@@ -1,8 +1,13 @@
-# Hydros SDK
+# Hydros Python SDK
 
-A sample project demonstrating a simple sum function, PyPI packaging, and binary executable generation for Linux and Windows.
+The official Python SDK for the Hydros ecosystem. This library provides clients and data models for interacting with Hydros simulation agents via MQTT.
 
-## Installation from PyPI
+## Requirements
+
+- Python >= 3.9
+- OS: Windows, Linux, macOS
+
+## Installation
 
 ```bash
 pip install hydros-sdk
@@ -10,38 +15,58 @@ pip install hydros-sdk
 
 ## Usage
 
-### Python Library
+### MQTT Client
+
+The SDK provides a typed MQTT client wrapper for handling simulation commands.
+
 ```python
-from hydros_sdk import calc_sum
+import time
+from hydros_sdk.mqtt import HydrosMqttClient, CommandDispatcher
+from hydros_sdk.protocol.commands import SimTaskInitRequest, HydroCmd
 
-print(calc_sum(1, 2))  # Output: 3
+def on_init_request(cmd: HydroCmd):
+    if isinstance(cmd, SimTaskInitRequest):
+        print(f"Received init request for agents: {cmd.agentList}")
+
+# 1. Setup Dispatcher and Handlers
+dispatcher = CommandDispatcher()
+dispatcher.register_handler("SIMCMD_TASK_INIT_REQUEST", on_init_request)
+
+# 2. Initialize Client
+client = HydrosMqttClient(client_id="my_agent_1", dispatcher=dispatcher)
+
+# 3. Connect
+client.connect("tcp://localhost", port=1883)
+client.subscribe("hydros/agent/+/request")
+
+# 4. Keep running
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    client.disconnect()
 ```
 
-### CLI
-If installed via pip:
-```bash
-hydros-sum 1 2
+### Protocol Models
+
+The SDK includes Pydantic models for protocol validation.
+
+```python
+from hydros_sdk.protocol.commands import TickCmdRequest, SimTaskInitRequest
+
+# Create a command
+tick_cmd = TickCmdRequest(
+    command_id="cmd_123",
+    context={"bizSceneInstanceId": "scene_1", "taskId": "task_1"},
+    tickId=100,
+    deltaTime=0.05
+)
+
+# Serialize
+payload = tick_cmd.model_dump_json()
+print(payload)
 ```
 
-Or from source:
-```bash
-python -m hydros_sdk.cli 1 2
-```
+## Binary Support
 
-## Building Binaries
-
-This project uses `PyInstaller` to generate standalone executables.
-
-### Linux
-Run the build script:
-```bash
-./build_binaries.sh
-```
-The executable will be in `dist/hydros-sum-linux`.
-
-### Windows
-Run the following command in PowerShell or Command Prompt:
-```cmd
-pyinstaller --onefile run_cli.py --name hydros-sum-windows
-```
-The executable will be in `dist/hydros-sum-windows.exe`.
+This package supports being bundled into binaries using tools like `PyInstaller` internally, but is primarily designed to be imported as a library.
