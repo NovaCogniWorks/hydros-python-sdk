@@ -4,7 +4,7 @@ from typing import Callable, Dict, Any, Type
 import paho.mqtt.client as mqtt
 from pydantic import ValidationError
 
-from hydros_sdk.protocol.commands import SimCommandEnvelope, HydroCmd
+from hydros_agent_sdk.protocol.commands import SimCommandEnvelope, HydroCmd
 
 logger = logging.getLogger(__name__)
 

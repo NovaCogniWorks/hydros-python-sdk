@@ -6,13 +6,13 @@ import os
 # Ensure the package is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from hydros_sdk.mqtt import HydrosMqttClient, CommandDispatcher
-from hydros_sdk.protocol.commands import (
+from hydros_agent_sdk.mqtt import HydrosMqttClient, CommandDispatcher
+from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest, SimTaskInitResponse,
     TickCmdRequest, TickCmdResponse,
     HydroCmd, SimCommand
 )
-from hydros_sdk.protocol.models import HydroAgentInstance, TopHydroObject
+from hydros_agent_sdk.protocol.models import HydroAgentInstance, TopHydroObject
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

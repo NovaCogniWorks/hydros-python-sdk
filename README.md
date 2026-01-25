@@ -1,4 +1,4 @@
-# Hydros Python SDK
+# Hydros Agent SDK
 
 The official Python SDK for the Hydros ecosystem. This library provides clients and data models for interacting with Hydros simulation agents via MQTT.
 
@@ -10,7 +10,7 @@ The official Python SDK for the Hydros ecosystem. This library provides clients 
 ## Installation
 
 ```bash
-pip install hydros-sdk
+pip install hydros-agent-sdk
 ```
 
 ## Usage
@@ -21,8 +21,8 @@ The SDK provides a typed MQTT client wrapper for handling simulation commands.
 
 ```python
 import time
-from hydros_sdk.mqtt import HydrosMqttClient, CommandDispatcher
-from hydros_sdk.protocol.commands import SimTaskInitRequest, HydroCmd
+from hydros_agent_sdk.mqtt import HydrosMqttClient, CommandDispatcher
+from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, HydroCmd
 
 def on_init_request(cmd: HydroCmd):
     if isinstance(cmd, SimTaskInitRequest):
@@ -52,7 +52,7 @@ except KeyboardInterrupt:
 The SDK includes Pydantic models for protocol validation.
 
 ```python
-from hydros_sdk.protocol.commands import TickCmdRequest, SimTaskInitRequest
+from hydros_agent_sdk.protocol.commands import TickCmdRequest, SimTaskInitRequest
 
 # Create a command
 tick_cmd = TickCmdRequest(

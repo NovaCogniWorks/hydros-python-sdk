@@ -3,8 +3,8 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hydros-sdk"
-version = "0.1.0"
+name = "hydros-agent-sdk"
+version = "0.1.3"
 description = "Official Python SDK for the Hydros ecosystem: Simulation Agents and MQTT Protocol"
 readme = "README.md"
 dependencies = [

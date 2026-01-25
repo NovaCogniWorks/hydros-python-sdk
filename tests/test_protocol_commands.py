@@ -1,12 +1,12 @@
 import json
-from hydros_sdk.protocol.commands import (
+from hydros_agent_sdk.protocol.commands import (
     TimeSeriesCalculationRequest, 
     TimeSeriesDataUpdateRequest, 
     SimCommandEnvelope, 
     HydroAgentInstance
 )
-from hydros_sdk.protocol.events import TimeSeriesDataChangedEvent, HydroEvent
-from hydros_sdk.protocol.models import SimulationContext, ObjectTimeSeries, TimeSeriesValue
+from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent, HydroEvent
+from hydros_agent_sdk.protocol.models import SimulationContext, ObjectTimeSeries, TimeSeriesValue
 
 def test_models():
     # 1. Test TimeSeriesDataUpdateRequest
