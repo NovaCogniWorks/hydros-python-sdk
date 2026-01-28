@@ -13,21 +13,21 @@ def test_models():
     print("Testing TimeSeriesDataUpdateRequest...")
     cmd_update = TimeSeriesDataUpdateRequest(
         command_id="cmd_update_1",
-        context=SimulationContext(bizSceneInstanceId="scene1", taskId="task1"),
-        timeSeriesDataChangedEvent=TimeSeriesDataChangedEvent(
+        context=SimulationContext(biz_scene_instance_id="scene1", task_id="task1"),
+        time_series_data_changed_event=TimeSeriesDataChangedEvent(
             hydro_event_type="HYDRO_EVENT_TIME_SERIES_DATA_UPDATED",
-            objectTimeSeries=[
+            object_time_series=[
                 ObjectTimeSeries(
-                    timeSeriesName="ts1",
-                    objectId=101,
-                    timeSeries=[TimeSeriesValue(step=1, value=10.5)]
+                    time_series_name="ts1",
+                    object_id=101,
+                    time_series=[TimeSeriesValue(step=1, value=10.5)]
                 )
             ]
         )
     )
     json_update = cmd_update.model_dump_json(by_alias=True) # Important: by_alias=True
     print("Update JSON Payload (Should be snake_case):", json_update)
-    
+
     # Check if snake_case keys exist
     parsed = json.loads(json_update)
     assert "time_series_data_changed_event" in parsed
@@ -43,13 +43,18 @@ def test_calc_request():
     print("\nTesting TimeSeriesCalculationRequest...")
     cmd_calc = TimeSeriesCalculationRequest(
         command_id="cmd_calc_1",
-        context=SimulationContext(bizSceneInstanceId="scene1"),
-        targetAgentInstance=HydroAgentInstance(
-            agentId="agent1",
-            instanceId="inst1",
-            context=SimulationContext(bizSceneInstanceId="scene1")
+        context=SimulationContext(biz_scene_instance_id="scene1"),
+        target_agent_instance=HydroAgentInstance(
+            agent_id="agent1",
+            agent_code="TEST_AGENT",
+            agent_type="TEST_TYPE",
+            agent_configuration_url="http://test.url/config.yaml",
+            biz_scene_instance_id="scene1",
+            hydros_cluster_id="cluster1",
+            hydros_node_id="node1",
+            context=SimulationContext(biz_scene_instance_id="scene1")
         ),
-        hydroEvent=HydroEvent(hydro_event_type="GENERIC_EVENT")
+        hydro_event=HydroEvent(hydro_event_type="GENERIC_EVENT")
     )
     json_calc = cmd_calc.model_dump_json(by_alias=True)
     print("Calc JSON Payload (Should be snake_case):", json_calc)

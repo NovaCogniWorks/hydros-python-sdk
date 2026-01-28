@@ -29,7 +29,7 @@ class CommandDispatcher:
         try:
             # decode bytes to string
             payload_str = payload.decode("utf-8")
-            logger.debug(f"Received payload: {payload_str}")
+            logger.info(f"Received payload: {payload_str}")
 
             # Parse JSON
             data = json.loads(payload_str)

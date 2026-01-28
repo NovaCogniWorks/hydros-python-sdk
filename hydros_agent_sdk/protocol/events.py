@@ -6,21 +6,21 @@ from .base import HydroBaseModel
 
 class BaseHydroEvent(HydroBaseModel):
     hydro_event_type: str
-    hydroEventId: Optional[str] = None
-    hydroEventName: Optional[str] = None
+    hydro_event_id: Optional[str] = None
+    hydro_event_name: Optional[str] = None
     context: Optional[SimulationContext] = None
-    createdTime: Optional[Any] = None
-    autoScheduleAtStep: int = -1
-    hydroEventSourceType: Optional[str] = None
-    hydroEventSource: Optional[str] = None
-    hydroEventDescription: Optional[str] = None
+    created_time: Optional[Any] = None
+    auto_schedule_at_step: int = -1
+    hydro_event_source_type: Optional[str] = None
+    hydro_event_source: Optional[str] = None
+    hydro_event_description: Optional[str] = None
 
 class HydroEvent(BaseHydroEvent):
     pass
 
 class TimeSeriesDataChangedEvent(HydroEvent):
     hydro_event_type: Literal["HYDRO_EVENT_TIME_SERIES_DATA_UPDATED"] = "HYDRO_EVENT_TIME_SERIES_DATA_UPDATED"
-    objectTimeSeries: List[ObjectTimeSeries] = Field(default_factory=list)
+    object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
 # Union for polymorphic events if needed later
 HydroEventUnion = Union[

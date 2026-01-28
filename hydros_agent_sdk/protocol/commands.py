@@ -5,12 +5,12 @@ from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroO
 from .base import HydroBaseModel
 
 # Constants for Command Types
-SIMCMD_TASK_INIT_REQUEST = "SIMCMD_TASK_INIT_REQUEST"
-SIMCMD_TASK_INIT_RESPONSE = "SIMCMD_TASK_INIT_RESPONSE"
+SIMCMD_TASK_INIT_REQUEST = "task_init_request"
+SIMCMD_TASK_INIT_RESPONSE = "task_init_response"
 SIMCMD_TASK_TERMINATED_REQUEST = "SIMCMD_TASK_TERMINATED_REQUEST"
 SIMCMD_TASK_TERMINATED_RESPONSE = "SIMCMD_TASK_TERMINATED_RESPONSE"
-SIMCMD_TICK_CMD_REQUEST = "SIMCMD_TICK_CMD_REQUEST"
-SIMCMD_TICK_CMD_RESPONSE = "SIMCMD_TICK_CMD_RESPONSE"
+SIMCMD_TICK_CMD_REQUEST = "tick_cmd_request"
+SIMCMD_TICK_CMD_RESPONSE = "tick_cmd_response"
 SIMCMD_TIME_SERIES_CALCULATION_REQUEST = "SIMCMD_TIME_SERIES_CALCULATION_REQUEST"
 SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "SIMCMD_TIME_SERIES_CALCULATION_RESPONSE"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST"
@@ -24,32 +24,28 @@ class SimCommand(HydroCmd):
     context: SimulationContext
     broadcast: bool = False
 
-    class Config:
-        # Pydantic configuration if needed
-        pass
-
 # --- Base Request/Response ---
 
 class SimCoordinationRequest(SimCommand):
     pass
 
 class SimCoordinationResponse(SimCommand):
-    commandStatus: Optional[CommandStatus] = None
-    errorCode: Optional[str] = None
-    errorMessage: Optional[str] = None
-    sourceAgentInstance: HydroAgentInstance
+    command_status: Optional[CommandStatus] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    source_agent_instance: HydroAgentInstance
 
 # --- Specific Commands ---
 
 class SimTaskInitRequest(SimCoordinationRequest):
-    command_type: Literal["SIMCMD_TASK_INIT_REQUEST"] = SIMCMD_TASK_INIT_REQUEST
-    agentList: List[HydroAgent]
-    bizSceneConfigurationUrl: Optional[str] = None
+    command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
+    agent_list: List[HydroAgent]
+    biz_scene_configuration_url: Optional[str] = None
 
 class SimTaskInitResponse(SimCoordinationResponse):
-    command_type: Literal["SIMCMD_TASK_INIT_RESPONSE"] = SIMCMD_TASK_INIT_RESPONSE
-    createdAgentInstances: List[HydroAgentInstance]
-    managedTopObjects: Dict[str, List[TopHydroObject]]
+    command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
+    created_agent_instances: List[HydroAgentInstance]
+    managed_top_objects: Dict[str, List[TopHydroObject]]
 
 class SimTaskTerminatedRequest(SimCoordinationRequest):
     command_type: Literal["SIMCMD_TASK_TERMINATED_REQUEST"] = SIMCMD_TASK_TERMINATED_REQUEST
@@ -59,12 +55,12 @@ class SimTaskTerminatedResponse(SimCoordinationResponse):
     command_type: Literal["SIMCMD_TASK_TERMINATED_RESPONSE"] = SIMCMD_TASK_TERMINATED_RESPONSE
 
 class TickCmdRequest(SimCoordinationRequest):
-    command_type: Literal["SIMCMD_TICK_CMD_REQUEST"] = SIMCMD_TICK_CMD_REQUEST
-    tickId: int
-    deltaTime: float
+    command_type: Literal["tick_cmd_request"] = SIMCMD_TICK_CMD_REQUEST
+    tick_id: int
+    delta_time: float
 
 class TickCmdResponse(SimCoordinationResponse):
-    command_type: Literal["SIMCMD_TICK_CMD_RESPONSE"] = SIMCMD_TICK_CMD_RESPONSE
+    command_type: Literal["tick_cmd_response"] = SIMCMD_TICK_CMD_RESPONSE
 
 # --- Time Series Commands ---
 
@@ -73,17 +69,17 @@ from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
     command_type: Literal["SIMCMD_TIME_SERIES_CALCULATION_REQUEST"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
-    targetAgentInstance: HydroAgentInstance
-    hydroEvent: HydroEvent
+    target_agent_instance: HydroAgentInstance
+    hydro_event: HydroEvent
 
 class TimeSeriesCalculationResponse(SimCoordinationResponse):
     command_type: Literal["SIMCMD_TIME_SERIES_CALCULATION_RESPONSE"] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
-    hydroEvent: HydroEvent
-    objectTimeSeriesList: List[ObjectTimeSeries]
+    hydro_event: HydroEvent
+    object_time_series_list: List[ObjectTimeSeries]
 
 class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
     command_type: Literal["SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST"] = SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST
-    timeSeriesDataChangedEvent: TimeSeriesDataChangedEvent
+    time_series_data_changed_event: TimeSeriesDataChangedEvent
 
 class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE"] = SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE

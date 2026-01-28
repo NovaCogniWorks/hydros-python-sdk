@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any
+from enum import Enum
 from pydantic import Field
 from .base import HydroBaseModel
 
@@ -6,23 +7,26 @@ class SimulationContext(HydroBaseModel):
     """
     Represents the simulation context, used to support multi-task isolation.
     """
-    bizSceneInstanceId: str
-    taskId: Optional[str] = None
+    biz_scene_instance_id: str
+    task_id: Optional[str] = None
 
 class HydroAgent(HydroBaseModel):
     """
     Represents an agent definition.
     """
-    agentId: str
-    name: Optional[str] = None
-    properties: Dict[str, Any] = Field(default_factory=dict)
+    agent_code: str
+    agent_type: str
+    agent_name: Optional[str] = None
+    agent_configuration_url: str
 
-class HydroAgentInstance(HydroBaseModel):
+class HydroAgentInstance(HydroAgent):
     """
     Represents a running instance of an agent.
     """
-    agentId: str
-    instanceId: str
+    agent_id: str
+    biz_scene_instance_id: str
+    hydros_cluster_id: str
+    hydros_node_id: str
     context: SimulationContext
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -34,8 +38,14 @@ class TopHydroObject(HydroBaseModel):
     type: str
     properties: Dict[str, Any] = Field(default_factory=dict)
 
-class CommandStatus(HydroBaseModel):
-    status: str
+class CommandStatus(str, Enum):
+    """
+    Command status enumeration matching Java implementation.
+    """
+    INIT = "INIT"
+    PROCESSING = "PROCESSING"
+    SUCCEED = "SUCCEED"
+    FAILED = "FAILED"
 
 # --- Time Series Models ---
 
@@ -45,9 +55,9 @@ class TimeSeriesValue(HydroBaseModel):
     value: Optional[float] = None
 
 class ObjectTimeSeries(HydroBaseModel):
-    timeSeriesName: Optional[str] = None
-    objectId: Optional[int] = None
-    objectType: Optional[str] = None
-    objectName: Optional[str] = None
-    metricsCode: Optional[str] = None
-    timeSeries: List[TimeSeriesValue] = Field(default_factory=list)
+    time_series_name: Optional[str] = None
+    object_id: Optional[int] = None
+    object_type: Optional[str] = None
+    object_name: Optional[str] = None
+    metrics_code: Optional[str] = None
+    time_series: List[TimeSeriesValue] = Field(default_factory=list)

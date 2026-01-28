@@ -26,11 +26,11 @@ from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, HydroCmd
 
 def on_init_request(cmd: HydroCmd):
     if isinstance(cmd, SimTaskInitRequest):
-        print(f"Received init request for agents: {cmd.agentList}")
+        print(f"Received init request for agents: {cmd.agent_list}")
 
 # 1. Setup Dispatcher and Handlers
 dispatcher = CommandDispatcher()
-dispatcher.register_handler("SIMCMD_TASK_INIT_REQUEST", on_init_request)
+dispatcher.register_handler("task_init_request", on_init_request)
 
 # 2. Initialize Client
 client = HydrosMqttClient(client_id="my_agent_1", dispatcher=dispatcher)
@@ -53,17 +53,18 @@ The SDK includes Pydantic models for protocol validation.
 
 ```python
 from hydros_agent_sdk.protocol.commands import TickCmdRequest, SimTaskInitRequest
+from hydros_agent_sdk.protocol.models import SimulationContext
 
 # Create a command
 tick_cmd = TickCmdRequest(
     command_id="cmd_123",
-    context={"bizSceneInstanceId": "scene_1", "taskId": "task_1"},
-    tickId=100,
-    deltaTime=0.05
+    context=SimulationContext(biz_scene_instance_id="scene_1", task_id="task_1"),
+    tick_id=100,
+    delta_time=0.05
 )
 
 # Serialize
-payload = tick_cmd.model_dump_json()
+payload = tick_cmd.model_dump_json(by_alias=True)
 print(payload)
 ```
 
