@@ -19,7 +19,7 @@ class HydroEvent(BaseHydroEvent):
     pass
 
 class TimeSeriesDataChangedEvent(HydroEvent):
-    hydro_event_type: Literal["HYDRO_EVENT_TIME_SERIES_DATA_UPDATED"] = "HYDRO_EVENT_TIME_SERIES_DATA_UPDATED"
+    hydro_event_type: Literal["TIME_SERIES_DATA_UPDATED"] = "TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
 # Union for polymorphic events if needed later
