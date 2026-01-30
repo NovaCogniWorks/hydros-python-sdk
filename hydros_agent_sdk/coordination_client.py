@@ -232,7 +232,7 @@ class SimCoordinationClient:
             command: The command to send
         """
         self.out_message_queue.put(command)
-        logger.info(f"Enqueued command: {command}")
+        logger.info(f"Enqueued command: type={command.command_type}, id={command.command_id}")
 
     def send_command(self, command: SimCommand):
         """
