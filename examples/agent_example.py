@@ -11,7 +11,7 @@ This module demonstrates a better architecture where:
 import time
 import logging
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, TYPE_CHECKING
 from abc import ABC, abstractmethod
 from configparser import ConfigParser
 from pydantic import Field
@@ -19,6 +19,11 @@ from pydantic import Field
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.callback import SimCoordinationCallback
 from hydros_agent_sdk import setup_logging, BaseHydroAgent
+from hydros_agent_sdk.agent_properties import AgentProperties
+
+# Import for type checking only to avoid runtime circular imports
+if TYPE_CHECKING:
+    from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -70,10 +75,19 @@ class MySampleHydroAgent(BaseHydroAgent):
     # Type hints for dynamically set attributes (set via object.__setattr__)
     # These are set in __init__ or inherited from BaseHydroAgent
     # Using Field(exclude=True) to prevent Pydantic from treating these as model fields
-    config: Any = Field(default=None, exclude=True)  # Dict[str, str]
-    sim_coordination_client: Any = Field(default=None, exclude=True)  # SimCoordinationClient
-    state_manager: Any = Field(default=None, exclude=True)  # AgentStateManager - avoid circular import
-    properties: Any = Field(default=None, exclude=True)  # AgentProperties - avoid circular import
+    # Using TYPE_CHECKING to provide proper types for IDE without affecting runtime
+    if TYPE_CHECKING:
+        config: Dict[str, str]
+        sim_coordination_client: SimCoordinationClient
+        state_manager: 'AgentStateManager'
+        properties: AgentProperties
+
+    # Runtime field definitions (excluded from Pydantic validation)
+    # Using __annotations__ to avoid type checking errors
+    config: Dict[str, str] = Field(default=None, exclude=True)  # type: ignore[assignment]
+    sim_coordination_client: SimCoordinationClient = Field(default=None, exclude=True)  # type: ignore[assignment]
+    state_manager: 'AgentStateManager' = Field(default=None, exclude=True)  # type: ignore[assignment]
+    properties: AgentProperties = Field(default=None, exclude=True)  # type: ignore[assignment]
 
     def __init__(
         self,

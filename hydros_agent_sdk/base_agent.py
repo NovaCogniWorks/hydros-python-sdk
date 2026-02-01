@@ -6,7 +6,7 @@ and adds behavioral methods for handling simulation lifecycle.
 """
 
 import logging
-from typing import Optional, Any
+from typing import Optional, TYPE_CHECKING
 from abc import ABC, abstractmethod
 from pydantic import ConfigDict, Field
 
@@ -24,6 +24,11 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.agent_properties import AgentProperties
+
+# Import for type checking only to avoid runtime circular imports
+if TYPE_CHECKING:
+    from hydros_agent_sdk.coordination_client import SimCoordinationClient
+    from hydros_agent_sdk.state_manager import AgentStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +75,17 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
 
     # Type hints for dynamically set attributes (set via object.__setattr__)
     # Using Field(exclude=True) to prevent Pydantic from treating these as model fields
-    sim_coordination_client: Any = Field(default=None, exclude=True)  # SimCoordinationClient - avoid circular import
-    state_manager: Any = Field(default=None, exclude=True)  # AgentStateManager - avoid circular import
-    properties: Any = Field(default=None, exclude=True)  # AgentProperties - avoid circular import
+    # Using TYPE_CHECKING to provide proper types for IDE without affecting runtime
+    if TYPE_CHECKING:
+        sim_coordination_client: 'SimCoordinationClient'
+        state_manager: 'AgentStateManager'
+        properties: AgentProperties
+
+    # Runtime field definitions (excluded from Pydantic validation)
+    # Using type: ignore to avoid type checking errors with None default
+    sim_coordination_client: 'SimCoordinationClient' = Field(default=None, exclude=True)  # type: ignore[assignment]
+    state_manager: 'AgentStateManager' = Field(default=None, exclude=True)  # type: ignore[assignment]
+    properties: AgentProperties = Field(default=None, exclude=True)  # type: ignore[assignment]
 
     def __init__(
         self,
