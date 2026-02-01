@@ -11,12 +11,10 @@ This module demonstrates a better architecture where:
 import time
 import logging
 import os
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 from configparser import ConfigParser
 
-from hydros_agent_sdk import agent_config
-from hydros_agent_sdk.agent_config import AgentConfigLoader
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.callback import SimCoordinationCallback
 from hydros_agent_sdk import setup_logging, BaseHydroAgent
@@ -28,7 +26,6 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
-    TimeSeriesDataUpdateResponse,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
 )
@@ -61,7 +58,20 @@ class MySampleHydroAgent(BaseHydroAgent):
     - biz_scene_instance_id as direct property
     - Clear lifecycle methods
     - All configuration loaded from properties file
+
+    Attributes:
+        config: Configuration dictionary loaded from properties file
+        sim_coordination_client: MQTT coordination client (inherited from BaseHydroAgent)
+        state_manager: Agent state manager (inherited from BaseHydroAgent)
+        properties: Agent properties with typed accessors (inherited from BaseHydroAgent)
     """
+
+    # Type hints for dynamically set attributes (set via object.__setattr__)
+    # These are set in __init__ or inherited from BaseHydroAgent
+    config: Dict[str, str]
+    sim_coordination_client: SimCoordinationClient
+    state_manager: Any  # AgentStateManager - avoid circular import
+    properties: Any  # AgentProperties - avoid circular import
 
     def __init__(
         self,
