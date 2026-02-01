@@ -41,10 +41,10 @@ class SimCoordinationCallback(ABC):
     @abstractmethod
     def get_component(self) -> str:
         """
-        Get the component name for this callback handler.
+        Get the agent code for this callback handler.
 
         Returns:
-            Component name (e.g., "TWINS_SIMULATION_AGENT")
+            Agent code (e.g., "TWINS_SIMULATION_AGENT")
         """
         pass
 
@@ -190,11 +190,18 @@ class SimpleCallback(SimCoordinationCallback):
     rather than implementing all abstract methods.
     """
 
-    def __init__(self, component_name: str):
-        self.component_name = component_name
+    def __init__(self, agent_code: str):
+        """
+        Initialize callback with agent code.
+
+        Args:
+            agent_code: Agent code (e.g., "TWINS_SIMULATION_AGENT")
+        """
+        self.agent_code = agent_code
 
     def get_component(self) -> str:
-        return self.component_name
+        """Get agent code."""
+        return self.agent_code
 
     def is_remote_agent(self, agent_instance: HydroAgentInstance) -> bool:
         # Default: always return False (treat all as local)

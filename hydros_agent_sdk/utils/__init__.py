@@ -10,6 +10,12 @@ from .hydro_object_utils import (
     HydroObjectType,
     MetricsCodes,
 )
+from .mqtt_metrics import (
+    MqttMetrics,
+    send_metrics,
+    send_metrics_batch,
+    create_mock_metrics,
+)
 
 __all__ = [
     'HydroObjectUtilsV2',
@@ -18,4 +24,8 @@ __all__ = [
     'SimpleChildObject',
     'HydroObjectType',
     'MetricsCodes',
+    'MqttMetrics',
+    'send_metrics',
+    'send_metrics_batch',
+    'create_mock_metrics',
 ]

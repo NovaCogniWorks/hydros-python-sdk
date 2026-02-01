@@ -47,53 +47,62 @@ python -m build
 
 ### Core Components
 
-**1. SimCoordinationClient** (`coordination_client.py`)
+**1. BaseHydroAgent** (`base_agent.py`)
+- Base class for implementing Hydro agents
+- Inherits from HydroAgent (Pydantic model) to get agent properties
+- Adds behavioral methods for simulation lifecycle
+- Abstract methods: `on_init()`, `on_tick()`, `on_terminate()`
+- Provides default implementations for `on_time_series_data_update()` and `on_time_series_calculation()`
+- Manages agent instance lifecycle and state
+- Part of the public SDK API - import with: `from hydros_agent_sdk import BaseHydroAgent`
+
+**2. SimCoordinationClient** (`coordination_client.py`)
 - High-level client that encapsulates MQTT logic and message handling
 - Manages connection, subscriptions, message routing, and retry logic
 - Uses callback-based architecture similar to Java's SimCoordinationSlave
 - Handles automatic message filtering and routing to callbacks
 - Thread-safe with separate threads for MQTT loop and outgoing message queue
 
-**2. SimCoordinationCallback** (`callback.py`)
+**3. SimCoordinationCallback** (`callback.py`)
 - Abstract base class defining callback interface for business logic
 - Developers implement this to handle coordination commands
 - Key methods: `on_sim_task_init()`, `on_tick()`, `on_terminate()`, `on_time_series_calculation()`, `on_time_series_data_update()`
 - Separates business logic from infrastructure concerns
 
-**3. AgentStateManager** (`state_manager.py`)
+**4. AgentStateManager** (`state_manager.py`)
 - Unified state management for multi-task agent services
 - Tracks active simulation contexts (multi-task isolation via `biz_scene_instance_id`)
 - Manages agent instances and their lifecycle (INITIALIZING → ACTIVE → TERMINATING → TERMINATED)
 - Distinguishes between local and remote agents based on node ID
 - Thread-safe for concurrent access
 
-**4. MessageFilter** (`message_filter.py`)
+**5. MessageFilter** (`message_filter.py`)
 - Filters incoming MQTT messages based on agent context and message type
 - Implements Java logic from `SimCoordinationSlave.messageArrived()` and `isActiveToTaskSimCommand()`
 - Always accepts `SimTaskInitRequest` messages
 - Filters messages based on active contexts (only processes messages for active tasks)
 - Filters responses based on local/remote agent distinction
 
-**5. HydrosMqttClient** (`mqtt.py`)
+**6. HydrosMqttClient** (`mqtt.py`)
 - Lower-level MQTT client wrapper using paho-mqtt
 - Provides CommandDispatcher for routing messages to handlers
 - Used internally by SimCoordinationClient
 
-**6. Protocol Models** (`protocol/`)
+**7. Protocol Models** (`protocol/`)
 - `models.py`: Core data models (SimulationContext, HydroAgent, HydroAgentInstance, etc.)
 - `commands.py`: Command definitions (SimTaskInitRequest/Response, TickCmdRequest/Response, etc.)
 - `events.py`: Event definitions (HydroEvent, TimeSeriesDataChangedEvent)
 - `base.py`: HydroBaseModel with snake_case field naming convention
 - All models use Pydantic v2 for validation and serialization
 
-**7. AgentConfigLoader** (`agent_config.py`)
+**8. AgentConfigLoader** (`agent_config.py`)
 - Loads and parses agent configuration YAML files from URLs or local files
 - Provides Pydantic models for configuration structure (AgentConfiguration, AgentProperties, etc.)
 - Handles URL encoding for non-ASCII characters (e.g., Chinese characters in URLs)
 - Offers convenience methods for accessing common configuration values
 - Supports loading from URL, file, YAML string, or dictionary
 
-**8. HydroObjectUtilsV2** (`utils/hydro_object_utils.py`)
+**9. HydroObjectUtilsV2** (`utils/hydro_object_utils.py`)
 - Utility class for loading and parsing water network topology objects from YAML
 - Python equivalent of Java `com.hydros.agent.common.utils.HydroObjectUtilsV2`
 - Loads complex water network topology with objects, cross-sections, and connections
@@ -102,6 +111,14 @@ python -m build
 - Builds topology indices for child-to-parent, upstream, and downstream relationships
 - Provides object caching for fast O(1) lookups by ID
 - See `docs/HYDRO_OBJECT_UTILS.md` for detailed documentation
+
+**10. Logging Configuration** (`logging_config.py`)
+- Custom logging formatter matching Java logback pattern
+- Structured log format: `NODE_ID|TIMESTAMP|LEVEL|TASK_ID|BIZ_COMPONENT|TYPE|CONTENT|LOGGER|MESSAGE`
+- Context management using Python's contextvars (similar to Java's MDC)
+- Automatic context setting in SimCoordinationClient
+- Thread-safe and async-compatible
+- See `docs/LOGGING.md` for detailed documentation
 
 ### Key Design Patterns
 
@@ -235,14 +252,93 @@ parent = topology.get_top_object_by_child_id(child_id)
 
 See `examples/hydro_object_utils_example.py` for a complete example and `docs/HYDRO_OBJECT_UTILS.md` for detailed documentation.
 
+### MQTT Metrics Sending
+
+The SDK provides utilities for sending metrics data via MQTT, matching the Java `MqttMetrics` implementation:
+
+```python
+from hydros_agent_sdk.utils import create_mock_metrics, send_metrics
+
+# Create metrics
+metrics = create_mock_metrics(
+    source_id="TWINS_SIMULATION_AGENT",
+    job_instance_id=biz_scene_instance_id,
+    object_id=1001,
+    object_name="Gate_01",
+    step_index=10,
+    metrics_code="gate_opening",
+    value=0.75
+)
+
+# Send via MQTT
+send_metrics(
+    mqtt_client=sim_coordination_client.mqtt_client,
+    topic="hydros/metrics",
+    metrics=metrics,
+    qos=0
+)
+```
+
+**Key Features:**
+- Matches Java `com.hydros.agent.edge.channel.biz.model.MqttMetrics` structure
+- Supports single and batch metrics sending
+- Automatic JSON serialization
+- Pydantic validation for data integrity
+
+**Key Functions:**
+- `create_mock_metrics()`: Create metrics objects with automatic timestamp
+- `send_metrics()`: Send single metrics message via MQTT
+- `send_metrics_batch()`: Send multiple metrics messages efficiently
+- `MqttMetrics`: Pydantic model for metrics data
+
+See `examples/mqtt_metrics_example.py` for examples and `docs/MQTT_METRICS.md` for detailed documentation.
+
+### Logging Configuration
+
+The SDK provides structured logging that matches the Java logback pattern:
+
+```python
+from hydros_agent_sdk import setup_logging, LogContext
+import logging
+
+# Configure logging
+setup_logging(
+    level=logging.INFO,
+    node_id="DATA",  # Your hydros_node_id
+    console=True,
+    log_file="logs/hydros-agent.log"
+)
+
+logger = logging.getLogger(__name__)
+
+# Use context for structured logs
+with LogContext(task_id="TASK123", biz_component="MyAgent"):
+    logger.info("Processing command")
+    # Output: DATA|2026-01-30 08:56:34|INFO|TASK123|MyAgent|||__main__|Processing command
+```
+
+**Key Features:**
+- Matches Java logback format: `NODE_ID|TIMESTAMP|LEVEL|TASK_ID|BIZ_COMPONENT|TYPE|CONTENT|LOGGER|MESSAGE`
+- Automatic context setting in `SimCoordinationClient` (no manual setup needed in callbacks)
+- Thread-safe context management using Python's contextvars
+- Logger name abbreviation (e.g., `hydros_agent_sdk.coordination_client` → `h.a.coordination_client`)
+
+**Key Functions:**
+- `setup_logging(level, node_id, log_file, console)`: Configure logging with Hydros formatter
+- `LogContext(task_id, biz_component, node_id)`: Context manager for setting log context
+- `set_task_id()`, `set_biz_component()`, `set_node_id()`: Set individual context values
+
+See `examples/logging_example.py` for examples and `docs/LOGGING.md` for detailed documentation.
+
 ### Message Flow
 
 **Incoming Messages:**
 1. MQTT message arrives → `_on_message()` callback
 2. Parse JSON → Pydantic model (using `SimCommandEnvelope`)
 3. Apply filters → `MessageFilter.should_process_message()`
-4. Route to handler → `_handle_incoming_message()`
-5. Call appropriate callback method on user's callback implementation
+4. Set logging context → `_set_logging_context()` (task_id, biz_component, node_id)
+5. Route to handler → `_handle_incoming_message()`
+6. Call appropriate callback method on user's callback implementation
 
 **Outgoing Messages:**
 1. Create command object (e.g., `SimTaskInitResponse`)
@@ -261,14 +357,25 @@ See `examples/hydro_object_utils_example.py` for a complete example and `docs/HY
 - Set `command_status=CommandStatus.FAILED` in responses when errors occur
 - Include `error_code` and `error_message` in response objects
 - Log errors with context (command_id, context_id, etc.)
+- Use `logger.error(..., exc_info=True)` to include full traceback in logs
+
+### Logging Best Practices
+
+1. **Configure logging early**: Call `setup_logging()` at application startup
+2. **Set node_id from environment**: `setup_logging(node_id=os.getenv("HYDROS_NODE_ID", "DATA"))`
+3. **Let SimCoordinationClient handle context**: Context is automatically set in callbacks
+4. **Use structured messages**: Include key information like commandId, commandType, topic
+5. **Log important events**: Task init, tick processing, command publishing, errors
 
 ## Testing Notes
 
 The test directory contains test files for various components:
 - `tests/test_agent_config.py`: Tests for agent configuration loading
+- `tests/test_logging_config.py`: Tests for logging configuration and formatting
+- `tests/test_hydro_object_utils.py`: Tests for water network topology loading
 - Place new test files in `tests/` directory
 - Name test files with `test_*.py` prefix
-- Tests can run with pytest or standalone: `python tests/test_agent_config.py`
+- Tests can run with pytest or standalone: `python tests/test_*.py`
 - Use pytest fixtures for common setup (MQTT broker, mock clients, etc.)
 - Test message filtering logic, state management, and callback routing
 - Consider integration tests with a local MQTT broker (e.g., Mosquitto)

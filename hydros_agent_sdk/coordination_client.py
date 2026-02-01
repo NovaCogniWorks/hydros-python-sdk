@@ -17,6 +17,7 @@ import paho.mqtt.client as mqtt
 from hydros_agent_sdk.callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
+from hydros_agent_sdk.logging_config import set_task_id, set_biz_component, set_node_id
 from hydros_agent_sdk.protocol.commands import (
     SimCommand,
     SimTaskInitRequest,
@@ -232,7 +233,8 @@ class SimCoordinationClient:
             command: The command to send
         """
         self.out_message_queue.put(command)
-        logger.info(f"Enqueued command: type={command.command_type}, id={command.command_id}")
+        # Use Pydantic's model_dump() to properly serialize nested models
+        logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
 
     def send_command(self, command: SimCommand):
         """
@@ -290,13 +292,45 @@ class SimCoordinationClient:
     # Message Handling
     # ========================================================================
 
+    def _set_logging_context(self, command: SimCommand):
+        """
+        Set logging context from command for structured logging.
+
+        Extracts context information from the command and sets it in the logging
+        context so all subsequent logs will include this information.
+
+        Args:
+            command: The command to extract context from
+        """
+        # Set node_id from state_manager
+        node_id = self.state_manager.get_node_id()
+        if node_id:
+            set_node_id(node_id)
+
+        # Set biz_component from callback
+        biz_component = self.callback.get_component()
+        if biz_component:
+            set_biz_component(biz_component)
+
+        # Set task_id from command's context (SimulationContext)
+        if hasattr(command, 'context') and command.context:
+            task_id = command.context.biz_scene_instance_id
+            if task_id:
+                set_task_id(task_id)
+
     def _handle_incoming_message(self, command: SimCommand):
         """
         Handle an incoming command by routing it to the appropriate handler.
 
+        Automatically sets logging context (task_id, biz_component, node_id) before
+        calling the handler, so all logs within the handler will include this context.
+
         Args:
             command: The command to handle
         """
+        # Set logging context from command
+        self._set_logging_context(command)
+
         handler = self.handlers.get(command.command_type)
         if handler:
             try:
