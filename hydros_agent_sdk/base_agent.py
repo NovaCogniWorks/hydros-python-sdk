@@ -1,7 +1,7 @@
 """
 Base agent implementation for Hydros agents.
 
-This module provides the BaseHydroAgent class which inherits from HydroAgent
+This module provides the BaseHydroAgent class which inherits from HydroAgentInstance
 and adds behavioral methods for handling simulation lifecycle.
 """
 
@@ -10,7 +10,7 @@ from typing import Optional, Any
 from abc import ABC, abstractmethod
 from pydantic import ConfigDict
 
-from hydros_agent_sdk.protocol.models import HydroAgent, HydroAgentInstance, SimulationContext
+from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext, AgentBizStatus, AgentDriveMode
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -28,45 +28,63 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 logger = logging.getLogger(__name__)
 
 
-class BaseHydroAgent(HydroAgent, ABC):
+class BaseHydroAgent(HydroAgentInstance, ABC):
     """
-    Base class for Hydro agents with improved design.
+    Base class for Hydro agents with improved inheritance design.
 
-    This class inherits from HydroAgent (Pydantic model) and adds behavioral methods
-    for handling simulation lifecycle events.
+    Inheritance hierarchy:
+        HydroBaseModel (Pydantic base)
+            ↓
+        HydroAgent (agent definition)
+            - agent_code, agent_type, agent_name, agent_configuration_url
+            ↓
+        HydroAgentInstance (running instance)
+            - agent_id, biz_scene_instance_id, hydros_cluster_id, hydros_node_id
+            - context, agent_biz_status, drive_mode
+            ↓
+        BaseHydroAgent (behavioral base class)
+            - Adds lifecycle methods: on_init(), on_tick(), on_terminate()
+            - Adds non-Pydantic attributes: sim_coordination_client, state_manager, properties
 
     Key features:
-    1. Inherits from HydroAgent for data model properties
-    2. sim_coordination_client is required in constructor (non-null)
-    3. context is a member property
-    4. biz_scene_instance_id is a direct property
-    5. Clear lifecycle: created on task init, destroyed on terminate
-    6. Each agent instance corresponds to one simulation task
-    7. properties: AgentProperties dictionary for flexible configuration
+    1. Inherits from HydroAgentInstance for all agent instance properties
+    2. No duplicate attributes - all inherited from parent classes
+    3. sim_coordination_client is required in constructor (non-null)
+    4. Clear lifecycle: created on task init, destroyed on terminate
+    5. Each agent instance corresponds to one simulation task
+    6. properties: AgentProperties dictionary for flexible configuration
 
-    Additional instance attributes (set dynamically, not Pydantic fields):
+    Non-Pydantic attributes (set dynamically, not serialized):
     - sim_coordination_client: The coordination client instance
-    - context: SimulationContext for this agent
-    - hydros_cluster_id: Cluster ID where agent runs
-    - hydros_node_id: Node ID where agent runs
-    - biz_scene_instance_id: Direct access to context's biz_scene_instance_id
-    - hydro_agent_instance: HydroAgentInstance created during initialization
     - state_manager: Reference to the state manager
     - properties: AgentProperties dictionary with typed accessors
+
+    Attributes:
+        sim_coordination_client: MQTT coordination client for sending commands
+        state_manager: Agent state manager for tracking active contexts
+        properties: AgentProperties dictionary with typed accessors
     """
 
     # Configure Pydantic to allow extra fields for non-model attributes
     model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
+    # Type hints for dynamically set attributes (set via object.__setattr__)
+    sim_coordination_client: Any  # SimCoordinationClient - avoid circular import
+    state_manager: Any  # AgentStateManager - avoid circular import
+    properties: AgentProperties
+
     def __init__(
         self,
         sim_coordination_client,  # Type hint removed to avoid circular import
-        context: SimulationContext,
+        agent_id: str,
         agent_code: str,
-        agent_name: str,
         agent_type: str,
+        agent_name: str,
+        context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
+        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
     ):
@@ -75,14 +93,17 @@ class BaseHydroAgent(HydroAgent, ABC):
 
         Args:
             sim_coordination_client: Required MQTT client (non-null)
-            context: Simulation context for this agent
+            agent_id: Unique agent instance ID
             agent_code: Agent code (e.g., "TWINS_SIMULATION_AGENT")
-            agent_name: Agent name (e.g., "Twins Simulation Agent")
             agent_type: Agent type (e.g., "TWINS_SIMULATION_AGENT")
+            agent_name: Agent name (e.g., "Twins Simulation Agent")
+            context: Simulation context for this agent
             hydros_cluster_id: Cluster ID where this agent runs
             hydros_node_id: Node ID where this agent runs
+            agent_biz_status: Initial business status (default: INIT)
+            drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional URL to agent configuration (will be loaded from SimTaskInitRequest if not provided)
-            **kwargs: Additional keyword arguments for HydroAgent
+            **kwargs: Additional keyword arguments for HydroAgentInstance
         """
         # Required parameters validation
         if sim_coordination_client is None:
@@ -90,33 +111,38 @@ class BaseHydroAgent(HydroAgent, ABC):
         if context is None:
             raise ValueError("context is required")
 
-        # Initialize parent Pydantic model with agent properties
+        # Initialize parent HydroAgentInstance with all required fields
         super().__init__(
+            agent_id=agent_id,
             agent_code=agent_code,
             agent_type=agent_type,
             agent_name=agent_name,
             agent_configuration_url=agent_configuration_url or "",
+            biz_scene_instance_id=context.biz_scene_instance_id,
+            hydros_cluster_id=hydros_cluster_id,
+            hydros_node_id=hydros_node_id,
+            context=context,
+            agent_biz_status=agent_biz_status,
+            drive_mode=drive_mode,
             **kwargs
         )
 
-        # Store additional properties not in HydroAgent model
+        # Store non-Pydantic attributes (not serialized)
         # These are stored as extra fields due to model_config extra='allow'
         object.__setattr__(self, 'sim_coordination_client', sim_coordination_client)
-        object.__setattr__(self, 'context', context)
-        object.__setattr__(self, 'hydros_cluster_id', hydros_cluster_id)
-        object.__setattr__(self, 'hydros_node_id', hydros_node_id)
-        object.__setattr__(self, 'biz_scene_instance_id', context.biz_scene_instance_id)
-        object.__setattr__(self, 'hydro_agent_instance', None)
         object.__setattr__(self, 'state_manager', sim_coordination_client.state_manager)
         object.__setattr__(self, 'properties', AgentProperties())
 
         # Note: Logging context (task_id, biz_component) is automatically set by
         # SimCoordinationClient when processing commands, so all logs in callbacks
         # will include the correct context information
-        logger.info(f"Created agent for context: {self.biz_scene_instance_id}")
+        logger.info(f"Created agent instance: {self.agent_id}")
         logger.info(f"  - Agent Code: {self.agent_code}")
         logger.info(f"  - Agent Name: {self.agent_name}")
         logger.info(f"  - Agent Type: {self.agent_type}")
+        logger.info(f"  - Context: {self.biz_scene_instance_id}")
+        logger.info(f"  - Status: {self.agent_biz_status}")
+        logger.info(f"  - Drive Mode: {self.drive_mode}")
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -177,14 +203,11 @@ class BaseHydroAgent(HydroAgent, ABC):
         """
         logger.info(f"Time series data update: {request.command_id}")
 
-        if self.hydro_agent_instance is None:
-            raise RuntimeError("Agent instance not initialized")
-
         return TimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self.hydro_agent_instance,
+            source_agent_instance=self,  # self is already a HydroAgentInstance
             broadcast=False
         )
 
