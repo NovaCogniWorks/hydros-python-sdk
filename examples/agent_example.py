@@ -14,6 +14,7 @@ import os
 from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 from configparser import ConfigParser
+from pydantic import Field
 
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.callback import SimCoordinationCallback
@@ -68,10 +69,11 @@ class MySampleHydroAgent(BaseHydroAgent):
 
     # Type hints for dynamically set attributes (set via object.__setattr__)
     # These are set in __init__ or inherited from BaseHydroAgent
-    config: Dict[str, str]
-    sim_coordination_client: SimCoordinationClient
-    state_manager: Any  # AgentStateManager - avoid circular import
-    properties: Any  # AgentProperties - avoid circular import
+    # Using Field(exclude=True) to prevent Pydantic from treating these as model fields
+    config: Any = Field(default=None, exclude=True)  # Dict[str, str]
+    sim_coordination_client: Any = Field(default=None, exclude=True)  # SimCoordinationClient
+    state_manager: Any = Field(default=None, exclude=True)  # AgentStateManager - avoid circular import
+    properties: Any = Field(default=None, exclude=True)  # AgentProperties - avoid circular import
 
     def __init__(
         self,

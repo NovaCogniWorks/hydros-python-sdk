@@ -8,7 +8,7 @@ and adds behavioral methods for handling simulation lifecycle.
 import logging
 from typing import Optional, Any
 from abc import ABC, abstractmethod
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext, AgentBizStatus, AgentDriveMode
 from hydros_agent_sdk.protocol.commands import (
@@ -69,9 +69,10 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
     model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
     # Type hints for dynamically set attributes (set via object.__setattr__)
-    sim_coordination_client: Any  # SimCoordinationClient - avoid circular import
-    state_manager: Any  # AgentStateManager - avoid circular import
-    properties: AgentProperties
+    # Using Field(exclude=True) to prevent Pydantic from treating these as model fields
+    sim_coordination_client: Any = Field(default=None, exclude=True)  # SimCoordinationClient - avoid circular import
+    state_manager: Any = Field(default=None, exclude=True)  # AgentStateManager - avoid circular import
+    properties: Any = Field(default=None, exclude=True)  # AgentProperties - avoid circular import
 
     def __init__(
         self,
