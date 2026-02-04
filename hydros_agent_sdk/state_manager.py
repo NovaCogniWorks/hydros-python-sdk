@@ -66,20 +66,30 @@ class AgentStateManager:
         self._task_states: Dict[str, TaskState] = {}  # context_id → task state
         self._agent_instances: Dict[str, HydroAgentInstance] = {}  # agent_id → instance
         self._local_agent_instances: Set[str] = set()  # local agent_id set
-        self._node_id: Optional[str] = None  # current node ID
+        self._hydros_cluster_id: Optional[str] = None  # current cluster ID
+        self._hydros_node_id: Optional[str] = None  # current node ID
 
     # ========================================================================
-    # Node Management
+    # Cluster and Node Management
     # ========================================================================
+
+    def set_cluster_id(self, cluster_id: str):
+        """Set the current cluster ID."""
+        self._hydros_cluster_id = cluster_id
+        logger.info(f"Cluster ID set to: {cluster_id}")
+
+    def get_cluster_id(self) -> Optional[str]:
+        """Get the current cluster ID."""
+        return self._hydros_cluster_id
 
     def set_node_id(self, node_id: str):
         """Set the current node ID."""
-        self._node_id = node_id
+        self._hydros_node_id = node_id
         logger.info(f"Node ID set to: {node_id}")
 
     def get_node_id(self) -> Optional[str]:
         """Get the current node ID."""
-        return self._node_id
+        return self._hydros_node_id
 
     # ========================================================================
     # Context Management (from AgentContextManager)
@@ -240,7 +250,7 @@ class AgentStateManager:
 
         # Check by node_id if available (implicit check)
         # Only consider it local if node_id matches AND agent is not explicitly registered as remote
-        if self._node_id and agent_instance.hydros_node_id == self._node_id:
+        if self._hydros_node_id and agent_instance.hydros_node_id == self._hydros_node_id:
             # If agent_id is known but not in local set, it's not local
             if agent_instance.agent_id:
                 return False

@@ -6,7 +6,7 @@ coordination and MQTT protocol support.
 """
 
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
-from hydros_agent_sdk.callback import SimCoordinationCallback
+from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.mqtt import HydrosMqttClient
@@ -36,16 +36,58 @@ from hydros_agent_sdk.logging_config import (
     setup_logging,
     LogContext,
     HydrosFormatter,
-    set_task_id,
+    # New API
+    set_biz_scene_instance_id,
     set_biz_component,
-    set_log_type,
-    set_log_content,
+    set_hydros_cluster_id,
+    set_hydros_node_id,
+    get_biz_scene_instance_id,
+    get_biz_component,
+    get_hydros_cluster_id,
+    get_hydros_node_id,
+    # Deprecated API (for backward compatibility)
+    set_task_id,
+    set_agent_id,
     set_node_id,
     get_task_id,
-    get_biz_component,
-    get_log_type,
-    get_log_content,
+    get_agent_id,
     get_node_id,
+)
+
+# Import specialized agent types
+from hydros_agent_sdk.agents import (
+    TickableAgent,
+    OntologySimulationAgent,
+    TwinsSimulationAgent,
+    ModelCalculationAgent,
+    CentralSchedulingAgent,
+)
+
+# Import factory and multi-agent support
+from hydros_agent_sdk.factory import (
+    generate_agent_instance_id,
+    HydroAgentFactory,
+)
+from hydros_agent_sdk.multi_agent import (
+    MultiAgentCallback,
+)
+from hydros_agent_sdk.config_loader import (
+    load_env_config,
+    load_agent_config,
+    load_properties_file,
+)
+
+# Import error handling
+from hydros_agent_sdk.error_codes import (
+    ErrorCode,
+    ErrorCodes,
+    create_error_response,
+)
+from hydros_agent_sdk.error_handling import (
+    handle_agent_errors,
+    safe_execute,
+    AgentErrorContext,
+    validate_request,
 )
 
 __version__ = "0.1.3"
@@ -73,6 +115,23 @@ __all__ = [
     "Waterway",
     "MqttBroker",
     "OutputConfig",
+    "load_env_config",
+    "load_agent_config",
+    "load_properties_file",
+
+    # Factory and multi-agent support
+    "generate_agent_instance_id",
+    "HydroAgentFactory",
+    "MultiAgentCallback",
+
+    # Error handling
+    "ErrorCode",
+    "ErrorCodes",
+    "create_error_response",
+    "handle_agent_errors",
+    "safe_execute",
+    "AgentErrorContext",
+    "validate_request",
 
     # Utility classes
     "HydroObjectUtilsV2",
@@ -90,14 +149,27 @@ __all__ = [
     "setup_logging",
     "LogContext",
     "HydrosFormatter",
-    "set_task_id",
+    # New API
+    "set_biz_scene_instance_id",
     "set_biz_component",
-    "set_log_type",
-    "set_log_content",
+    "set_hydros_cluster_id",
+    "set_hydros_node_id",
+    "get_biz_scene_instance_id",
+    "get_biz_component",
+    "get_hydros_cluster_id",
+    "get_hydros_node_id",
+    # Deprecated API (for backward compatibility)
+    "set_task_id",
+    "set_agent_id",
     "set_node_id",
     "get_task_id",
-    "get_biz_component",
-    "get_log_type",
-    "get_log_content",
+    "get_agent_id",
     "get_node_id",
+
+    # Specialized agent types
+    "TickableAgent",
+    "OntologySimulationAgent",
+    "TwinsSimulationAgent",
+    "ModelCalculationAgent",
+    "CentralSchedulingAgent",
 ]

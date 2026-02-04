@@ -14,10 +14,15 @@ from queue import Queue, Empty
 from threading import Thread, Event
 import paho.mqtt.client as mqtt
 
-from hydros_agent_sdk.callback import SimCoordinationCallback
+from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
-from hydros_agent_sdk.logging_config import set_task_id, set_biz_component, set_node_id
+from hydros_agent_sdk.logging_config import (
+    set_biz_scene_instance_id,
+    set_biz_component,
+    set_hydros_cluster_id,
+    set_hydros_node_id
+)
 from hydros_agent_sdk.protocol.commands import (
     SimCommand,
     SimTaskInitRequest,
@@ -63,9 +68,7 @@ class SimCoordinationClient:
     Example:
         ```python
         class MyCallback(SimCoordinationCallback):
-            def get_component(self):
-                return "MY_AGENT"
-
+        
             def on_sim_task_init(self, request):
                 # Your business logic here
                 pass
@@ -91,8 +94,7 @@ class SimCoordinationClient:
         broker_url: str,
         broker_port: int,
         topic: str,
-        callback: SimCoordinationCallback,
-        client_id: Optional[str] = None,
+        sim_coordination_callback: SimCoordinationCallback,
         state_manager: Optional[AgentStateManager] = None,
         qos: int = 1,
         max_retry_count: int = 5,
@@ -115,16 +117,13 @@ class SimCoordinationClient:
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
         self.topic = topic
-        self.callback = callback
+        self.sim_coordination_callback = sim_coordination_callback
         self.qos = qos
         self.max_retry_count = max_retry_count
         self.base_retry_delay_ms = base_retry_delay_ms
 
-        # Generate client ID if not provided
-        if client_id is None:
-            component = callback.get_component()
-            client_id = f"hydros_{component}_{int(time.time() * 1000)}"
-        self.client_id = client_id
+        # Generate client ID
+        self.client_id = f"hydros_node_{int(time.time() * 1000)}"
 
         # Initialize state manager
         if state_manager is None:
@@ -299,24 +298,36 @@ class SimCoordinationClient:
         Extracts context information from the command and sets it in the logging
         context so all subsequent logs will include this information.
 
+        The logging context includes:
+        - hydros_cluster_id: From state_manager (loaded from env.properties)
+        - hydros_node_id: From state_manager (loaded from env.properties)
+        - biz_scene_instance_id: From command's SimulationContext
+        - biz_component: Agent ID or component name (e.g., "SIM_COORDINATOR")
+
         Args:
             command: The command to extract context from
         """
-        # Set node_id from state_manager
+        # Set hydros_cluster_id from state_manager
+        cluster_id = self.state_manager.get_cluster_id()
+        if cluster_id:
+            set_hydros_cluster_id(cluster_id)
+
+        # Set hydros_node_id from state_manager
         node_id = self.state_manager.get_node_id()
         if node_id:
-            set_node_id(node_id)
+            set_hydros_node_id(node_id)
 
-        # Set biz_component from callback
-        biz_component = self.callback.get_component()
-        if biz_component:
-            set_biz_component(biz_component)
-
-        # Set task_id from command's context (SimulationContext)
+        # Set biz_scene_instance_id from command's context (SimulationContext)
         if hasattr(command, 'context') and command.context:
-            task_id = command.context.biz_scene_instance_id
-            if task_id:
-                set_task_id(task_id)
+            biz_scene_instance_id = command.context.biz_scene_instance_id
+            if biz_scene_instance_id:
+                set_biz_scene_instance_id(biz_scene_instance_id)
+
+        # Set biz_component from callback's component
+        # This will be agent_id in agent context, or component name in infrastructure
+        component = self.sim_coordination_callback.get_component()
+        if component:
+            set_biz_component(component)
 
     def _handle_incoming_message(self, command: SimCommand):
         """
@@ -349,45 +360,45 @@ class SimCoordinationClient:
         """Handle task init request."""
         request = command
         assert isinstance(request, SimTaskInitRequest)
-        self.callback.on_sim_task_init(request)
+        self.sim_coordination_callback.on_sim_task_init(request)
 
     def _handle_task_init_response(self, command: SimCommand):
         """Handle task init response from remote agent."""
         response = command
         assert isinstance(response, SimTaskInitResponse)
-        if self.callback.is_remote_agent(response.source_agent_instance):
-            self.callback.on_agent_instance_sibling_created(response)
+        if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
+            self.sim_coordination_callback.on_agent_instance_sibling_created(response)
 
     def _handle_tick(self, command: SimCommand):
         """Handle tick command."""
         request = command
         assert isinstance(request, TickCmdRequest)
-        self.callback.on_tick(request)
+        self.sim_coordination_callback.on_tick(request)
 
     def _handle_task_terminate(self, command: SimCommand):
         """Handle task terminate request."""
         request = command
         assert isinstance(request, SimTaskTerminateRequest)
-        self.callback.on_task_terminate(request)
+        self.sim_coordination_callback.on_task_terminate(request)
 
     def _handle_time_series_data_update(self, command: SimCommand):
         """Handle time series data update."""
         request = command
         assert isinstance(request, TimeSeriesDataUpdateRequest)
-        self.callback.on_time_series_data_update(request)
+        self.sim_coordination_callback.on_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
         """Handle time series calculation."""
         request = command
         assert isinstance(request, TimeSeriesCalculationRequest)
-        self.callback.on_time_series_calculation(request)
+        self.sim_coordination_callback.on_time_series_calculation(request)
 
     def _handle_agent_status_report(self, command: SimCommand):
         """Handle agent status report from remote agent."""
         report = command
         assert isinstance(report, AgentInstanceStatusReport)
-        if self.callback.is_remote_agent(report.source_agent_instance):
-            self.callback.on_agent_instance_sibling_status_updated(report)
+        if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
+            self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
 
     # ========================================================================
     # Outgoing Message Queue

@@ -1,18 +1,26 @@
 """
 Logging configuration for Hydros Agent SDK.
 
-Provides a custom formatter that matches the Java logback pattern used in hydros-data:
-DATA|2026-01-28 23:29:48|INFO|TASK202601282328VG3IE7H3CA0F|SimCoordinator|||c.h.c.s.b.BaseCoordinatorMqttService|message
+Provides a custom formatter with Python-style source location for VSCode navigation.
+
+Log format varies by context:
+
+1. Agent business logic (with biz_scene_instance_id):
+   ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_scene_instance_id}|${agent_id}|||coordination_client.py:123|message
+
+2. SDK infrastructure (without biz_scene_instance_id):
+   ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_component}|-|coordination_client.py:123|message
 
 Format breakdown:
-- hydros_node_id (e.g., "DATA")
+- hydros_cluster_id (e.g., "default_cluster")
+- hydros_node_id (e.g., "default_central")
 - timestamp (yyyy-MM-dd HH:mm:ss)
 - log level (5 chars, left-aligned)
-- biz_scene_instance_id (taskId, defaults to "System")
-- agent_code (bizComponent, defaults to "Common")
-- type (defaults to empty)
-- content (defaults to empty)
-- logger name (abbreviated)
+- biz_scene_instance_id (from SimulationContext) OR biz_component (e.g., "SIM_SDK", "SIM_COORDINATOR")
+- agent_id (from HydroAgentInstance) OR "-" for infrastructure logs
+- reserved field (empty)
+- reserved field (empty)
+- source location (filename:lineno) - clickable in VSCode
 - message
 """
 
@@ -22,11 +30,10 @@ from typing import Optional
 from datetime import datetime
 
 # Context variables for MDC-like functionality (similar to Java's MDC)
-_task_id: ContextVar[Optional[str]] = ContextVar('task_id', default=None)
+_biz_scene_instance_id: ContextVar[Optional[str]] = ContextVar('biz_scene_instance_id', default=None)
 _biz_component: ContextVar[Optional[str]] = ContextVar('biz_component', default=None)
-_log_type: ContextVar[Optional[str]] = ContextVar('log_type', default=None)
-_log_content: ContextVar[Optional[str]] = ContextVar('log_content', default=None)
-_node_id: ContextVar[Optional[str]] = ContextVar('node_id', default=None)
+_hydros_cluster_id: ContextVar[Optional[str]] = ContextVar('hydros_cluster_id', default=None)
+_hydros_node_id: ContextVar[Optional[str]] = ContextVar('hydros_node_id', default=None)
 
 
 class LogContext:
@@ -34,36 +41,32 @@ class LogContext:
     Context manager for setting logging context (MDC-like functionality).
 
     Example:
-        with LogContext(task_id="TASK123", biz_component="MyAgent"):
+        with LogContext(biz_scene_instance_id="TASK123", biz_component="AGENT_001"):
             logger.info("Processing task")
     """
 
     def __init__(
         self,
-        task_id: Optional[str] = None,
+        biz_scene_instance_id: Optional[str] = None,
         biz_component: Optional[str] = None,
-        log_type: Optional[str] = None,
-        log_content: Optional[str] = None,
-        node_id: Optional[str] = None
+        hydros_cluster_id: Optional[str] = None,
+        hydros_node_id: Optional[str] = None
     ):
-        self.task_id = task_id
+        self.biz_scene_instance_id = biz_scene_instance_id
         self.biz_component = biz_component
-        self.log_type = log_type
-        self.log_content = log_content
-        self.node_id = node_id
+        self.hydros_cluster_id = hydros_cluster_id
+        self.hydros_node_id = hydros_node_id
         self.tokens = []
 
     def __enter__(self):
-        if self.task_id is not None:
-            self.tokens.append(_task_id.set(self.task_id))
+        if self.biz_scene_instance_id is not None:
+            self.tokens.append(_biz_scene_instance_id.set(self.biz_scene_instance_id))
         if self.biz_component is not None:
             self.tokens.append(_biz_component.set(self.biz_component))
-        if self.log_type is not None:
-            self.tokens.append(_log_type.set(self.log_type))
-        if self.log_content is not None:
-            self.tokens.append(_log_content.set(self.log_content))
-        if self.node_id is not None:
-            self.tokens.append(_node_id.set(self.node_id))
+        if self.hydros_cluster_id is not None:
+            self.tokens.append(_hydros_cluster_id.set(self.hydros_cluster_id))
+        if self.hydros_node_id is not None:
+            self.tokens.append(_hydros_node_id.set(self.hydros_node_id))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -71,86 +74,122 @@ class LogContext:
             token.var.reset(token)
 
 
-def set_task_id(task_id: Optional[str]):
-    """Set the task ID (biz_scene_instance_id) for the current context."""
-    _task_id.set(task_id)
+def set_biz_scene_instance_id(biz_scene_instance_id: Optional[str]):
+    """Set the biz_scene_instance_id (from SimulationContext) for the current context."""
+    _biz_scene_instance_id.set(biz_scene_instance_id)
 
 
 def set_biz_component(biz_component: Optional[str]):
-    """Set the business component (agent_code) for the current context."""
+    """
+    Set the biz_component for the current context.
+
+    This can be:
+    - agent_id (e.g., "AGENT_001") in agent business logic
+    - component name (e.g., "SIM_SDK", "SIM_COORDINATOR") in infrastructure code
+    """
     _biz_component.set(biz_component)
 
 
-def set_log_type(log_type: Optional[str]):
-    """Set the log type for the current context."""
-    _log_type.set(log_type)
+def set_hydros_cluster_id(hydros_cluster_id: Optional[str]):
+    """Set the hydros_cluster_id for the current context."""
+    _hydros_cluster_id.set(hydros_cluster_id)
 
 
-def set_log_content(log_content: Optional[str]):
-    """Set the log content for the current context."""
-    _log_content.set(log_content)
+def set_hydros_node_id(hydros_node_id: Optional[str]):
+    """Set the hydros_node_id for the current context."""
+    _hydros_node_id.set(hydros_node_id)
 
 
-def set_node_id(node_id: Optional[str]):
-    """Set the node ID (hydros_node_id) for the current context."""
-    _node_id.set(node_id)
-
-
-def get_task_id() -> Optional[str]:
-    """Get the current task ID."""
-    return _task_id.get()
+def get_biz_scene_instance_id() -> Optional[str]:
+    """Get the current biz_scene_instance_id."""
+    return _biz_scene_instance_id.get()
 
 
 def get_biz_component() -> Optional[str]:
-    """Get the current business component."""
+    """Get the current biz_component."""
     return _biz_component.get()
 
 
-def get_log_type() -> Optional[str]:
-    """Get the current log type."""
-    return _log_type.get()
+def get_hydros_cluster_id() -> Optional[str]:
+    """Get the current hydros_cluster_id."""
+    return _hydros_cluster_id.get()
 
 
-def get_log_content() -> Optional[str]:
-    """Get the current log content."""
-    return _log_content.get()
+def get_hydros_node_id() -> Optional[str]:
+    """Get the current hydros_node_id."""
+    return _hydros_node_id.get()
+
+
+# Backward compatibility aliases (deprecated)
+def set_task_id(task_id: Optional[str]):
+    """Deprecated: Use set_biz_scene_instance_id instead."""
+    set_biz_scene_instance_id(task_id)
+
+
+def set_agent_id(agent_id: Optional[str]):
+    """Deprecated: Use set_biz_component instead."""
+    set_biz_component(agent_id)
+
+
+def set_node_id(node_id: Optional[str]):
+    """Deprecated: Use set_hydros_node_id instead."""
+    set_hydros_node_id(node_id)
+
+
+def get_task_id() -> Optional[str]:
+    """Deprecated: Use get_biz_scene_instance_id instead."""
+    return get_biz_scene_instance_id()
+
+
+def get_agent_id() -> Optional[str]:
+    """Deprecated: Use get_biz_component instead."""
+    return get_biz_component()
 
 
 def get_node_id() -> Optional[str]:
-    """Get the current node ID."""
-    return _node_id.get()
+    """Deprecated: Use get_hydros_node_id instead."""
+    return get_hydros_node_id()
 
 
 class HydrosFormatter(logging.Formatter):
     """
-    Custom formatter that matches the Java logback pattern.
+    Custom formatter with Python-style source location for VSCode navigation.
 
-    Format: NODE_ID|TIMESTAMP|LEVEL|TASK_ID|BIZ_COMPONENT|TYPE|CONTENT|LOGGER|MESSAGE
+    Format varies by context:
+    1. With biz_scene_instance_id (agent business logic):
+       CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|||SOURCE|MESSAGE
 
-    Example output:
-    DATA|2026-01-28 23:29:48|INFO|TASK202601282328VG3IE7H3CA0F|SimCoordinator|||c.h.c.s.b.BaseCoordinatorMqttService|Processing command
+    2. Without biz_scene_instance_id (infrastructure):
+       CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
+
+    Example outputs:
+    - Agent: default_cluster|default_central|2026-01-28 23:29:48|INFO |TASK202601282328VG3IE7H3CA0F|AGENT_001|||coordination_client.py:123|Processing command
+    - SDK:   default_cluster|default_central|2026-01-28 23:29:48|INFO |SIM_SDK|-|coordination_client.py:123|Loading configuration
     """
 
-    def __init__(self, default_node_id: str = "DATA", logger_max_length: int = 36):
+    def __init__(
+        self,
+        default_hydros_cluster_id: str = "default_cluster",
+        default_hydros_node_id: str = "LOCAL"
+    ):
         """
         Initialize the formatter.
 
         Args:
-            default_node_id: Default node ID if not set in context (default: "DATA")
-            logger_max_length: Maximum length for logger name abbreviation (default: 36)
+            default_hydros_cluster_id: Default cluster ID if not set in context
+            default_hydros_node_id: Default node ID if not set in context
         """
         super().__init__()
-        self.default_node_id = default_node_id
-        self.logger_max_length = logger_max_length
+        self.default_hydros_cluster_id = default_hydros_cluster_id
+        self.default_hydros_node_id = default_hydros_node_id
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format the log record according to the Hydros pattern."""
+        """Format the log record with Python-style source location."""
         # Get context values with defaults
-        node_id = get_node_id() or self.default_node_id
-        task_id = get_task_id() or "System"
+        hydros_cluster_id = get_hydros_cluster_id() or self.default_hydros_cluster_id
+        hydros_node_id = get_hydros_node_id() or self.default_hydros_node_id
+        biz_scene_instance_id = get_biz_scene_instance_id()
         biz_component = get_biz_component() or "Common"
-        log_type = get_log_type() or ""
-        log_content = get_log_content() or ""
 
         # Format timestamp
         timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
@@ -158,8 +197,8 @@ class HydrosFormatter(logging.Formatter):
         # Format log level (5 chars, left-aligned)
         level = f"{record.levelname:<5}"
 
-        # Abbreviate logger name if needed
-        logger_name = self._abbreviate_logger_name(record.name)
+        # Format source location (filename:lineno) for VSCode navigation
+        source_location = f"{record.filename}:{record.lineno}"
 
         # Format message
         message = record.getMessage()
@@ -170,80 +209,78 @@ class HydrosFormatter(logging.Formatter):
                 message += '\n'
             message += self.formatException(record.exc_info)
 
-        # Build the log line
-        parts = [
-            node_id,
-            timestamp,
-            level,
-            task_id,
-            biz_component,
-            log_type,
-            log_content,
-            logger_name,
-            message
-        ]
+        # Build the log line based on context
+        if biz_scene_instance_id:
+            # Agent business logic format: CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|||SOURCE|MESSAGE
+            parts = [
+                hydros_cluster_id,
+                hydros_node_id,
+                timestamp,
+                level,
+                biz_scene_instance_id,
+                biz_component,  # This is agent_id in agent context
+                "",  # Reserved field
+                "",  # Reserved field
+                source_location,
+                message
+            ]
+        else:
+            # Infrastructure format: CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
+            parts = [
+                hydros_cluster_id,
+                hydros_node_id,
+                timestamp,
+                level,
+                biz_component,  # This is component name like "SIM_SDK", "SIM_COORDINATOR"
+                "-",  # No agent_id in infrastructure logs
+                source_location,
+                message
+            ]
 
         return '|'.join(parts)
-
-    def _abbreviate_logger_name(self, name: str) -> str:
-        """
-        Abbreviate logger name similar to logback's %logger{36}.
-
-        Examples:
-            com.hydros.coordination.service.BaseCoordinatorMqttService
-            -> c.h.c.s.BaseCoordinatorMqttService
-
-            hydros_agent_sdk.coordination_client
-            -> h.a.coordination_client
-        """
-        if len(name) <= self.logger_max_length:
-            return name
-
-        parts = name.split('.')
-        if len(parts) <= 1:
-            return name[:self.logger_max_length]
-
-        # Abbreviate all parts except the last one
-        abbreviated = []
-        for part in parts[:-1]:
-            if part:
-                abbreviated.append(part[0])
-        abbreviated.append(parts[-1])
-
-        result = '.'.join(abbreviated)
-
-        # If still too long, truncate
-        if len(result) > self.logger_max_length:
-            return result[:self.logger_max_length]
-
-        return result
 
 
 def setup_logging(
     level: int = logging.INFO,
-    node_id: str = "DATA",
+    hydros_cluster_id: str = "default_cluster",
+    hydros_node_id: str = "LOCAL",
     log_file: Optional[str] = None,
-    console: bool = True
+    console: bool = True,
+    # Deprecated parameters for backward compatibility
+    node_id: Optional[str] = None
 ):
     """
     Configure logging with Hydros formatter.
 
     Args:
         level: Logging level (default: logging.INFO)
-        node_id: Default node ID for logs (default: "DATA")
+        hydros_cluster_id: Default cluster ID for logs (default: "default_cluster")
+        hydros_node_id: Default node ID for logs (default: "LOCAL")
         log_file: Optional log file path
         console: Whether to log to console (default: True)
+        node_id: Deprecated, use hydros_node_id instead
 
     Example:
-        setup_logging(level=logging.INFO, node_id="AGENT_NODE_01")
+        setup_logging(
+            level=logging.INFO,
+            hydros_cluster_id="default_cluster",
+            hydros_node_id="default_central"
+        )
 
         # Set context and log
-        set_task_id("TASK202601282328VG3IE7H3CA0F")
-        set_biz_component("SimCoordinator")
+        set_biz_scene_instance_id("TASK202601282328VG3IE7H3CA0F")
+        set_agent_id("AGENT_001")
         logger.info("Processing command")
     """
+    # Backward compatibility: use node_id if hydros_node_id not explicitly set
+    if node_id is not None and hydros_node_id == "LOCAL":
+        hydros_node_id = node_id
+
     # Create formatter
-    formatter = HydrosFormatter(default_node_id=node_id)
+    formatter = HydrosFormatter(
+        default_hydros_cluster_id=hydros_cluster_id,
+        default_hydros_node_id=hydros_node_id
+    )
 
     # Get root logger
     root_logger = logging.getLogger()

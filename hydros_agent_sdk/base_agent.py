@@ -8,7 +8,7 @@ and adds behavioral methods for handling simulation lifecycle.
 import logging
 from typing import Optional, TYPE_CHECKING
 from abc import ABC, abstractmethod
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict
 
 from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext, AgentBizStatus, AgentDriveMode
 from hydros_agent_sdk.protocol.commands import (
@@ -74,18 +74,11 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
     model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
     # Type hints for dynamically set attributes (set via object.__setattr__)
-    # Using Field(exclude=True) to prevent Pydantic from treating these as model fields
-    # Using TYPE_CHECKING to provide proper types for IDE without affecting runtime
+    # These are only for IDE support and are not Pydantic fields
     if TYPE_CHECKING:
         sim_coordination_client: 'SimCoordinationClient'
         state_manager: 'AgentStateManager'
         properties: AgentProperties
-
-    # Runtime field definitions (excluded from Pydantic validation)
-    # Using type: ignore to avoid type checking errors with None default
-    sim_coordination_client: 'SimCoordinationClient' = Field(default=None, exclude=True)  # type: ignore[assignment]
-    state_manager: 'AgentStateManager' = Field(default=None, exclude=True)  # type: ignore[assignment]
-    properties: AgentProperties = Field(default=None, exclude=True)  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -173,6 +166,23 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         pass
 
+    def _set_agent_logging_context(self):
+        """
+        Set logging context for this agent instance.
+
+        This should be called at the beginning of each agent method (on_init, on_tick, etc.)
+        to ensure logs from agent business logic include the correct agent_id.
+        """
+        from hydros_agent_sdk.logging_config import set_biz_component, set_biz_scene_instance_id
+
+        # Set biz_component to agent_id for agent business logic
+        if self.agent_id:
+            set_biz_component(self.agent_id)
+
+        # Set biz_scene_instance_id from context
+        if self.context and self.context.biz_scene_instance_id:
+            set_biz_scene_instance_id(self.context.biz_scene_instance_id)
+
     @abstractmethod
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
@@ -259,12 +269,17 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             request: SimTaskInitRequest containing agent_list with configuration URLs
 
         Raises:
-            ValueError: If agent not found in agent_list or agent_code mismatch
+            ValueError: If agent_code mismatch in configuration
             Exception: If configuration loading fails
+
+        Note:
+            If agent is not found in agent_list, this method will skip loading
+            and return silently, as the SimTaskInitRequest may only initialize
+            a subset of agents.
         """
         from hydros_agent_sdk.agent_config import AgentConfigLoader
 
-        # Find matching agent in agent_list
+        # Find matching agent in agent_list by agent_code (exact match)
         matching_agent = None
         for agent in request.agent_list:
             if agent.agent_code == self.agent_code:
@@ -272,9 +287,11 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
                 break
 
         if matching_agent is None:
-            raise ValueError(
-                f"Agent with code '{self.agent_code}' not found in SimTaskInitRequest.agent_list"
+            logger.info(
+                f"Agent '{self.agent_code}' not found in SimTaskInitRequest.agent_list, "
+                f"skipping configuration loading (this is normal if only initializing a subset of agents)"
             )
+            return
 
         if not matching_agent.agent_configuration_url:
             logger.warning(f"No agent_configuration_url provided for agent '{self.agent_code}'")
