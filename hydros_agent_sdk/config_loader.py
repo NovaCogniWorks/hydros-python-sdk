@@ -18,7 +18,7 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     Load environment configuration from env.properties file.
 
     This function loads the shared environment configuration that all agents use.
-    All configuration properties are required and must be present in the file.
+    The mqtt_topic is automatically constructed from hydros_cluster_id if not explicitly provided.
 
     Args:
         env_file: Path to environment configuration file (default: ./env.properties)
@@ -57,6 +57,12 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     # Load properties
     config = load_properties_file(env_file)
 
+    # Auto-generate mqtt_topic from hydros_cluster_id if not provided
+    if 'mqtt_topic' not in config or not config['mqtt_topic']:
+        if 'hydros_cluster_id' in config and config['hydros_cluster_id']:
+            config['mqtt_topic'] = f"/hydros/commands/coordination/{config['hydros_cluster_id']}"
+            logger.info(f"Auto-generated mqtt_topic: {config['mqtt_topic']}")
+
     # Validate required properties
     required_props = [
         'mqtt_broker_url',
@@ -76,9 +82,10 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
             f"Required properties:\n"
             f"  - mqtt_broker_url: MQTT broker URL (e.g., tcp://192.168.1.24)\n"
             f"  - mqtt_broker_port: MQTT broker port (e.g., 1883)\n"
-            f"  - mqtt_topic: MQTT topic for coordination (e.g., /hydros/commands/coordination/cluster_name)\n"
-            f"  - hydros_cluster_id: Hydros cluster ID (e.g., default_cluster)\n"
-            f"  - hydros_node_id: Hydros node ID (e.g., default_central)\n"
+            f"  - hydros_cluster_id: Hydros cluster ID (e.g., weijiahao)\n"
+            f"  - hydros_node_id: Hydros node ID (e.g., local)\n"
+            f"\n"
+            f"Note: mqtt_topic will be auto-generated as /hydros/commands/coordination/{{hydros_cluster_id}}\n"
         )
 
     return config

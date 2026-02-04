@@ -1,0 +1,12 @@
+# 核心业务依赖
+-e git+ssh://git@github.com/NovaCogniWorks/hydros-python-sdk.git@879e12b1f84d8ca83817493ed5558bb6f665f7fd#egg=hydros_agent_sdk
+paho-mqtt==2.1.0
+pydantic==2.12.5
+PyYAML==6.0.3
+requests==2.32.5
+rich==14.3.1
+
+# 构建与发布工具 (如果你只需要运行代码，这部分可以移到 requirements-dev.txt)
+build==1.4.0
+twine==6.2.0
+debugpy==1.8.20

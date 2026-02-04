@@ -6,7 +6,7 @@ Provides a custom formatter with Python-style source location for VSCode navigat
 Log format varies by context:
 
 1. Agent business logic (with biz_scene_instance_id):
-   ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_scene_instance_id}|${agent_id}|||coordination_client.py:123|message
+   ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_scene_instance_id}|${agent_id}|coordination_client.py:123|message
 
 2. SDK infrastructure (without biz_scene_instance_id):
    ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_component}|-|coordination_client.py:123|message
@@ -18,8 +18,6 @@ Format breakdown:
 - log level (5 chars, left-aligned)
 - biz_scene_instance_id (from SimulationContext) OR biz_component (e.g., "SIM_SDK", "SIM_COORDINATOR")
 - agent_id (from HydroAgentInstance) OR "-" for infrastructure logs
-- reserved field (empty)
-- reserved field (empty)
 - source location (filename:lineno) - clickable in VSCode
 - message
 """
@@ -157,13 +155,13 @@ class HydrosFormatter(logging.Formatter):
 
     Format varies by context:
     1. With biz_scene_instance_id (agent business logic):
-       CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|||SOURCE|MESSAGE
+       CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|SOURCE|MESSAGE
 
     2. Without biz_scene_instance_id (infrastructure):
        CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
 
     Example outputs:
-    - Agent: default_cluster|default_central|2026-01-28 23:29:48|INFO |TASK202601282328VG3IE7H3CA0F|AGENT_001|||coordination_client.py:123|Processing command
+    - Agent: default_cluster|default_central|2026-01-28 23:29:48|INFO |TASK202601282328VG3IE7H3CA0F|AGENT_001|coordination_client.py:123|Processing command
     - SDK:   default_cluster|default_central|2026-01-28 23:29:48|INFO |SIM_SDK|-|coordination_client.py:123|Loading configuration
     """
 
@@ -211,7 +209,7 @@ class HydrosFormatter(logging.Formatter):
 
         # Build the log line based on context
         if biz_scene_instance_id:
-            # Agent business logic format: CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|||SOURCE|MESSAGE
+            # Agent business logic format: CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|SOURCE|MESSAGE
             parts = [
                 hydros_cluster_id,
                 hydros_node_id,
@@ -219,8 +217,6 @@ class HydrosFormatter(logging.Formatter):
                 level,
                 biz_scene_instance_id,
                 biz_component,  # This is agent_id in agent context
-                "",  # Reserved field
-                "",  # Reserved field
                 source_location,
                 message
             ]
