@@ -13,7 +13,10 @@ import os
 import time
 import logging
 import signal
-from typing import List, Optional
+import importlib.util
+import inspect
+from typing import List, Optional, Dict, Any, Tuple
+from pathlib import Path
 
 # 添加项目根目录到 Python 路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +33,7 @@ from hydros_agent_sdk import (
     MultiAgentCallback,
     load_env_config,
 )
+from hydros_agent_sdk.base_agent import BaseHydroAgent
 
 # Debug 支持
 DEBUG_MODE = False
@@ -59,6 +63,152 @@ setup_logging(
 )
 
 logger = logging.getLogger(__name__)
+
+
+def parse_properties(properties_file: str) -> Dict[str, str]:
+    """
+    解析 .properties 文件
+
+    Args:
+        properties_file: properties 文件路径
+
+    Returns:
+        包含所有配置项的字典
+    """
+    properties = {}
+
+    if not os.path.exists(properties_file):
+        raise FileNotFoundError(f"Properties file not found: {properties_file}")
+
+    with open(properties_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            # 跳过注释和空行
+            if not line or line.startswith('#'):
+                continue
+            # 解析 key=value
+            if '=' in line:
+                key, value = line.split('=', 1)
+                properties[key.strip()] = value.strip()
+
+    return properties
+
+
+def find_agent_class(agent_dir: str) -> Optional[type]:
+    """
+    在指定目录中查找 BaseHydroAgent 的子类
+
+    Args:
+        agent_dir: agent 目录路径
+
+    Returns:
+        找到的 Agent 类，如果没找到返回 None
+    """
+    # 扫描目录下的所有 Python 文件
+    py_files = [f for f in os.listdir(agent_dir)
+                if f.endswith('.py') and not f.startswith('__')]
+
+    if not py_files:
+        logger.warning(f"No Python files found in {agent_dir}")
+        return None
+
+    # 遍历每个 Python 文件
+    for py_file in py_files:
+        file_path = os.path.join(agent_dir, py_file)
+        module_name = py_file[:-3]  # 去掉 .py 后缀
+
+        try:
+            # 动态导入模块
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec is None or spec.loader is None:
+                continue
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            # 检查模块中的所有类
+            for name, obj in inspect.getmembers(module, inspect.isclass):
+                # 检查是否是 BaseHydroAgent 的子类（但不是 BaseHydroAgent 本身）
+                if (obj != BaseHydroAgent and
+                    issubclass(obj, BaseHydroAgent) and
+                    obj.__module__ == module_name):
+
+                    # 优先选择不包含特殊标记的类（如 "With", "Test" 等）
+                    if not any(marker in name for marker in ['With', 'Test', 'Mock', 'Demo']):
+                        logger.debug(f"Found agent class: {name} in {py_file}")
+                        return obj
+
+        except Exception as e:
+            logger.debug(f"Failed to import {py_file}: {e}")
+            continue
+
+    # 如果没找到标准类，再次扫描接受任何 BaseHydroAgent 子类
+    for py_file in py_files:
+        file_path = os.path.join(agent_dir, py_file)
+        module_name = py_file[:-3]
+
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec is None or spec.loader is None:
+                continue
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            for name, obj in inspect.getmembers(module, inspect.isclass):
+                if (obj != BaseHydroAgent and
+                    issubclass(obj, BaseHydroAgent) and
+                    obj.__module__ == module_name):
+                    logger.debug(f"Found agent class (fallback): {name} in {py_file}")
+                    return obj
+
+        except Exception as e:
+            continue
+
+    return None
+
+
+def discover_all_agents() -> List[str]:
+    """
+    自动发现所有可用的 agents
+
+    Returns:
+        可用的 agent 名称列表
+    """
+    agents_dir = os.path.join(EXAMPLES_DIR, 'agents')
+
+    if not os.path.exists(agents_dir):
+        logger.warning(f"Agents directory not found: {agents_dir}")
+        return []
+
+    available_agents = []
+
+    # 扫描所有子目录
+    for item in os.listdir(agents_dir):
+        item_path = os.path.join(agents_dir, item)
+
+        # 跳过非目录和特殊目录
+        if not os.path.isdir(item_path) or item.startswith('__'):
+            continue
+
+        # 检查是否有 agent.properties 文件
+        props_file = os.path.join(item_path, 'agent.properties')
+        if not os.path.exists(props_file):
+            logger.debug(f"Skipping {item}: no agent.properties found")
+            continue
+
+        # 检查是否有 Python 实现文件
+        py_files = [f for f in os.listdir(item_path)
+                    if f.endswith('.py') and not f.startswith('__')]
+
+        if not py_files:
+            logger.debug(f"Skipping {item}: no Python implementation found")
+            continue
+
+        available_agents.append(item)
+        logger.debug(f"Discovered agent: {item}")
+
+    return sorted(available_agents)
 
 
 def setup_debugpy(port: int = 5678, wait_for_client: bool = True):
@@ -125,36 +275,73 @@ class MultiAgentCoordinator:
         self.client: Optional[SimCoordinationClient] = None
         self.running = False
 
-    def load_agent_module(self, agent_name: str):
-        """动态加载 agent 模块"""
-        agent_map = {
-            'twins': {
-                'module': 'agents.twins.twins_agent',
-                'agent_class': 'MyTwinsSimulationAgent',
-                'script_dir': os.path.join(EXAMPLES_DIR, 'agents', 'twins'),
-                'agent_code': 'TWINS_SIMULATION_AGENT'
-            },
-            'ontology': {
-                'module': 'agents.ontology.ontology_agent',
-                'agent_class': 'MyOntologySimulationAgent',
-                'script_dir': os.path.join(EXAMPLES_DIR, 'agents', 'ontology'),
-                'agent_code': 'ONTOLOGY_SIMULATION_AGENT'
-            },
-        }
+    def load_agent_module(self, agent_name: str) -> Dict[str, Any]:
+        """
+        动态加载 agent 模块（自动扫描）
 
-        if agent_name not in agent_map:
-            raise ValueError(f"Unknown agent: {agent_name}")
+        Args:
+            agent_name: agent 目录名称（如 'twins', 'ontology'）
 
-        agent_info = agent_map[agent_name]
+        Returns:
+            包含 agent 信息的字典：
+            - name: agent 名称
+            - agent_class: Agent 类
+            - script_dir: agent 目录路径
+            - agent_code: agent 代码（从 agent.properties 读取）
+            - agent_display_name: agent 显示名称（从 agent.properties 读取）
 
-        # 动态导入模块
-        module = __import__(agent_info['module'], fromlist=[agent_info['agent_class']])
+        Raises:
+            ValueError: 如果 agent 不存在或加载失败
+        """
+        # 1. 构建 agent 目录路径
+        agents_dir = os.path.join(EXAMPLES_DIR, 'agents')
+        agent_dir = os.path.join(agents_dir, agent_name)
 
+        if not os.path.exists(agent_dir):
+            raise ValueError(f"Agent directory not found: {agent_dir}")
+
+        if not os.path.isdir(agent_dir):
+            raise ValueError(f"Not a directory: {agent_dir}")
+
+        # 2. 读取 agent.properties
+        props_file = os.path.join(agent_dir, 'agent.properties')
+
+        try:
+            properties = parse_properties(props_file)
+        except FileNotFoundError:
+            raise ValueError(f"agent.properties not found in {agent_dir}")
+        except Exception as e:
+            raise ValueError(f"Failed to parse agent.properties: {e}")
+
+        # 3. 提取必要的配置
+        agent_code = properties.get('agent_code')
+        agent_display_name = properties.get('agent_name', agent_name)
+
+        if not agent_code:
+            raise ValueError(f"agent_code not found in {props_file}")
+
+        logger.debug(f"Loaded properties for {agent_name}:")
+        logger.debug(f"  agent_code: {agent_code}")
+        logger.debug(f"  agent_name: {agent_display_name}")
+
+        # 4. 查找 BaseHydroAgent 子类
+        agent_class = find_agent_class(agent_dir)
+
+        if agent_class is None:
+            raise ValueError(
+                f"No BaseHydroAgent subclass found in {agent_dir}. "
+                f"Please ensure there is a Python file with a class that inherits from BaseHydroAgent."
+            )
+
+        logger.debug(f"Found agent class: {agent_class.__name__}")
+
+        # 5. 返回 agent 信息
         return {
             'name': agent_name,
-            'agent_class': getattr(module, agent_info['agent_class']),
-            'script_dir': agent_info['script_dir'],
-            'agent_code': agent_info['agent_code']
+            'agent_class': agent_class,
+            'script_dir': agent_dir,
+            'agent_code': agent_code,
+            'agent_display_name': agent_display_name
         }
 
     def start_all(self, agent_names: List[str]):
@@ -188,7 +375,7 @@ class MultiAgentCoordinator:
                     logger.info(f"  Node ID: {env_config['hydros_node_id']}")
 
                 # Agent 配置文件
-                config_file = os.path.join(agent_info['script_dir'], 'agent.properties')
+                config_file = os.path.join(agent_info['script_dir'], 'agent.properties')   
 
                 # 创建 agent factory（使用泛型 HydroAgentFactory，传递 env_config）
                 agent_factory = HydroAgentFactory(
@@ -201,6 +388,9 @@ class MultiAgentCoordinator:
                 self.callback.register_agent_factory(agent_info['agent_code'], agent_factory)
 
                 logger.info(f"  ✓ {agent_name.upper()} agent registered")
+                logger.info(f"    Display Name: {agent_info['agent_display_name']}")
+                logger.info(f"    Agent Code: {agent_info['agent_code']}")
+                logger.info(f"    Agent Class: {agent_info['agent_class'].__name__}")
 
             except Exception as e:
                 logger.error(f"Failed to register {agent_name}: {e}", exc_info=True)
@@ -288,26 +478,38 @@ class MultiAgentCoordinator:
 
 def show_help():
     """显示帮助信息"""
-    print("""
+    # 自动发现可用的 agents
+    available_agents = discover_all_agents()
+
+    agents_list = "\n".join([f"    {agent:15} - Auto-discovered from agents/{agent}/"
+                             for agent in available_agents])
+
+    if not agents_list:
+        agents_list = "    (No agents found in examples/agents/)"
+
+    print(f"""
 Multi-Agent Launcher - 在单个进程中运行多个 agents
 
 用法:
     python multi_agent_launcher.py [选项] [agent1] [agent2] ...
     python multi_agent_launcher.py --all
+    python multi_agent_launcher.py --list
 
-可用的 agents:
-    twins      - Twins Simulation Agent
-    ontology   - Ontology Simulation Agent
-    lite       - Lite Agent Example
+可用的 agents (自动发现):
+{agents_list}
 
 选项:
-    --all              - 启动所有 agents
+    --all              - 启动所有可用的 agents
+    --list             - 列出所有可用的 agents
     --debug            - 启用远程调试模式 (debugpy)
     --debug-port PORT  - 指定调试端口 (默认: 5678)
     --debug-nowait     - 不等待调试器连接，直接启动
     --help             - 显示帮助信息
 
 示例:
+    # 列出所有可用的 agents
+    python multi_agent_launcher.py --list
+
     # 启动单个 agent
     python multi_agent_launcher.py twins
 
@@ -333,11 +535,21 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
     • 可以设置断点、单步调试、查看变量等
 
 特性:
+    • 自动发现 examples/agents/ 下的所有 agent 实现
+    • 从 agent.properties 读取配置（agent_code, agent_name）
+    • 自动扫描并加载 BaseHydroAgent 子类
+    • 无需硬编码 agent 列表，每个目录一个 agent 实现
     • 所有 agents 在同一个进程中运行
     • 前台运行，可以在控制台看到日志
     • 所有日志保存到 examples/logs/agent.log
     • 日志内容中包含 agent 标识，可以区分不同的 agent
     • 使用 Ctrl+C 优雅停止所有 agents
+
+添加新 Agent:
+    1. 在 examples/agents/ 下创建新目录（如 myagent/）
+    2. 创建 agent.properties 文件，包含 agent_code 和 agent_name
+    3. 创建 Python 文件，实现 BaseHydroAgent 的子类
+    4. 运行 python multi_agent_launcher.py myagent
 """)
 
 
@@ -348,6 +560,42 @@ def main():
     # 解析参数
     if len(sys.argv) < 2 or '--help' in sys.argv or '-h' in sys.argv:
         show_help()
+        sys.exit(0)
+
+    # 处理 --list 参数
+    if '--list' in sys.argv:
+        print("\n" + "=" * 70)
+        print("Available Agents (auto-discovered)")
+        print("=" * 70)
+        available_agents = discover_all_agents()
+
+        if not available_agents:
+            print("No agents found in examples/agents/")
+            print("\nTo add a new agent:")
+            print("  1. Create a directory in examples/agents/")
+            print("  2. Add agent.properties with agent_code and agent_name")
+            print("  3. Implement a BaseHydroAgent subclass")
+        else:
+            for agent_name in available_agents:
+                agent_dir = os.path.join(EXAMPLES_DIR, 'agents', agent_name)
+                props_file = os.path.join(agent_dir, 'agent.properties')
+
+                try:
+                    properties = parse_properties(props_file)
+                    agent_code = properties.get('agent_code', 'N/A')
+                    agent_display_name = properties.get('agent_name', 'N/A')
+
+                    print(f"\n  {agent_name}")
+                    print(f"    Display Name: {agent_display_name}")
+                    print(f"    Agent Code:   {agent_code}")
+                    print(f"    Directory:    agents/{agent_name}/")
+                except Exception as e:
+                    print(f"\n  {agent_name}")
+                    print(f"    Error: {e}")
+
+        print("\n" + "=" * 70)
+        print(f"Total: {len(available_agents)} agent(s)")
+        print("=" * 70 + "\n")
         sys.exit(0)
 
     # 解析调试参数
@@ -367,7 +615,13 @@ def main():
 
     # 确定要启动的 agents
     if '--all' in sys.argv:
-        agent_names = ['twins', 'ontology']
+        # 自动发现所有可用的 agents
+        agent_names = discover_all_agents()
+        if not agent_names:
+            logger.error("No agents found in examples/agents/")
+            logger.error("Please add agent implementations first.")
+            sys.exit(1)
+        logger.info(f"Auto-discovered {len(agent_names)} agent(s): {', '.join(agent_names)}")
     else:
         agent_names = [
             arg for arg in sys.argv[1:]
@@ -389,7 +643,7 @@ def main():
     coordinator = MultiAgentCoordinator()
 
     # 设置信号处理
-    def signal_handler(signum, frame):
+    def signal_handler(_signum, _frame):
         logger.info("")
         logger.info("Received signal, stopping...")
         coordinator.stop_all()

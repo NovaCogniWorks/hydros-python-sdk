@@ -24,11 +24,24 @@ from hydros_agent_sdk import (
     HydroAgentFactory,
     MultiAgentCallback,
     load_env_config,
+    ErrorCodes,
+    handle_agent_errors,
+    safe_execute,
+    AgentErrorContext,
 )
 from hydros_agent_sdk.agents import OntologySimulationAgent
+from hydros_agent_sdk.protocol.commands import (
+    SimTaskInitRequest,
+    SimTaskInitResponse,
+    TickCmdRequest,
+    SimTaskTerminateRequest,
+    SimTaskTerminateResponse,
+)
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
+    CommandStatus,
 )
+from hydros_agent_sdk.utils import HydroObjectUtilsV2
 
 # Import example ontology rule engine implementation
 from ontology_rule_engine import OntologyRuleEngine
@@ -105,34 +118,63 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
     def _initialize_ontology_model(self):
         """
-        Initialize ontology model.
+        Initialize ontology model with error handling.
 
         This method initializes the ontology rule engine with the loaded topology.
         """
         logger.info("Initializing ontology model...")
 
-        # Create ontology rule engine
-        self._rule_engine = OntologyRuleEngine()
+        # Create ontology rule engine with error context
+        with AgentErrorContext(
+            ErrorCodes.MODEL_INITIALIZATION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
+            self._rule_engine = OntologyRuleEngine()
+
+        if ctx.has_error:
+            logger.error(f"Failed to create rule engine: {ctx.error_message}")
+            raise RuntimeError(f"Rule engine creation failed: {ctx.error_message}")
 
         # Load ontology from topology
         if self._topology:
-            self._rule_engine.load_ontology(self._topology)
+            with AgentErrorContext(
+                ErrorCodes.MODEL_INITIALIZATION_FAILURE,
+                agent_name=self.agent_code
+            ) as ctx:
+                self._rule_engine.load_ontology(self._topology)
+
+            if ctx.has_error:
+                logger.error(f"Failed to load ontology: {ctx.error_message}")
+                raise RuntimeError(f"Ontology load failed: {ctx.error_message}")
+
             logger.info("Ontology model initialized with topology")
         else:
             logger.warning("No topology available for ontology model")
 
-        # Load ontology parameters from configuration
-        ontology_params = {
-            'reasoning_mode': self.properties.get_property('reasoning_mode', 'forward_chaining'),
-            'rule_file': self.properties.get_property('rule_file', None),
-            'inference_depth': self.properties.get_property('inference_depth', 3),
-        }
+        # Load ontology parameters from configuration with error handling
+        with AgentErrorContext(
+            ErrorCodes.CONFIGURATION_LOAD_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
+            ontology_params = {
+                'reasoning_mode': self.properties.get_property('reasoning_mode', 'forward_chaining'),
+                'rule_file': self.properties.get_property('rule_file', None),
+                'inference_depth': self.properties.get_property('inference_depth', 3),
+            }
+
+        if ctx.has_error:
+            logger.warning(f"Failed to load parameters, using defaults: {ctx.error_message}")
+            ontology_params = {
+                'reasoning_mode': 'forward_chaining',
+                'rule_file': None,
+                'inference_depth': 3,
+            }
 
         logger.info(f"Ontology parameters: {ontology_params}")
 
     def _execute_ontology_simulation(self, step: int) -> List[Dict[str, Any]]:
         """
-        Execute ontology-based simulation step.
+        Execute ontology-based simulation step with comprehensive error handling.
 
         This method:
         1. Collects boundary conditions from cache
@@ -151,27 +193,47 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
             logger.error("Ontology rule engine not initialized")
             return []
 
-        # Collect boundary conditions from time series cache
-        boundary_conditions = self._collect_boundary_conditions(step)
+        # Collect boundary conditions with error handling
+        with AgentErrorContext(
+            ErrorCodes.BOUNDARY_CONDITION_ERROR,
+            agent_name=self.agent_code
+        ) as ctx:
+            boundary_conditions = self._collect_boundary_conditions(step)
+
+        if ctx.has_error:
+            logger.error(f"Failed to collect boundary conditions: {ctx.error_message}")
+            # Use empty boundary conditions as fallback
+            boundary_conditions = {}
 
         logger.debug(f"Boundary conditions: {len(boundary_conditions)} objects")
 
-        # Apply ontology rules
-        try:
+        # Apply ontology rules with error handling
+        with AgentErrorContext(
+            ErrorCodes.SIMULATION_EXECUTION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
             results = self._rule_engine.apply_rules(step, boundary_conditions)
 
-            logger.info(f"Ontology reasoning completed for step {step}")
+        if ctx.has_error:
+            logger.error(f"Ontology reasoning failed: {ctx.error_message}")
+            return []
 
-            # Convert results to metrics list
+        logger.info(f"Ontology reasoning completed for step {step}")
+
+        # Convert results to metrics with error handling
+        with AgentErrorContext(
+            ErrorCodes.METRICS_GENERATION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
             metrics_list = self._convert_results_to_metrics(results)
 
-            logger.info(f"Generated {len(metrics_list)} metrics for step {step}")
-
-            return metrics_list
-
-        except Exception as e:
-            logger.error(f"Error in ontology reasoning: {e}", exc_info=True)
+        if ctx.has_error:
+            logger.error(f"Failed to convert results: {ctx.error_message}")
             return []
+
+        logger.info(f"Generated {len(metrics_list)} metrics for step {step}")
+
+        return metrics_list
 
     def _collect_boundary_conditions(self, step: int) -> Dict[int, Dict[str, float]]:
         """

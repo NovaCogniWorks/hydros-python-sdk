@@ -24,12 +24,25 @@ from hydros_agent_sdk import (
     HydroAgentFactory,
     MultiAgentCallback,
     load_env_config,
+    ErrorCodes,
+    handle_agent_errors,
+    safe_execute,
+    AgentErrorContext,
 )
 from hydros_agent_sdk.agents import TwinsSimulationAgent
+from hydros_agent_sdk.protocol.commands import (
+    SimTaskInitRequest,
+    SimTaskInitResponse,
+    TickCmdRequest,
+    SimTaskTerminateRequest,
+    SimTaskTerminateResponse,
+)
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     ObjectTimeSeries,
+    CommandStatus,
 )
+from hydros_agent_sdk.utils import HydroObjectUtilsV2
 
 # Import example hydraulic solver implementation
 from hydraulic_solver import HydraulicSolver
@@ -106,34 +119,63 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def _initialize_twins_model(self):
         """
-        Initialize digital twins model.
+        Initialize digital twins model with error handling.
 
         This method initializes the hydraulic solver with the loaded topology.
         """
         logger.info("Initializing digital twins model...")
 
-        # Create hydraulic solver
-        self._hydraulic_solver = HydraulicSolver()
+        # Create hydraulic solver with error context
+        with AgentErrorContext(
+            ErrorCodes.MODEL_INITIALIZATION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
+            self._hydraulic_solver = HydraulicSolver()
+
+        if ctx.has_error:
+            logger.error(f"Failed to create solver: {ctx.error_message}")
+            raise RuntimeError(f"Solver creation failed: {ctx.error_message}")
 
         # Initialize solver with topology
         if self._topology:
-            self._hydraulic_solver.initialize(self._topology)
+            with AgentErrorContext(
+                ErrorCodes.MODEL_INITIALIZATION_FAILURE,
+                agent_name=self.agent_code
+            ) as ctx:
+                self._hydraulic_solver.initialize(self._topology)
+
+            if ctx.has_error:
+                logger.error(f"Failed to initialize solver: {ctx.error_message}")
+                raise RuntimeError(f"Solver initialization failed: {ctx.error_message}")
+
             logger.info("Hydraulic solver initialized with topology")
         else:
             logger.warning("No topology available for hydraulic solver")
 
-        # Load solver parameters from configuration
-        solver_params = {
-            'time_step': self.properties.get_property('time_step', 60),  # seconds
-            'convergence_tolerance': self.properties.get_property('convergence_tolerance', 1e-6),
-            'max_iterations': self.properties.get_property('max_iterations', 100),
-        }
+        # Load solver parameters from configuration with error handling
+        with AgentErrorContext(
+            ErrorCodes.CONFIGURATION_LOAD_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
+            solver_params = {
+                'time_step': self.properties.get_property('time_step', 60),  # seconds
+                'convergence_tolerance': self.properties.get_property('convergence_tolerance', 1e-6),
+                'max_iterations': self.properties.get_property('max_iterations', 100),
+            }
+
+        if ctx.has_error:
+            logger.warning(f"Failed to load parameters, using defaults: {ctx.error_message}")
+            solver_params = {
+                'time_step': 60,
+                'convergence_tolerance': 1e-6,
+                'max_iterations': 100,
+            }
 
         logger.info(f"Hydraulic solver parameters: {solver_params}")
 
     def _execute_twins_simulation(self, step: int) -> List[Dict[str, Any]]:
         """
-        Execute digital twins simulation step.
+        Execute digital twins simulation step with comprehensive error handling.
 
         This method:
         1. Collects boundary conditions from cache
@@ -152,27 +194,47 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             logger.error("Hydraulic solver not initialized")
             return []
 
-        # Collect boundary conditions from time series cache
-        boundary_conditions = self._collect_boundary_conditions(step)
+        # Collect boundary conditions with error handling
+        with AgentErrorContext(
+            ErrorCodes.BOUNDARY_CONDITION_ERROR,
+            agent_name=self.agent_code
+        ) as ctx:
+            boundary_conditions = self._collect_boundary_conditions(step)
+
+        if ctx.has_error:
+            logger.error(f"Failed to collect boundary conditions: {ctx.error_message}")
+            # Use empty boundary conditions as fallback
+            boundary_conditions = {}
 
         logger.debug(f"Boundary conditions: {len(boundary_conditions)} objects")
 
-        # Execute hydraulic solver
-        try:
+        # Execute hydraulic solver with error handling
+        with AgentErrorContext(
+            ErrorCodes.SIMULATION_EXECUTION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
             results = self._hydraulic_solver.solve_step(step, boundary_conditions)
 
-            logger.info(f"Hydraulic solver completed for step {step}")
+        if ctx.has_error:
+            logger.error(f"Hydraulic solver failed: {ctx.error_message}")
+            return []
 
-            # Convert results to metrics list
+        logger.info(f"Hydraulic solver completed for step {step}")
+
+        # Convert results to metrics with error handling
+        with AgentErrorContext(
+            ErrorCodes.METRICS_GENERATION_FAILURE,
+            agent_name=self.agent_code
+        ) as ctx:
             metrics_list = self._convert_results_to_metrics(results)
 
-            logger.info(f"Generated {len(metrics_list)} metrics for step {step}")
-
-            return metrics_list
-
-        except Exception as e:
-            logger.error(f"Error in hydraulic solver: {e}", exc_info=True)
+        if ctx.has_error:
+            logger.error(f"Failed to convert results: {ctx.error_message}")
             return []
+
+        logger.info(f"Generated {len(metrics_list)} metrics for step {step}")
+
+        return metrics_list
 
     def _collect_boundary_conditions(self, step: int) -> Dict[int, Dict[str, float]]:
         """
@@ -252,7 +314,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates.
+        Handle boundary condition updates with error handling.
 
         This method is called when external boundary conditions are updated
         (e.g., from field measurements, weather forecasts, etc.).
@@ -262,21 +324,29 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         logger.info(f"Updating digital twins with {len(time_series_list)} boundary conditions")
 
-        # Log boundary condition updates
+        # Log boundary condition updates with error handling
         for time_series in time_series_list:
-            logger.info(
-                f"Boundary condition update: "
-                f"object={time_series.object_name}, "
-                f"metrics={time_series.metrics_code}, "
-                f"values={len(time_series.time_series)}"
-            )
+            try:
+                logger.info(
+                    f"Boundary condition update: "
+                    f"object={time_series.object_name}, "
+                    f"metrics={time_series.metrics_code}, "
+                    f"values={len(time_series.time_series)}"
+                )
 
-            # Update simulation state if needed
-            if self._simulation_state and time_series.object_id:
-                state_key = f"{time_series.object_id}_{time_series.metrics_code}"
-                self._simulation_state[state_key] = time_series
+                # Update simulation state if needed
+                if self._simulation_state and time_series.object_id:
+                    state_key = f"{time_series.object_id}_{time_series.metrics_code}"
+                    self._simulation_state[state_key] = time_series
 
-                logger.debug(f"Updated simulation state: {state_key}")
+                    logger.debug(f"Updated simulation state: {state_key}")
+
+            except Exception as e:
+                logger.error(
+                    f"Error updating boundary condition for {time_series.object_name}: {e}",
+                    exc_info=True
+                )
+                # Continue with other updates
 
 
 def main():
