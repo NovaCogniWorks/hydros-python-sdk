@@ -315,6 +315,7 @@ class MultiAgentCoordinator:
 
         # 3. 提取必要的配置
         agent_code = properties.get('agent_code')
+        agent_type = properties.get('agent_type', '')
         agent_display_name = properties.get('agent_name', agent_name)
 
         if not agent_code:
@@ -322,6 +323,7 @@ class MultiAgentCoordinator:
 
         logger.debug(f"Loaded properties for {agent_name}:")
         logger.debug(f"  agent_code: {agent_code}")
+        logger.debug(f"  agent_type: {agent_type}")
         logger.debug(f"  agent_name: {agent_display_name}")
 
         # 4. 查找 BaseHydroAgent 子类
@@ -341,6 +343,7 @@ class MultiAgentCoordinator:
             'agent_class': agent_class,
             'script_dir': agent_dir,
             'agent_code': agent_code,
+            'agent_type': agent_type,
             'agent_display_name': agent_display_name
         }
 
@@ -360,6 +363,7 @@ class MultiAgentCoordinator:
 
         # 2. 加载环境配置（所有 agent 共享）
         env_config = None
+        registered_agents = []  # 存储已注册的 agent 信息
         for agent_name in agent_names:
             try:
                 logger.info(f"Registering {agent_name.upper()} agent...")
@@ -391,6 +395,16 @@ class MultiAgentCoordinator:
                 logger.info(f"    Display Name: {agent_info['agent_display_name']}")
                 logger.info(f"    Agent Code: {agent_info['agent_code']}")
                 logger.info(f"    Agent Class: {agent_info['agent_class'].__name__}")
+
+                # 保存 agent 信息用于后续显示
+                registered_agents.append({
+                    'name': agent_name,
+                    'agent_code': agent_info['agent_code'],
+                    'agent_type': agent_info.get('agent_type', agent_info['agent_code'].replace('_demo001', '')),
+                    'agent_display_name': agent_info['agent_display_name'],
+                    'agent_class': agent_info['agent_class'].__name__,
+                    'directory': os.path.basename(agent_info['script_dir'])
+                })
 
             except Exception as e:
                 logger.error(f"Failed to register {agent_name}: {e}", exc_info=True)
@@ -431,8 +445,13 @@ class MultiAgentCoordinator:
         logger.info(f"  MQTT Topic: {topic}")
         logger.info("")
         logger.info("Registered agent types:")
-        for agent_name in agent_names:
-            logger.info(f"  • {agent_name.upper()}")
+        for agent in registered_agents:
+            logger.info(f"  • {agent['name'].upper()}")
+            logger.info(f"      Agent Code:   {agent['agent_code']}")
+            logger.info(f"      Agent Type:   {agent['agent_type']}")
+            logger.info(f"      Display Name: {agent['agent_display_name']}")
+            logger.info(f"      Class Name:   {agent['agent_class']}")
+            logger.info(f"      Directory:    agents/{agent['directory']}/")
         logger.info("")
         logger.info("Press Ctrl+C to stop all agents...")
         logger.info("")
