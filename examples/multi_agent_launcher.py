@@ -39,6 +39,9 @@ from hydros_agent_sdk.base_agent import BaseHydroAgent
 DEBUG_MODE = False
 DEBUG_PORT = 5678
 
+# 日志模式: 默认简化格式，--full-log 切换为生产完整格式
+FULL_LOG_MODE = '--full-log' in sys.argv
+
 # 配置统一日志
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
@@ -59,7 +62,8 @@ setup_logging(
     hydros_cluster_id=hydros_cluster_id,
     hydros_node_id=hydros_node_id,
     console=True,
-    log_file=os.path.join(LOG_DIR, "agent.log")
+    log_file=os.path.join(LOG_DIR, "agent.log"),
+    simple=not FULL_LOG_MODE
 )
 
 logger = logging.getLogger(__name__)
@@ -421,12 +425,16 @@ class MultiAgentCoordinator:
         broker_url = env_config['mqtt_broker_url']
         broker_port = int(env_config['mqtt_broker_port'])
         topic = env_config['mqtt_topic']
+        mqtt_username = env_config.get('mqtt_username')
+        mqtt_password = env_config.get('mqtt_password')
 
         self.client = SimCoordinationClient(
             broker_url=broker_url,
             broker_port=broker_port,
             topic=topic,
-            sim_coordination_callback=self.callback
+            sim_coordination_callback=self.callback,
+            mqtt_username=mqtt_username,
+            mqtt_password=mqtt_password
         )
 
         # 设置 client 引用
@@ -523,6 +531,7 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
     --debug            - 启用远程调试模式 (debugpy)
     --debug-port PORT  - 指定调试端口 (默认: 5678)
     --debug-nowait     - 不等待调试器连接，直接启动
+    --full-log         - 使用完整日志格式（生产环境），默认使用简化格式
     --help             - 显示帮助信息
 
 示例:

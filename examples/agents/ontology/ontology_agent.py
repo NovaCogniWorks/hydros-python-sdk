@@ -326,6 +326,8 @@ def main():
     BROKER_URL = env_config['mqtt_broker_url']
     BROKER_PORT = int(env_config['mqtt_broker_port'])
     TOPIC = env_config['mqtt_topic']
+    MQTT_USERNAME = env_config.get('mqtt_username')
+    MQTT_PASSWORD = env_config.get('mqtt_password')
 
     # Agent configuration file
     CONFIG_FILE = os.path.join(script_dir, "agent.properties")
@@ -346,7 +348,9 @@ def main():
         broker_url=BROKER_URL,
         broker_port=BROKER_PORT,
         topic=TOPIC,
-        sim_coordination_callback=callback
+        sim_coordination_callback=callback,
+        mqtt_username=MQTT_USERNAME,
+        mqtt_password=MQTT_PASSWORD
     )
 
     # Set client reference

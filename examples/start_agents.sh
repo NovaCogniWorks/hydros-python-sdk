@@ -31,6 +31,7 @@ show_help() {
     echo "  -d, --debug         启用远程调试模式 (debugpy)"
     echo "  --debug-port PORT   指定调试端口 (默认: 5678)"
     echo "  --debug-nowait      不等待调试器连接，直接启动"
+    echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
     echo "  twins               Twins Simulation Agent"
@@ -172,6 +173,10 @@ main() {
                 ;;
             --debug-nowait)
                 PYTHON_ARGS+=("--debug-nowait")
+                shift
+                ;;
+            --full-log)
+                PYTHON_ARGS+=("--full-log")
                 shift
                 ;;
             *)

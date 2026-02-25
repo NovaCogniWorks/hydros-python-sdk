@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import Field
+from pydantic import Field, ConfigDict
 from .base import HydroBaseModel
 
 class AgentBizStatus(str, Enum):
@@ -68,7 +68,7 @@ class HydroAgent(HydroBaseModel):
     agent_code: str
     agent_type: str
     agent_name: Optional[str] = None
-    agent_configuration_url: str
+    agent_configuration_url: Optional[str] = None
 
 class HydroAgentInstance(HydroAgent):
     """
@@ -84,10 +84,15 @@ class HydroAgentInstance(HydroAgent):
 
 class TopHydroObject(HydroBaseModel):
     """
-    Placeholder for top-level hydro objects managed by the simulation.
+    Represents a top-level hydro object managed by the simulation.
+    Uses flexible schema to accommodate varying object types from the coordinator
+    (e.g., gate stations, channels, etc.) with different nested properties.
     """
-    id: str
-    type: str
+    model_config = ConfigDict(extra='allow')
+
+    object_id: Optional[int] = None
+    object_name: Optional[str] = None
+    object_type: Optional[str] = None
     properties: Dict[str, Any] = Field(default_factory=dict)
 
 # --- Time Series Models ---

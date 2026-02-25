@@ -98,7 +98,9 @@ class SimCoordinationClient:
         state_manager: Optional[AgentStateManager] = None,
         qos: int = 1,
         max_retry_count: int = 5,
-        base_retry_delay_ms: int = 1000
+        base_retry_delay_ms: int = 1000,
+        mqtt_username: Optional[str] = None,
+        mqtt_password: Optional[str] = None
     ):
         """
         Initialize the coordination client.
@@ -113,6 +115,8 @@ class SimCoordinationClient:
             qos: MQTT QoS level (default: 1)
             max_retry_count: Maximum retry count for sending messages (default: 5)
             base_retry_delay_ms: Base retry delay in milliseconds (default: 1000)
+            mqtt_username: Optional MQTT username for authentication (None for no auth)
+            mqtt_password: Optional MQTT password for authentication (None for no auth)
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
@@ -138,6 +142,18 @@ class SimCoordinationClient:
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.on_disconnect = self._on_disconnect
+
+        # Configure automatic reconnect with exponential backoff
+        # min_delay=1s, max_delay=120s (doubles each attempt: 1, 2, 4, 8, ... 120)
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
+
+        # Set MQTT authentication if credentials provided
+        if mqtt_username:
+            self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
+            logger.info(f"MQTT authentication configured for user: {mqtt_username}")
+
+        # Track intentional disconnect to distinguish from unexpected ones
+        self._intentional_disconnect = False
 
         # Outgoing message queue
         self.out_message_queue: Queue[SimCommand] = Queue()
@@ -217,6 +233,7 @@ class SimCoordinationClient:
             self.queue_thread.join(timeout=5)
 
         # Disconnect MQTT
+        self._intentional_disconnect = True
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
 
@@ -249,20 +266,40 @@ class SimCoordinationClient:
     # ========================================================================
 
     def _on_connect(self, client, userdata, flags, rc):
-        """MQTT connection callback."""
+        """MQTT connection callback. Also handles auto-reconnect re-subscription."""
         if rc == 0:
-            logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            # Subscribe to topic
+            was_connected = self.connected.is_set()
+            if was_connected:
+                logger.info(f"Reconnected to MQTT broker: {self.broker_url}:{self.broker_port}")
+            else:
+                logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
+            # (Re-)subscribe to topic on every connect/reconnect
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             logger.info(f"Subscribed to topic: {self.topic}")
             self.connected.set()
         else:
-            logger.error(f"Failed to connect to MQTT broker, return code: {rc}")
+            rc_reasons = {
+                1: "incorrect protocol version",
+                2: "invalid client identifier",
+                3: "server unavailable",
+                4: "bad username or password",
+                5: "not authorized",
+            }
+            reason = rc_reasons.get(rc, "unknown")
+            logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
     def _on_disconnect(self, client, userdata, rc):
         """MQTT disconnection callback."""
-        logger.info(f"Disconnected from MQTT broker, return code: {rc}")
         self.connected.clear()
+        if rc == 0 or self._intentional_disconnect:
+            logger.info("Disconnected from MQTT broker (clean)")
+        else:
+            rc_reasons = {
+                1: "unexpected disconnect",
+                7: "connection lost (keepalive timeout or broker idle disconnect)",
+            }
+            reason = rc_reasons.get(rc, f"unexpected, code={rc}")
+            logger.warning(f"Disconnected from MQTT broker: {reason}. Auto-reconnecting...")
 
     def _on_message(self, client, userdata, msg):
         """MQTT message received callback."""

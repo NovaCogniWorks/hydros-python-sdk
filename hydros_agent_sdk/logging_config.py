@@ -149,9 +149,33 @@ def get_node_id() -> Optional[str]:
     return get_hydros_node_id()
 
 
+class HydrosSimpleFormatter(logging.Formatter):
+    """
+    Simplified formatter for local development.
+
+    Format: TIME|LEVEL|SOURCE|MESSAGE
+
+    Example:
+        2026-01-28 23:29:48|INFO |coordination_client.py:123|Processing command
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
+        level = f"{record.levelname:<5}"
+        source_location = f"{record.filename}:{record.lineno}"
+        message = record.getMessage()
+
+        if record.exc_info:
+            if not message.endswith('\n'):
+                message += '\n'
+            message += self.formatException(record.exc_info)
+
+        return f"{timestamp}|{level}|{source_location}|{message}"
+
+
 class HydrosFormatter(logging.Formatter):
     """
-    Custom formatter with Python-style source location for VSCode navigation.
+    Full formatter for production deployment.
 
     Format varies by context:
     1. With biz_scene_instance_id (agent business logic):
@@ -242,6 +266,7 @@ def setup_logging(
     hydros_node_id: str = "LOCAL",
     log_file: Optional[str] = None,
     console: bool = True,
+    simple: bool = True,
     # Deprecated parameters for backward compatibility
     node_id: Optional[str] = None
 ):
@@ -254,29 +279,22 @@ def setup_logging(
         hydros_node_id: Default node ID for logs (default: "LOCAL")
         log_file: Optional log file path
         console: Whether to log to console (default: True)
+        simple: Use simplified log format for local dev (default: True).
+                Set to False for full production format.
         node_id: Deprecated, use hydros_node_id instead
-
-    Example:
-        setup_logging(
-            level=logging.INFO,
-            hydros_cluster_id="default_cluster",
-            hydros_node_id="default_central"
-        )
-
-        # Set context and log
-        set_biz_scene_instance_id("TASK202601282328VG3IE7H3CA0F")
-        set_agent_id("AGENT_001")
-        logger.info("Processing command")
     """
     # Backward compatibility: use node_id if hydros_node_id not explicitly set
     if node_id is not None and hydros_node_id == "LOCAL":
         hydros_node_id = node_id
 
-    # Create formatter
-    formatter = HydrosFormatter(
-        default_hydros_cluster_id=hydros_cluster_id,
-        default_hydros_node_id=hydros_node_id
-    )
+    # Create formatter based on mode
+    if simple:
+        formatter = HydrosSimpleFormatter()
+    else:
+        formatter = HydrosFormatter(
+            default_hydros_cluster_id=hydros_cluster_id,
+            default_hydros_node_id=hydros_node_id
+        )
 
     # Get root logger
     root_logger = logging.getLogger()

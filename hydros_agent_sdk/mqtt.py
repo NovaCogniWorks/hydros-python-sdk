@@ -102,14 +102,27 @@ class HydrosMqttClient:
         self.client.on_message = self._on_message
         self._connected = False
 
-    def connect(self, broker_url: str, port: int = 1883, keepalive: int = 60):
+    def connect(self, broker_url: str, port: int = 1883, keepalive: int = 60,
+                username: Optional[str] = None, password: Optional[str] = None):
         """
         Connect to the MQTT broker.
+
+        Args:
+            broker_url: MQTT broker URL (e.g., "tcp://192.168.1.24")
+            port: MQTT broker port (default: 1883)
+            keepalive: Keepalive interval in seconds (default: 60)
+            username: Optional MQTT username for authentication (None for no auth)
+            password: Optional MQTT password for authentication (None for no auth)
         """
         logger.info(f"Connecting to MQTT broker at {broker_url}:{port}")
         # Parse broker_url to handle tcp:// prefix if present
         host = broker_url.replace("tcp://", "")
-        
+
+        # Set authentication if credentials provided
+        if username:
+            self.client.username_pw_set(username, password)
+            logger.info(f"MQTT authentication configured for user: {username}")
+
         self.client.connect(host, port, keepalive)
         self.client.loop_start()
 
