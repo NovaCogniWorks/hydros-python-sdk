@@ -101,6 +101,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         if self._client is None:
             raise RuntimeError("Coordination client not set")
 
+        print(request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
         logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
 
