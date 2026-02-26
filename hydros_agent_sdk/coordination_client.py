@@ -509,6 +509,7 @@ class SimCoordinationClient:
                 payload = command.model_dump_json(by_alias=True)
 
                 # Publish to MQTT
+                print(self.topic)
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
 

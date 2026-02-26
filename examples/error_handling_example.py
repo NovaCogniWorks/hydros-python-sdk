@@ -32,6 +32,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
 # Setup logging
 setup_logging(
@@ -165,7 +166,19 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             return []
 
         # Convert results to metrics
-        metrics_list = self._convert_results_to_metrics(results)
+        metrics_list = [
+            create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=object_id,
+                object_name=f"Object_{object_id}",
+                step_index=step,
+                metrics_code=metrics_code,
+                value=value
+            )
+            for object_id, values in results.items()
+            for metrics_code, value in values.items()
+        ]
 
         return metrics_list
 

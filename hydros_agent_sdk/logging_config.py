@@ -23,6 +23,7 @@ Format breakdown:
 """
 
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from contextvars import ContextVar
 from typing import Optional
 from datetime import datetime
@@ -267,6 +268,7 @@ def setup_logging(
     log_file: Optional[str] = None,
     console: bool = True,
     simple: bool = True,
+    use_rolling: bool = False,
     # Deprecated parameters for backward compatibility
     node_id: Optional[str] = None
 ):
@@ -281,6 +283,7 @@ def setup_logging(
         console: Whether to log to console (default: True)
         simple: Use simplified log format for local dev (default: True).
                 Set to False for full production format.
+        use_rolling: Whether to use daily rolling for log files (default: False).
         node_id: Deprecated, use hydros_node_id instead
     """
     # Backward compatibility: use node_id if hydros_node_id not explicitly set
@@ -311,6 +314,20 @@ def setup_logging(
 
     # Add file handler if specified
     if log_file:
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        if use_rolling:
+            # Use TimedRotatingFileHandler for daily rotation
+            file_handler = TimedRotatingFileHandler(
+                log_file,
+                when='midnight',
+                interval=1,
+                backupCount=30,  # Keep 30 days of logs
+                encoding='utf-8',
+                utc=False
+            )
+            # Set the suffix for rotated files to include the date
+            file_handler.suffix = "%Y-%m-%d"
+        else:
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)

@@ -6,9 +6,10 @@ with ontology-based simulation capabilities.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from .tickable_agent import TickableAgent
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -210,36 +211,28 @@ class OntologySimulationAgent(TickableAgent):
         # TODO: Load ontology rules, constraints, etc.
         pass
 
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Dict[str, Any]]]:
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         Execute ontology-based simulation step.
-
-        This method:
-        1. Applies ontology rules to current state
-        2. Computes water network state for current step
-        3. Returns metrics data to send via MQTT
 
         Args:
             request: Tick command request
 
         Returns:
-            List of metrics dictionaries to send via MQTT
+            List of MqttMetrics objects to send via MQTT
         """
         logger.info(f"Executing ontology simulation step {request.step}")
 
         try:
-            # Execute ontology-based simulation logic
             metrics_list = self._execute_ontology_simulation(request.step)
-
             logger.info(f"Ontology simulation step {request.step} completed")
-
             return metrics_list
 
         except Exception as e:
             logger.error(f"Error in ontology simulation step {request.step}: {e}", exc_info=True)
             return None
 
-    def _execute_ontology_simulation(self, step: int) -> List[Dict[str, Any]]:
+    def _execute_ontology_simulation(self, step: int) -> List[MqttMetrics]:
         """
         Execute ontology-based simulation logic.
 
@@ -250,7 +243,7 @@ class OntologySimulationAgent(TickableAgent):
             step: Current simulation step
 
         Returns:
-            List of metrics dictionaries
+            List of MqttMetrics objects
         """
         # Default implementation: return empty metrics
         # Subclasses should override this method

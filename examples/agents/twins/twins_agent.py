@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 import time
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
 # Add current directory to Python path for hydraulic_solver import
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +43,7 @@ from hydros_agent_sdk.protocol.models import (
     CommandStatus,
 )
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
 # Import example hydraulic solver implementation
 from hydraulic_solver import HydraulicSolver
@@ -69,7 +70,8 @@ if __name__ == "__main__":
         hydros_cluster_id=hydros_cluster_id,
         hydros_node_id=hydros_node_id,
         console=True,
-        log_file=os.path.join(LOG_DIR, "twins_agent.log")
+        log_file=os.path.join(LOG_DIR, "hydros.log"),
+        use_rolling=True
     )
 
 logger = logging.getLogger(__name__)
@@ -173,20 +175,15 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         logger.info(f"Hydraulic solver parameters: {solver_params}")
 
-    def _execute_twins_simulation(self, step: int) -> List[Dict[str, Any]]:
+    def _execute_twins_simulation(self, step: int) -> List[MqttMetrics]:
         """
         Execute digital twins simulation step with comprehensive error handling.
-
-        This method:
-        1. Collects boundary conditions from cache
-        2. Executes hydraulic solver
-        3. Returns computed metrics
 
         Args:
             step: Current simulation step
 
         Returns:
-            List of metrics dictionaries
+            List of MqttMetrics objects
         """
         logger.info(f"Executing digital twins simulation for step {step}")
 
@@ -279,7 +276,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _convert_results_to_metrics(
         self,
         results: Dict[int, Dict[str, float]]
-    ) -> List[Dict[str, Any]]:
+    ) -> List[MqttMetrics]:
         """
         Convert solver results to metrics list.
 
@@ -287,28 +284,28 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             results: Solver results {object_id: {metrics_code: value}}
 
         Returns:
-            List of metrics dictionaries
+            List of MqttMetrics objects
         """
         metrics_list = []
 
-        # Get object names from topology
         object_names = {}
         if self._topology:
             for top_obj in self._topology.top_objects:
                 for child in top_obj.children:
                     object_names[child.object_id] = child.object_name
 
-        # Convert results to metrics
         for object_id, values in results.items():
             object_name = object_names.get(object_id, f"Object_{object_id}")
-
             for metrics_code, value in values.items():
-                metrics_list.append({
-                    'object_id': object_id,
-                    'object_name': object_name,
-                    'metrics_code': metrics_code,
-                    'value': value
-                })
+                metrics_list.append(create_mock_metrics(
+                    source_id=self.agent_code,
+                    job_instance_id=self.biz_scene_instance_id,
+                    object_id=object_id,
+                    object_name=object_name,
+                    step_index=self._current_step,
+                    metrics_code=metrics_code,
+                    value=value
+                ))
 
         return metrics_list
 

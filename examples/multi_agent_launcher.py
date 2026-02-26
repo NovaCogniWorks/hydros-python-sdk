@@ -62,8 +62,9 @@ setup_logging(
     hydros_cluster_id=hydros_cluster_id,
     hydros_node_id=hydros_node_id,
     console=True,
-    log_file=os.path.join(LOG_DIR, "agent.log"),
-    simple=not FULL_LOG_MODE
+    log_file=os.path.join(LOG_DIR, "hydros.log"),
+    simple=not FULL_LOG_MODE,
+    use_rolling=True
 )
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,7 @@ class MultiAgentCoordinator:
         logger.info("Multi-Agent Launcher")
         logger.info("=" * 70)
         logger.info(f"Starting {len(agent_names)} agent types: {', '.join(agent_names)}")
-        logger.info(f"Log file: {os.path.join(LOG_DIR, 'agent.log')}")
+        logger.info(f"Log file: {os.path.join(LOG_DIR, 'hydros.log')}")
         logger.info("=" * 70)
         logger.info("")
 

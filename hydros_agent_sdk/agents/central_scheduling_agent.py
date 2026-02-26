@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
 from .tickable_agent import TickableAgent
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -210,21 +211,15 @@ class CentralSchedulingAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error processing field metrics: {e}", exc_info=True)
 
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Dict[str, Any]]]:
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         Execute central scheduling step.
-
-        This method:
-        1. Checks if optimization should run (based on horizon)
-        2. If yes, executes MPC optimization
-        3. Sends control commands to agents (future implementation)
-        4. Returns metrics data (optional)
 
         Args:
             request: Tick command request
 
         Returns:
-            List of metrics dictionaries to send via MQTT (optional)
+            List of MqttMetrics objects to send via MQTT (optional)
         """
         logger.info(f"Central scheduling step {request.step}")
 

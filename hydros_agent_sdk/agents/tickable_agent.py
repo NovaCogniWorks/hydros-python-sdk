@@ -7,9 +7,10 @@ with tick-driven simulation capabilities and time series data update handling.
 
 import logging
 from abc import abstractmethod
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -198,7 +199,7 @@ class TickableAgent(BaseHydroAgent):
             )
 
     @abstractmethod
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Dict[str, Any]]]:
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         Execute simulation step logic.
 
@@ -208,8 +209,7 @@ class TickableAgent(BaseHydroAgent):
             request: Tick command request
 
         Returns:
-            List of metrics dictionaries to send via MQTT, or None
-            Each metrics dict should contain: object_id, object_name, metrics_code, value
+            List of MqttMetrics objects to send via MQTT, or None
         """
         pass
 
@@ -342,36 +342,20 @@ class TickableAgent(BaseHydroAgent):
 
         return None
 
-    def send_metrics_batch(self, metrics_list: List[Dict[str, Any]]):
+    def send_metrics_batch(self, metrics_list: List[MqttMetrics]):
         """
         Send batch of metrics data via MQTT.
 
         Args:
-            metrics_list: List of metrics dictionaries
-                Each dict should contain: object_id, object_name, metrics_code, value
+            metrics_list: List of MqttMetrics objects to send
         """
-        from hydros_agent_sdk.utils import create_mock_metrics, send_metrics_batch
+        from hydros_agent_sdk.utils.mqtt_metrics import send_metrics_batch
 
-        # Convert to MqttMetrics objects
-        mqtt_metrics_list = []
-        for metrics_dict in metrics_list:
-            mqtt_metrics = create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
-                object_id=metrics_dict['object_id'],
-                object_name=metrics_dict['object_name'],
-                step_index=self._current_step,
-                metrics_code=metrics_dict['metrics_code'],
-                value=metrics_dict['value']
-            )
-            mqtt_metrics_list.append(mqtt_metrics)
-
-        # Send via MQTT
         metrics_topic = f"{self.sim_coordination_client.topic}/metrics"
         send_metrics_batch(
             mqtt_client=self.sim_coordination_client.mqtt_client,
             topic=metrics_topic,
-            metrics_list=mqtt_metrics_list,
+            metrics_list=metrics_list,
             qos=0
         )
 

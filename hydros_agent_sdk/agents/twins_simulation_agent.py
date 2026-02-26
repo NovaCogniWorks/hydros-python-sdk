@@ -6,9 +6,10 @@ with digital twins simulation capabilities.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from .tickable_agent import TickableAgent
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -216,37 +217,28 @@ class TwinsSimulationAgent(TickableAgent):
         # TODO: Initialize hydraulic solver, state estimator, etc.
         pass
 
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Dict[str, Any]]]:
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         Execute digital twins simulation step.
-
-        This method:
-        1. Updates simulation state with boundary conditions
-        2. Executes hydraulic calculations
-        3. Computes water network state for current step
-        4. Returns detailed metrics data to send via MQTT
 
         Args:
             request: Tick command request
 
         Returns:
-            List of metrics dictionaries to send via MQTT
+            List of MqttMetrics objects to send via MQTT
         """
         logger.info(f"Executing digital twins simulation step {request.step}")
 
         try:
-            # Execute digital twins simulation logic
             metrics_list = self._execute_twins_simulation(request.step)
-
             logger.info(f"Digital twins simulation step {request.step} completed")
-
             return metrics_list
 
         except Exception as e:
             logger.error(f"Error in digital twins simulation step {request.step}: {e}", exc_info=True)
             return None
 
-    def _execute_twins_simulation(self, step: int) -> List[Dict[str, Any]]:
+    def _execute_twins_simulation(self, step: int) -> List[MqttMetrics]:
         """
         Execute digital twins simulation logic.
 
@@ -257,25 +249,27 @@ class TwinsSimulationAgent(TickableAgent):
             step: Current simulation step
 
         Returns:
-            List of metrics dictionaries
+            List of MqttMetrics objects
         """
         # Default implementation: return mock metrics
         # Subclasses should override this method
         logger.warning("Using default digital twins simulation (mock data)")
 
-        # Example: Generate mock metrics for demonstration
         metrics_list = []
         if self._topology:
             for top_obj in self._topology.top_objects[:3]:  # First 3 objects
                 for child in top_obj.children[:2]:  # First 2 children
                     if child.metrics:
                         for metrics_code in child.metrics[:1]:  # First metric
-                            metrics_list.append({
-                                'object_id': child.object_id,
-                                'object_name': child.object_name,
-                                'metrics_code': metrics_code,
-                                'value': 0.5 + (step % 10) * 0.05  # Mock value
-                            })
+                            metrics_list.append(create_mock_metrics(
+                                source_id=self.agent_code,
+                                job_instance_id=self.biz_scene_instance_id,
+                                object_id=child.object_id,
+                                object_name=child.object_name,
+                                step_index=step,
+                                metrics_code=metrics_code,
+                                value=0.5 + (step % 10) * 0.05
+                            ))
 
         return metrics_list
 

@@ -306,7 +306,8 @@ import logging
 setup_logging(
     level=logging.DEBUG,  # Change to DEBUG
     console=True,
-    log_file="agent.log"
+    log_file="hydros.log",
+    use_rolling=True
 )
 ```
 

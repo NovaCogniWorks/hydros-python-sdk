@@ -57,7 +57,7 @@ show_help() {
     echo "特性:"
     echo "  • 所有 agents 在同一个进程中运行"
     echo "  • 前台运行，可以在控制台看到日志"
-    echo "  • 所有日志保存到 examples/logs/agent.log"
+    echo "  • 所有日志保存到 examples/logs/hydros.log"
     echo "  • 使用 Ctrl+C 优雅停止所有 agents"
     echo ""
 }
@@ -110,22 +110,22 @@ view_logs() {
     echo -e "${GREEN}日志文件:${NC}"
     echo ""
 
-    if [ -f "${SCRIPT_DIR}/logs/agent.log" ]; then
-        echo "  ${SCRIPT_DIR}/logs/agent.log"
+    if [ -f "${SCRIPT_DIR}/logs/hydros.log" ]; then
+        echo "  ${SCRIPT_DIR}/logs/hydros.log"
         echo ""
         echo "查看日志命令:"
-        echo "  tail -f ${SCRIPT_DIR}/logs/agent.log"
-        echo "  tail -100 ${SCRIPT_DIR}/logs/agent.log"
+        echo "  tail -f ${SCRIPT_DIR}/logs/hydros.log"
+        echo "  tail -100 ${SCRIPT_DIR}/logs/hydros.log"
         echo ""
         echo "过滤特定 agent 的日志:"
-        echo "  grep 'TWINS_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/agent.log"
-        echo "  grep 'ONTOLOGY_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/agent.log"
+        echo "  grep 'TWINS_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/hydros.log"
+        echo "  grep 'ONTOLOGY_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/hydros.log"
         echo ""
 
         # 显示最后几行日志
-        if [ -s "${SCRIPT_DIR}/logs/agent.log" ]; then
+        if [ -s "${SCRIPT_DIR}/logs/hydros.log" ]; then
             echo "最近的日志:"
-            tail -10 "${SCRIPT_DIR}/logs/agent.log" | sed 's/^/  /'
+            tail -10 "${SCRIPT_DIR}/logs/hydros.log" | sed 's/^/  /'
         fi
     else
         echo "  (日志文件不存在)"
