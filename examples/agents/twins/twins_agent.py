@@ -114,7 +114,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             **kwargs
         )
 
-        # Hydraulic solver
+        # Hydraulic solver is managed by job_instance_id via class methods
+        # Not storing instance variable, using HydraulicSolver.get_or_create() and HydraulicSolver.get()
         self._hydraulic_solver: Optional[HydraulicSolver] = None
 
         logger.info(f"MyTwinsSimulationAgent created: {agent_id}")
@@ -124,15 +125,17 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         Initialize digital twins model with error handling.
 
         This method initializes the hydraulic solver with the loaded topology.
+        使用 biz_scene_instance_id (即 job_instance_id) 来支持多任务并发仿真。
         """
         logger.info("Initializing digital twins model...")
 
-        # Create hydraulic solver with error context
+        # 使用 biz_scene_instance_id (即 job_instance_id) 获取或创建求解器
+        # 这样可以支持多个任务并发运行，每个任务有独立的求解器实例
         with AgentErrorContext(
             ErrorCodes.MODEL_INITIALIZATION_FAILURE,
             agent_name=self.agent_code
         ) as ctx:
-            self._hydraulic_solver = HydraulicSolver()
+            self._hydraulic_solver = HydraulicSolver.get_or_create(self.biz_scene_instance_id)
 
         if ctx.has_error:
             logger.error(f"Failed to create solver: {ctx.error_message}")
@@ -144,7 +147,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 ErrorCodes.MODEL_INITIALIZATION_FAILURE,
                 agent_name=self.agent_code
             ) as ctx:
-                self._hydraulic_solver.initialize(self._topology)
+                self._hydraulic_solver.initialize(self._topology, self.agent_configuration_url)
 
             if ctx.has_error:
                 logger.error(f"Failed to initialize solver: {ctx.error_message}")
@@ -344,6 +347,36 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     exc_info=True
                 )
                 # Continue with other updates
+
+    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
+        """
+        终止数字孪生仿真代理并清理求解器资源。
+
+        重写父类方法以添加 HydraulicSolver 的清理逻辑，使用 biz_scene_instance_id
+        来移除对应任务的求解器实例，支持多任务并发场景下的资源管理。
+
+        Args:
+            request: 任务终止请求
+
+        Returns:
+            任务终止响应
+        """
+        logger.info("="*70)
+        logger.info(f"TERMINATING DIGITAL TWINS SIMULATION AGENT: {self.biz_scene_instance_id}")
+        logger.info("="*70)
+
+        # 清理 HydraulicSolver 资源
+        if hasattr(self, '_hydraulic_solver') and self._hydraulic_solver is not None:
+            logger.info(f"Cleaning up hydraulic solver for job: {self.biz_scene_instance_id}")
+            try:
+                HydraulicSolver.remove(self.biz_scene_instance_id)
+                self._hydraulic_solver = None
+                logger.info("Hydraulic solver cleaned up successfully")
+            except Exception as e:
+                logger.error(f"Error cleaning up hydraulic solver: {e}", exc_info=True)
+
+        # 调用父类的终止方法以执行其他清理
+        return super().on_terminate(request)
 
 
 def main():
