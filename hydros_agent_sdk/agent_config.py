@@ -61,15 +61,10 @@ class OutputConfig(HydroBaseModel):
 
 class AgentProperties(HydroBaseModel):
     """Agent properties containing business logic configuration."""
-    biz_start_time: Optional[str] = None
-    step_resolution: Optional[int] = None
-    total_steps: Optional[int] = None
     driven_by_coordinator: Optional[bool] = None
     hydro_environment_type: Optional[str] = None
     hydros_objects_modeling_url: Optional[str] = None
-    idz_config_url: Optional[str] = None
-    time_series_config_url: Optional[str] = None
-    output_config: Optional[OutputConfig] = None
+
 
     # Allow additional properties not explicitly defined
     class Config:
@@ -112,34 +107,7 @@ class AgentConfiguration(HydroBaseModel):
         """
         return self.properties.hydros_objects_modeling_url if self.properties else None
 
-    def get_idz_config_url(self) -> Optional[str]:
-        """
-        Get the IDZ configuration URL from properties.
 
-        Returns:
-            The IDZ config URL if present, None otherwise
-        """
-        return self.properties.idz_config_url if self.properties else None
-
-    def get_time_series_config_url(self) -> Optional[str]:
-        """
-        Get the time series configuration URL from properties.
-
-        Returns:
-            The time series config URL if present, None otherwise
-        """
-        return self.properties.time_series_config_url if self.properties else None
-
-    def get_mqtt_broker_config(self) -> Optional[MqttBroker]:
-        """
-        Get the MQTT broker configuration from output config.
-
-        Returns:
-            MqttBroker object if present, None otherwise
-        """
-        if self.properties and self.properties.output_config:
-            return self.properties.output_config.mqtt_broker
-        return None
 
     def get_property(self, key: str, default: Any = None) -> Any:
         """

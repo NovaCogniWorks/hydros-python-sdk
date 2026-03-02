@@ -13,6 +13,8 @@ import sys
 import time
 from typing import Optional, List, Dict
 
+from hydros_agent_sdk.utils.yaml_loader import YamlLoader
+
 # Add current directory to Python path for hydraulic_solver import
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
@@ -126,6 +128,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         This method initializes the hydraulic solver with the loaded topology.
         """
         logger.info("Initializing digital twins model...")
+        idz_config_url = self.properties.get_property('idz_config_url')
+        config = YamlLoader.from_url(idz_config_url)
 
         # Create hydraulic solver with error context
         with AgentErrorContext(
