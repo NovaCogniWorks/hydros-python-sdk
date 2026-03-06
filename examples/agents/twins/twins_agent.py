@@ -13,6 +13,8 @@ import sys
 import time
 from typing import Optional, List, Dict
 
+from hydros_agent_sdk.utils.yaml_loader import YamlLoader
+
 # Add current directory to Python path for hydraulic_solver import
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
@@ -128,6 +130,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         使用 biz_scene_instance_id (即 job_instance_id) 来支持多任务并发仿真。
         """
         logger.info("Initializing digital twins model...")
+        idz_config_url = self.properties.get_property('idz_config_url')
+        config = YamlLoader.from_url(idz_config_url)
 
         # 使用 biz_scene_instance_id (即 job_instance_id) 获取或创建求解器
         # 这样可以支持多个任务并发运行，每个任务有独立的求解器实例

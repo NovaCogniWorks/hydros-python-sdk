@@ -16,6 +16,7 @@ from .mqtt_metrics import (
     send_metrics_batch,
     create_mock_metrics,
 )
+from .yaml_loader import YamlLoader
 
 __all__ = [
     'HydroObjectUtilsV2',
@@ -28,4 +29,5 @@ __all__ = [
     'send_metrics',
     'send_metrics_batch',
     'create_mock_metrics',
+    'YamlLoader',
 ]
