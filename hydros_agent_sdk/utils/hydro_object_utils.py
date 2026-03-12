@@ -23,7 +23,8 @@ class HydroObjectType(str, Enum):
     GATE_STATION = "GateStation"
     DIVERSION_POINT = "DiversionPoint"
     CROSS_SECTION = "CrossSection"
-    PUMP_STATION = "PumpStation"
+    STATION = "Station"
+    PUMP = "Pump"
     GATE = "Gate"
     SENSOR = "Sensor"
     CHANNEL = "Channel"
@@ -445,7 +446,7 @@ class HydroObjectUtilsV2:
                         MetricsCodes.GATE_OPENING,
                         MetricsCodes.GATE_OPENING_PERCENTAGE
                     ])
-                elif child.object_type == HydroObjectType.PUMP_STATION:
+                elif child.object_type == HydroObjectType.PUMP:
                     metrics.extend([
                         MetricsCodes.WATER_FLOW
                     ])
