@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 from typing import List, Optional, Any, Literal, Union
 from pydantic import Field
 from .models import SimulationContext, ObjectTimeSeries
@@ -22,9 +23,17 @@ class TimeSeriesDataChangedEvent(HydroEvent):
     hydro_event_type: Literal["TIME_SERIES_DATA_UPDATED"] = "TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
+
+class StepPumpStationWaterDiversionEvent(HydroEvent):
+    hydro_event_type: Literal["STEP_PUMP_STATION_WATER_DIVERSION"] = "STEP_PUMP_STATION_WATER_DIVERSION"
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    water_flow: Optional[float] = None
+
 # Union for polymorphic events if needed later
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
+    StepPumpStationWaterDiversionEvent,
     # Add generic HydroEvent as fallback?
     HydroEvent
 ]
