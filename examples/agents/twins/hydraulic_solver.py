@@ -157,7 +157,7 @@ class HydraulicSolver:
         self.state = {}
         logger.info(f"Hydraulic solver initialized for job: {job_instance_id}")
 
-    def initialize(self, topology, agent_configuration_url):
+    def initialize(self, topology, idz_config_url):
         """
         初始化算法及初始参数。
 
@@ -177,7 +177,7 @@ class HydraulicSolver:
 
         # ========== 第1步：下载代理配置并获取 idz_config_url ==========
         logger.debug("第1步：下载代理配置并获取 idz_config_url")
-        idz_config_file = self._download_idz_config(agent_configuration_url)
+        idz_config_file = self._download_idz_config(idz_config_url)
         if not idz_config_file:
             # 下载yaml文件失败，抛出异常停止后续仿真
             error_msg = "无法下载 IDZ 配置文件，仿真初始化失败"
@@ -336,12 +336,12 @@ class HydraulicSolver:
             self.boundary_params[node_id].update(boundaries)
         logger.info(f"更新了 {len(boundary_update)} 个节点的边界条件")
 
-    def _download_idz_config(self, agent_configuration_url: str) -> Optional[str]:
+    def _download_idz_config(self, idz_config_url: str) -> Optional[str]:
         """
         从代理配置 URL 下载 IDZ 配置文件。
 
         Args:
-            agent_configuration_url: 代理配置文件 URL
+            idz_config_url: 代理配置文件 URL
 
         Returns:
             下载的 IDZ 配置文件路径，失败则返回 None
@@ -350,11 +350,11 @@ class HydraulicSolver:
             # 导入 AgentConfigLoader
             from hydros_agent_sdk.agent_config import AgentConfigLoader
 
-            logger.info(f"加载代理配置: {agent_configuration_url}")
-            agent_config = AgentConfigLoader.from_url(agent_configuration_url)
+            logger.info(f"加载代理配置: {idz_config_url}")
+            # agent_config = AgentConfigLoader.from_url(agent_configuration_url)
 
             # 获取 idz_config_url
-            idz_config_url = agent_config.get_idz_config_url()
+            # idz_config_url = agent_config.get_idz_config_url()
             if not idz_config_url:
                 logger.warning("代理配置中未找到 idz_config_url")
                 return None

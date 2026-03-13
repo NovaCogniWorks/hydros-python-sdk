@@ -131,7 +131,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         logger.info("Initializing digital twins model...")
         idz_config_url = self.properties.get_property('idz_config_url')
-        config = YamlLoader.from_url(idz_config_url)
+        # config = YamlLoader.from_url(idz_config_url)
 
         # 使用 biz_scene_instance_id (即 job_instance_id) 获取或创建求解器
         # 这样可以支持多个任务并发运行，每个任务有独立的求解器实例
@@ -151,7 +151,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 ErrorCodes.MODEL_INITIALIZATION_FAILURE,
                 agent_name=self.agent_code
             ) as ctx:
-                self._hydraulic_solver.initialize(self._topology, self.agent_configuration_url)
+                self._hydraulic_solver.initialize(self._topology, idz_config_url)
 
             if ctx.has_error:
                 logger.error(f"Failed to initialize solver: {ctx.error_message}")
@@ -287,6 +287,10 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         Convert solver results to metrics list.
 
+        根据节点类型决定发送策略：
+        - DisturbanceNode（分水口、退水闸）：直接发送节点数据
+        - Pipe、GateStation（倒虹吸、节制闸）：为每个断面发送数据
+
         Args:
             results: Solver results {object_id: {metrics_code: value}}
 
@@ -295,26 +299,223 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         metrics_list = []
 
-        object_names = {}
+        # 构建节点信息映射：{node_id: {type, name, cross_section_children}}
+        node_info = {}
+        cross_section_info = {}
+
         if self._topology:
             for top_obj in self._topology.top_objects:
-                for child in top_obj.children:
-                    object_names[child.object_id] = child.object_name
+                # 处理顶级对象
+                node_info[top_obj.object_id] = {
+                    'type': top_obj.object_type,
+                    'name': top_obj.object_name,
+                    'cross_section_children': []
+                }
 
-        for object_id, values in results.items():
-            object_name = object_names.get(object_id, f"Object_{object_id}")
-            for metrics_code, value in values.items():
-                metrics_list.append(create_mock_metrics(
-                    source_id=self.agent_code,
-                    job_instance_id=self.biz_scene_instance_id,
-                    object_id=object_id,
-                    object_name=object_name,
-                    step_index=self._current_step,
-                    metrics_code=metrics_code,
-                    value=value
-                ))
+                cross_section_ids = []
+                # 处理子对象
+                for child in top_obj.children:
+                    node_info[child.object_id] = {
+                        'type': child.object_type,
+                        'name': child.object_name,
+                        'cross_section_children': []
+                    }
+
+                   
+                    # 对于 Pipe 和 GateStation，收集断面信息
+                    if top_obj.object_type in ['Pipe', 'GateStation']:
+                        if child.object_type in ['CrossSection', 'CrossSectionNode']:
+                                cross_section_ids.append(child.object_id)
+
+                node_info[top_obj.object_id]['cross_section_children'] = cross_section_ids
+
+        # 遍历结果，根据节点类型发送数据
+        for node_id, values in results.items():
+            if node_id not in node_info:
+                logger.warning(f"Node {node_id} not found in topology, skipping")
+                continue
+
+            node_type = node_info[node_id]['type']
+
+            if node_type in ['DisturbanceNode']:
+                # 分水口、退水闸：直接发送节点数据
+                self._send_disturbance_node_metrics(
+                    node_id=node_id,
+                    node_info=node_info[node_id],
+                    values=values,
+                    metrics_list=metrics_list
+                )
+
+            elif node_type in ['Pipe', 'GateStation']:
+                # 倒虹吸、节制闸：为每个断面发送数据
+                self._send_pipe_gate_metrics(
+                    node_id=node_id,
+                    node_info=node_info[node_id],
+                    cross_section_info=cross_section_info,
+                    values=values,
+                    metrics_list=metrics_list
+                )
+            else:
+                # 其他类型：直接发送节点数据
+                self._send_default_metrics(
+                    node_id=node_id,
+                    node_info=node_info[node_id],
+                    values=values,
+                    metrics_list=metrics_list
+                )
 
         return metrics_list
+
+    def _send_disturbance_node_metrics(
+        self,
+        node_id: int,
+        node_info: Dict,
+        values: Dict[str, float],
+        metrics_list: List[MqttMetrics]
+    ):
+        """
+        发送 DisturbanceNode（分水口、退水闸）的指标数据
+
+        Args:
+            node_id: 节点ID
+            node_info: 节点信息
+            values: 指标值
+            metrics_list: 指标列表（用于追加）
+        """
+        node_name = node_info['name']
+
+        # 发送水位数据
+        if 'water_level' in values or 'h_i_t' in values:
+            water_level = values.get('water_level', values.get('h_i_t', 0))
+            metrics_list.append(create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=node_id,
+                object_name=node_name,
+                step_index=self._current_step,
+                metrics_code="water_level",
+                value=water_level
+            ))
+
+        # 发送流量数据
+        if 'water_flow' in values or 'qtot_i_t' in values or 'q_out' in values:
+            water_flow = values.get('water_flow', values.get('qtot_i_t', values.get('q_out', 0)))
+            metrics_list.append(create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=node_id,
+                object_name=node_name,
+                step_index=self._current_step,
+                metrics_code="water_flow",
+                value=water_flow
+            ))
+
+    def _send_pipe_gate_metrics(
+        self,
+        node_id: int,
+        node_info: Dict,
+        cross_section_info: Dict,
+        values: Dict[str, float],
+        metrics_list: List[MqttMetrics]
+    ):
+        """
+        发送 Pipe/GateStation（倒虹吸、节制闸）的指标数据
+
+        获取当前节点下的 cross_section_children 下的节点发送水位和流量数据：
+        - 遍历 cross_section_children 列表
+        - 为每个断面发送水位数据（使用节点的水位值）
+        - 第一个断面发送入口流量，其他断面发送出口流量
+
+        Args:
+            node_id: 节点ID（Pipe或GateStation的ID）
+            node_info: 节点信息
+            cross_section_info: 断面信息映射 {cs_id: {name, parent_id, parent_type}}
+            values: 指标值（节点级别的水位和流量数据）
+            metrics_list: 指标列表（用于追加）
+        """
+        # 获取当前节点的 cross_section_children
+        cross_section_ids = node_info.get('cross_section_children', [])
+
+        if not cross_section_ids:
+            logger.warning(f"Node {node_id} ({node_info['name']}) has no cross sections, sending as default node")
+            self._send_default_metrics(node_id, node_info, values, metrics_list)
+            return
+
+        logger.info(f"Processing {node_info['name']}: found {len(cross_section_ids)} cross sections")
+
+        # 提取节点级别的数据
+        node_water_level = values.get('water_level', values.get('h_i_t', 0))
+        q_in = values.get('q_in', values.get('water_flow', 0))
+        q_out = values.get('q_out', values.get('water_flow', 0))
+
+        # 遍历 cross_section_children，为每个断面发送数据
+        for index, cs_id in enumerate(cross_section_ids):
+            # 从 cross_section_info 中获取断面名称
+            cs_info = cross_section_info.get(cs_id, {})
+            cs_name = cs_info.get('name', f"CS_{cs_id}")
+
+            logger.debug(f"  - Cross section {index + 1}: ID={cs_id}, Name={cs_name}")
+
+            # 发送水位数据（所有断面使用相同的水位）
+            metrics_list.append(create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=cs_id,  # 使用断面ID作为object_id
+                object_name=cs_name,
+                step_index=self._current_step,
+                metrics_code="water_level",
+                value=node_water_level
+            ))
+
+            # 根据断面索引决定发送入口流量还是出口流量
+            if index == 0:
+                # 第一个断面：发送入口流量
+                flow_value = q_in
+                logger.debug(f"    Sending inlet flow: {flow_value}")
+            else:
+                # 其他断面：发送出口流量
+                flow_value = q_out
+                logger.debug(f"    Sending outlet flow: {flow_value}")
+
+            # 发送流量数据
+            metrics_list.append(create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=cs_id,  # 使用断面ID作为object_id
+                object_name=cs_name,
+                step_index=self._current_step,
+                metrics_code="water_flow",
+                value=flow_value
+            ))
+
+    def _send_default_metrics(
+        self,
+        node_id: int,
+        node_info: Dict,
+        values: Dict[str, float],
+        metrics_list: List[MqttMetrics]
+    ):
+        """
+        发送默认类型的节点指标数据
+
+        Args:
+            node_id: 节点ID
+            node_info: 节点信息
+            values: 指标值
+            metrics_list: 指标列表（用于追加）
+        """
+        node_name = node_info['name']
+
+        for metrics_code, value in values.items():
+            metrics_list.append(create_mock_metrics(
+                source_id=self.agent_code,
+                job_instance_id=self.biz_scene_instance_id,
+                object_id=node_id,
+                object_name=node_name,
+                step_index=self._current_step,
+                metrics_code=metrics_code,
+                value=value
+            ))
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

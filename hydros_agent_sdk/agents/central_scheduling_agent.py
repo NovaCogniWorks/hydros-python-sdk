@@ -341,6 +341,15 @@ class CentralSchedulingAgent(TickableAgent):
             )
             # TODO: Update optimization model constraints
 
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Returns:
+            MQTT topic string for central scheduling metrics
+        """
+        return f"/hydros/simulation/jobs/{self.biz_scene_instance_id}/centralscheduling/objects"
+
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
