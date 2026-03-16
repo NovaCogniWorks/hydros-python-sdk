@@ -196,13 +196,13 @@ class SimCoordinationCallback(ABC):
         """
         logger.debug("Identified parameter updated (default handler)")
 
-    def on_outflow_time_series(self, request):
-            """
-            Called when outflow time series data is requested.
+    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+        """
+        Called when outflow time series data is requested.
 
-            Default implementation does nothing. Override if needed.
+        Default implementation logs the event. Override if needed.
 
-            Args:
-                request: The outflow time series request
-            """
-            logger.debug("Outflow time series request received (default handler)")
+        Args:
+            request: The outflow time series request
+        """
+        logger.info("Outflow time series request received")

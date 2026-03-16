@@ -442,10 +442,10 @@ class SimCoordinationClient:
             self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
 
     def _handle_outflow_time_series_request(self, command: SimCommand):
-            """Handle outflow time series request."""
-            request = command
-            assert isinstance(request, OutflowTimeSeriesRequest)
-            self.sim_coordination_callback.on_outflow_time_series(request)
+        """Handle outflow time series request."""
+        request = command
+        assert isinstance(request, OutflowTimeSeriesRequest)
+        self.sim_coordination_callback.on_outflow_time_series(request)
 
     # ========================================================================
     # Outgoing Message Queue
