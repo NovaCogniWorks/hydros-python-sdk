@@ -18,6 +18,7 @@ SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
+SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
 
 class HydroCmd(HydroBaseModel):
     command_id: str
@@ -86,6 +87,11 @@ class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
 class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["time_series_data_update_response"] = SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE
 
+class OutflowTimeSeriesRequest(SimCoordinationRequest):
+    command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
+    target_agent_instance: HydroAgentInstance
+    hydro_event: HydroEvent
+
 # --- Report Commands ---
 
 class AgentInstanceStatusReport(SimCommand):
@@ -130,6 +136,7 @@ CommandUnion = Union[
     TimeSeriesCalculationResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesRequest,
     AgentInstanceStatusReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,
