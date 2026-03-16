@@ -205,4 +205,4 @@ class SimCoordinationCallback(ABC):
         Args:
             request: The outflow time series request
         """
-        logger.info("Outflow time series request received")
+        logger.debug("Outflow time series request received")
