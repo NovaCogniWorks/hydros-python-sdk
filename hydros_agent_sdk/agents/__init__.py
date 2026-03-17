@@ -7,6 +7,7 @@ This module provides pre-built agent types that extend BaseHydroAgent:
 - TwinsSimulationAgent: Digital twins simulation agent
 - ModelCalculationAgent: Event-driven model calculation agent
 - CentralSchedulingAgent: Central scheduling agent with MPC optimization
+- OutflowPlanAgent: Event-driven outflow planning agent
 """
 
 from .tickable_agent import TickableAgent
@@ -14,6 +15,7 @@ from .ontology_simulation_agent import OntologySimulationAgent
 from .twins_simulation_agent import TwinsSimulationAgent
 from .model_calculation_agent import ModelCalculationAgent
 from .central_scheduling_agent import CentralSchedulingAgent
+from .outflow_plan_agent import OutflowPlanAgent
 
 __all__ = [
     'TickableAgent',
@@ -21,4 +23,5 @@ __all__ = [
     'TwinsSimulationAgent',
     'ModelCalculationAgent',
     'CentralSchedulingAgent',
+    'OutflowPlanAgent',
 ]

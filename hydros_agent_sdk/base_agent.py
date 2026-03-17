@@ -21,6 +21,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
     TimeSeriesCalculationRequest,
+    OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.agent_properties import AgentProperties
@@ -245,6 +246,17 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             request: Time series calculation request
         """
         logger.info(f"Time series calculation: {request.command_id}")
+
+    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+        """
+        Handle outflow time series request.
+
+        Default implementation. Override if needed.
+
+        Args:
+            request: Outflow time series request
+        """
+        logger.info(f"Outflow time series request: {request.command_id}")
 
     def send_response(self, response):
         """

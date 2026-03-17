@@ -21,6 +21,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
+    OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
 
@@ -194,3 +195,14 @@ class SimCoordinationCallback(ABC):
             request: The parameter sync request
         """
         logger.debug("Identified parameter updated (default handler)")
+
+    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+        """
+        Called when outflow time series data is requested.
+
+        Default implementation logs the event. Override if needed.
+
+        Args:
+            request: The outflow time series request
+        """
+        logger.debug("Outflow time series request received")
