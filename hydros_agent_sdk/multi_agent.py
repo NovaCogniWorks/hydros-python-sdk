@@ -15,6 +15,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
 
@@ -233,3 +234,42 @@ class MultiAgentCallback(SimCoordinationCallback):
                     agent.send_response(response)
             except Exception as e:
                 logger.error(f"Error in time series update for {agent_code}: {e}", exc_info=True)
+
+    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+        """
+        Handle outflow time series request for the target agent.
+
+        Unlike on_tick or on_time_series_data_update which broadcast to all agents,
+        this method routes the request only to the target agent specified in the request.
+        """
+        context_id = request.context.biz_scene_instance_id
+        context_agents = self.agents.get(context_id)
+
+        if not context_agents:
+            logger.error(f"No agents found for context: {context_id}")
+            return
+
+        # Extract target agent code from request
+        target_agent_code = request.target_agent_instance.agent_code
+
+        # Find the target agent
+        target_agent = context_agents.get(target_agent_code)
+
+        if not target_agent:
+            logger.warning(
+                f"Target agent '{target_agent_code}' not found in context {context_id}. "
+                f"Available agents: {list(context_agents.keys())}"
+            )
+            return
+
+        # Forward request to the target agent only
+        try:
+            logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
+            response = target_agent.on_outflow_time_series(request)
+            if response:
+                target_agent.send_response(response)
+        except Exception as e:
+            logger.error(
+                f"Error in outflow time series for {target_agent_code}: {e}",
+                exc_info=True
+            )
