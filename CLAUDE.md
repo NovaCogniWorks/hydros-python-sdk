@@ -56,6 +56,9 @@ python twins_agent.py
 
 cd examples/agents/ontology
 python ontology_agent.py
+
+cd examples/agents/outflowplan
+python outflow_plan_agent.py
 ```
 
 ## Architecture
@@ -81,6 +84,7 @@ python ontology_agent.py
 - `TwinsSimulationAgent`: Digital twins high-fidelity simulation
 - `ModelCalculationAgent`: Event-driven model calculation
 - `CentralSchedulingAgent`: Central scheduling with MPC optimization
+- `OutflowPlanAgent`: Event-driven outflow planning agent
 
 **Protocol Models** (`protocol/`)
 - `models.py`: Core data models (SimulationContext, HydroAgentInstance, etc.)
