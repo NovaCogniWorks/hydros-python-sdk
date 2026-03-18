@@ -36,6 +36,8 @@ show_help() {
     echo "可用的 agent:"
     echo "  twins               Twins Simulation Agent"
     echo "  ontology            Ontology Simulation Agent"
+    echo "  outflowplan         Outflow Plan Agent"
+    echo "  centralscheduling   Central Scheduling Agent"
     echo "  lite                Lite Agent Example"
     echo ""
     echo "示例:"
@@ -75,6 +77,16 @@ list_agents() {
     if [ -f "${SCRIPT_DIR}/agents/ontology/ontology_agent.py" ]; then
         echo -e "  ${BLUE}ontology${NC}   - Ontology Simulation Agent"
         echo "                 路径: ${SCRIPT_DIR}/agents/ontology/ontology_agent.py"
+    fi
+
+    if [ -f "${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py" ]; then
+        echo -e "  ${BLUE}outflowplan${NC} - Outflow Plan Agent"
+        echo "                 路径: ${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py"
+    fi
+
+    if [ -f "${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py" ]; then
+        echo -e "  ${BLUE}centralscheduling${NC} - Central Scheduling Agent"
+        echo "                 路径: ${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py"
     fi
 
     if [ -f "${SCRIPT_DIR}/agents/lite/agent_example.py" ]; then

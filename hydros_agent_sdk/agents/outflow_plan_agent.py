@@ -17,7 +17,8 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
-    OutflowTimeSeriesRequest, OutflowTimeSeriesResponse,
+    OutflowTimeSeriesRequest,
+    OutflowTimeSeriesResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
