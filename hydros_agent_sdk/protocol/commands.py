@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import Field, Discriminator
+from pydantic import Field
 from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
 from .base import HydroBaseModel
 
@@ -67,7 +67,7 @@ class TickCmdResponse(SimCoordinationResponse):
 
 # --- Time Series Commands ---
 
-from .events import HydroEvent, TimeSeriesDataChangedEvent
+from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEvent
 from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
@@ -90,7 +90,7 @@ class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
 class OutflowTimeSeriesRequest(SimCoordinationRequest):
     command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
     target_agent_instance: HydroAgentInstance
-    hydro_event: HydroEvent
+    outflow_time_series_event: OutflowTimeSeriesEvent
 
 # --- Report Commands ---
 

@@ -23,17 +23,17 @@ class TimeSeriesDataChangedEvent(HydroEvent):
     hydro_event_type: Literal["TIME_SERIES_DATA_UPDATED"] = "TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
-
-class StepPumpStationWaterDiversionEvent(HydroEvent):
-    hydro_event_type: Literal["STEP_PUMP_STATION_WATER_DIVERSION"] = "STEP_PUMP_STATION_WATER_DIVERSION"
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    water_flow: Optional[float] = None
+class OutflowTimeSeriesEvent(HydroEvent):
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
+    start_step: Optional[int] = None
+    end_step: Optional[int] = None
+    value: Optional[float] = None
+    priority: Optional[str] = None
 
 # Union for polymorphic events if needed later
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
-    StepPumpStationWaterDiversionEvent,
+    OutflowTimeSeriesEvent,
     # Add generic HydroEvent as fallback?
     HydroEvent
 ]

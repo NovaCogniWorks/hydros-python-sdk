@@ -9,7 +9,7 @@ import logging
 from typing import Optional, List
 from abc import abstractmethod
 
-from hydros_agent_sdk.base_agent import BaseHydroAgent
+from .tickable_agent import TickableAgent, MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -27,10 +27,12 @@ from hydros_agent_sdk.protocol.models import (
     ObjectTimeSeries,
 )
 
+from hydros_agent_sdk.utils import HydroObjectUtilsV2
+
 logger = logging.getLogger(__name__)
 
 
-class OutflowPlanAgent(BaseHydroAgent):
+class OutflowPlanAgent(TickableAgent):
     """
     Event-driven outflow plan agent.
 
@@ -116,9 +118,10 @@ class OutflowPlanAgent(BaseHydroAgent):
         # Outflow plan state
         self._plan_config = {}
 
+        self._topology = None
+
         logger.info(f"OutflowPlanAgent initialized: {self.agent_id}")
 
-    @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
         Initialize the outflow plan agent.
@@ -135,33 +138,64 @@ class OutflowPlanAgent(BaseHydroAgent):
         Returns:
             Task initialization response
         """
-        pass
+        logger.info(f"Initializing outflow plan agent: {self.agent_id}")
 
-    def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
+        # Load agent configuration
+        self.load_agent_configuration(request)
+
+        # Load topology if configured
+        topology_url = self.properties.get_property('hydros_objects_modeling_url')
+        if topology_url:
+            logger.info(f"Loading topology from: {topology_url}")
+            self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
+            logger.info(f"Topology loaded: {len(self._topology.top_objects)} top objects")
+
+        # Initialize planning models
+        self._initialize_planning_models()
+
+        # Register with state manager
+        self.state_manager.init_task(self.context, [self])
+        self.state_manager.add_local_agent(self)
+
+        logger.info(f"Outflow plan agent initialized successfully: {self.agent_id}")
+
+        # Update agent status to ACTIVE
+        object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+
+        # Return response
+        return SimTaskInitResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            created_agent_instances=[self],
+            managed_top_objects={},
+            broadcast=False
+        )
+
+    def _initialize_planning_models(self):
+        """Initialize outflow planning models."""
+        logger.info("Initializing outflow planning models...")
+
+        # Load planning configuration
+        planning_config = self.properties.get_property('planning_config', {})
+
+        # Initialize your planning models here
+        # For example: optimization models, forecasting models, etc.
+
+        logger.info("Planning models initialized")
+
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        Handle tick command (not applicable for event-driven agents).
-
-        Outflow plan agents are event-driven and do not respond to tick commands.
-        This method returns a failed response.
+        Execute ontology-based simulation step.
 
         Args:
             request: Tick command request
 
         Returns:
-            Tick command response with FAILED status
+            List of MqttMetrics objects to send via MQTT
         """
-        logger.warning(
-            f"OutflowPlanAgent received TickCmdRequest (not supported). "
-            f"This agent is EVENT_DRIVEN and should not receive tick commands."
-        )
-
-        return TickCmdResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.FAILED,
-            source_agent_instance=self,
-            broadcast=False
-        )
+        return None
 
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
