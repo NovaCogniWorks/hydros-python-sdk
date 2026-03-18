@@ -265,9 +265,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         # Forward request to the target agent only
         try:
             logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
-            response = target_agent.on_outflow_time_series(request)
-            if response:
-                target_agent.send_response(response)
+            target_agent.on_outflow_time_series(request)
         except Exception as e:
             logger.error(
                 f"Error in outflow time series for {target_agent_code}: {e}",

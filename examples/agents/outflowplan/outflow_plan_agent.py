@@ -33,7 +33,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
-    OutflowTimeSeriesRequest,
+    OutflowTimeSeriesRequest, OutflowTimeSeriesResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -129,10 +129,24 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
 
             logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
 
-            # Create response (if needed - depends on protocol design)
-            # For now, just log the results
-            for plan in outflow_plans:
-                logger.info(f"Outflow plan for {plan.object_name}: {len(plan.time_series)} steps")
+            # Create response
+            response = OutflowTimeSeriesResponse(
+                context=self.context,
+                command_id=request.command_id,
+                command_status=CommandStatus.SUCCEED,
+                source_agent_instance=self,
+                hydro_event=request.hydro_event,
+                object_time_series_list=outflow_plans,
+                broadcast=False
+            )
+
+            # Send response
+            self.send_response(response)
+
+            logger.info(
+                f"发布协调指令成功,commandId={response.command_id},"
+                f"commandType=OutflowTimeSeriesResponse 到MQTT Topic={self.sim_coordination_client.topic}"
+            )
 
         except Exception as e:
             logger.error(f"Error in outflow planning: {e}", exc_info=True)
