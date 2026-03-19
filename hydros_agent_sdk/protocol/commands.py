@@ -98,7 +98,7 @@ class OutflowTimeSeriesRequest(SimCoordinationRequest):
 class OutflowTimeSeriesResponse(SimCoordinationResponse):
     command_type: Literal["outflow_time_series_response"] = SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE
     hydro_event: HydroEvent
-    object_time_series_list: List[ObjectTimeSeries]
+    outflow_time_series_map: Dict[str, List[ObjectTimeSeries]]
 
 # --- Report Commands ---
 

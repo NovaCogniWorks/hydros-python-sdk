@@ -1,8 +1,8 @@
 """
-Outflow plan agent for event-driven outflow planning.
+用于事件驱动型外发流量计划的智能体。
 
-This module provides the OutflowPlanAgent class which extends BaseHydroAgent
-with event-driven outflow planning capabilities.
+该模块提供了 OutflowPlanAgent 类，它扩展了 BaseHydroAgent，
+具备事件驱动的外发流量计划能力。
 """
 
 import logging
@@ -35,20 +35,20 @@ logger = logging.getLogger(__name__)
 
 class OutflowPlanAgent(TickableAgent):
     """
-    Event-driven outflow plan agent.
+    事件驱动型的外发流量计划智能体。
 
-    This agent performs outflow planning in response to events:
-    1. Receives OutflowTimeSeriesRequest from coordinator
-    2. Executes outflow planning logic
-    3. Produces ObjectTimeSeries results for outflow plans
-    4. Returns response to coordinator
+    该智能体根据事件执行外发流量计划逻辑：
+    1. 从协调器接收 OutflowTimeSeriesRequest 请求
+    2. 执行外发流量计划计算
+    3. 生成外发流量计划的 ObjectTimeSeries 结果
+    4. 将响应返回给协调器
 
-    Key features:
-    - Event-driven execution (not tick-driven)
-    - Outflow planning based on hydro events
-    - Time series output for planned outflows
+    核心特性：
+    - 事件驱动执行（非步进驱动）
+    - 基于水文事件的外发流量计划
+    - 输出计划流量的时间序列
 
-    Usage example:
+    使用示例：
         ```python
         agent = OutflowPlanAgent(
             sim_coordination_client=client,
@@ -63,10 +63,10 @@ class OutflowPlanAgent(TickableAgent):
         )
         ```
 
-    Subclasses must implement:
-    - on_init(): Initialize agent and load configuration
-    - on_outflow_time_series(): Execute outflow planning logic
-    - on_terminate(): Clean up resources
+    子类必须实现：
+    - on_init(): 初始化智能体并加载配置
+    - on_outflow_time_series(): 执行外发流量计划逻辑
+    - on_terminate(): 清理资源
     """
 
     def __init__(
@@ -85,21 +85,21 @@ class OutflowPlanAgent(TickableAgent):
         **kwargs
     ):
         """
-        Initialize outflow plan agent.
+        初始化外发流量计划智能体。
 
-        Args:
-            sim_coordination_client: Required MQTT client
-            agent_id: Unique agent instance ID
-            agent_code: Agent code
-            agent_type: Agent type
-            agent_name: Agent name
-            context: Simulation context
-            hydros_cluster_id: Cluster ID
-            hydros_node_id: Node ID
-            agent_biz_status: Initial business status
-            drive_mode: Agent drive mode (default: EVENT_DRIVEN)
-            agent_configuration_url: Optional configuration URL
-            **kwargs: Additional keyword arguments
+        参数:
+            sim_coordination_client: 必填的 MQTT 客户端
+            agent_id: 唯一的智能体实例 ID
+            agent_code: 智能体代码
+            agent_type: 智能体类型
+            agent_name: 智能体名称
+            context: 仿真上下文
+            hydros_cluster_id: 集群 ID
+            hydros_node_id: 节点 ID
+            agent_biz_status: 初始业务状态
+            drive_mode: 智能体驱动模式（默认：EVENT_DRIVEN）
+            agent_configuration_url: 可选的配置 URL
+            **kwargs: 其他关键字参数
         """
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -116,7 +116,7 @@ class OutflowPlanAgent(TickableAgent):
             **kwargs
         )
 
-        # Outflow plan state
+        # 外发流量计划状态
         self._plan_config = {}
 
         self._topology = None
@@ -125,45 +125,45 @@ class OutflowPlanAgent(TickableAgent):
 
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the outflow plan agent.
+        初始化外发流量计划智能体。
 
-        Subclasses should:
-        1. Load agent configuration using self.load_agent_configuration(request)
-        2. Load topology and initialize planning models
-        3. Register with state manager
-        4. Return SimTaskInitResponse
+        子类应该：
+        1. 使用 self.load_agent_configuration(request) 加载智能体配置
+        2. 加载拓扑并初始化计划模型
+        3. 在状态管理器中注册
+        4. 返回 SimTaskInitResponse
 
-        Args:
-            request: Task initialization request
+        参数:
+            request: 任务初始化请求
 
-        Returns:
-            Task initialization response
+        返回:
+            任务初始化响应
         """
         logger.info(f"Initializing outflow plan agent: {self.agent_id}")
 
-        # Load agent configuration
+        # 加载智能体配置
         self.load_agent_configuration(request)
 
-        # Load topology if configured
+        # 如果配置了 URL，则加载拓扑
         topology_url = self.properties.get_property('hydros_objects_modeling_url')
         if topology_url:
             logger.info(f"Loading topology from: {topology_url}")
             self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
             logger.info(f"Topology loaded: {len(self._topology.top_objects)} top objects")
 
-        # Initialize planning models
+        # 初始化计划模型
         self._initialize_planning_models()
 
-        # Register with state manager
+        # 在状态管理器中注册
         self.state_manager.init_task(self.context, [self])
         self.state_manager.add_local_agent(self)
 
         logger.info(f"Outflow plan agent initialized successfully: {self.agent_id}")
 
-        # Update agent status to ACTIVE
+        # 将智能体状态更新为 ACTIVE
         object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
 
-        # Return response
+        # 返回响应
         return SimTaskInitResponse(
             context=self.context,
             command_id=request.command_id,
@@ -175,60 +175,60 @@ class OutflowPlanAgent(TickableAgent):
         )
 
     def _initialize_planning_models(self):
-        """Initialize outflow planning models."""
+        """初始化外发流量计划模型。"""
         logger.info("Initializing outflow planning models...")
 
-        # Load planning configuration
+        # 加载计划配置
         planning_config = self.properties.get_property('planning_config', {})
 
-        # Initialize your planning models here
-        # For example: optimization models, forecasting models, etc.
+        # 在此处初始化具体的计划模型
+        # 例如：优化模型、预报模型等
 
         logger.info("Planning models initialized")
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        Execute ontology-based simulation step.
+        执行基于本体的仿真步骤。由于该智能体是事件驱动的，通常返回 None。
 
-        Args:
-            request: Tick command request
+        参数:
+            request: 步进指令请求
 
-        Returns:
-            List of MqttMetrics objects to send via MQTT
+        返回:
+            要通过 MQTT 发送的 MqttMetrics 对象列表
         """
         return None
 
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        Handle outflow time series request.
+        处理外发流量时间序列请求。
 
-        Subclasses must implement this method to perform outflow planning logic.
-        This method should:
-        1. Extract event information from request
-        2. Execute outflow planning calculations
-        3. Generate ObjectTimeSeries results
-        4. Send response back to coordinator
+        子类必须实现此方法以执行外发流量计划逻辑。
+        该方法应该：
+        1. 从请求中提取事件信息
+        2. 执行外发流量计划计算
+        3. 生成 ObjectTimeSeries 结果
+        4. 将响应发送回协调器
 
-        Args:
-            request: Outflow time series request containing hydro event
+        参数:
+            request: 包含水文事件的外发流量时间序列请求
         """
         pass
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the outflow plan agent.
+        终止外发流量计划智能体。
 
-        Subclasses should:
-        1. Clean up planning resources
-        2. Unregister from state manager
-        3. Return SimTaskTerminateResponse
+        子类应该：
+        1. 清理计划资源
+        2. 在状态管理器中注销
+        3. 返回 SimTaskTerminateResponse
 
-        Args:
-            request: Task termination request
+        参数:
+            request: 任务终止请求
 
-        Returns:
-            Task termination response
+        返回:
+            任务终止响应
         """
         pass
