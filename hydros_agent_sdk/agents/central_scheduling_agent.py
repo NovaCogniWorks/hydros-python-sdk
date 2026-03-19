@@ -170,12 +170,23 @@ class CentralSchedulingAgent(TickableAgent):
         self._metrics_subscription_topic = metrics_topic
 
         # Subscribe to MQTT topic
-        self.sim_coordination_client.mqtt_client.subscribe(
-            topic=metrics_topic,
-            callback=self._on_field_metrics_received
+        # Use paho-mqtt correct way to route specific topic to a callback
+        self.sim_coordination_client.mqtt_client.message_callback_add(
+            metrics_topic,
+            lambda client, userdata, msg: self._on_field_metrics_received_wrapper(msg)
         )
+        self.sim_coordination_client.mqtt_client.subscribe(metrics_topic)
 
         logger.info(f"Subscribed to field metrics: {metrics_topic}")
+
+    def _on_field_metrics_received_wrapper(self, msg):
+        """Wrapper to parse MQTT message payload before calling business logic callback."""
+        try:
+            import json
+            payload = json.loads(msg.payload.decode("utf-8"))
+            self._on_field_metrics_received(msg.topic, payload)
+        except Exception as e:
+            logger.error(f"Error parsing field metrics payload on {msg.topic}: {e}")
 
     def _on_field_metrics_received(self, topic: str, payload: Dict[str, Any]):
         """

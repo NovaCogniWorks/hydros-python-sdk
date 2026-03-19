@@ -102,11 +102,22 @@ class MyCentralSchedulingAgent(CentralSchedulingAgent):
         # 2. 初始化优化模型 (模拟)
         self._initialize_optimization_model()
 
-        # 3. 订阅现地指标（如果在配置中指定了字段）
-        metrics_topic = self.properties.get_property('field_metrics_topic')
-        if metrics_topic:
-            logger.info(f"订阅现地数据主题: {metrics_topic}")
-            self.subscribe_to_field_metrics(metrics_topic)
+        # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
+        env_config = load_env_config()
+        base_metrics_topic = env_config.get('metrics_topic')
+        if base_metrics_topic:
+            # 手动替换 {hydros_cluster_id} 变量
+            cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
+            base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
+            
+            # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
+            task_id = self.context.biz_scene_instance_id
+            
+            # 拼接完整主题实现任务隔离：base_topic/task_id
+            full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
+            
+            logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
+            self.subscribe_to_field_metrics(full_metrics_topic)
 
         # 4. 在状态管理器中注册
         self.state_manager.init_task(self.context, [self])
