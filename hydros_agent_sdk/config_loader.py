@@ -111,7 +111,7 @@ def load_properties_file(file_path: str) -> Dict[str, str]:
     config = ConfigParser()
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             config_string = '[DEFAULT]\n' + f.read()
         config.read_string(config_string)
 
@@ -149,7 +149,7 @@ def load_agent_config(config_file: str) -> Dict[str, str]:
 
     try:
         # Read properties file
-        with open(config_file, 'r') as f:
+        with open(config_file, 'r', encoding='utf-8') as f:
             config_string = '[DEFAULT]\n' + f.read()
         config.read_string(config_string)
 
