@@ -33,6 +33,8 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -212,6 +214,40 @@ class MyCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False
+        )
+
+    @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
+        """
+        处理出流时间序列数据更新。
+
+        参数:
+            request: 出流时间序列数据更新请求
+        """
+        logger.info(f"--- 收到出流量时间序列数据更新：{request.command_id} ---")
+
+        # 1. 获取变更的数据事件
+        event = request.outflow_time_series_data_changed_event
+
+        if event and event.object_time_series:
+            # 2. 遍历并处理数据
+            for obj_ts in event.object_time_series:
+
+                # 打印部分数据供调试
+                if obj_ts.time_series:
+                    first_val = obj_ts.time_series[0]
+                    logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+
+            # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
+            # self.on_boundary_condition_update(event.object_time_series)
+
+        # 4. 返回成功响应
+        return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
