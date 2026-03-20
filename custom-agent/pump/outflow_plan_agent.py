@@ -1,16 +1,18 @@
 """
-外发流量计划智能体示例
+Outflow Plan Agent Example
 
-该示例展示了如何基于 OutflowPlanAgent 基类实现一个具体的外发流量计划智能体。
-该智能体通过响应水文事件来执行流量计划计算。
+This example demonstrates how to implement a concrete outflow plan agent
+using the OutflowPlanAgent base class.
+
+The agent performs outflow planning in response to hydro events.
 """
 
 import logging
 import os
 import sys
-from typing import Optional, List, Dict
+from typing import Optional, List
 
-# 将当前目录添加到 Python 路径中
+# Add current directory to Python path
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -41,7 +43,7 @@ from hydros_agent_sdk.protocol.models import (
     TimeSeriesValue,
 )
 
-# 配置日志（仅在直接作为脚本运行时）
+# Configure logging (only when running as main script)
 if __name__ == "__main__":
     EXAMPLES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
@@ -69,13 +71,13 @@ logger = logging.getLogger(__name__)
 
 class MyOutflowPlanAgent(OutflowPlanAgent):
     """
-    外发流量计划智能体的具体实现。
+    Concrete implementation of outflow plan agent.
 
-    该智能体的主要功能包括：
-    1. 加载水网拓扑
-    2. 初始化流量计划模型
-    3. 响应外发流量时间序列请求
-    4. 根据水文事件生成下泄流量计划
+    This agent:
+    1. Loads water network topology
+    2. Initializes outflow planning models
+    3. Responds to outflow time series requests
+    4. Generates outflow plans based on hydro events
     """
 
     def __init__(
@@ -90,7 +92,7 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
         hydros_node_id: str,
         **kwargs
     ):
-        """初始化外发流量计划智能体实例。"""
+        """Initialize outflow plan agent."""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -103,7 +105,7 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
             **kwargs
         )
 
-        # 拓扑对象
+        # Topology
         self._topology = None
 
         logger.info(f"MyOutflowPlanAgent created: {agent_id}")
@@ -111,35 +113,35 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        处理外发流量时间序列请求。
+        Handle outflow time series request.
 
-        该方法：
-        1. 从请求中提取事件信息
-        2. 执行外发流量计划计算逻辑
-        3. 生成 ObjectTimeSeries 格式的结果
-        4. 将响应发送回协调器
+        This method:
+        1. Extracts event information from request
+        2. Executes outflow planning logic
+        3. Generates ObjectTimeSeries results
+        4. Sends response back to coordinator
         """
         logger.info(f"Received OutflowTimeSeriesRequest, commandId={request.command_id}")
         logger.info(f"Event: {request.hydro_event}")
 
         try:
-            # 执行下泄计划计算
+            # Execute outflow planning
             outflow_plans = self._execute_outflow_planning(request.hydro_event)
 
             logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
 
-            # 构造响应
+            # Create response
             response = OutflowTimeSeriesResponse(
                 context=self.context,
                 command_id=request.command_id,
                 command_status=CommandStatus.SUCCEED,
                 source_agent_instance=self,
                 hydro_event=request.hydro_event,
-                outflow_time_series_map={"Gate": outflow_plans},
+                object_time_series_list=outflow_plans,
                 broadcast=False
             )
 
-            # 发送响应
+            # Send response
             self.send_response(response)
 
             logger.info(
@@ -153,32 +155,32 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
 
     def _execute_outflow_planning(self, hydro_event) -> List[ObjectTimeSeries]:
         """
-        执行具体的外发流量计划逻辑。
+        Execute outflow planning logic.
 
-        在这里实现具体的流量调度或计划算法。
+        This is where you implement your specific outflow planning algorithm.
 
-        参数:
-            hydro_event: 触发计划计算的水文事件
+        Args:
+            hydro_event: Event that triggered the planning
 
-        返回:
-            包含流量计划的时间序列列表 (ObjectTimeSeries)
+        Returns:
+            List of ObjectTimeSeries containing outflow plans
         """
         logger.info("Executing outflow planning...")
 
-        # 示例：生成模拟的流量计划数据
+        # Example: Generate mock outflow plans
         outflow_plans = []
 
-        # 从配置中获取计划时界（预测时长）
+        # Get planning horizon from configuration
         planning_horizon = self.properties.get_property('planning_horizon', 24)
 
-        # 为每个相关对象生成流量计划
+        # Generate outflow plan for each relevant object
         if self._topology:
-            for top_obj in self._topology.top_objects[:3]:  # 示例：仅取前3个对象
+            for top_obj in self._topology.top_objects[:3]:  # Example: first 3 objects
                 time_series_values = []
 
                 for step in range(planning_horizon):
-                    # 在此处编写具体的计划逻辑
-                    # 例如：优化算法、预测模型、基于规则的计划等
+                    # Your planning logic here
+                    # For example: optimization, forecasting, rule-based planning, etc.
                     planned_outflow = self._calculate_planned_outflow(top_obj, step, hydro_event)
 
                     time_series_values.append(
@@ -188,7 +190,7 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
                         )
                     )
 
-                # 创建对象的时间序列结果
+                # Create ObjectTimeSeries
                 outflow_plan = ObjectTimeSeries(
                     time_series_name=f"{top_obj.object_name}_outflow_plan",
                     object_id=top_obj.object_id,
@@ -205,11 +207,11 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
 
     def _calculate_planned_outflow(self, hydro_object, step: int, hydro_event) -> float:
         """
-        计算特定对象在特定时间步长的计划流量。
+        Calculate planned outflow for a specific object and time step.
 
-        这是一个占位方法 - 请在此处实现实际的计划算法。
+        This is a placeholder - implement your actual planning algorithm here.
         """
-        # 示例：简单的线性变化计划
+        # Example: Simple rule-based planning
         base_outflow = 100.0
         variation = step * 5.0
 
@@ -218,20 +220,20 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        终止外发流量计划智能体运行。
+        Terminate the outflow plan agent.
 
-        该方法：
-        1. 清理计划资源
-        2. 在状态管理器中注销
-        3. 返回终止响应
+        This method:
+        1. Cleans up planning resources
+        2. Unregisters from state manager
+        3. Returns termination response
         """
         logger.info(f"Terminating outflow plan agent: {self.agent_id}")
 
-        # 清理资源
+        # Clean up resources
         self._topology = None
         self._plan_config = {}
 
-        # 在状态管理器中注销
+        # Unregister from state manager
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
 
@@ -247,11 +249,11 @@ class MyOutflowPlanAgent(OutflowPlanAgent):
 
 
 # ============================================================================
-# 智能体工厂类
+# Agent Factory
 # ============================================================================
 
 class OutflowPlanAgentFactory(HydroAgentFactory):
-    """用于创建外发流量计划智能体实例的工厂。"""
+    """Factory for creating outflow plan agent instances."""
 
     def create_agent(
         self,
@@ -265,7 +267,7 @@ class OutflowPlanAgentFactory(HydroAgentFactory):
         hydros_node_id: str,
         **kwargs
     ):
-        """创建一个新的外发流量计划智能体实例。"""
+        """Create a new outflow plan agent instance."""
         return MyOutflowPlanAgent(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -280,21 +282,21 @@ class OutflowPlanAgentFactory(HydroAgentFactory):
 
 
 # ============================================================================
-# 主入口
+# Main Entry Point
 # ============================================================================
 
 def main():
-    """外发流量计划智能体的主入口函数。"""
+    """Main entry point for outflow plan agent."""
     logger.info("=" * 80)
     logger.info("Starting Outflow Plan Agent")
     logger.info("=" * 80)
 
     try:
-        # 加载配置
+        # Load configuration
         env_config = load_env_config()
         agent_config = load_agent_config()
 
-        # 提取配置参数
+        # Extract configuration
         mqtt_broker_url = env_config['mqtt_broker_url']
         mqtt_broker_port = env_config['mqtt_broker_port']
         mqtt_topic = env_config['mqtt_topic']
@@ -310,11 +312,13 @@ def main():
         logger.info(f"MQTT Broker: {mqtt_broker_url}:{mqtt_broker_port}")
         logger.info(f"MQTT Topic: {mqtt_topic}")
 
-        # 创建工厂和回调
+        # Create factory
         factory = OutflowPlanAgentFactory()
+
+        # Create multi-agent callback
         callback = MultiAgentCallback(factory)
 
-        # 创建协调客户端
+        # Create coordination client
         client = SimCoordinationClient(
             broker_url=mqtt_broker_url,
             broker_port=mqtt_broker_port,
@@ -324,11 +328,11 @@ def main():
             hydros_node_id=hydros_node_id
         )
 
-        # 启动连接
+        # Connect and start
         client.connect()
         logger.info("Outflow plan agent connected and ready")
 
-        # 保持运行状态
+        # Keep running
         try:
             while True:
                 import time
