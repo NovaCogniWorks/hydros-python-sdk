@@ -19,6 +19,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
     OutflowTimeSeriesRequest,
@@ -140,6 +141,17 @@ class SimCoordinationCallback(ABC):
             request: The data update request
         """
         logger.info("Time series data update received")
+
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
+        """
+        Called when outflow time series data is updated.
+
+        Default implementation logs the event. Override if needed.
+
+        Args:
+            request: The outflow data update request
+        """
+        logger.info("Outflow time series data update received")
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """

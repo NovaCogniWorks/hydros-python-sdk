@@ -20,7 +20,11 @@ class HydroEvent(BaseHydroEvent):
     pass
 
 class TimeSeriesDataChangedEvent(HydroEvent):
-    hydro_event_type: Literal["TIME_SERIES_DATA_UPDATED"] = "TIME_SERIES_DATA_UPDATED"
+    hydro_event_type: Union[Literal["TIME_SERIES_DATA_UPDATED"], Literal["TimeSeriesDataChangedEvent"]] = "TIME_SERIES_DATA_UPDATED"
+    object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
+
+class OutflowTimeSeriesDataChangedEvent(HydroEvent):
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES_DATA_UPDATED"] = "OUTFLOW_TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
 class OutflowTimeSeriesEvent(HydroEvent):

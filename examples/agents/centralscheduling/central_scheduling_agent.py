@@ -33,6 +33,8 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -102,11 +104,22 @@ class MyCentralSchedulingAgent(CentralSchedulingAgent):
         # 2. 初始化优化模型 (模拟)
         self._initialize_optimization_model()
 
-        # 3. 订阅现地指标（如果在配置中指定了字段）
-        metrics_topic = self.properties.get_property('field_metrics_topic')
-        if metrics_topic:
-            logger.info(f"订阅现地数据主题: {metrics_topic}")
-            self.subscribe_to_field_metrics(metrics_topic)
+        # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
+        env_config = load_env_config()
+        base_metrics_topic = env_config.get('metrics_topic')
+        if base_metrics_topic:
+            # 手动替换 {hydros_cluster_id} 变量
+            cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
+            base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
+            
+            # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
+            task_id = self.context.biz_scene_instance_id
+            
+            # 拼接完整主题实现任务隔离：base_topic/task_id
+            full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
+            
+            logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
+            self.subscribe_to_field_metrics(full_metrics_topic)
 
         # 4. 在状态管理器中注册
         self.state_manager.init_task(self.context, [self])
@@ -201,6 +214,40 @@ class MyCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False
+        )
+
+    @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
+        """
+        处理出流时间序列数据更新。
+
+        参数:
+            request: 出流时间序列数据更新请求
+        """
+        logger.info(f"--- 收到出流量时间序列数据更新：{request.command_id} ---")
+
+        # 1. 获取变更的数据事件
+        event = request.outflow_time_series_data_changed_event
+
+        if event and event.object_time_series:
+            # 2. 遍历并处理数据
+            for obj_ts in event.object_time_series:
+
+                # 打印部分数据供调试
+                if obj_ts.time_series:
+                    first_val = obj_ts.time_series[0]
+                    logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+
+            # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
+            # self.on_boundary_condition_update(event.object_time_series)
+
+        # 4. 返回成功响应
+        return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,

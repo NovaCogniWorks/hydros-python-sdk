@@ -30,6 +30,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
     SimCoordinationRequest,
@@ -45,7 +46,8 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
+    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
+    SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
 )
 import json
 
@@ -181,7 +183,8 @@ class SimCoordinationClient:
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
-            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request
+            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
+            SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
         }
         logger.info(f"Registered {len(self.handlers)} command handlers")
 
@@ -427,6 +430,12 @@ class SimCoordinationClient:
         request = command
         assert isinstance(request, TimeSeriesDataUpdateRequest)
         self.sim_coordination_callback.on_time_series_data_update(request)
+
+    def _handle_outflow_time_series_data_update(self, command: SimCommand):
+        """Handle outflow time series data update."""
+        request = command
+        assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
+        self.sim_coordination_callback.on_outflow_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
         """Handle time series calculation."""
