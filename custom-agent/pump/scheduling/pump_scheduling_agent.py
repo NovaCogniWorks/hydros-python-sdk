@@ -45,7 +45,7 @@ from hydros_agent_sdk.protocol.models import (
 logger = logging.getLogger(__name__)
 
 
-class MyCentralSchedulingAgent(CentralSchedulingAgent):
+class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     """
     中央调度智能体的具体实现。
 
@@ -296,7 +296,7 @@ class CentralSchedulingAgentFactory(HydroAgentFactory):
         **kwargs
     ):
         """创建一个新的中央调度智能体实例。"""
-        return MyCentralSchedulingAgent(
+        return PumpCentralSchedulingAgent(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
             agent_code=agent_code,

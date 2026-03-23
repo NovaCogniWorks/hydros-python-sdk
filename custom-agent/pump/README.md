@@ -44,7 +44,7 @@ mqtt_topic=/hydros/commands/coordination/default_cluster
 
 ```bash
 cd examples/agents/outflowplan
-python outflow_plan_agent.py
+python pump_outflow_plan_agent.py
 ```
 
 ## Agent Lifecycle
