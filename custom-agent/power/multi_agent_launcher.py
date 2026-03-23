@@ -308,6 +308,10 @@ class MultiAgentCoordinator:
         Raises:
             ValueError: 如果 agent 不存在或加载失败
         """
+        # 兼容别名
+        if agent_name == 'power':
+            agent_name = 'outflowplan'
+
         # 1. 构建 agent 目录路径
         agents_dir = get_agents_root()
         agent_dir = os.path.join(agents_dir, agent_name)

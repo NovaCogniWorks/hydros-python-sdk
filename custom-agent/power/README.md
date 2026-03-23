@@ -6,20 +6,22 @@
 
 ```
 custom-agent/
-├── start_agents.sh           # 启动脚本
-├── multi_agent_launcher.py   # Python 启动器
-├── env.properties            # 共享环境配置
 ├── power/
-│   ├── agent.properties
-│   ├── env.properties
-│   ├── power_agent.py
-│   └── power_solver.py
-├── pump/
-│   ├── agent.properties
-│   └── outflow_plan_agent.py
-└── scheduling/
+│   ├── start_agents.sh           # 启动脚本
+│   ├── multi_agent_launcher.py   # Python 启动器
+│   ├── env.properties            # 共享环境配置
+│   ├── outflowplan/
+│   │   ├── agent.properties
+│   │   ├── power_agent.py
+│   │   └── power_solver.py
+│   ├── scheduling/
+│   │   ├── agent.properties
+│   │   └── power_scheduling_agent.py
+│   └── logs/
+│       └── hydros.log
+└── pump/
     ├── agent.properties
-    └── scheduling_agent.py
+    └── outflow_plan_agent.py
 ```
 
 ## 前置条件
@@ -30,13 +32,13 @@ custom-agent/
   pip install -e .
   pip install pyyaml
   ```
-- MQTT 配置：`custom-agent/env.properties`
+- MQTT 配置：`custom-agent/power/env.properties`
 
 ## 配置说明
 
 ### env.properties（共享配置）
 
-位于 `custom-agent/env.properties`，用于配置 MQTT 连接和集群信息。
+位于 `custom-agent/power/env.properties`，用于配置 MQTT 连接和集群信息。
 
 示例：
 ```properties
@@ -49,7 +51,7 @@ hydros_node_id=default_node
 
 ### agent.properties（每个 agent）
 
-位于 `custom-agent/power|pump|scheduling/agent.properties`，用于描述 agent 元信息。
+位于 `custom-agent/power/outflowplan|scheduling/agent.properties`，用于描述 agent 元信息。
 
 示例：
 ```properties
@@ -63,25 +65,25 @@ agent_name=Power Agent
 ### 启动指定 agent
 
 ```bash
-bash custom-agent/start_agents.sh power pump scheduling
+bash custom-agent/power/start_agents.sh power pump scheduling
 ```
 
 ### 启动全部 agent
 
 ```bash
-bash custom-agent/start_agents.sh --all
+bash custom-agent/power/start_agents.sh --all
 ```
 
 ### 列出可用 agent
 
 ```bash
-bash custom-agent/start_agents.sh --list
+bash custom-agent/power/start_agents.sh --list
 ```
 
 ### 查看日志
 
 ```bash
-bash custom-agent/start_agents.sh --logs
+bash custom-agent/power/start_agents.sh --logs
 ```
 
 ## 调试模式
@@ -89,27 +91,27 @@ bash custom-agent/start_agents.sh --logs
 ### 启用调试（等待调试器）
 
 ```bash
-bash custom-agent/start_agents.sh --debug power
+bash custom-agent/power/start_agents.sh --debug power
 ```
 
 ### 启用调试（不等待调试器）
 
 ```bash
-bash custom-agent/start_agents.sh --debug --debug-nowait power
+bash custom-agent/power/start_agents.sh --debug --debug-nowait power
 ```
 
 ### 指定调试端口
 
 ```bash
-bash custom-agent/start_agents.sh --debug --debug-port 5679 power
+bash custom-agent/power/start_agents.sh --debug --debug-port 5679 power
 ```
 
 ## 日志
 
-- 日志文件：`custom-agent/logs/hydros.log`
+- 日志文件：`custom-agent/power/logs/hydros.log`
 - 过滤示例：
   ```bash
-  grep 'POWER_AGENT' custom-agent/logs/hydros.log
+  grep 'POWER_AGENT' custom-agent/power/logs/hydros.log
   ```
 
 ## 常见问题
@@ -118,7 +120,7 @@ bash custom-agent/start_agents.sh --debug --debug-port 5679 power
 
 请使用可用的 Python 命令（如 `python` 或 `py`）直接启动：
 ```bash
-python custom-agent/multi_agent_launcher.py power pump scheduling
+python custom-agent/power/multi_agent_launcher.py power pump scheduling
 ```
 
 ### 2) MQTT 连接失败
