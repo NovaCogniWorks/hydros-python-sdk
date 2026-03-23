@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 
 # 获取脚本所在目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 # 设置 PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
@@ -34,18 +34,18 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  power               Power Agent"
+    echo "  outflowplan         Power Agent"
     echo "  pump                Pump Agent"
     echo "  scheduling          Scheduling Agent"
     echo ""
     echo "示例:"
-    echo "  $0 power                    # 启动 power agent"
-    echo "  $0 power pump               # 在同一进程中启动 power 和 pump agents"
+    echo "  $0 outflowplan               # 启动 power agent"
+    echo "  $0 outflowplan pump          # 在同一进程中启动 power 和 pump agents"
     echo "  $0 --all                    # 启动所有 agents"
     echo "  $0 --logs                   # 查看日志"
-    echo "  $0 --debug power            # 启用调试模式启动 power agent"
-    echo "  $0 -d power pump            # 启用调试模式启动多个 agents"
-    echo "  $0 --debug --debug-nowait power  # 调试模式但不等待调试器"
+    echo "  $0 --debug outflowplan       # 启用调试模式启动 power agent"
+    echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
+    echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
     echo ""
     echo "调试模式:"
     echo "  • 使用 debugpy 进行远程调试"
@@ -67,9 +67,9 @@ list_agents() {
     echo -e "${GREEN}可用的 Agents:${NC}"
     echo ""
 
-    if [ -f "${SCRIPT_DIR}/power/power_agent.py" ]; then
-        echo -e "  ${BLUE}power${NC}      - Power Agent"
-        echo "                 路径: ${SCRIPT_DIR}/power/power_agent.py"
+    if [ -f "${SCRIPT_DIR}/outflowplan/power_agent.py" ]; then
+        echo -e "  ${BLUE}outflowplan${NC} - Power Agent"
+        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_agent.py"
     fi
 
     if [ -f "${SCRIPT_DIR}/pump/outflow_plan_agent.py" ]; then
