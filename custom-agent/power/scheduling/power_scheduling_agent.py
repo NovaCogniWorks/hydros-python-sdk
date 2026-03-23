@@ -45,7 +45,7 @@ from hydros_agent_sdk.protocol.models import (
 logger = logging.getLogger(__name__)
 
 
-class PumpCentralSchedulingAgent(CentralSchedulingAgent):
+class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     """
     中央调度智能体的具体实现。
 
@@ -105,7 +105,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self._initialize_optimization_model()
 
         # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
-        env_config = load_env_config()
+        # env.properties 位于 power 目录（custom-agent/power/env.properties）
+        env_config_path = os.path.join(os.path.dirname(__file__), '..', 'env.properties')
+        env_config = load_env_config(env_config_path)
         base_metrics_topic = env_config.get('metrics_topic')
         if base_metrics_topic:
             # 手动替换 {hydros_cluster_id} 变量
@@ -296,7 +298,7 @@ class CentralSchedulingAgentFactory(HydroAgentFactory):
         **kwargs
     ):
         """创建一个新的中央调度智能体实例。"""
-        return PumpCentralSchedulingAgent(
+        return PowerCentralSchedulingAgent(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
             agent_code=agent_code,
@@ -317,7 +319,8 @@ def main():
     
     try:
         # 加载环境和智能体配置
-        env_config = load_env_config()
+        env_config_path = os.path.join(os.path.dirname(__file__), '..', 'env.properties')
+        env_config = load_env_config(env_config_path)
         agent_config = load_agent_config()
 
         # 创建协调客户端
