@@ -67,7 +67,7 @@ if __name__ == "__main__":
 logger = logging.getLogger(__name__)
 
 
-class MyOutflowPlanAgent(OutflowPlanAgent):
+class PumpOutflowPlanAgent(OutflowPlanAgent):
     """
     外发流量计划智能体的具体实现。
 
@@ -266,7 +266,7 @@ class OutflowPlanAgentFactory(HydroAgentFactory):
         **kwargs
     ):
         """创建一个新的外发流量计划智能体实例。"""
-        return MyOutflowPlanAgent(
+        return PumpOutflowPlanAgent(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
             agent_code=agent_code,
