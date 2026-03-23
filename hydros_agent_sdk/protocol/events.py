@@ -29,9 +29,7 @@ class OutflowTimeSeriesDataChangedEvent(HydroEvent):
 
 class OutflowTimeSeriesEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
-    start_step: Optional[int] = None
-    end_step: Optional[int] = None
-    value: Optional[float] = None
+    event_content_url: str
     priority: Optional[str] = None
 
 # Union for polymorphic events if needed later
