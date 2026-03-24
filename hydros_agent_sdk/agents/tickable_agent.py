@@ -342,35 +342,23 @@ class TickableAgent(BaseHydroAgent):
 
         return None
 
-    def send_metrics_batch(self, metrics_list: List[MqttMetrics]):
+    def send_metrics_batch(self, metrics_list: List[MqttMetrics], topic: Optional[str] = None):
         """
         Send batch of metrics data via MQTT.
 
         Args:
             metrics_list: List of MqttMetrics objects to send
+            topic: Optional MQTT topic override
         """
         from hydros_agent_sdk.utils.mqtt_metrics import send_metrics_batch
 
-        metrics_topic = self.get_metrics_topic()
+        metrics_topic = topic or f"{self.sim_coordination_client.topic}/metrics"
         send_metrics_batch(
             mqtt_client=self.sim_coordination_client.mqtt_client,
             topic=metrics_topic,
             metrics_list=metrics_list,
             qos=0
         )
-
-    @abstractmethod
-    def get_metrics_topic(self) -> str:
-        """
-        Get the MQTT topic for sending metrics data.
-
-        Subclasses must implement this method to define their specific metrics topic.
-        The topic format should be: /hydros/simulation/jobs/{biz_scene_instance_id}/{agent_type}/objects
-
-        Returns:
-            MQTT topic string for metrics
-        """
-        pass
 
     @property
     def current_step(self) -> int:

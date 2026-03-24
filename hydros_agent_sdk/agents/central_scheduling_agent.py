@@ -6,6 +6,7 @@
 """
 
 import logging
+import time
 from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
@@ -220,6 +221,51 @@ class CentralSchedulingAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error processing field metrics: {e}", exc_info=True)
 
+    def on_tick(self, request: TickCmdRequest):
+        """
+        Handle simulation tick with central scheduling metrics topic.
+
+        Sends metrics only when optimization runs, using get_metrics_topic().
+        """
+        # Set agent logging context for agent business logic
+        self._set_agent_logging_context()
+
+        self._current_step = request.step
+
+        logger.info(f"Processing tick: step={request.step}, commandId={request.command_id}")
+
+        try:
+            metrics_list = self.on_tick_simulation(request)
+
+            if metrics_list:
+                self.send_metrics_batch(metrics_list, topic=self.get_metrics_topic())
+                logger.info(f"Sent {len(metrics_list)} metrics for step {request.step}")
+
+            response = self._build_tick_response(request, CommandStatus.SUCCEED)
+
+            logger.info(
+                f"发布协调指令成功,commandId={response.command_id},"
+                f"commandType=tick_cmd_response 到MQTT Topic={self.sim_coordination_client.topic}"
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error processing tick {request.step}: {e}", exc_info=True)
+            return self._build_tick_response(request, CommandStatus.FAILED)
+
+    def _build_tick_response(self, request: TickCmdRequest, status: CommandStatus):
+        """Build TickCmdResponse for central scheduling ticks."""
+        from hydros_agent_sdk.protocol.commands import TickCmdResponse
+
+        return TickCmdResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=status,
+            source_agent_instance=self,
+            broadcast=False
+        )
+
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         执行中央调度步骤。
@@ -254,11 +300,12 @@ class CentralSchedulingAgent(TickableAgent):
 
                 logger.info(f"MPC optimization completed at step {request.step}")
 
-            else:
-                logger.debug(
-                    f"Skipping optimization at step {request.step} "
-                    f"(next optimization at step {self._last_optimization_step + self._optimization_horizon})"
-                )
+                return self._build_optimization_metrics(request.step, control_commands)
+
+            logger.debug(
+                f"Skipping optimization at step {request.step} "
+                f"(next optimization at step {self._last_optimization_step + self._optimization_horizon})"
+            )
 
             # 返回可选指标
             return None
@@ -266,6 +313,42 @@ class CentralSchedulingAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error in central scheduling step {request.step}: {e}", exc_info=True)
             return None
+
+    def _build_optimization_metrics(
+        self,
+        step: int,
+        control_commands: Optional[List[Dict[str, Any]]]
+    ) -> Optional[List[MqttMetrics]]:
+        """Build MqttMetrics list from optimization results."""
+        if not control_commands:
+            return None
+
+        metrics_list: List[MqttMetrics] = []
+        timestamp_ms = int(time.time() * 1000)
+
+        for command in control_commands:
+            object_id = command.get('object_id')
+            if object_id is None:
+                continue
+
+            target_agent = command.get('target') or command.get('target_agent') or {}
+            object_name = target_agent.get('agent_name') if isinstance(target_agent, dict) else str(target_agent)
+
+            metrics_list.append(
+                MqttMetrics(
+                    source_id=self.agent_code,
+                    job_instance_id=self.biz_scene_instance_id,
+                    object_id=object_id,
+                    object_name=str(object_name or ''),
+                    step_index=step,
+                    source_timestamp_ms=timestamp_ms,
+                    metrics_code=command.get('command_type', 'control_command'),
+                    value=float(command.get('gate_opening', 0.0))
+                )
+            )
+
+        return metrics_list or None
+
 
     @abstractmethod
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:

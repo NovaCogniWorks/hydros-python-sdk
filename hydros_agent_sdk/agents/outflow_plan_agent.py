@@ -198,6 +198,15 @@ class OutflowPlanAgent(TickableAgent):
         """
         return None
 
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Returns:
+            MQTT topic string for outflow plan metrics
+        """
+        return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"
+
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """

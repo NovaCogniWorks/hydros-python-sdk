@@ -171,17 +171,84 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         # 2. 调用优化算法（模拟运行）
         logger.info("求解器正在运行中...")
         
-        # 3. 生成控制决策
+        # 3. 生成控制决策（mock 数据）
         control_commands = [
             {
-                "target_agent": "PUMP_AGENT_001",
-                "command_type": "set_pump_speed",
-                "parameters": {"speed": 85.5, "duration": 3600}
-            },
-            {
-                "target_agent": "GATE_AGENT_002",
-                "command_type": "set_gate_opening",
-                "parameters": {"opening": 1.2}
+                "command_id": "AGTCMD202601091051YTYDBLABKHZ1",
+                "command_status": "INIT",
+                "source": {
+                    "agent_code": "CENTRAL_SCHEDULING_AGENT",
+                    "agent_type": "CENTRAL_SCHEDULING_AGENT",
+                    "agent_name": "中央调度智能体",
+                    "agent_id": "AGT2026010910500EWONB_CENTRAL_SCHEDULING",
+                    "agent_biz_status": "IDLE",
+                    "drive_mode": "SIM_TICK_DRIVEN",
+                    "context": {
+                        "tenant": {
+                            "tenant_id": "1111",
+                            "tenant_name": "河北工程大学水利学院"
+                        },
+                        "biz_scenario": {
+                            "biz_scenario_id": "100010",
+                            "biz_scenario_name": "大渡河-梯级电站发电协同与水量平衡综合调度演示场景"
+                        },
+                        "waterway": {
+                            "waterway_id": "60",
+                            "waterway_name": "大渡河"
+                        },
+                        "biz_scene_instance_id": "TASK202601091050QC1BC3DGROZD",
+                        "valid": True
+                    },
+                    "valid": True,
+                    "drive_mode_description": "响应时钟节拍，同步执行仿真步骤"
+                },
+                "target": {
+                    "agent_code": "GATE_STATION_AGENT",
+                    "agent_type": "GATE_STATION_AGENT",
+                    "agent_name": "闸站智能体",
+                    "agent_id": "AGT2026010910505TA7YF_GATE_STATION",
+                    "agent_biz_status": "ACTIVE",
+                    "drive_mode": "PROACTIVE",
+                    "context": {
+                        "tenant": {
+                            "tenant_id": "1111",
+                            "tenant_name": "河北工程大学水利学院"
+                        },
+                        "biz_scenario": {
+                            "biz_scenario_id": "100010",
+                            "biz_scenario_name": "大渡河-梯级电站发电协同与水量平衡综合调度演示场景"
+                        },
+                        "waterway": {
+                            "waterway_id": "60",
+                            "waterway_name": "大渡河"
+                        },
+                        "biz_scene_instance_id": "TASK202601091050QC1BC3DGROZD",
+                        "valid": True
+                    },
+                    "valid": True,
+                    "drive_mode_description": "现地部署模式，响应特定事件，异步执行处理逻辑，不受coordinator的管理协调"
+                },
+                "security_check": False,
+                "object_id": 2421,
+                "gate_opening": 1.03,
+                "command_type": "direct_gate_opening_request",
+                "context": {
+                    "tenant": {
+                        "tenant_id": "1111",
+                        "tenant_name": "河北工程大学水利学院"
+                    },
+                    "biz_scenario": {
+                        "biz_scenario_id": "100010",
+                        "biz_scenario_name": "大渡河-梯级电站发电协同与水量平衡综合调度演示场景"
+                    },
+                    "waterway": {
+                        "waterway_id": "50",
+                        "waterway_name": "京石段"
+                    },
+                    "biz_scene_instance_id": "TASK202601091050QC1BC3DGROZD",
+                    "valid": True
+                },
+                "completed": False
             }
         ]
 
