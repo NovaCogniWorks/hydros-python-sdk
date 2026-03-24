@@ -17,6 +17,7 @@ import paho.mqtt.client as mqtt
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
+from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.logging_config import (
     set_biz_scene_instance_id,
     set_biz_component,
@@ -98,8 +99,9 @@ class SimCoordinationClient:
         self,
         broker_url: str,
         broker_port: int,
-        topic: str,
-        sim_coordination_callback: SimCoordinationCallback,
+        topic: Optional[str] = None,
+        hydros_cluster_id: Optional[str] = None,
+        sim_coordination_callback: Optional[SimCoordinationCallback] = None,
         state_manager: Optional[AgentStateManager] = None,
         qos: int = 1,
         max_retry_count: int = 5,
@@ -114,8 +116,8 @@ class SimCoordinationClient:
             broker_url: MQTT broker URL (e.g., "tcp://192.168.1.24")
             broker_port: MQTT broker port (default: 1883)
             topic: MQTT topic to subscribe to
-            callback: SimCoordinationCallback implementation
-            client_id: Optional MQTT client ID (auto-generated if not provided)
+            hydros_cluster_id: Optional cluster ID used to derive the coordination topic
+            sim_coordination_callback: SimCoordinationCallback implementation
             state_manager: Optional state manager (created if not provided)
             qos: MQTT QoS level (default: 1)
             max_retry_count: Maximum retry count for sending messages (default: 5)
@@ -125,7 +127,14 @@ class SimCoordinationClient:
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
-        self.topic = topic
+        if topic:
+            self.topic = topic
+        elif hydros_cluster_id:
+            self.topic = HydrosTopics.get_coordination_command_topic(hydros_cluster_id)
+        else:
+            raise ValueError("topic 和 hydros_cluster_id 不能同时为空")
+        if sim_coordination_callback is None:
+            raise ValueError("sim_coordination_callback is required")
         self.sim_coordination_callback = sim_coordination_callback
         self.qos = qos
         self.max_retry_count = max_retry_count
@@ -143,7 +152,11 @@ class SimCoordinationClient:
         self.message_filter = MessageFilter(self.state_manager)
 
         # Initialize MQTT client
-        self.mqtt_client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311)
+        self.mqtt_client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=self.client_id,
+            protocol=mqtt.MQTTv311,
+        )
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.on_disconnect = self._on_disconnect
@@ -272,8 +285,9 @@ class SimCoordinationClient:
     # MQTT Callbacks
     # ========================================================================
 
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         """MQTT connection callback. Also handles auto-reconnect re-subscription."""
+        rc = int(reason_code)
         if rc == 0:
             was_connected = self.connected.is_set()
             if was_connected:
@@ -295,8 +309,9 @@ class SimCoordinationClient:
             reason = rc_reasons.get(rc, "unknown")
             logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
-    def _on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
         """MQTT disconnection callback."""
+        rc = int(reason_code)
         self.connected.clear()
         if rc == 0 or self._intentional_disconnect:
             logger.info("Disconnected from MQTT broker (clean)")
