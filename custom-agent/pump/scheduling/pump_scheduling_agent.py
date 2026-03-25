@@ -182,7 +182,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         pump_request = self._build_station_target_value_request(
             step=step,
-            target_agent_code="STATION_AGENT_PUMP",
+            target_agent_code="STATION_AGENT",
             target_command_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
             target_value=-6,
         )
