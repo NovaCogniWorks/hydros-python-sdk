@@ -1,5 +1,7 @@
 import unittest
 
+from paho.mqtt.reasoncodes import ReasonCode
+
 from hydros_agent_sdk import AgentCommandClient, HydrosTopics, SimCoordinationCallback, SimCoordinationClient
 
 
@@ -15,6 +17,47 @@ class DummyCoordinationCallback(SimCoordinationCallback):
 
 
 class HydrosTopicsTest(unittest.TestCase):
+    def test_coordination_client_on_connect_accepts_reason_code_object(self):
+        client = SimCoordinationClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo_cluster",
+            sim_coordination_callback=DummyCoordinationCallback(),
+        )
+
+        subscriptions = []
+        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
+
+        client._on_connect(
+            None,
+            None,
+            None,
+            ReasonCode(packetType=2, aName="Success"),
+        )
+
+        self.assertTrue(client.connected.is_set())
+        self.assertEqual(subscriptions, [("/hydros/commands/coordination/demo_cluster", 1)])
+
+    def test_agent_command_client_on_connect_accepts_reason_code_object(self):
+        client = AgentCommandClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo_cluster",
+        )
+
+        subscriptions = []
+        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
+
+        client._on_connect(
+            None,
+            None,
+            None,
+            ReasonCode(packetType=2, aName="Success"),
+        )
+
+        self.assertTrue(client._connected.is_set())
+        self.assertEqual(subscriptions, [("/hydros/commands/agent/demo_cluster", 1)])
+
     def test_topic_builders_match_java_rules(self):
         self.assertEqual(
             HydrosTopics.get_coordination_command_topic("demo_cluster"),

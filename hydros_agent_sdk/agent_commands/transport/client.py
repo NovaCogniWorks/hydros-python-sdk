@@ -170,7 +170,7 @@ class AgentCommandClient:
         )
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
-        rc = int(reason_code)
+        rc = reason_code.value
         if rc == 0:
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             self._connected.set()
@@ -179,7 +179,7 @@ class AgentCommandClient:
         logger.error("AgentCommandClient 连接 MQTT 失败: rc=%s", rc)
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None) -> None:
-        rc = int(reason_code)
+        rc = reason_code.value
         self._connected.clear()
         if rc == 0 or self._intentional_disconnect:
             logger.info("AgentCommandClient 已断开 MQTT")

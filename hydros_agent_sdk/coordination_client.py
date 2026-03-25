@@ -287,7 +287,7 @@ class SimCoordinationClient:
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         """MQTT connection callback. Also handles auto-reconnect re-subscription."""
-        rc = int(reason_code)
+        rc = reason_code.value
         if rc == 0:
             was_connected = self.connected.is_set()
             if was_connected:
@@ -311,7 +311,7 @@ class SimCoordinationClient:
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
         """MQTT disconnection callback."""
-        rc = int(reason_code)
+        rc = reason_code.value
         self.connected.clear()
         if rc == 0 or self._intentional_disconnect:
             logger.info("Disconnected from MQTT broker (clean)")
