@@ -1,5 +1,5 @@
 """
-Device target value type enum.
+设备目标值类型枚举。
 """
 
 from __future__ import annotations

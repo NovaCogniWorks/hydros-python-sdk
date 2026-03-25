@@ -1,5 +1,5 @@
 """
-Agent command handler abstractions.
+Agent command handler 抽象。
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Minimal command log store abstractions.
+最小化的 command 日志存储抽象。
 """
 
 from __future__ import annotations

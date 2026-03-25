@@ -1,10 +1,10 @@
 """
-Agent command type constants.
+Agent command 类型常量。
 """
 
 
 class AgentCommandTypes:
-    """Collect known command type literals in one place."""
+    """把已知的命令类型字面量统一收口到一个地方。"""
 
     AGTCMD_AGENT_EVENT_REPORT_REQUEST = "agent_event_report_request"
     AGTCMD_AGENT_EVENT_REPORT_RESPONSE = "agent_event_report_response"

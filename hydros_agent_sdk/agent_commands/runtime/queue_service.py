@@ -1,5 +1,5 @@
 """
-Lightweight runtime queue and routing service.
+轻量级 runtime 队列与路由服务。
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class AgentCommandQueueService:
             self._worker_executor = None
 
     def enqueue_received(self, command: AgentCommand) -> None:
-        """Compatibility alias for inbound commands."""
+        """入站命令处理接口的兼容别名。"""
         self.enqueue_incoming(command)
 
     def enqueue_incoming(self, command: AgentCommand) -> None:

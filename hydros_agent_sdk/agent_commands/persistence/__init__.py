@@ -1,5 +1,5 @@
 """
-Agent command persistence layer exports.
+Agent command 持久化层导出。
 """
 
 from .log_repository import AgentCommandLogRepository, SqliteAgentCommandLogRepository, SqliteAgentCommandLogStore

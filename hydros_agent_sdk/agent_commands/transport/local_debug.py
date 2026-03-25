@@ -1,5 +1,5 @@
 """
-Local debug tools for agent command runtime.
+用于 agent command runtime 的本地调试工具。
 """
 
 from __future__ import annotations

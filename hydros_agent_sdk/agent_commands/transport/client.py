@@ -1,5 +1,5 @@
 """
-MQTT transport client for agent commands.
+用于 agent command 的 MQTT 传输客户端。
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Agent command base models and registry.
+Agent command 基础模型与注册表。
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ _COMMAND_MODEL_REGISTRY: Dict[str, Type["AgentCommand"]] = {}
 
 
 class HydroCmd(HydroBaseModel):
-    """The minimal shared fields across all agent commands."""
+    """所有 agent command 共享的最小公共字段。"""
 
     command_id: str
 
 
 class AgentCommand(HydroCmd):
-    """Shared fields for all agent commands."""
+    """所有 agent command 的公共字段。"""
 
     command_type: str
     timestamp_ms: Optional[Any] = None
@@ -52,14 +52,14 @@ class AgentCommand(HydroCmd):
 
 
 class AgentCommandRequest(AgentCommand):
-    """Shared fields for agent command requests."""
+    """agent command 请求的公共字段。"""
 
     need_ack_reply: Optional[bool] = None
     acked: Optional[bool] = None
 
 
 class AgentCommandResponse(AgentCommand):
-    """Shared fields for agent command responses."""
+    """agent command 响应的公共字段。"""
 
     success: bool = False
     error_code: Optional[str] = None
@@ -76,7 +76,7 @@ class AgentCommandResponse(AgentCommand):
 
 
 def register_agent_command(command_model: Type[AgentCommand]) -> Type[AgentCommand]:
-    """Register a concrete command model by its default command_type."""
+    """按默认的 `command_type` 注册具体命令模型。"""
 
     field = command_model.model_fields.get("command_type")
     command_type = None if field is None else field.default
@@ -99,7 +99,7 @@ def get_agent_command_model(command_type: str) -> Type[AgentCommand]:
 
 
 def parse_agent_command(payload: AgentCommand | Dict[str, Any]) -> AgentCommand:
-    """Parse a command payload using the command registry."""
+    """使用命令注册表解析命令载荷。"""
 
     if isinstance(payload, AgentCommand):
         return payload

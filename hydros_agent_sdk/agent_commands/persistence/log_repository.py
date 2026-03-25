@@ -1,5 +1,5 @@
 """
-SQLite-backed command log persistence.
+基于 SQLite 的 command 日志持久化实现。
 """
 
 from __future__ import annotations
@@ -407,7 +407,7 @@ class SqliteAgentCommandLogRepository(AgentCommandLogRepository):
 
 
 class SqliteAgentCommandLogStore(AgentCommandLogStore):
-    """Runtime-facing sqlite log store without the extra service layer."""
+    """直接面向 runtime 的 sqlite 日志存储实现，不再额外包一层 service。"""
 
     def __init__(
         self,

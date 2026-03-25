@@ -1,5 +1,5 @@
 """
-Agent command model layer exports.
+Agent command 模型层导出。
 """
 
 from .base import (

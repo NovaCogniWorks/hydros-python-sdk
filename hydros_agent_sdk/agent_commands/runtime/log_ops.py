@@ -1,5 +1,5 @@
 """
-Unified runtime log operations.
+统一的 runtime 日志操作。
 """
 
 from __future__ import annotations

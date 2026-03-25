@@ -1,5 +1,5 @@
 """
-Concrete agent command models.
+具体的 agent command 模型。
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class HydroTargetWaterLevelResponse(AgentCommandResponse):
 
 
 class AgentCommandEnvelope(HydroBaseModel):
-    """Envelope used for registry-based polymorphic parsing."""
+    """用于基于注册表进行多态解析的包裹模型。"""
 
     command: AgentCommand
 
