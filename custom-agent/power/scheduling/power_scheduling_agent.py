@@ -98,47 +98,55 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         """
         logger.info(f"正在初始化智能体: {self.agent_id}")
 
-        # 1. 加载智能体配置 (从 agent.properties)
-        self.load_agent_configuration(request)
+        try:
+            # 1. 加载智能体配置 (从 agent.properties)
+            self.load_agent_configuration(request)
 
-        # 2. 初始化优化模型 (模拟)
-        self._initialize_optimization_model()
+            # 2. 初始化优化模型 (模拟)
+            self._initialize_optimization_model()
 
-        # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
-        env_config = load_env_config()
-        base_metrics_topic = env_config.get('metrics_topic')
-        if base_metrics_topic:
-            # 手动替换 {hydros_cluster_id} 变量
-            cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
-            base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
-            
-            # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
-            task_id = self.context.biz_scene_instance_id
-            
-            # 拼接完整主题实现任务隔离：base_topic/task_id
-            full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
-            
-            logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
-            self.subscribe_to_field_metrics(full_metrics_topic)
+            # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
+            env_config = load_env_config()
+            base_metrics_topic = env_config.get('metrics_topic')
+            if base_metrics_topic:
+                # 手动替换 {hydros_cluster_id} 变量
+                cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
+                base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
 
-        # 4. 在状态管理器中注册
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
+                # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
+                task_id = self.context.biz_scene_instance_id
 
-        logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
+                # 拼接完整主题实现任务隔离：base_topic/task_id
+                full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
 
-        # 将智能体状态更新为 ACTIVE (活动)
-        object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+                logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
+                self.subscribe_to_field_metrics(full_metrics_topic)
 
-        return SimTaskInitResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            created_agent_instances=[self],
-            managed_top_objects={},
-            broadcast=False
-        )
+            # 4. 在状态管理器中注册
+            self.state_manager.init_task(self.context, [self])
+            self.state_manager.add_local_agent(self)
+
+            # 5. 启动 agent command 客户端，后面就能直接发指令
+            self._start_agent_command_client()
+
+            logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
+
+            # 将智能体状态更新为 ACTIVE (活动)
+            object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+
+            return SimTaskInitResponse(
+                context=self.context,
+                command_id=request.command_id,
+                command_status=CommandStatus.SUCCEED,
+                source_agent_instance=self,
+                created_agent_instances=[self],
+                managed_top_objects={},
+                broadcast=False
+            )
+        except Exception:
+            # 初始化失败就把客户端收掉，别把半拉资源留住
+            self._shutdown_agent_command_client()
+            raise
 
     def _initialize_optimization_model(self):
         """
@@ -263,6 +271,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
         # 清理资源
+        self._shutdown_agent_command_client()
         self._optimization_model = None
         
         # 从状态管理器中注销

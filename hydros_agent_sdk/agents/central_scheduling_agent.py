@@ -9,6 +9,8 @@ import logging
 from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
+from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
@@ -38,7 +40,7 @@ class CentralSchedulingAgent(TickableAgent):
     2. 通过 MQTT 订阅接收来自现地设备的实时指标
     3. 处理边界条件更新
     4. 执行 MPC 优化
-    5. 发送智能体间的控制指令（未来实现）
+    5. 通过 agent command 客户端发送智能体间控制指令
 
     核心特性：
     - 滚动时界优化 (MPC)
@@ -131,6 +133,10 @@ class CentralSchedulingAgent(TickableAgent):
         # 用于现地指标的 MQTT 订阅主题
         self._metrics_subscription_topic = None
 
+        # 需要发 agent command 的话，就在这里懒加载客户端
+        self._agent_command_client: Optional[AgentCommandClient] = None
+        self._agent_command_client_started = False
+
         logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
         logger.info(f"Optimization horizon: {self._optimization_horizon} ticks")
 
@@ -154,6 +160,35 @@ class CentralSchedulingAgent(TickableAgent):
             任务初始化响应
         """
         pass
+
+    def send_command(self, command: AgentCommand) -> None:
+        """把 agent command 交给专用客户端发送，客户端会按需懒加载。"""
+        self._start_agent_command_client()
+        self._get_or_create_agent_command_client().send_command(command)
+
+    def _get_or_create_agent_command_client(self) -> AgentCommandClient:
+        if self._agent_command_client is None:
+            self._agent_command_client = AgentCommandClient(
+                broker_url=self.sim_coordination_client.broker_url,
+                broker_port=self.sim_coordination_client.broker_port,
+                hydros_cluster_id=self.hydros_cluster_id,
+                state_manager=self.state_manager,
+            )
+        return self._agent_command_client
+
+    def _start_agent_command_client(self) -> None:
+        if self._agent_command_client_started:
+            return
+        self._get_or_create_agent_command_client().start()
+        self._agent_command_client_started = True
+
+    def _shutdown_agent_command_client(self) -> None:
+        if self._agent_command_client is None:
+            return
+        if not self._agent_command_client_started:
+            return
+        self._agent_command_client.stop()
+        self._agent_command_client_started = False
 
     def subscribe_to_field_metrics(self, metrics_topic: str):
         """

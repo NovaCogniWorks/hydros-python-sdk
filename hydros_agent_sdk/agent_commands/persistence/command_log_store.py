@@ -15,7 +15,7 @@ from typing import List, Optional, Sequence
 from hydros_agent_sdk.protocol.models import CommandStatus
 
 
-DEFAULT_AGENT_COMMAND_DB_PATH = "data/agent_command.db"
+DEFAULT_AGENT_COMMAND_DB_PATH = "data/agent_data.db"
 
 
 def _utc_now() -> datetime:

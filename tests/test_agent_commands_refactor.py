@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from hydros_agent_sdk.agent_commands import (
     AgentCommandClient,
@@ -14,9 +14,17 @@ from hydros_agent_sdk.agent_commands import (
     HydroDirectGateOpeningResponse,
 )
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
+from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.protocol.commands import (
+    SimTaskInitRequest,
+    SimTaskInitResponse,
+    SimTaskTerminateRequest,
+    SimTaskTerminateResponse,
+)
 from hydros_agent_sdk.protocol.models import (
     AgentBizStatus,
     AgentDriveMode,
+    HydroAgent,
     CommandStatus,
     HydroAgentInstance,
     SimulationContext,
@@ -54,6 +62,37 @@ class DirectGateHandler(AgentCommandHandler[HydroDirectGateOpeningRequest, Hydro
             command_status=CommandStatus.SUCCEED,
             success=True,
             final_gate_opening=request.gate_opening,
+        )
+
+
+class TestCentralSchedulingAgent(CentralSchedulingAgent):
+    def load_agent_configuration(self, request):
+        # 测试里不走外部配置，直接给一个空 properties 就够了。
+        return None
+
+    def on_init(self, request: SimTaskInitRequest):
+        self._start_agent_command_client()
+        return SimTaskInitResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            created_agent_instances=[self],
+            managed_top_objects={},
+            broadcast=False,
+        )
+
+    def on_optimization(self, step: int):
+        return None
+
+    def on_terminate(self, request: SimTaskTerminateRequest):
+        self._shutdown_agent_command_client()
+        return SimTaskTerminateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False,
         )
 
 
@@ -138,13 +177,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertIsNone(client._runtime)
-        self.assertFalse(os.path.exists(os.path.join("data", "agent_command.db")))
+        self.assertFalse(os.path.exists(os.path.join("data", "agent_data.db")))
 
         runtime = client.runtime
 
         self.assertIsNotNone(runtime)
         self.assertIsNotNone(client._runtime)
-        self.assertTrue(os.path.exists(os.path.join("data", "agent_command.db")))
+        self.assertTrue(os.path.exists(os.path.join("data", "agent_data.db")))
 
     def test_runtime_can_restart_after_stop(self):
         state_manager = AgentStateManager()
@@ -181,13 +220,67 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         runtime.start()
         send_and_wait("cmd-003a", 0.12)
         runtime.stop()
-        self.assertTrue(os.path.exists(os.path.join("data", "agent_command.db")))
+        self.assertTrue(os.path.exists(os.path.join("data", "agent_data.db")))
 
         runtime.start()
         send_and_wait("cmd-003b", 0.24)
         runtime.stop()
 
         self.assertEqual(sent_commands, [])
+
+    def test_central_scheduling_agent_starts_agent_command_client(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-004")
+        agent = TestCentralSchedulingAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-004",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        request = SimTaskInitRequest(
+            command_id="init-004",
+            context=context,
+            agent_list=[
+                HydroAgent(
+                    agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+                    agent_type="CENTRAL_SCHEDULING_AGENT",
+                    agent_name="中央调度智能体",
+                )
+            ],
+        )
+
+        with patch("hydros_agent_sdk.agents.central_scheduling_agent.AgentCommandClient") as mock_client_cls:
+            mock_client = Mock()
+            mock_client_cls.return_value = mock_client
+
+            agent.on_init(request)
+            agent.send_command(Mock())
+            agent.on_terminate(SimTaskTerminateRequest(command_id="term-004", context=context))
+
+            mock_client_cls.assert_called_once_with(
+                broker_url="127.0.0.1",
+                broker_port=1883,
+                hydros_cluster_id="demo-cluster",
+                state_manager=state_manager,
+            )
+            mock_client.start.assert_called_once()
+            mock_client.send_command.assert_called_once()
+            mock_client.stop.assert_called_once()
 
 
 if __name__ == "__main__":
