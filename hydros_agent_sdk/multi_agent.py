@@ -216,6 +216,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         # Remove agents from tracking
         del self.agents[context_id]
+        super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):

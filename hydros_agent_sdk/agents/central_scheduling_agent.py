@@ -6,10 +6,11 @@
 """
 
 import logging
+import uuid
 from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.agent_commands.models import AgentCommand, DeviceValueTypeEnum, HydroStationTargetValueRequest
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -25,6 +26,7 @@ from hydros_agent_sdk.protocol.models import (
     CommandStatus,
     AgentBizStatus,
     AgentDriveMode,
+    HydroAgentInstance,
     ObjectTimeSeries,
 )
 
@@ -165,6 +167,56 @@ class CentralSchedulingAgent(TickableAgent):
         """把 agent command 交给专用客户端发送，客户端会按需懒加载。"""
         self._start_agent_command_client()
         self._get_or_create_agent_command_client().send_command(command)
+
+    def get_sibling_agent_instance(self, agent_code: str) -> Optional[HydroAgentInstance]:
+        """按 agent_code 找兄弟智能体。"""
+        callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
+        if callback is None:
+            return None
+
+        getter = getattr(callback, "get_sibling_agent_instance", None)
+        if getter is None:
+            return None
+
+        biz_scene_instance_id = self.context.biz_scene_instance_id if self.context else None
+        return getter(agent_code=agent_code, biz_scene_instance_id=biz_scene_instance_id)
+
+    def _build_station_target_value_request(
+        self,
+        step: int,
+        target_agent_code: str,
+        target_command_type: str,
+        target_value: Any,
+        object_id: Optional[int] = None,
+        object_type: Optional[str] = None,
+    ) -> Optional[HydroStationTargetValueRequest]:
+        """把内部控制指令转成站点目标值请求。"""
+        target_agent = self.get_sibling_agent_instance(target_agent_code)
+        if target_agent is None:
+            logger.warning(f"未找到兄弟智能体: {target_agent_code}")
+            return None
+
+        try:
+            value_type = DeviceValueTypeEnum.from_code(target_command_type)
+        except ValueError:
+            logger.warning(f"不支持的目标值类型: {target_command_type}")
+            return None
+
+        if target_value is None:
+            logger.warning(f"控制指令缺少有效目标值: target={target_agent_code}, type={target_command_type}")
+            return None
+
+        return HydroStationTargetValueRequest(
+            command_id=f"{self.agent_id}_{step}_{target_agent_code}_{uuid.uuid4().hex[:8]}",
+            context=self.context,
+            source=self,
+            target=target_agent,
+            object_id=object_id,
+            object_type=object_type or target_agent.agent_type,
+            target_value_type=value_type.code,
+            target_value=target_value,
+            need_ack_reply=True,
+        )
 
     def _get_or_create_agent_command_client(self) -> AgentCommandClient:
         if self._agent_command_client is None:

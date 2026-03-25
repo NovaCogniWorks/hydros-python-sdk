@@ -23,7 +23,7 @@ from hydros_agent_sdk import (
     load_env_config,
     load_agent_config,
     ErrorCodes,
-    handle_agent_errors,
+    handle_agent_errors, DeviceValueTypeEnum,
 )
 from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
@@ -177,22 +177,28 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 2. 调用优化算法（模拟运行）
         logger.info("求解器正在运行中...")
         
-        # 3. 生成控制决策
-        control_commands = [
-            {
-                "target_agent": "PUMP_AGENT_001",
-                "command_type": "set_pump_speed",
-                "parameters": {"speed": 85.5, "duration": 3600}
-            },
-            {
-                "target_agent": "GATE_AGENT_002",
-                "command_type": "set_gate_opening",
-                "parameters": {"opening": 1.2}
-            }
-        ]
+        # 3. 直接下发控制指令
+        logger.info("优化完成，开始下发控制指令")
 
-        logger.info(f"优化完成，生成了 {len(control_commands)} 条控制指令")
-        return control_commands
+        pump_request = self._build_station_target_value_request(
+            step=step,
+            target_agent_code="PUMP_AGENT_001",
+            target_command_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
+            target_value=85.5,
+        )
+        if pump_request is not None:
+            self.send_command(pump_request)
+
+        gate_request = self._build_station_target_value_request(
+            step=step,
+            target_agent_code="GATE_AGENT_002",
+            target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
+            target_value=1.2,
+        )
+        if gate_request is not None:
+            self.send_command(gate_request)
+
+        return None
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:

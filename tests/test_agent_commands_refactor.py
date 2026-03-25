@@ -13,8 +13,10 @@ from hydros_agent_sdk.agent_commands import (
     HydroDirectGateOpeningRequest,
     HydroDirectGateOpeningResponse,
 )
+from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -94,6 +96,20 @@ class TestCentralSchedulingAgent(CentralSchedulingAgent):
             source_agent_instance=self,
             broadcast=False,
         )
+
+
+class TestSiblingCacheCallback(SimCoordinationCallback):
+    def get_component(self) -> str:
+        return "TEST_CALLBACK"
+
+    def on_sim_task_init(self, request: SimTaskInitRequest):
+        return None
+
+    def on_tick(self, request):
+        return None
+
+    def is_remote_agent(self, agent_instance) -> bool:
+        return True
 
 
 class AgentCommandsRefactorTest(unittest.TestCase):
@@ -281,6 +297,93 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             mock_client.start.assert_called_once()
             mock_client.send_command.assert_called_once()
             mock_client.stop.assert_called_once()
+
+    def test_central_scheduling_agent_builds_station_target_value_request(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-006")
+        agent = TestCentralSchedulingAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-006",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        target = build_agent_instance("target-006", "PUMP_AGENT_001", "node-b", context)
+
+        with patch.object(agent, "get_sibling_agent_instance", return_value=target):
+            request = agent._build_station_target_value_request(
+                step=12,
+                target_agent_code="PUMP_AGENT_001",
+                target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
+                target_value=1.25,
+            )
+
+        self.assertIsNotNone(request)
+        self.assertEqual(request.target.agent_code, "PUMP_AGENT_001")
+        self.assertEqual(request.target_value_type, DeviceValueTypeEnum.GATE_OPENING.code)
+        self.assertEqual(request.target_value, 1.25)
+
+    def test_sibling_agent_cache_is_available_to_central_scheduling_agent(self):
+        callback = TestSiblingCacheCallback()
+
+        context = SimulationContext(biz_scene_instance_id="scene-005")
+        sibling = build_agent_instance("agent-005", "SOURCE_AGENT", "node-a", context)
+        response = SimTaskInitResponse(
+            command_id="init-005",
+            context=context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=sibling,
+            created_agent_instances=[sibling],
+            managed_top_objects={},
+        )
+
+        callback.on_agent_instance_sibling_created(response)
+        self.assertIsNone(callback.get_sibling_agent_instance("agent-005"))
+        self.assertIs(callback.get_sibling_agent_instance("SOURCE_AGENT"), sibling)
+        self.assertIsNone(callback.get_sibling_agent_instance("agent-005", biz_scene_instance_id="other-scene"))
+
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+            sim_coordination_callback=callback,
+        )
+
+        agent = TestCentralSchedulingAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-006",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+
+        self.assertIs(agent.get_sibling_agent_instance("SOURCE_AGENT"), sibling)
+
+        terminate_request = SimTaskTerminateRequest(command_id="term-005", context=context)
+        callback.on_task_terminate(terminate_request)
+        self.assertIsNone(callback.get_sibling_agent_instance("agent-005"))
 
 
 if __name__ == "__main__":
