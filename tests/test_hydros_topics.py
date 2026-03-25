@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 from paho.mqtt.reasoncodes import ReasonCode
@@ -17,6 +19,15 @@ class DummyCoordinationCallback(SimCoordinationCallback):
 
 
 class HydrosTopicsTest(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._cwd = os.getcwd()
+        os.chdir(self._temp_dir.name)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._temp_dir.cleanup()
+
     def test_coordination_client_on_connect_accepts_reason_code_object(self):
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",

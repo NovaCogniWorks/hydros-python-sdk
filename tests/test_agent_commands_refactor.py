@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -10,8 +12,8 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandRuntime,
     HydroDirectGateOpeningRequest,
     HydroDirectGateOpeningResponse,
-    wait_command_completed,
 )
+from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.protocol.models import (
     AgentBizStatus,
     AgentDriveMode,
@@ -56,6 +58,15 @@ class DirectGateHandler(AgentCommandHandler[HydroDirectGateOpeningRequest, Hydro
 
 
 class AgentCommandsRefactorTest(unittest.TestCase):
+    def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._cwd = os.getcwd()
+        os.chdir(self._temp_dir.name)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._temp_dir.cleanup()
+
     def test_agent_command_envelope_uses_registry_parser(self):
         context = SimulationContext(biz_scene_instance_id="scene-001")
         source = build_agent_instance("source-001", "SOURCE_AGENT", "node-a", context)
@@ -119,6 +130,22 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         client.runtime.start.assert_not_called()
         self.assertTrue(client._intentional_disconnect)
 
+    def test_client_lazy_builds_runtime(self):
+        client = AgentCommandClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo-cluster",
+        )
+
+        self.assertIsNone(client._runtime)
+        self.assertFalse(os.path.exists(os.path.join("data", "agent_command.db")))
+
+        runtime = client.runtime
+
+        self.assertIsNotNone(runtime)
+        self.assertIsNotNone(client._runtime)
+        self.assertTrue(os.path.exists(os.path.join("data", "agent_command.db")))
+
     def test_runtime_can_restart_after_stop(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
@@ -154,6 +181,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         runtime.start()
         send_and_wait("cmd-003a", 0.12)
         runtime.stop()
+        self.assertTrue(os.path.exists(os.path.join("data", "agent_command.db")))
 
         runtime.start()
         send_and_wait("cmd-003b", 0.24)

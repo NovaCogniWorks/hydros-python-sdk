@@ -1,5 +1,5 @@
 """
-用于 agent command runtime 的本地调试工具。
+Agent command runtime 的本地调试和测试辅助工具。
 """
 
 from __future__ import annotations
@@ -8,7 +8,8 @@ import logging
 import time
 from typing import Dict
 
-from hydros_agent_sdk.agent_commands.runtime import AgentCommandHandler, AgentCommandRuntime
+from hydros_agent_sdk.agent_commands.runtime.handlers import AgentCommandHandler
+from hydros_agent_sdk.agent_commands.runtime.runtime import AgentCommandRuntime
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,6 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.topics import HydrosTopics
 
 from hydros_agent_sdk.agent_commands.models import AgentCommand, AgentCommandEnvelope
-from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogStore
 from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
 
 logger = logging.getLogger(__name__)
@@ -38,10 +37,6 @@ class AgentCommandClient:
         base_retry_delay_ms: int = 1000,
         mqtt_username: Optional[str] = None,
         mqtt_password: Optional[str] = None,
-        handler_registry=None,
-        log_store: Optional[AgentCommandLogStore] = None,
-        sqlite_log_db_path: Optional[str] = None,
-        use_sqlite_log_store: bool = False,
         pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
         pending_retry_delay_ms: int = 50,
         max_workers: int = 8,
@@ -62,6 +57,10 @@ class AgentCommandClient:
         if state_manager is None:
             state_manager = AgentStateManager()
         self.state_manager = state_manager
+        self._pending_command_predicate = pending_command_predicate
+        self._pending_retry_delay_ms = pending_retry_delay_ms
+        self._max_workers = max_workers
+        self._runtime: Optional[AgentCommandRuntime] = None
 
         self.mqtt_client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -75,18 +74,6 @@ class AgentCommandClient:
 
         if mqtt_username:
             self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
-
-        self.runtime = AgentCommandRuntime(
-            state_manager=self.state_manager,
-            sender=self._send_with_retry,
-            handler_registry=handler_registry,
-            log_store=log_store,
-            sqlite_log_db_path=sqlite_log_db_path,
-            use_sqlite_log_store=use_sqlite_log_store,
-            pending_command_predicate=pending_command_predicate,
-            pending_retry_delay_ms=pending_retry_delay_ms,
-            max_workers=max_workers,
-        )
 
         self._connected = Event()
         self._intentional_disconnect = False
@@ -109,7 +96,8 @@ class AgentCommandClient:
             raise
 
     def stop(self) -> None:
-        self.runtime.stop()
+        if self._runtime is not None:
+            self._runtime.stop()
         self._intentional_disconnect = True
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
@@ -169,6 +157,10 @@ class AgentCommandClient:
             incomplete_statuses=incomplete_statuses,
         )
 
+    @property
+    def runtime(self) -> AgentCommandRuntime:
+        return self._get_runtime()
+
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         rc = reason_code.value
         if rc == 0:
@@ -217,3 +209,16 @@ class AgentCommandClient:
                 if attempt > self.max_retry_count:
                     raise
                 time.sleep((self.base_retry_delay_ms * (2 ** attempt)) / 1000.0)
+
+    def _get_runtime(self) -> AgentCommandRuntime:
+        if self._runtime is None:
+            self._runtime = AgentCommandRuntime(
+                state_manager=self.state_manager,
+                sender=self._send_with_retry,
+                pending_command_predicate=self._pending_command_predicate,
+                pending_retry_delay_ms=self._pending_retry_delay_ms,
+                max_workers=self._max_workers,
+            )
+            return self._runtime
+
+        return self._runtime

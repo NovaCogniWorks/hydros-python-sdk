@@ -12,7 +12,7 @@ from typing import Callable, Dict, List, Sequence
 from hydros_agent_sdk.protocol.models import CommandStatus
 
 from hydros_agent_sdk.agent_commands.models import AgentCommandRequest, parse_agent_command
-from hydros_agent_sdk.agent_commands.persistence.log_store import AgentCommandLogEntry, AgentCommandLogStore
+from hydros_agent_sdk.agent_commands.persistence.command_log_store import AgentCommandLogEntry, AgentCommandLogStore
 
 
 @dataclass
@@ -66,8 +66,11 @@ class AgentCommandLogOperations:
 
     def find_unreported_command_logs(self, limit: int = 100) -> List[AgentCommandLogEntry]:
         current_source_id = self._get_current_source_id()
-        entries = self.log_store.find_command_logs_by_reported(False, limit=limit)
-        return [entry for entry in entries if entry.source_id == current_source_id]
+        return self.log_store.find_command_logs_by_reported(
+            False,
+            source_id=current_source_id,
+            limit=limit,
+        )
 
     def report_once(
         self,

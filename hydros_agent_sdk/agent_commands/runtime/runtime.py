@@ -10,11 +10,7 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.state_manager import AgentStateManager
 
 from hydros_agent_sdk.agent_commands.models import AgentCommand
-from hydros_agent_sdk.agent_commands.persistence import (
-    AgentCommandLogStore,
-    InMemoryAgentCommandLogStore,
-    SqliteAgentCommandLogStore,
-)
+from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogStore, SqliteAgentCommandLogStore
 
 from .log_ops import AgentCommandLogOperations
 from .queue_service import AgentCommandQueueService
@@ -30,8 +26,6 @@ class AgentCommandRuntime:
         sender: Callable[[AgentCommand], None],
         handler_registry: Optional[AgentCommandHandlerRegistry] = None,
         log_store: Optional[AgentCommandLogStore] = None,
-        sqlite_log_db_path: Optional[str] = None,
-        use_sqlite_log_store: bool = False,
         pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
         pending_retry_delay_ms: int = 50,
         max_workers: int = 8,
@@ -39,10 +33,9 @@ class AgentCommandRuntime:
         self.state_manager = state_manager
         self.handler_registry = handler_registry or AgentCommandHandlerRegistry()
         self._owns_log_store = log_store is None
+        self._log_store_closed = False
         self.log_store = self._build_log_store(
             log_store=log_store,
-            sqlite_log_db_path=sqlite_log_db_path,
-            use_sqlite_log_store=use_sqlite_log_store,
         )
         self.log_ops = AgentCommandLogOperations(
             log_store=self.log_store,
@@ -50,7 +43,7 @@ class AgentCommandRuntime:
         )
         self.queue_service = AgentCommandQueueService(
             handler_registry=self.handler_registry,
-            log_store=self.log_store,
+            command_log_store=self.log_store,
             state_manager=self.state_manager,
             sender=sender,
             pending_command_predicate=pending_command_predicate,
@@ -59,12 +52,21 @@ class AgentCommandRuntime:
         )
 
     def start(self) -> None:
+        if self._owns_log_store and self._log_store_closed:
+            self.log_store = self._build_log_store(
+                log_store=None,
+            )
+            self.log_ops.log_store = self.log_store
+            self.queue_service.command_log_store = self.log_store
+            self.queue_service.execution_service.command_log_store = self.log_store
+            self._log_store_closed = False
         self.queue_service.start()
 
     def stop(self) -> None:
         self.queue_service.stop()
         if self._owns_log_store:
             self.log_store.close()
+            self._log_store_closed = True
 
     def handle_incoming_command(self, command: AgentCommand) -> None:
         self.queue_service.enqueue_incoming(command)
@@ -133,13 +135,8 @@ class AgentCommandRuntime:
     @staticmethod
     def _build_log_store(
         log_store: Optional[AgentCommandLogStore],
-        sqlite_log_db_path: Optional[str],
-        use_sqlite_log_store: bool,
     ) -> AgentCommandLogStore:
         if log_store is not None:
             return log_store
 
-        if use_sqlite_log_store or sqlite_log_db_path is not None:
-            return SqliteAgentCommandLogStore(db_path=sqlite_log_db_path or ":memory:")
-
-        return InMemoryAgentCommandLogStore()
+        return SqliteAgentCommandLogStore()
