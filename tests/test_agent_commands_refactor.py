@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from hydros_agent_sdk import HydroObjectType, generate_agent_command_id
 from hydros_agent_sdk.agent_commands import (
     AgentCommandClient,
     AgentCommandEnvelope,
@@ -26,6 +27,7 @@ from hydros_agent_sdk.protocol.commands import (
 from hydros_agent_sdk.protocol.models import (
     AgentBizStatus,
     AgentDriveMode,
+    BizScenario,
     HydroAgent,
     CommandStatus,
     HydroAgentInstance,
@@ -201,6 +203,43 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIsNotNone(client._runtime)
         self.assertTrue(os.path.exists(os.path.join("data", "agent_data.db")))
 
+    def test_runtime_serializes_biz_scenario_id_as_string(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        context = SimulationContext(
+            biz_scene_instance_id="scene-010",
+            biz_scenario=BizScenario(
+                biz_scenario_id="biz-scenario-010",
+                biz_scenario_name="Demo Scenario",
+            ),
+        )
+        source = build_agent_instance("source-010", "SOURCE_AGENT", "node-a", context)
+        target = build_agent_instance("target-010", "TARGET_AGENT", "node-a", context)
+        state_manager.add_local_agent(source)
+        state_manager.add_local_agent(target)
+
+        runtime = AgentCommandRuntime(
+            state_manager=state_manager,
+            sender=lambda command: None,
+            max_workers=1,
+        )
+
+        runtime.send_command(
+            HydroDirectGateOpeningRequest(
+                command_id="cmd-010",
+                source=source,
+                target=target,
+                gate_opening=0.42,
+            )
+        )
+
+        entry = runtime.log_store.find_command_log_by_request_id("cmd-010", "node-a")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.biz_scenario_id, "biz-scenario-010")
+        self.assertIsInstance(entry.biz_scenario_id, str)
+
     def test_runtime_can_restart_after_stop(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
@@ -330,12 +369,27 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 target_agent_code="PUMP_AGENT_001",
                 target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
                 target_value=1.25,
+                object_id=1023,
+                object_type=HydroObjectType.PUMP,
             )
 
         self.assertIsNotNone(request)
         self.assertEqual(request.target.agent_code, "PUMP_AGENT_001")
         self.assertEqual(request.target_value_type, DeviceValueTypeEnum.GATE_OPENING.code)
         self.assertEqual(request.target_value, 1.25)
+
+    def test_central_scheduling_agent_generates_java_style_command_id(self):
+        with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \
+             patch("hydros_agent_sdk.utils.id_generator.choice", return_value="A"):
+            mock_now = Mock()
+            mock_now.strftime.return_value = "202601011230"
+            mock_datetime.now.return_value = mock_now
+
+            command_id = generate_agent_command_id()
+
+        self.assertEqual(command_id, "AGTCMD202601011230AAAAAAAAAAAA")
+        self.assertTrue(command_id.startswith("AGTCMD"))
+        self.assertEqual(len(command_id), 30)
 
     def test_sibling_agent_cache_is_available_to_central_scheduling_agent(self):
         callback = TestSiblingCacheCallback()

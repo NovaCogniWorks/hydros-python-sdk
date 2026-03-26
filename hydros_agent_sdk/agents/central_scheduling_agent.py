@@ -6,12 +6,12 @@
 """
 
 import logging
-import uuid
 from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
 from hydros_agent_sdk.agent_commands.models import AgentCommand, DeviceValueTypeEnum, HydroStationTargetValueRequest
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
+from hydros_agent_sdk.utils import generate_agent_command_id
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
@@ -187,8 +187,8 @@ class CentralSchedulingAgent(TickableAgent):
         target_agent_code: str,
         target_command_type: str,
         target_value: Any,
-        object_id: Optional[int] = None,
-        object_type: Optional[str] = None,
+        object_id: int,
+        object_type: str,
     ) -> Optional[HydroStationTargetValueRequest]:
         """把内部控制指令转成站点目标值请求。"""
         target_agent = self.get_sibling_agent_instance(target_agent_code)
@@ -207,12 +207,12 @@ class CentralSchedulingAgent(TickableAgent):
             return None
 
         return HydroStationTargetValueRequest(
-            command_id=f"{self.agent_id}_{step}_{target_agent_code}_{uuid.uuid4().hex[:8]}",
+            command_id=generate_agent_command_id(),
             context=self.context,
             source=self,
             target=target_agent,
             object_id=object_id,
-            object_type=object_type or target_agent.agent_type,
+            object_type=object_type,
             target_value_type=value_type.code,
             target_value=target_value,
             need_ack_reply=True,

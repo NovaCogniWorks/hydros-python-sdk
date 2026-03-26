@@ -23,7 +23,7 @@ from hydros_agent_sdk import (
     load_env_config,
     load_agent_config,
     ErrorCodes,
-    handle_agent_errors, DeviceValueTypeEnum,
+    handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
 )
 from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
@@ -67,7 +67,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 5,
+        optimization_horizon: int = 10,
         **kwargs
     ):
         """
@@ -185,6 +185,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             target_agent_code="STATION_AGENT",
             target_command_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
             target_value=-6,
+            object_id=1021,
+            object_type=HydroObjectType.PUMP,
         )
         if pump_request is not None:
             self.send_command(pump_request)

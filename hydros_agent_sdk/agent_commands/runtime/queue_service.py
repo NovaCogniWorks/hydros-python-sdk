@@ -179,6 +179,8 @@ class AgentCommandQueueService:
         return AgentCommandLogEntry(
             command_id=command.command_id,
             source_id=source_id,
+            tenant_id=str(command.context.tenant.tenant_id),
+            biz_scenario_id=str(command.context.biz_scenario.biz_scenario_id),
             biz_scene_instance_id=command.context.biz_scene_instance_id,
             command_type=command.command_type,
             command_request=command.model_dump_json(by_alias=True),
