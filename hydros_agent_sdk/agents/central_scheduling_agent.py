@@ -121,21 +121,21 @@ class CentralSchedulingAgent(TickableAgent):
             **kwargs
         )
 
-        # MPC 配置
+        # MPC 相关配置
         self._optimization_horizon = optimization_horizon
         self._last_optimization_step = 0
 
-        # 优化模型
+        # 优化模型与拓扑
         self._optimization_model = None
         self._topology = None
 
-        # 实时指标缓存（来自现地设备）
+        # 现地设备实时指标缓存
         self._field_metrics_cache: Dict[str, Any] = {}
 
-        # 用于现地指标的 MQTT 订阅主题
+        # 现地指标订阅主题
         self._metrics_subscription_topic = None
 
-        # 需要发 agent command 的话，就在这里懒加载客户端
+        # agent command 客户端按需懒加载
         self._agent_command_client: Optional[AgentCommandClient] = None
         self._agent_command_client_started = False
 
@@ -164,12 +164,12 @@ class CentralSchedulingAgent(TickableAgent):
         pass
 
     def send_command(self, command: AgentCommand) -> None:
-        """把 agent command 交给专用客户端发送，客户端会按需懒加载。"""
+        """将 agent command 交给专用客户端发送，客户端按需懒加载。"""
         self._start_agent_command_client()
         self._get_or_create_agent_command_client().send_command(command)
 
     def get_sibling_agent_instance(self, agent_code: str) -> Optional[HydroAgentInstance]:
-        """按 agent_code 找兄弟智能体。"""
+        """按 agent_code 查找同任务下的兄弟智能体。"""
         callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
         if callback is None:
             return None
@@ -183,14 +183,13 @@ class CentralSchedulingAgent(TickableAgent):
 
     def _build_station_target_value_request(
         self,
-        step: int,
         target_agent_code: str,
         target_command_type: str,
         target_value: Any,
         object_id: int,
         object_type: str,
     ) -> Optional[HydroStationTargetValueRequest]:
-        """把内部控制指令转成站点目标值请求。"""
+        """把内部控制指令转换成站点目标值请求。"""
         target_agent = self.get_sibling_agent_instance(target_agent_code)
         if target_agent is None:
             logger.warning(f"未找到兄弟智能体: {target_agent_code}")
@@ -255,7 +254,7 @@ class CentralSchedulingAgent(TickableAgent):
 
         self._metrics_subscription_topic = metrics_topic
 
-        # 使用 paho-mqtt 正确的方式将特定主题路由到回调
+        # 用 paho-mqtt 的主题级回调把消息路由到现地指标处理函数
         self.sim_coordination_client.mqtt_client.message_callback_add(
             metrics_topic,
             lambda client, userdata, msg: self._on_field_metrics_received_wrapper(msg)
@@ -265,7 +264,7 @@ class CentralSchedulingAgent(TickableAgent):
         logger.info(f"Subscribed to field metrics: {metrics_topic}")
 
     def _on_field_metrics_received_wrapper(self, msg):
-        """在调用业务逻辑回调之前解析 MQTT 消息负载的包装器。"""
+        """先解析 MQTT 消息负载，再进入业务逻辑处理。"""
         try:
             import json
             payload = json.loads(msg.payload.decode("utf-8"))
@@ -287,7 +286,7 @@ class CentralSchedulingAgent(TickableAgent):
         logger.debug(f"Received field metrics from topic: {topic}")
 
         try:
-            # 提取指标信息
+            # 解析指标字段
             object_id = payload.get('object_id')
             metrics_code = payload.get('metrics_code')
             value = payload.get('value')
@@ -309,13 +308,13 @@ class CentralSchedulingAgent(TickableAgent):
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        执行中央调度步骤。
+        执行中央调度步进。
 
         参数:
             request: 步进指令请求
 
         返回:
-            要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
+            需要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
         """
         logger.info(f"Central scheduling step {request.step}")
 
@@ -391,8 +390,7 @@ class CentralSchedulingAgent(TickableAgent):
                 f"type={command_type}, params={parameters}"
             )
 
-            # TODO: 实现智能体间指令发送
-            # 这将在未来版本中实现
+            # TODO：后续补齐真正的智能体间指令发送实现
 
     def get_field_metrics_value(
         self,
@@ -434,7 +432,7 @@ class CentralSchedulingAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO: 更新优化模型约束
+            # TODO：更新优化模型约束
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:

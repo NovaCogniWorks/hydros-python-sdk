@@ -181,7 +181,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info("优化完成，开始下发控制指令")
 
         pump_request = self._build_station_target_value_request(
-            step=step,
             target_agent_code="STATION_AGENT",
             target_command_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
             target_value=-6,

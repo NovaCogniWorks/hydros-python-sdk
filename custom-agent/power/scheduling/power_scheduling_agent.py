@@ -181,7 +181,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info("优化完成，开始下发控制指令")
 
         pump_request = self._build_station_target_value_request(
-            step=step,
             target_agent_code="PUMP_AGENT_001",
             target_command_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
             target_value=85.5,
@@ -192,7 +191,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.send_command(pump_request)
 
         gate_request = self._build_station_target_value_request(
-            step=step,
             target_agent_code="GATE_AGENT_002",
             target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
             target_value=1.2,

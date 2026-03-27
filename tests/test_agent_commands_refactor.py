@@ -365,7 +365,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         with patch.object(agent, "get_sibling_agent_instance", return_value=target):
             request = agent._build_station_target_value_request(
-                step=12,
                 target_agent_code="PUMP_AGENT_001",
                 target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
                 target_value=1.25,

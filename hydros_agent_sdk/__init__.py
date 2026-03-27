@@ -100,6 +100,14 @@ from hydros_agent_sdk.error_handling import (
     AgentErrorContext,
     validate_request,
 )
+from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.protocol.system_commands import (
+    HydroCommandLogReportRequest,
+    SystemCmd,
+    SystemCommand,
+    SystemCommandRequest,
+    SystemCommandResponse,
+)
 from hydros_agent_sdk.agent_commands import (
     HydroCmd as AgentHydroCmd,
     AgentCommand,
@@ -132,6 +140,7 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandQueueService,
     AgentCommandRuntime,
     AgentCommandClient,
+    HydroCommandLogReportScheduler,
 )
 
 __version__ = "0.1.3"
@@ -189,6 +198,14 @@ __all__ = [
     "AgentErrorContext",
     "validate_request",
 
+    # System commands
+    "SystemCmd",
+    "SystemCommand",
+    "SystemCommandRequest",
+    "SystemCommandResponse",
+    "CommandLogDTO",
+    "HydroCommandLogReportRequest",
+
     # Agent command runtime
     "AgentHydroCmd",
     "AgentCommand",
@@ -221,6 +238,7 @@ __all__ = [
     "AgentCommandQueueService",
     "AgentCommandRuntime",
     "AgentCommandClient",
+    "HydroCommandLogReportScheduler",
 
     # Utility classes
     "HydroObjectUtilsV2",

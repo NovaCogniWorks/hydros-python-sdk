@@ -214,7 +214,7 @@ class TwinsSimulationAgent(TickableAgent):
         Default implementation does nothing.
         """
         logger.info("Initializing digital twins model...")
-        # TODO: Initialize hydraulic solver, state estimator, etc.
+        # TODO：初始化水力求解器、状态估计器等组件。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -296,7 +296,7 @@ class TwinsSimulationAgent(TickableAgent):
             state_key = f"{time_series.object_id}_{time_series.metrics_code}"
             self._simulation_state[state_key] = time_series
 
-            # TODO: Update hydraulic solver boundary conditions
+            # TODO：更新水力求解器的边界条件
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """

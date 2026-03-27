@@ -35,6 +35,7 @@ from .runtime import (
     AgentCommandLogOperations,
     AgentCommandLogSnapshot,
     AgentCommandLogStats,
+    HydroCommandLogReportScheduler,
     AgentCommandQueueService,
     AgentCommandRuntime,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "AgentCommandLogOperations",
     "AgentCommandLogSnapshot",
     "AgentCommandLogStats",
+    "HydroCommandLogReportScheduler",
     "AgentCommandEnvelope",
     "AgentCommandHandler",
     "AgentCommandHandlerRegistry",
