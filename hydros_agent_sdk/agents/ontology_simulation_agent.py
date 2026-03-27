@@ -326,3 +326,12 @@ class OntologySimulationAgent(TickableAgent):
                 source_agent_instance=self,
                 broadcast=False
             )
+
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Returns:
+            MQTT topic string for ontology simulation metrics
+        """
+        return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"
