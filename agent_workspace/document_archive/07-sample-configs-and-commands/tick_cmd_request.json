@@ -1,0 +1,12 @@
+﻿{
+  "command": {
+    "command_id": "cmd-tick-0001",
+    "command_type": "tick_cmd_request",
+    "broadcast": false,
+    "context": {
+      "biz_scene_instance_id": "scene-20260324-001",
+      "valid": true
+    },
+    "step": 1
+  }
+}

@@ -1,0 +1,1300 @@
+simulation:
+  name: 两闸三渠池
+  id: 50
+  description: 两闸三渠池
+  version: 1
+  calculate_start_time: 2025-10-13 00:00:00
+  biz_start_time: 2025-08-06 00:00:00
+  start_time: 0
+  end_time: 259200
+  calculate_step: 120
+  output_step: 7200
+  step_speed: 1
+components:
+  - id: 1002
+    type: Pipe
+    name: DHX1-中易水渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 10133
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    device_children:
+      - id: 1065
+        type: Pipe_child
+        name: DHX1-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 519
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.1
+          single_orifice_height: 5.1
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1004
+    type: DisturbanceNode
+    name: FSK1-荆柯山分水口
+    initial_state:
+      outflow: 0.22
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 17250
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1066
+        type: DisturbanceNode_child
+        name: FSK1-1
+        initial_state:
+          outflow: 0.22
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1006
+    type: DisturbanceNode
+    name: FSK2-北易水退水闸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 20161
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1067
+        type: DisturbanceNode_child
+        name: FSK2-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1008
+    type: Pipe
+    name: DHX2-北易水渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 10133
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+   
+    device_children:
+      - id: 1068
+        type: Pipe_child
+        name: DHX2-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 490
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.5
+          single_orifice_height: 5.5
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1009
+    type: GateStation
+    name: ZM1-北易水倒虹吸出口节制闸
+    initial_state:
+      outflow: 31.4518086415417
+      water_level: 63.0240575682442
+      inflow: 30.42490457138925
+      water_level_back: 62.3945286588849
+    parameters:
+      location: 20811
+
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 1 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0.00038361 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: -0.00033327 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 0 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: -0.00048827 # 常数偏移项（系统基准修正或外部补偿）
+
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1039
+        type: CrossSection
+        name: ZM1-入口断面
+
+      - id: 1040
+        type: CrossSection
+        name: QD-5#断面#001
+    device_children:
+      - id: 1041
+        type: Gate
+        name: ZM1-节制闸#1
+        devices:
+          - device_metrics_code: GateOpening
+            device_id: HydroHardware.WaterGate_GATE001
+        initial_state:
+          outflow: 15.72590432077085
+          water_level: 63.0240575682442
+          inflow: 30.42490457138925
+          opening: 0.775
+          water_level_back: 62.3945286588849
+        parameters:
+          gate_width: 5.5
+          max_opening: 5
+          bottom_elevation: 55.764
+          count_of_gates: 1
+          gate_flow_calculation_method:
+            type: 1 # 1:离散流态分段系数法，对应4个，自由孔流（系数1）、自由堰流（系数2）、淹没孔流（系数3）、淹没堰流（系数4）。   2:综合流量公式，对应二次项系数（系数1）、一次项系数（系数2）、常数项（系数3）  3.无量纲闸门泄流公式：开度线性影响系数（系数1），基准流量系数（系数2）
+            free_orifice_flow: 0 #自由孔流（系数1）
+            submerged_orifice_flow: 0 #淹没孔流（系数3）
+            free_weir_flow: 0.89 #自由堰流（系数2）
+            submerged_weir_flow: 0 #淹没堰流（系数4）
+
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 1 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0.00000078 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 0 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 0 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 15.09671355 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+      - id: 1042
+        type: Gate
+        name: ZM1-节制闸#2
+        devices:
+          - device_metrics_code: GateOpening
+            device_id: HydroHardware.WaterGate_GATE002
+        initial_state:
+          outflow: 15.72590432077085
+          water_level: 63.0240575682442
+          inflow: 30.42490457138925
+          opening: 0.775
+          water_level_back: 62.3945286588849
+        parameters:
+          gate_width: 5.5
+          max_opening: 5
+          bottom_elevation: 55.764
+          count_of_gates: 1
+          gate_flow_calculation_method:
+            type: 2
+            free_orifice_flow: 0
+            submerged_orifice_flow: 0
+            free_weir_flow: 0.89
+            submerged_weir_flow: 0
+
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 1 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0.00000078 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 0 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 0 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 15.09671355 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1011
+    type: Pipe
+    name: DHX3-厂城渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 21198
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1043
+        type: CrossSection
+        name: QD-5#断面#002
+      - id: 1044
+        type: CrossSection
+        name: QD-6#断面#001
+    device_children:
+      - id: 1069
+        type: Pipe_child
+        name: DHX3-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 187
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.5
+          single_orifice_height: 5.5
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1013
+    type: Pipe
+    name: DHX4-七里庄沟渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 26385
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1045
+        type: CrossSection
+        name: QD-6#断面#002
+
+      - id: 1046
+        type: CrossSection
+        name: QD-7#断面#001
+    device_children:
+      - id: 1070
+        type: Pipe_child
+        name: DHX4-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 191
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.5
+          single_orifice_height: 5.6
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1015
+    type: Pipe
+    name: DHX5-马头沟渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 33026
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1047
+        type: CrossSection
+        name: QD-7#断面#002
+
+      - id: 1048
+        type: CrossSection
+        name: QD-8#断面#001
+    device_children:
+      - id: 1071
+        type: Pipe_child
+        name: DHX5-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 297
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.5
+          single_orifice_height: 5.6
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1017
+    type: Pipe
+    name: DHX6-坟庄河渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 35299
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1049
+        type: CrossSection
+        name: QD-8#断面#002
+
+      - id: 1050
+        type: CrossSection
+        name: ZM2-入口断面
+    device_children:
+      - id: 1072
+        type: Pipe_child
+        name: DHX6-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 213
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.4
+          single_orifice_height: 5.4
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1018
+    type: GateStation
+    name: ZM2-坟庄河倒虹吸出口节制闸
+    initial_state:
+      outflow: 30.5577149661082
+      water_level: 62.1048113265128
+      water_level_back: 60.9099998474121
+      inflow: 27.057717620015
+    parameters:
+      location: 35571
+
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 1 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0.00257978 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: -0.00257978 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 0 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1050
+        type: CrossSection
+        name: ZM2-入口断面
+
+      - id: 1051
+        type: CrossSection
+        name: QD-9#断面#001
+    device_children:
+      - id: 1052
+        type: Gate
+        name: ZM2-节制闸#1
+        devices:
+          - device_metrics_code: GateOpening
+            device_id: HydroHardware.WaterGate_GATE003
+        initial_state:
+          outflow: 15.2788574830541
+          water_level: 62.1048113265128
+          opening: 0.540
+          water_level_back: 60.9099998474121
+          inflow: 27.057717620015
+        parameters:
+          gate_width: 5.4
+          max_opening: 5
+          bottom_elevation: 55.596
+          count_of_gates: 1
+          gate_flow_calculation_method:
+            type: 2
+            free_orifice_flow: 0
+            submerged_orifice_flow: 0
+            free_weir_flow: 0.89
+            submerged_weir_flow: 0
+
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 1 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0.00000131 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 0 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 0 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 14.82222785 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+      - id: 1053
+        type: Gate
+        name: ZM2-节制闸#2
+        devices:
+          - device_metrics_code: GateOpening
+            device_id: HydroHardware.WaterGate_GATE004
+        initial_state:
+          outflow: 15.2788574830541
+          water_level: 62.1048113265128
+          opening: 0.540
+          water_level_back: 60.9099998474121
+          inflow: 27.057717620015
+        parameters:
+          gate_width: 5.4
+          max_opening: 5
+          bottom_elevation: 55.596
+          count_of_gates: 1
+          gate_flow_calculation_method:
+            type: 2
+            free_orifice_flow: 0
+            submerged_orifice_flow: 0
+            free_weir_flow: 0.89
+            submerged_weir_flow: 0
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 1 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0.00000131 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 0 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 0 # 入流系数（行进水头影响效应）
+            beta_control: 0
+            c_discharge: 14.82222785 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1020
+    type: DisturbanceNode
+    name: FSK3-下车亭分水口
+    initial_state:
+      outflow: 0.63
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 43098
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1073
+        type: DisturbanceNode_child
+        name: FSK3-1
+        initial_state:
+          outflow: 0.63
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1022
+    type: DisturbanceNode
+    name: FSK4-水北沟退水闸
+    initial_state:
+      outflow: 0.63
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 46526
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1074
+        type: DisturbanceNode_child
+        name: FSK4-1
+        initial_state:
+          outflow: 0.63
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1024
+    type: Pipe
+    name: DHX7-南拒马河渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 54292
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1058
+        type: CrossSection
+        name: QD-11#断面#002
+
+      - id: 1059
+        type: CrossSection
+        name: QD-12#断面#001
+    device_children:
+      - id: 1075
+        type: Pipe_child
+        name: DHX7-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 678
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.1
+          single_orifice_height: 5.1
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1026
+    type: Pipe
+    name: DHX8-北拒马河南支渠道倒虹吸
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 57194
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+
+    message_bus:
+      enabled:
+    cross_section_children:
+      - id: 1060
+        type: CrossSection
+        name: QD-12#断面#002
+      - id: 1061
+        type: CrossSection
+        name: QD-13#断面#001
+    device_children:
+      - id: 1076
+        type: Pipe_child
+        name: DHX8-1
+        initial_state:
+          outflow: 0
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          length: 685
+          manning_n: 0.015
+          orifice_count: 2
+          single_orifice_width: 5.1
+          single_orifice_height: 5.1
+          loss_coeff: 1
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - id: 1027
+    type: DisturbanceNode
+    name: FSK5-三岔沟分水口
+    initial_state:
+      outflow: 1.34
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 57879
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1077
+        type: DisturbanceNode_child
+        name: FSK5-1
+        initial_state:
+          outflow: 1.34
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+
+  - id: 1029
+    type: DisturbanceNode
+    name: FSK6-北拒马退水闸
+    initial_state:
+      outflow: 0.5
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      location: 58883
+      f1:
+        latex: 'h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h} \cdot 1' # 节点水位更新公式（f1）
+        # 参数说明
+        alpha_h: 0 # 当前水位惯性系数（上一时刻水位对下一时刻的保留比例）
+        beta_h: 0 # 入流影响系数（入流增加对水位的正向贡献）
+        gamma_h: 0 # 出流影响系数（总流量增加对水位的负向影响）
+        delta_down: 1 # 上游水位影响效应（下游节点水位对当前节点的抑制作用）
+        eta_h: 0 # 常数偏移项（系统基准修正或外部补偿）
+    message_bus:
+      enabled:
+    device_children:
+      - id: 1078
+        type: DisturbanceNode_child
+        name: FSK6-1
+        initial_state:
+          outflow: 0.5
+          water_level: 0
+          inflow: 0
+          water_level_back: 0
+        parameters:
+          f2:
+            latex: '\hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail} \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down} \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}} + \zeta_{tail} \cdot 1' # 尾水位更新公式
+            # 参数说明
+            alpha_tail: 0 # 尾水区惯性系数（上一时刻尾水位对下一时刻的保留比例）
+            beta_tail: 0 # 本节点总流量影响系数（反映当前流量对尾水位的推动作用）
+            delta_down: 1 # 下游水位传导系数（下游节点水位对尾水位的影响）
+            theta_down: 0 # 下游顶托游流量传导系数（下游总流量对尾水位的耦合效应）
+            epsilon_db: 0 # 下游边界流量影响系数（边界出流对尾水位的抑制或反馈作用）
+            zeta_tail: 0 # 常数偏移项（尾水位基准或外部修正补偿）
+
+          f3: # 公式3：流量计算（f3）
+            latex: 'q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\, h_{i,t} - \hat{h}_{i,t})}' # 流量计算公式
+            # 参数说明
+            alpha_inflow: 1 # 入流系数（行进水头影响效应）
+            beta_control: -1
+            c_discharge: 0 # 出流系数（结构或设备流量系数，控制整体流量规模）
+
+  - cross_sections:
+      - id: 1031
+        type: CrossSection
+        name: QD-1#断面#001
+        parameters:
+          location: 0
+          cross_section_type: trapezoidal #trapezoidal梯形、closed_rectangular封闭矩形、closed_circular封闭圆形
+          bottom_elevation: 57.492 #trapezoidal、closed_rectangular、closed_circular共有
+          t_top_elevation: 62.992 #trapezoidal
+          t_bottom_width: 10 #trapezoidal
+          t_side_slope_ratio: 0 #trapezoidal
+          cr_width: 5 #closed_rectangular
+          cr_height: 2 #closed_rectangular
+          pressure_wave_velocity: 1000 #closed_rectangular、closed_circular共有
+          cc_circumferential_segment_count: 100 #   closed_circular
+          cc_radius: 20 #   closed_circular      半径
+          min_sectional_area: 500
+
+      - id: 1032
+        type: CrossSection
+        name: QD-1#断面#002
+        parameters:
+          location: 10133
+          bottom_elevation: 59.207
+          t_top_elevation: 65.31
+          t_bottom_width: 11.2
+          t_side_slope_ratio: 2.5
+          min_sectional_area: 500
+
+      - id: 1033
+        type: CrossSection
+        name: QD-2#断面#001
+        parameters:
+          location: 10652
+          bottom_elevation: 59.207
+          t_top_elevation: 65.31
+          t_bottom_width: 11.2
+          t_side_slope_ratio: 2.5
+          min_sectional_area: 500
+
+      - id: 1035
+        type: CrossSection
+        name: QD-3#断面#001
+        parameters:
+          location: 17250
+          bottom_elevation: 58.737
+          t_top_elevation: 64.739
+          t_bottom_width: 9
+          t_side_slope_ratio: 0.8
+          min_sectional_area: 500
+
+      - id: 1037
+        type: CrossSection
+        name: QD-4#断面#001
+        parameters:
+          location: 20161
+          bottom_elevation: 58.652
+          t_top_elevation: 64.723
+          t_bottom_width: 7.5
+          t_side_slope_ratio: 2.5
+          min_sectional_area: 500
+          
+      - id: 1038
+        type: CrossSection
+        name: QD-4#断面#002
+        parameters:
+          location: 20339
+          bottom_elevation: 55.674
+          t_top_elevation: 64.721
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1039
+        type: CrossSection
+        name: ZM1-入口断面
+        devices:
+          - device_metrics_code: LevelMeasurementValue
+            device_id: HydroHardware.LevelSensor_SENSOR001
+          - device_metrics_code: FlowMeasurementValue
+            device_id: HydroHardware.FlowSensor_SENSOR001
+        parameters:
+          location: 20800
+          bottom_elevation: 55.764
+          t_top_elevation: 64.764
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+      - id: 1040
+        type: CrossSection
+        name: QD-5#断面#001
+        devices:
+          - device_metrics_code: LevelMeasurementValue
+            device_id: HydroHardware.LevelSensor_SENSOR002
+          - device_metrics_code: FlowMeasurementValue
+            device_id: HydroHardware.FlowSensor_SENSOR002
+        parameters:
+          location: 20811
+          bottom_elevation: 55.764
+          t_top_elevation: 64.764
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+         
+      - id: 1043
+        type: CrossSection
+        name: QD-5#断面#002
+        parameters:
+          location: 21198
+          bottom_elevation: 55.556
+          t_top_elevation: 64.477
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1044
+        type: CrossSection
+        name: QD-6#断面#001
+        parameters:
+          location: 21450
+          bottom_elevation: 56.241
+          t_top_elevation: 64.589
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1045
+        type: CrossSection
+        name: QD-6#断面#002
+        parameters:
+          location: 26385
+          bottom_elevation: 55.31
+          t_top_elevation: 64.354
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1046
+        type: CrossSection
+        name: QD-7#断面#001
+        parameters:
+          location: 26576
+          bottom_elevation: 55.892
+          t_top_elevation: 64.282
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1047
+        type: CrossSection
+        name: QD-7#断面#002
+        parameters:
+          location: 33026
+          bottom_elevation: 55
+          t_top_elevation: 63.978
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1048
+        type: CrossSection
+        name: QD-8#断面#001
+        parameters:
+          location: 33323
+          bottom_elevation: 55.5
+          t_top_elevation: 63.882
+          t_bottom_width: 12.1
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1049
+        type: CrossSection
+        name: QD-8#断面#002
+        parameters:
+          location: 35299
+          bottom_elevation: 55.065
+          t_top_elevation: 63.791
+          t_bottom_width: 11.9
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1050
+        type: CrossSection
+        name: ZM2-入口断面
+        devices:
+          - device_metrics_code: LevelMeasurementValue
+            device_id: HydroHardware.LevelSensor_SENSOR003
+          - device_metrics_code: FlowMeasurementValue
+            device_id: HydroHardware.FlowSensor_SENSOR003
+        parameters:
+          location: 35560
+          bottom_elevation: 55.596
+          t_top_elevation: 63.676
+          t_bottom_width: 11.9
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1051
+        type: CrossSection
+        name: QD-9#断面#001
+        devices:
+          - device_metrics_code: LevelMeasurementValue
+            device_id: HydroHardware.LevelSensor_SENSOR004
+          - device_metrics_code: FlowMeasurementValue
+            device_id: HydroHardware.FlowSensor_SENSOR004
+        parameters:
+          location: 35571
+          bottom_elevation: 55.596
+          t_top_elevation: 63.676
+          t_bottom_width: 11.9
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1055
+        type: CrossSection
+        name: QD-10#断面#001
+        parameters:
+          location: 43098
+          bottom_elevation: 57.202
+          t_top_elevation: 63.202
+          t_bottom_width: 13
+          t_side_slope_ratio: 2
+          min_sectional_area: 500
+          
+
+      - id: 1057
+        type: CrossSection
+        name: QD-11#断面#001
+        parameters:
+          location: 46526
+          bottom_elevation: 57.06
+          t_top_elevation: 63.049
+          t_bottom_width: 11.4
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1058
+        type: CrossSection
+        name: QD-11#断面#002
+        parameters:
+          location: 54292
+          bottom_elevation: 53.996
+          t_top_elevation: 62.614
+          t_bottom_width: 11.4
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1059
+        type: CrossSection
+        name: QD-12#断面#001
+        parameters:
+          location: 54970
+          bottom_elevation: 54.53
+          t_top_elevation: 62.369
+          t_bottom_width: 11.4
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1060
+        type: CrossSection
+        name: QD-12#断面#002
+        parameters:
+          location: 57194
+          bottom_elevation: 53.486
+          t_top_elevation: 62.271
+          t_bottom_width: 11.4
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+      - id: 1061
+        type: CrossSection
+        name: QD-13#断面#001
+        parameters:
+          location: 57879
+          bottom_elevation: 56.619
+          t_top_elevation: 62.879
+          t_bottom_width: 11.4
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          
+
+      - id: 1063
+        type: CrossSection
+        name: QD-14#断面#001
+        parameters:
+          location: 58883
+          bottom_elevation: 56.578
+          t_top_elevation: 62.369
+          t_bottom_width: 11
+          t_side_slope_ratio: 2.5
+          min_sectional_area: 500
+          
+      - id: 1064
+        type: CrossSection
+        name: QD-14#断面#002
+        parameters:
+          location: 60828
+          bottom_elevation: 55.974
+          t_top_elevation: 62.271
+          t_bottom_width: 12.7
+          t_side_slope_ratio: 0
+          min_sectional_area: 500
+          

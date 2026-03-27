@@ -13,6 +13,30 @@ from configparser import ConfigParser
 logger = logging.getLogger(__name__)
 
 
+def _resolve_config_templates(config: Dict[str, str]) -> Dict[str, str]:
+    """
+    Resolve simple `{key}` placeholders in environment config values.
+
+    This keeps env.properties as the single source of truth for node identity
+    while allowing topic-style fields to derive from hydros_cluster_id without
+    hard-coding duplicated values.
+    """
+    resolved = dict(config)
+    for _ in range(len(resolved)):
+        changed = False
+        for key, value in list(resolved.items()):
+            new_value = value
+            for template_key, template_value in resolved.items():
+                placeholder = "{" + template_key + "}"
+                if placeholder in new_value:
+                    new_value = new_value.replace(placeholder, template_value)
+            if new_value != value:
+                resolved[key] = new_value
+                changed = True
+        if not changed:
+            break
+    return resolved
+
 def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     """
     Load environment configuration from env.properties file.
@@ -56,6 +80,9 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
 
     # Load properties
     config = load_properties_file(env_file)
+
+    # Expand topic-style templates such as /hydros/.../{hydros_cluster_id}
+    config = _resolve_config_templates(config)
 
     # Auto-generate mqtt_topic from hydros_cluster_id if not provided
     if 'mqtt_topic' not in config or not config['mqtt_topic']:

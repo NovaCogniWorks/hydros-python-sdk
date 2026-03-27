@@ -1,0 +1,35 @@
+﻿{
+  "command": {
+    "command_id": "cmd-calc-0001",
+    "command_type": "calculation_request",
+    "broadcast": false,
+    "context": {
+      "biz_scene_instance_id": "scene-20260324-001",
+      "valid": true
+    },
+    "target_agent_instance": {
+      "agent_code": "DEMO_MODEL_AGENT",
+      "agent_type": "MODEL_CALCULATION_AGENT",
+      "agent_name": "Demo Model Agent",
+      "agent_id": "AGT202603241810ABCD12_DEMO_MODEL_AGENT",
+      "biz_scene_instance_id": "scene-20260324-001",
+      "hydros_cluster_id": "default_cluster",
+      "hydros_node_id": "external_node_001",
+      "context": {
+        "biz_scene_instance_id": "scene-20260324-001",
+        "valid": true
+      },
+      "agent_biz_status": "ACTIVE",
+      "drive_mode": "EVENT_DRIVEN"
+    },
+    "hydro_event": {
+      "hydro_event_type": "RAIN_FORECAST",
+      "hydro_event_id": "event-0001",
+      "hydro_event_name": "demo-rain-forecast",
+      "created_time": "2026-03-24T18:00:00",
+      "hydro_event_source_type": "CENTRAL_AGENT",
+      "hydro_event_source": "central-agent",
+      "hydro_event_description": "joint debug rainfall forecast event"
+    }
+  }
+}

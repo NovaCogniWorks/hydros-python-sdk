@@ -1,0 +1,1280 @@
+connections:
+- from:
+    type: UnifiedCanal
+    name: QD-1
+    id: 1001
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX1-中易水渠道倒虹吸
+    id: 1002
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX1-中易水渠道倒虹吸
+    id: 1002
+  from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-2
+    id: 1003
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-2
+    id: 1003
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK1-荆柯山分水口
+    id: 1004
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK1-荆柯山分水口
+    id: 1004
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-3
+    id: 1005
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-3
+    id: 1005
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK2-北易水退水闸
+    id: 1006
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK2-北易水退水闸
+    id: 1006
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-4
+    id: 1007
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-4
+    id: 1007
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX2-北易水渠道倒虹吸
+    id: 1008
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX2-北易水渠道倒虹吸
+    id: 1008
+    from_port: outlet
+  to:
+    type: GateStation
+    name: ZM1-北易水倒虹吸出口节制闸
+    id: 1009
+    to_port: inlet
+- from:
+    type: GateStation
+    name: ZM1-北易水倒虹吸出口节制闸
+    id: 1009
+    from_port:
+    - id: 1041
+      type: Gate
+      name: ZM1-节制闸#1
+    - id: 1042
+      type: Gate
+      name: ZM1-节制闸#2
+  to:
+    type: UnifiedCanal
+    name: QD-5
+    id: 1010
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-5
+    id: 1010
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX3-厂城渠道倒虹吸
+    id: 1011
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX3-厂城渠道倒虹吸
+    id: 1011
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-6
+    id: 1012
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-6
+    id: 1012
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX4-七里庄沟渠道倒虹吸
+    id: 1013
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX4-七里庄沟渠道倒虹吸
+    id: 1013
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-7
+    id: 1014
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-7
+    id: 1014
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX5-马头沟渠道倒虹吸
+    id: 1015
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX5-马头沟渠道倒虹吸
+    id: 1015
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-8
+    id: 1016
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-8
+    id: 1016
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX6-坟庄河渠道倒虹吸
+    id: 1017
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX6-坟庄河渠道倒虹吸
+    id: 1017
+    from_port: outlet
+  to:
+    type: GateStation
+    name: ZM2-坟庄河倒虹吸出口节制闸
+    id: 1018
+    to_port: inlet
+- from:
+    type: GateStation
+    name: ZM2-坟庄河倒虹吸出口节制闸
+    id: 1018
+    from_port:
+    - id: 1052
+      type: Gate
+      name: ZM2-节制闸#1
+    - id: 1053
+      type: Gate
+      name: ZM2-节制闸#2
+  to:
+    type: UnifiedCanal
+    name: QD-9
+    id: 1019
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-9
+    id: 1019
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK3-下车亭分水口
+    id: 1020
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK3-下车亭分水口
+    id: 1020
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-10
+    id: 1021
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-10
+    id: 1021
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK4-水北沟退水闸
+    id: 1022
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK4-水北沟退水闸
+    id: 1022
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-11
+    id: 1023
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-11
+    id: 1023
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX7-南拒马河渠道倒虹吸
+    id: 1024
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX7-南拒马河渠道倒虹吸
+    id: 1024
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-12
+    id: 1025
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-12
+    id: 1025
+    from_port: outlet
+  to:
+    type: Pipe
+    name: DHX8-北拒马河南支渠道倒虹吸
+    id: 1026
+    to_port: inlet
+- from:
+    type: Pipe
+    name: DHX8-北拒马河南支渠道倒虹吸
+    id: 1026
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK5-三岔沟分水口
+    id: 1027
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK5-三岔沟分水口
+    id: 1027
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-13
+    id: 1028
+    to_port: inlet
+- from:
+    type: UnifiedCanal
+    name: QD-13
+    id: 1028
+    from_port: outlet
+  to:
+    type: DisturbanceNode
+    name: FSK6-北拒马退水闸
+    id: 1029
+    to_port: inlet
+- from:
+    type: DisturbanceNode
+    name: FSK6-北拒马退水闸
+    id: 1029
+    from_port: outlet
+  to:
+    type: UnifiedCanal
+    name: QD-14
+    id: 1030
+    to_port: inlet
+components:
+- id: 1001
+  type: UnifiedCanal
+  name: QD-1
+  initial_state:
+    average_water_level: 63.0348223033652
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1002
+  type: Pipe
+  name: DHX1-中易水渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1065
+    type: Pipe_child
+    name: DHX1-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.1
+      length: 519
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.1
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: 0
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1003
+  type: UnifiedCanal
+  name: QD-2
+  initial_state:
+    average_water_level: 62.907563085
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1004
+  type: DisturbanceNode
+  name: FSK1-荆柯山分水口
+  initial_state:
+    outflow: 0.22
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1066
+    type: DisturbanceNode_child
+    name: FSK1-1
+    initial_state:
+      outflow: 0.22
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1005
+  type: UnifiedCanal
+  name: QD-3
+  initial_state:
+    average_water_level: 62.82780435
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1006
+  type: DisturbanceNode
+  name: FSK2-北易水退水闸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1067
+    type: DisturbanceNode_child
+    name: FSK2-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1007
+  type: UnifiedCanal
+  name: QD-4
+  initial_state:
+    average_water_level: 62.79996535
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1008
+  type: Pipe
+  name: DHX2-北易水渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1068
+    type: Pipe_child
+    name: DHX2-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.5
+      length: 490
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.5
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: 0
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1009
+  type: GateStation
+  name: ZM1-北易水倒虹吸出口节制闸
+  initial_state:
+    outflow: 31.4518086415417
+    water_level: 63.0240575682442
+    inflow: 30.42490457138925
+    water_level_back: 62.3945286588849
+  device_children:
+  - id: 1041
+    type: Gate
+    name: ZM1-节制闸#1
+    initial_state:
+      outflow: 15.72590432077085
+      water_level: 63.0240575682442
+      inflow: 30.42490457138925
+      opening: 0.775
+      water_level_back: 62.3945286588849
+    parameters:
+      gate_width: 5.5
+      max_opening: 5
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 1
+        beta_tail: 7.8e-07
+        delta_down: 0
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 0
+        beta_control: 0
+        c_discharge: 15.09671355
+  - id: 1042
+    type: Gate
+    name: ZM1-节制闸#2
+    initial_state:
+      outflow: 15.72590432077085
+      water_level: 63.0240575682442
+      inflow: 30.42490457138925
+      opening: 0.775
+      water_level_back: 62.3945286588849
+    parameters:
+      gate_width: 5.5
+      max_opening: 5
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 1
+        beta_tail: 7.8e-07
+        delta_down: 0
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 0
+        beta_control: 0
+        c_discharge: 15.09671355
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 1
+      beta_h: 0.00038361
+      gamma_h: -0.00033327
+      delta_down: 0
+      eta_h: -0.00048827
+- id: 1010
+  type: UnifiedCanal
+  name: QD-5
+  initial_state:
+    average_water_level: 62.1540568839285
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1011
+  type: Pipe
+  name: DHX3-厂城渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1069
+    type: Pipe_child
+    name: DHX3-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.5
+      length: 187
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.5
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1012
+  type: UnifiedCanal
+  name: QD-6
+  initial_state:
+    average_water_level: 62.1097009392021
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1013
+  type: Pipe
+  name: DHX4-七里庄沟渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1070
+    type: Pipe_child
+    name: DHX4-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.6
+      length: 191
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.5
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1014
+  type: UnifiedCanal
+  name: QD-7
+  initial_state:
+    average_water_level: 62.019948581608
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1015
+  type: Pipe
+  name: DHX5-马头沟渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1071
+    type: Pipe_child
+    name: DHX5-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.6
+      length: 297
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.5
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1016
+  type: UnifiedCanal
+  name: QD-8
+  initial_state:
+    average_water_level: 61.9570745782143
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1017
+  type: Pipe
+  name: DHX6-坟庄河渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1072
+    type: Pipe_child
+    name: DHX6-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.4
+      length: 213
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.4
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1018
+  type: GateStation
+  name: ZM2-坟庄河倒虹吸出口节制闸
+  initial_state:
+    outflow: 30.5577149661082
+    water_level: 62.1048113265128
+    water_level_back: 60.9099998474121
+    inflow: 27.057717620015
+  device_children:
+  - id: 1052
+    type: Gate
+    name: ZM2-节制闸#1
+    initial_state:
+      outflow: 15.2788574830541
+      water_level: 62.1048113265128
+      opening: 0.54
+      water_level_back: 60.9099998474121
+      inflow: 27.057717620015
+    parameters:
+      gate_width: 5.4
+      max_opening: 5
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 1
+        beta_tail: 1.31e-06
+        delta_down: 0
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 0
+        beta_control: 0
+        c_discharge: 14.82222785
+  - id: 1053
+    type: Gate
+    name: ZM2-节制闸#2
+    initial_state:
+      outflow: 15.2788574830541
+      water_level: 62.1048113265128
+      opening: 0.54
+      water_level_back: 60.9099998474121
+      inflow: 27.057717620015
+    parameters:
+      gate_width: 5.4
+      max_opening: 5
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 1
+        beta_tail: 1.31e-06
+        delta_down: 0
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 0
+        beta_control: 0
+        c_discharge: 14.82222785
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 1
+      beta_h: 0.00257978
+      gamma_h: -0.00257978
+      delta_down: 0
+      eta_h: 0
+- id: 1019
+  type: UnifiedCanal
+  name: QD-9
+  initial_state:
+    average_water_level: 60.7252952226817
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1020
+  type: DisturbanceNode
+  name: FSK3-下车亭分水口
+  initial_state:
+    outflow: 0.63
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1073
+    type: DisturbanceNode_child
+    name: FSK3-1
+    initial_state:
+      outflow: 0.63
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1021
+  type: UnifiedCanal
+  name: QD-10
+  initial_state:
+    average_water_level: 60.59517998125
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1022
+  type: DisturbanceNode
+  name: FSK4-水北沟退水闸
+  initial_state:
+    outflow: 0.63
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1074
+    type: DisturbanceNode_child
+    name: FSK4-1
+    initial_state:
+      outflow: 0.63
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1023
+  type: UnifiedCanal
+  name: QD-11
+  initial_state:
+    average_water_level: 60.5142415898763
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1024
+  type: Pipe
+  name: DHX7-南拒马河渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1075
+    type: Pipe_child
+    name: DHX7-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.1
+      length: 678
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.1
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1025
+  type: UnifiedCanal
+  name: QD-12
+  initial_state:
+    average_water_level: 60.4131184179166
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1026
+  type: Pipe
+  name: DHX8-北拒马河南支渠道倒虹吸
+  initial_state:
+    outflow: 0
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1076
+    type: Pipe_child
+    name: DHX8-1
+    initial_state:
+      outflow: 0
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      orifice_count: 2
+      loss_coeff: 1
+      single_orifice_height: 5.1
+      length: 685
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      single_orifice_width: 5.1
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+      manning_n: 0.015
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1027
+  type: DisturbanceNode
+  name: FSK5-三岔沟分水口
+  initial_state:
+    outflow: 1.34
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1077
+    type: DisturbanceNode_child
+    name: FSK5-1
+    initial_state:
+      outflow: 1.34
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1028
+  type: UnifiedCanal
+  name: QD-13
+  initial_state:
+    average_water_level: 60.32208763625
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018
+- id: 1029
+  type: DisturbanceNode
+  name: FSK6-北拒马退水闸
+  initial_state:
+    outflow: 0.5
+    water_level: 0
+    inflow: 0
+    water_level_back: 0
+  device_children:
+  - id: 1078
+    type: DisturbanceNode_child
+    name: FSK6-1
+    initial_state:
+      outflow: 0.5
+      water_level: 0
+      inflow: 0
+      water_level_back: 0
+    parameters:
+      f2:
+        latex: \hat{h}_{i,t+1} = \alpha_{tail} \cdot \hat{h}_{i,t} + \beta_{tail}
+          \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot h_{i+1,t} + \theta_{down}
+          \cdot q_{i+1,t}^{\mathrm{tot}} + \epsilon_{db} \cdot q_{db,i,t}^{\mathrm{tot}}
+          + \zeta_{tail} \cdot 1
+        alpha_tail: 0
+        beta_tail: 0
+        delta_down: 1
+        theta_down: 0
+        epsilon_db: 0
+        zeta_tail: 0
+      f3:
+        latex: q_{i,t+1} = \alpha_{inflow} \cdot I_{i,t+1} + \beta_{control} \cdot
+          e_{i,t} + c_{discharge} \cdot n_{i,t} \cdot e_{i,t} \cdot \sqrt{\max(0,\,
+          h_{i,t} - \hat{h}_{i,t})}
+        alpha_inflow: 1
+        beta_control: -1
+        c_discharge: 0
+  parameters:
+    f1:
+      latex: h_{i,t+1} = \alpha_{h} \cdot h_{i,t} + \beta_{h} \cdot I_{i,t} + \gamma_{h}
+        \cdot q_{i,t}^{\mathrm{tot}} + \delta_{down} \cdot \hat{h}_{i-1,t} + \eta_{h}
+        \cdot 1
+      alpha_h: 0
+      beta_h: 0
+      gamma_h: 0
+      delta_down: 1
+      eta_h: 0
+- id: 1030
+  type: UnifiedCanal
+  name: QD-14
+  initial_state:
+    average_water_level: 60.2765722454167
+  parameters:
+    delay: 1
+    coefficient: 1.0
+    manning_n: 0.018

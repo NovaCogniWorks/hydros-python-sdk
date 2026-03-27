@@ -1,4 +1,4 @@
-"""
+﻿"""
 Simulation coordination client with callback-based architecture.
 
 This module provides a high-level client that encapsulates all common MQTT logic,
@@ -7,49 +7,46 @@ allowing developers to focus on business logic by implementing callbacks.
 Similar to Java's SimCoordinationSlave class.
 """
 
+import json
 import logging
 import time
-from typing import Optional, Dict, Callable
-from queue import Queue, Empty
-from threading import Thread, Event
+from queue import Queue
+from threading import Event, Thread
+from typing import Optional
+
 import paho.mqtt.client as mqtt
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
-from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.message_filter import MessageFilter
-from hydros_agent_sdk.logging_config import (
-    set_biz_scene_instance_id,
-    set_biz_component,
-    set_hydros_cluster_id,
-    set_hydros_node_id
+from hydros_agent_sdk.coordination_runtime import (
+    CommandRouter,
+    LoggingContextBinder,
+    MqttConnectionManager,
+    OutboundCommandSender,
 )
+from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.protocol.commands import (
-    SimCommand,
-    SimTaskInitRequest,
-    SimTaskInitResponse,
-    TickCmdRequest,
-    SimTaskTerminateRequest,
-    TimeSeriesDataUpdateRequest,
-    OutflowTimeSeriesDataUpdateRequest,
-    TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
-    SimCoordinationRequest,
-    SimCoordinationResponse,
-    SimCommandEnvelope,
+    OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
-
-    # Command type constants
+    SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
+    SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST,
+    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_TASK_INIT_REQUEST,
     SIMCMD_TASK_INIT_RESPONSE,
-    SIMCMD_TICK_CMD_REQUEST,
     SIMCMD_TASK_TERMINATE_REQUEST,
-    SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
+    SIMCMD_TICK_CMD_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
-    SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
-    SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
+    SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
+    SimCommand,
+    SimCommandEnvelope,
+    SimTaskInitRequest,
+    SimTaskInitResponse,
+    SimTaskTerminateRequest,
+    TickCmdRequest,
+    TimeSeriesCalculationRequest,
+    TimeSeriesDataUpdateRequest,
 )
-import json
+from hydros_agent_sdk.state_manager import AgentStateManager
 
 logger = logging.getLogger(__name__)
 
@@ -69,29 +66,6 @@ class SimCoordinationClient:
     Developers only need to implement SimCoordinationCallback to provide business logic.
 
     Similar to Java's SimCoordinationSlave class.
-
-    Example:
-        ```python
-        class MyCallback(SimCoordinationCallback):
-        
-            def on_sim_task_init(self, request):
-                # Your business logic here
-                pass
-
-            def on_tick(self, request):
-                # Your business logic here
-                pass
-
-        # Create and start client
-        callback = MyCallback()
-        client = SimCoordinationClient(
-            broker_url="tcp://192.168.1.24",
-            broker_port=1883,
-            topic="/hydros/commands/coordination/my_cluster",
-            callback=callback
-        )
-        client.start()
-        ```
     """
 
     def __init__(
@@ -105,25 +79,9 @@ class SimCoordinationClient:
         max_retry_count: int = 5,
         base_retry_delay_ms: int = 1000,
         mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None
+        mqtt_password: Optional[str] = None,
     ):
-        """
-        Initialize the coordination client.
-
-        Args:
-            broker_url: MQTT broker URL (e.g., "tcp://192.168.1.24")
-            broker_port: MQTT broker port (default: 1883)
-            topic: MQTT topic to subscribe to
-            callback: SimCoordinationCallback implementation
-            client_id: Optional MQTT client ID (auto-generated if not provided)
-            state_manager: Optional state manager (created if not provided)
-            qos: MQTT QoS level (default: 1)
-            max_retry_count: Maximum retry count for sending messages (default: 5)
-            base_retry_delay_ms: Base retry delay in milliseconds (default: 1000)
-            mqtt_username: Optional MQTT username for authentication (None for no auth)
-            mqtt_password: Optional MQTT password for authentication (None for no auth)
-        """
-        self.broker_url = broker_url.replace("tcp://", "")
+        self.broker_url = broker_url.replace('tcp://', '')
         self.broker_port = broker_port
         self.topic = topic
         self.sim_coordination_callback = sim_coordination_callback
@@ -131,51 +89,50 @@ class SimCoordinationClient:
         self.max_retry_count = max_retry_count
         self.base_retry_delay_ms = base_retry_delay_ms
 
-        # Generate client ID
         self.client_id = f"hydros_node_{int(time.time() * 1000)}"
 
-        # Initialize state manager
         if state_manager is None:
             state_manager = AgentStateManager()
         self.state_manager = state_manager
-
-        # Initialize message filter
         self.message_filter = MessageFilter(self.state_manager)
 
-        # Initialize MQTT client
         self.mqtt_client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.on_disconnect = self._on_disconnect
-
-        # Configure automatic reconnect with exponential backoff
-        # min_delay=1s, max_delay=120s (doubles each attempt: 1, 2, 4, 8, ... 120)
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
 
-        # Set MQTT authentication if credentials provided
         if mqtt_username:
             self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
             logger.info(f"MQTT authentication configured for user: {mqtt_username}")
 
-        # Track intentional disconnect to distinguish from unexpected ones
-        self._intentional_disconnect = False
-
-        # Outgoing message queue
         self.out_message_queue: Queue[SimCommand] = Queue()
-
-        # Thread management
         self.running = Event()
         self.queue_thread: Optional[Thread] = None
         self.connected = Event()
 
-        # Register command handlers
-        self._register_handlers()
+        self.command_router = CommandRouter()
+        self.logging_context_binder = LoggingContextBinder()
+        self.connection_manager = MqttConnectionManager(
+            mqtt_client=self.mqtt_client,
+            broker_host=self.broker_url,
+            broker_port=self.broker_port,
+            connected_event=self.connected,
+        )
+        self.outbound_sender = OutboundCommandSender(
+            mqtt_client=self.mqtt_client,
+            topic=self.topic,
+            qos=self.qos,
+            state_manager=self.state_manager,
+            max_retry_count=self.max_retry_count,
+            base_retry_delay_ms=self.base_retry_delay_ms,
+        )
 
+        self._register_handlers()
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
 
     def _register_handlers(self):
-        """Register all command handlers that route to callback methods."""
-        self.handlers: Dict[str, Callable[[SimCommand], None]] = {
+        self.command_router.register_many({
             SIMCMD_TASK_INIT_REQUEST: self._handle_task_init,
             SIMCMD_TASK_INIT_RESPONSE: self._handle_task_init_response,
             SIMCMD_TICK_CMD_REQUEST: self._handle_tick,
@@ -184,366 +141,161 @@ class SimCoordinationClient:
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
             SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
-            SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
-        }
-        logger.info(f"Registered {len(self.handlers)} command handlers")
+            SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update,
+        })
+        logger.info(f"Registered {len(self.command_router.handlers)} command handlers")
 
     def start(self):
-        """
-        Start the coordination client.
-
-        This will:
-        1. Connect to MQTT broker
-        2. Subscribe to the coordination topic
-        3. Start the outgoing message queue thread
-        """
         if self.running.is_set():
-            logger.warning("Client already running")
+            logger.warning('Client already running')
             return
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
+        self.connection_manager.start(timeout=10)
 
-        # Connect to MQTT broker
-        logger.info(f"Connecting to MQTT broker: {self.broker_url}:{self.broker_port}")
-        self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
-        self.mqtt_client.loop_start()
-
-        # Wait for connection
-        if not self.connected.wait(timeout=10):
-            raise RuntimeError("Failed to connect to MQTT broker within 10 seconds")
-
-        # Start queue processing thread
         self.running.set()
-        self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
+        self.queue_thread = Thread(target=self._queue_loop, daemon=True, name='QueueThread')
         self.queue_thread.start()
-
-        logger.info(f"SimCoordinationClient started successfully")
+        logger.info('SimCoordinationClient started successfully')
 
     def stop(self):
-        """
-        Stop the coordination client.
-
-        This will:
-        1. Stop the queue processing thread
-        2. Disconnect from MQTT broker
-        3. Clean up resources
-        """
         if not self.running.is_set():
-            logger.warning("Client not running")
+            logger.warning('Client not running')
             return
 
-        logger.info("Stopping SimCoordinationClient...")
-
-        # Stop queue thread
+        logger.info('Stopping SimCoordinationClient...')
         self.running.clear()
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
-        # Disconnect MQTT
-        self._intentional_disconnect = True
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
-
-        logger.info("SimCoordinationClient stopped")
+        self.connection_manager.stop()
+        logger.info('SimCoordinationClient stopped')
 
     def enqueue(self, command: SimCommand):
-        """
-        Enqueue a command for sending.
-
-        The command will be sent asynchronously by the queue thread.
-
-        Args:
-            command: The command to send
-        """
         self.out_message_queue.put(command)
-        # Use Pydantic's model_dump() to properly serialize nested models
         logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
 
     def send_command(self, command: SimCommand):
-        """
-        Send a command immediately (synchronous).
-
-        Args:
-            command: The command to send
-        """
-        self._send_with_retry(command)
-
-    # ========================================================================
-    # MQTT Callbacks
-    # ========================================================================
+        self.outbound_sender.send_with_retry(command)
 
     def _on_connect(self, client, userdata, flags, rc):
-        """MQTT connection callback. Also handles auto-reconnect re-subscription."""
         if rc == 0:
             was_connected = self.connected.is_set()
             if was_connected:
                 logger.info(f"Reconnected to MQTT broker: {self.broker_url}:{self.broker_port}")
             else:
                 logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            # (Re-)subscribe to topic on every connect/reconnect
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             logger.info(f"Subscribed to topic: {self.topic}")
             self.connected.set()
         else:
             rc_reasons = {
-                1: "incorrect protocol version",
-                2: "invalid client identifier",
-                3: "server unavailable",
-                4: "bad username or password",
-                5: "not authorized",
+                1: 'incorrect protocol version',
+                2: 'invalid client identifier',
+                3: 'server unavailable',
+                4: 'bad username or password',
+                5: 'not authorized',
             }
-            reason = rc_reasons.get(rc, "unknown")
+            reason = rc_reasons.get(rc, 'unknown')
             logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
     def _on_disconnect(self, client, userdata, rc):
-        """MQTT disconnection callback."""
         self.connected.clear()
-        if rc == 0 or self._intentional_disconnect:
-            logger.info("Disconnected from MQTT broker (clean)")
+        if rc == 0 or self.connection_manager.intentional_disconnect:
+            logger.info('Disconnected from MQTT broker (clean)')
         else:
             rc_reasons = {
-                1: "unexpected disconnect",
-                7: "connection lost (keepalive timeout or broker idle disconnect)",
+                1: 'unexpected disconnect',
+                7: 'connection lost (keepalive timeout or broker idle disconnect)',
             }
-            reason = rc_reasons.get(rc, f"unexpected, code={rc}")
+            reason = rc_reasons.get(rc, f'unexpected, code={rc}')
             logger.warning(f"Disconnected from MQTT broker: {reason}. Auto-reconnecting...")
 
     def _on_message(self, client, userdata, msg):
-        """MQTT message received callback."""
         try:
-            # Parse message
-            payload_str = msg.payload.decode("utf-8")
+            payload_str = msg.payload.decode('utf-8')
             logger.debug(f"Received message on topic {msg.topic}: {payload_str[:200]}...")
-
-            # Parse JSON
             data = json.loads(payload_str)
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
 
-            # Apply message filters
             if not self.message_filter.should_process_message(command):
                 logger.debug(f"Message filtered out: {command.command_type}, id={command.command_id}")
                 return
 
-            # Route to handler
             self._handle_incoming_message(command)
-
-        except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
-
-    # ========================================================================
-    # Message Handling
-    # ========================================================================
+        except Exception as exc:
+            logger.error(f"Error processing message: {exc}", exc_info=True)
 
     def _set_logging_context(self, command: SimCommand):
-        """
-        Set logging context from command for structured logging.
-
-        Extracts context information from the command and sets it in the logging
-        context so all subsequent logs will include this information.
-
-        The logging context includes:
-        - hydros_cluster_id: From state_manager (loaded from env.properties)
-        - hydros_node_id: From state_manager (loaded from env.properties)
-        - biz_scene_instance_id: From command's SimulationContext
-        - biz_component: Agent ID or component name (e.g., "SIM_COORDINATOR")
-
-        Args:
-            command: The command to extract context from
-        """
-        # Set hydros_cluster_id from state_manager
-        cluster_id = self.state_manager.get_cluster_id()
-        if cluster_id:
-            set_hydros_cluster_id(cluster_id)
-
-        # Set hydros_node_id from state_manager
-        node_id = self.state_manager.get_node_id()
-        if node_id:
-            set_hydros_node_id(node_id)
-
-        # Set biz_scene_instance_id from command's context (SimulationContext)
-        if hasattr(command, 'context') and command.context:
-            biz_scene_instance_id = command.context.biz_scene_instance_id
-            if biz_scene_instance_id:
-                set_biz_scene_instance_id(biz_scene_instance_id)
-
-        # Set biz_component from callback's component
-        # This will be agent_id in agent context, or component name in infrastructure
-        component = self.sim_coordination_callback.get_component()
-        if component:
-            set_biz_component(component)
+        self.logging_context_binder.bind(
+            command=command,
+            state_manager=self.state_manager,
+            callback=self.sim_coordination_callback,
+        )
 
     def _handle_incoming_message(self, command: SimCommand):
-        """
-        Handle an incoming command by routing it to the appropriate handler.
-
-        Automatically sets logging context (task_id, biz_component, node_id) before
-        calling the handler, so all logs within the handler will include this context.
-
-        Args:
-            command: The command to handle
-        """
-        # Set logging context from command
         self._set_logging_context(command)
-
-        handler = self.handlers.get(command.command_type)
-        if handler:
-            try:
-                logger.debug(f"Handling command: {command.command_type}, id={command.command_id}")
-                handler(command)
-            except Exception as e:
-                logger.error(f"Error handling command {command.command_type}: {e}", exc_info=True)
-        else:
-            logger.warning(f"No handler registered for command type: {command.command_type}")
-
-    # ========================================================================
-    # Command Handlers (route to callback)
-    # ========================================================================
+        try:
+            self.command_router.route(command)
+        except Exception as exc:
+            logger.error(f"Error handling command {command.command_type}: {exc}", exc_info=True)
 
     def _handle_task_init(self, command: SimCommand):
-        """Handle task init request."""
         request = command
         assert isinstance(request, SimTaskInitRequest)
         self.sim_coordination_callback.on_sim_task_init(request)
 
     def _handle_task_init_response(self, command: SimCommand):
-        """Handle task init response from remote agent."""
         response = command
         assert isinstance(response, SimTaskInitResponse)
         if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
             self.sim_coordination_callback.on_agent_instance_sibling_created(response)
 
     def _handle_tick(self, command: SimCommand):
-        """Handle tick command."""
         request = command
         assert isinstance(request, TickCmdRequest)
         self.sim_coordination_callback.on_tick(request)
 
     def _handle_task_terminate(self, command: SimCommand):
-        """Handle task terminate request."""
         request = command
         assert isinstance(request, SimTaskTerminateRequest)
         self.sim_coordination_callback.on_task_terminate(request)
 
     def _handle_time_series_data_update(self, command: SimCommand):
-        """Handle time series data update."""
         request = command
         assert isinstance(request, TimeSeriesDataUpdateRequest)
         self.sim_coordination_callback.on_time_series_data_update(request)
 
     def _handle_outflow_time_series_data_update(self, command: SimCommand):
-        """Handle outflow time series data update."""
         request = command
         assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
         self.sim_coordination_callback.on_outflow_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
-        """Handle time series calculation."""
         request = command
         assert isinstance(request, TimeSeriesCalculationRequest)
         self.sim_coordination_callback.on_time_series_calculation(request)
 
     def _handle_agent_status_report(self, command: SimCommand):
-        """Handle agent status report from remote agent."""
         report = command
         assert isinstance(report, AgentInstanceStatusReport)
         if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
             self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
 
     def _handle_outflow_time_series_request(self, command: SimCommand):
-        """Handle outflow time series request."""
         request = command
         assert isinstance(request, OutflowTimeSeriesRequest)
         self.sim_coordination_callback.on_outflow_time_series(request)
 
-    # ========================================================================
-    # Outgoing Message Queue
-    # ========================================================================
-
     def _queue_loop(self):
-        """
-        Main loop for processing outgoing message queue.
-
-        This runs in a separate thread and sends messages with retry logic.
-        """
-        logger.info("Queue processing thread started")
-        while self.running.is_set():
-            try:
-                # Get next command from queue (with timeout to allow checking running flag)
-                command = self.out_message_queue.get(timeout=1)
-
-                # Check if message should be sent
-                if self._should_send(command):
-                    self._send_with_retry(command)
-
-            except Empty:
-                # Timeout, continue loop
-                continue
-            except Exception as e:
-                logger.error(f"Error in queue loop: {e}", exc_info=True)
-
-        logger.info("Queue processing thread stopped")
+        self.outbound_sender.queue_loop(
+            running_event=self.running,
+            out_message_queue=self.out_message_queue,
+        )
 
     def _should_send(self, command: SimCommand) -> bool:
-        """
-        Check if a command should be sent.
-
-        Similar to Java's needSend() method.
-
-        Args:
-            command: The command to check
-
-        Returns:
-            True if the command should be sent, False otherwise
-        """
-        # Don't send requests (only responses and reports)
-        if isinstance(command, SimCoordinationRequest):
-            return False
-
-        # Send responses only from local agents
-        if isinstance(command, SimCoordinationResponse):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
-
-        # Send reports only from local agents
-        if isinstance(command, AgentInstanceStatusReport):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
-
-        return False
+        return self.outbound_sender.should_send(command)
 
     def _send_with_retry(self, command: SimCommand):
-        """
-        Send a command with retry logic.
-
-        Similar to Java's sendAsyncWithRetry() method.
-
-        Args:
-            command: The command to send
-        """
-        attempt = 0
-        command_id = command.command_id
-
-        while attempt <= self.max_retry_count:
-            try:
-                # Serialize command
-                payload = command.model_dump_json(by_alias=True)
-
-                # Publish to MQTT
-                print(self.topic)
-                result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
-                result.wait_for_publish()
-
-                logger.info(f"Command sent: type={command.command_type}, id={command_id}, attempt={attempt}")
-                return  # Success
-
-            except Exception as e:
-                logger.error(f"Failed to send command: id={command_id}, attempt={attempt}/{self.max_retry_count}: {e}")
-
-                attempt += 1
-                if attempt > self.max_retry_count:
-                    logger.error(f"Max retry count exceeded for command: id={command_id}")
-                    raise
-
-                # Exponential backoff: 2^attempt * base_delay
-                delay_ms = self.base_retry_delay_ms * (2 ** attempt)
-                logger.info(f"Retrying after {delay_ms}ms... (attempt {attempt}/{self.max_retry_count})")
-                time.sleep(delay_ms / 1000.0)
+        self.outbound_sender.send_with_retry(command)

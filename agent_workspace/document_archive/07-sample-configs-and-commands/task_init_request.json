@@ -1,0 +1,32 @@
+﻿{
+  "command": {
+    "command_id": "cmd-init-0001",
+    "command_type": "task_init_request",
+    "broadcast": false,
+    "context": {
+      "biz_scene_instance_id": "scene-20260324-001",
+      "valid": true,
+      "tenant": {
+        "tenant_id": "tenant-001",
+        "tenant_name": "default-tenant"
+      },
+      "biz_scenario": {
+        "biz_scenario_id": "scenario-001",
+        "biz_scenario_name": "demo-scenario"
+      },
+      "waterway": {
+        "waterway_id": "waterway-001",
+        "waterway_name": "demo-waterway"
+      }
+    },
+    "biz_scene_configuration_url": "http://config-server/hydros/scenes/scene-20260324-001.yml",
+    "agent_list": [
+      {
+        "agent_code": "DEMO_TWINS_AGENT",
+        "agent_type": "TWINS_SIMULATION_AGENT",
+        "agent_name": "Demo Twins Agent",
+        "agent_configuration_url": "http://config-server/hydros/agents/demo-twins-agent.yml"
+      }
+    ]
+  }
+}

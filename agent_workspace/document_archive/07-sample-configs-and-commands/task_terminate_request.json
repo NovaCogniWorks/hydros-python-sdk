@@ -1,0 +1,12 @@
+﻿{
+  "command": {
+    "command_id": "cmd-terminate-0001",
+    "command_type": "task_terminate_request",
+    "broadcast": false,
+    "context": {
+      "biz_scene_instance_id": "scene-20260324-001",
+      "valid": true
+    },
+    "reason": "joint-debug-finished"
+  }
+}
