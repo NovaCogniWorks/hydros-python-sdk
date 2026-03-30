@@ -22,6 +22,26 @@ from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
 logger = logging.getLogger(__name__)
 
 
+def _create_mqtt_client(client_id: str) -> mqtt.Client:
+    """Create a paho client compatible with both 1.x and 2.x."""
+    callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
+    if callback_api_version is not None:
+        return mqtt.Client(
+            callback_api_version=callback_api_version.VERSION2,
+            client_id=client_id,
+            protocol=mqtt.MQTTv311,
+        )
+    return mqtt.Client(
+        client_id=client_id,
+        protocol=mqtt.MQTTv311,
+    )
+
+
+def _reason_code_value(reason_code) -> int:
+    """Normalize paho reason code objects and legacy integer rc values."""
+    return getattr(reason_code, "value", reason_code)
+
+
 class AgentCommandClient:
     """先给第一版最小可用的 agent command 客户端。"""
 
@@ -62,11 +82,7 @@ class AgentCommandClient:
         self._max_workers = max_workers
         self._runtime: Optional[AgentCommandRuntime] = None
 
-        self.mqtt_client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self.client_id,
-            protocol=mqtt.MQTTv311,
-        )
+        self.mqtt_client = _create_mqtt_client(self.client_id)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_disconnect = self._on_disconnect
         self.mqtt_client.on_message = self._on_message
@@ -162,7 +178,7 @@ class AgentCommandClient:
         return self._get_runtime()
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
-        rc = reason_code.value
+        rc = _reason_code_value(reason_code)
         if rc == 0:
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             self._connected.set()
@@ -171,7 +187,9 @@ class AgentCommandClient:
         logger.error("AgentCommandClient 连接 MQTT 失败: rc=%s", rc)
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None) -> None:
-        rc = reason_code.value
+        if properties is None and reason_code == 0 and isinstance(disconnect_flags, int):
+            reason_code = disconnect_flags
+        rc = _reason_code_value(reason_code)
         self._connected.clear()
         if rc == 0 or self._intentional_disconnect:
             logger.info("AgentCommandClient 已断开 MQTT")

@@ -1,19 +1,20 @@
+﻿"""
+Hydraulic Solver implementation using corelib HydroSimulator.
+
+This module wraps the low-level simulator and adds:
+1. per-job solver lifecycle management
+2. boundary/control injection helpers
+3. snapshot-based forecast execution without mutating realtime state
 """
-Hydraulic Solver - Implementation using corelib HydroSimulator.
 
-This implements a hydraulic simulation for digital twins using the corelib
-HydroSimulator, which provides high-fidelity hydraulic calculations.
-
-Reference: examples/agents/idz/test.py
-"""
-
+import copy
 import logging
 import os
-from typing import Dict, Optional
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
-from urllib.parse import quote, urlparse, urlunparse
 import threading
+from typing import Any, Dict, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse, urlunparse
+from urllib.request import Request, urlopen
 
 # Add current directory to path for local imports
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,343 +26,284 @@ _idz_dir = os.path.join(os.path.dirname(__file__), '..', 'idz')
 if _idz_dir not in __import__('sys').path:
     __import__('sys').path.insert(0, _idz_dir)
 
-# Import corelib modules
 from corelib.core.hydro_simulator import HydroSimulator
-from simulation_states import DeviceControl, BoundaryState
+from simulation_states import BoundaryState, DeviceControl
 
 logger = logging.getLogger(__name__)
 
 
 class HydraulicSolver:
-    """
-    Hydraulic solver using corelib HydroSimulator.
+    """Hydraulic solver using corelib HydroSimulator."""
 
-    Workflow:
-    1. Initialize: Create simulator, get initial states, set up controls and boundaries
-    2. Solve Step: Execute one simulation step using the simulator
-
-    Supports concurrent simulations via job_instance_id.
-    """
-
-    # 类级别的求解器字典，用于管理多个并发仿真
-    # {job_instance_id: HydraulicSolver}
     _solvers: Dict[str, 'HydraulicSolver'] = {}
     _lock = threading.RLock()
 
     @classmethod
     def get_or_create(cls, job_instance_id: str) -> 'HydraulicSolver':
-        """
-        获取或创建指定 job_instance_id 的求解器实例。
-
-        Args:
-            job_instance_id: 任务实例ID
-
-        Returns:
-            HydraulicSolver 实例
-        """
         with cls._lock:
             if job_instance_id not in cls._solvers:
                 solver = cls(job_instance_id)
                 cls._solvers[job_instance_id] = solver
-                logger.info(f"创建新的求解器实例: {job_instance_id}")
+                logger.info(f"Created hydraulic solver for job: {job_instance_id}")
             return cls._solvers[job_instance_id]
 
     @classmethod
-    def remove(cls, job_instance_id: str) -> None:
-        """
-        移除指定 job_instance_id 的求解器实例。
-
-        Args:
-            job_instance_id: 任务实例ID
-        """
+    def get(cls, job_instance_id: str) -> Optional['HydraulicSolver']:
         with cls._lock:
-            if job_instance_id in cls._solvers:
-                solver = cls._solvers.pop(job_instance_id)
-                # 清理求解器资源
-                if hasattr(solver, 'sim') and solver.sim:
-                    try:
-                        # 如果 HydroSimulator 有 cleanup 方法
-                        if hasattr(solver.sim, 'cleanup'):
-                            solver.sim.cleanup()
-                    except Exception as e:
-                        logger.warning(f"清理求解器资源时出错: {e}")
+            return cls._solvers.get(job_instance_id)
 
-                # 删除 idz_config 配置文件
-                cls._cleanup_idz_config(job_instance_id)
+    @classmethod
+    def remove(cls, job_instance_id: str) -> None:
+        with cls._lock:
+            if job_instance_id not in cls._solvers:
+                return
 
-                logger.info(f"已移除求解器实例: {job_instance_id}")
+            solver = cls._solvers.pop(job_instance_id)
+            if getattr(solver, 'sim', None) and hasattr(solver.sim, 'cleanup'):
+                try:
+                    solver.sim.cleanup()
+                except Exception as exc:
+                    logger.warning(f"Failed to cleanup simulator for {job_instance_id}: {exc}")
+
+            cls._cleanup_idz_config(job_instance_id)
+            logger.info(f"Removed hydraulic solver for job: {job_instance_id}")
 
     @classmethod
     def _cleanup_idz_config(cls, job_instance_id: str) -> None:
-        """
-        删除指定任务实例的 IDZ 配置文件。
-
-        Args:
-            job_instance_id: 任务实例ID
-        """
-        # 使用绝对路径，确保从任何目录都能找到文件
-        # hydros-python-sdk/examples/data/idz_config_{job_instance_id}.yml
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        data_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "data"))
-        filename = f"idz_config_{job_instance_id}.yml"
-        file_path = os.path.join(data_dir, filename)
-
-        logger.info(f"尝试删除 IDZ 配置文件: {file_path}")
-        logger.info(f"当前工作目录: {os.getcwd()}")
-        logger.info(f"文件是否存在: {os.path.exists(file_path)}")
+        data_dir = os.path.abspath(os.path.join(script_dir, '..', '..', 'data'))
+        file_path = os.path.join(data_dir, f"idz_config_{job_instance_id}.yml")
 
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                logger.info(f"✓ 已删除 IDZ 配置文件: {file_path}")
-            else:
-                logger.warning(f"IDZ 配置文件不存在: {file_path}")
-                # 列出 data 目录中的所有文件以便调试
-                try:
-                    existing_files = [f for f in os.listdir(data_dir) if f.startswith("idz_config_")]
-                    logger.info(f"现有的 idz_config 文件: {existing_files}")
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.warning(f"删除 IDZ 配置文件时出错: {e}", exc_info=True)
-
-    @classmethod
-    def get(cls, job_instance_id: str) -> Optional['HydraulicSolver']:
-        """
-        获取指定 job_instance_id 的求解器实例（不存在则返回 None）。
-
-        Args:
-            job_instance_id: 任务实例ID
-
-        Returns:
-            HydraulicSolver 实例或 None
-        """
-        with cls._lock:
-            return cls._solvers.get(job_instance_id)
+                logger.info(f"Removed IDZ config file: {file_path}")
+        except Exception as exc:
+            logger.warning(f"Failed to remove IDZ config file {file_path}: {exc}", exc_info=True)
 
     def __init__(self, job_instance_id: str):
-        """
-        初始化液压求解器。
-
-        Args:
-            job_instance_id: 任务实例ID，用于标识并发仿真
-        """
         self.job_instance_id = job_instance_id
-        self.sim = None                # HydroSimulator 实例
-        self.simulation_states = {}       # 当前仿真状态
-        self.controls = {}               # 设备控制量
-        self.boundary_params = {}         # 边界条件参数
-        self.initial_states = {}          # 初始状态（用于重置）
-
-        # 简单的状态映射（向后兼容）
-        self.state = {}
+        self.sim = None
+        self.simulation_states: Dict[int, Any] = {}
+        self.controls: Dict[int, Dict[str, DeviceControl]] = {}
+        self.boundary_params: Dict[int, Dict[str, BoundaryState]] = {}
+        self.initial_states: Dict[int, Any] = {}
+        self.state: Dict[int, Dict[str, float]] = {}
         logger.info(f"Hydraulic solver initialized for job: {job_instance_id}")
 
-    def initialize(self, topology, idz_config_url):
-        """
-        初始化算法及初始参数。
-
-        步骤：
-        1. 通过 agent_configuration_url 下载配置并获取 idz_config_url
-        2. 下载 idz_config.yml 文件到 examples/data 目录
-        3. 创建 HydroSimulator 仿真器
-        4. 获取初始状态
-        5. 构造设备控制量
-        6. 构造边界条件参数
-
-        Args:
-            topology: 水网拓扑结构
-            agent_configuration_url: 代理配置文件 URL
-        """
+    def initialize(self, topology, idz_config_url: str) -> None:
         logger.info("Initializing hydraulic solver with topology")
 
-        # ========== 第1步：下载代理配置并获取 idz_config_url ==========
-        logger.debug("第1步：下载代理配置并获取 idz_config_url")
         idz_config_file = self._download_idz_config(idz_config_url)
         if not idz_config_file:
-            # 下载yaml文件失败，抛出异常停止后续仿真
-            error_msg = "无法下载 IDZ 配置文件，仿真初始化失败"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-            
-        # ========== 第2步：创建仿真器 ==========
-        logger.debug("第2步：创建仿真器")
-        self.sim = HydroSimulator(idz_config_file)
-        logger.info(f"✓ 仿真器创建成功，节点数量: {self.sim.num_nodes}")
+            raise RuntimeError("Failed to download IDZ configuration file")
 
-        # ========== 第3步：获取初始状态 ==========
-        logger.debug("第3步：获取初始状态")
+        self.sim = HydroSimulator(idz_config_file)
+        logger.info(f"HydroSimulator created, num_nodes={self.sim.num_nodes}")
 
         self.initial_states = self.sim.get_initial_states()
-        self.simulation_states = self.sim.get_initial_states()
-        logger.info(f"获取到 {len(self.simulation_states)} 个节点的初始状态")
+        self.simulation_states = copy.deepcopy(self.initial_states)
+        self.controls = self._build_default_controls(self.simulation_states)
+        self.boundary_params = self._build_default_boundary_params(self.simulation_states)
+        self.state = self.export_results_from_states(self.simulation_states)
 
-        # 显示前3个节点的状态
-        for node_id, state in list(self.simulation_states.items())[:3]:
-            logger.debug(f"  节点{node_id}: h={state.station_state.h_i_t:.2f}m, "
-                        f"qtot={state.station_state.qtot_i_t:.2f}m³/s")
+        logger.info(
+            "Hydraulic solver ready: states=%s, controls=%s, boundaries=%s",
+            len(self.simulation_states),
+            len(self.controls),
+            len(self.boundary_params),
+        )
 
-        # ========== 第4步：构造控制量 ==========
-        logger.debug("第4步：构造控制量")
+    def snapshot(self) -> Dict[str, Any]:
+        """Return a deep-copied mutable snapshot for forecast execution."""
+        return {
+            'simulation_states': copy.deepcopy(self.simulation_states),
+            'controls': copy.deepcopy(self.controls),
+            'boundary_params': copy.deepcopy(self.boundary_params),
+        }
 
-        all_node_ids = sorted(self.simulation_states.keys())
-        self.controls = {}
-
-        for node_id in all_node_ids:
-            state = self.simulation_states[node_id]
-            self.controls[node_id] = {}
-
-            # 为每个节点的每个设备创建控制量（默认开度65%）
-            for device_name in state.device_states.keys():
-                self.controls[node_id][device_name] = DeviceControl(
-                    device_name=device_name,
-                    e_i_t=65.0,  # 默认开度65%
-                    n_i_t=1,
-                )
-
-        logger.info(f"构造了 {len(self.controls)} 个节点的控制量")
-        logger.info("Hydraulic solver 初始化完成")
+    def get_current_results(self) -> Dict[int, Dict[str, float]]:
+        return self.export_results_from_states(self.simulation_states)
 
     def solve_step(
         self,
         step: int,
-        boundary_conditions: Dict[int, Dict[str, float]]
+        boundary_conditions: Optional[Dict[int, Dict[str, float]]] = None,
+        control_conditions: Optional[Dict[int, Dict[str, float]]] = None,
     ) -> Dict[int, Dict[str, float]]:
-        """
-        执行当前步的仿真任务。
+        """Execute one realtime step and persist the resulting state."""
+        snapshot = self.snapshot()
+        snapshot, output_results = self.solve_step_from_snapshot(
+            step=step,
+            snapshot=snapshot,
+            boundary_conditions=boundary_conditions,
+            control_conditions=control_conditions,
+        )
+        self.simulation_states = snapshot['simulation_states']
+        self.controls = snapshot['controls']
+        self.boundary_params = snapshot['boundary_params']
+        self.state = copy.deepcopy(output_results)
+        return output_results
 
-        步骤：
-        1. 更新边界条件（根据输入参数）
-        2. 调用 sim.step() 执行仿真
-        3. 更新内部状态
-        4. 返回仿真结果
+    def solve_step_from_snapshot(
+        self,
+        step: int,
+        snapshot: Dict[str, Any],
+        boundary_conditions: Optional[Dict[int, Dict[str, float]]] = None,
+        control_conditions: Optional[Dict[int, Dict[str, float]]] = None,
+    ) -> tuple[Dict[str, Any], Dict[int, Dict[str, float]]]:
+        """Execute one forecast step based on an external snapshot."""
+        if not self.sim:
+            raise RuntimeError('Hydraulic solver is not initialized')
 
-        Args:
-            step: 当前仿真步数
-            boundary_conditions: 边界条件 {object_id: {metrics_code: value}}
+        simulation_states = snapshot['simulation_states']
+        controls = snapshot['controls']
+        boundary_params = snapshot['boundary_params']
 
-        Returns:
-            仿真结果 {object_id: {metrics_code: value}}
-        """
-        logger.debug(f"执行第 {step} 步仿真")
+        self._apply_boundary_conditions(boundary_params, boundary_conditions or {})
+        self._apply_control_conditions(controls, control_conditions or {})
 
-        # ========== 更新边界条件 ==========
-        if boundary_conditions:
-            for object_id, bc_values in boundary_conditions.items():
-                if object_id in self.boundary_params:
-                    # 更新上游边界
-                    if 'upstream_boundary' in self.boundary_params[object_id]:
-                        upstream = self.boundary_params[object_id]['upstream_boundary']
-                        if 'h_i_t' in bc_values:
-                            upstream.h_i_t = bc_values['h_i_t']
-                        if 'Inflow_i_t' in bc_values:
-                            upstream.Inflow_i_t = bc_values['Inflow_i_t']
-                        if 'qtot_i_t' in bc_values:
-                            upstream.qtot_i_t = bc_values['qtot_i_t']
-
-                    # 更新下游边界
-                    if 'downstream_boundary' in self.boundary_params[object_id]:
-                        downstream = self.boundary_params[object_id]['downstream_boundary']
-                        if 'h_i_t' in bc_values:
-                            downstream.h_i_t = bc_values['h_i_t']
-                        if 'Inflow_i_t' in bc_values:
-                            downstream.Inflow_i_t = bc_values['Inflow_i_t']
-                        if 'qtot_i_t' in bc_values:
-                            downstream.qtot_i_t = bc_values['qtot_i_t']
-
-            logger.debug(f"更新了 {len(boundary_conditions)} 个节点的边界条件")
-
-        # ========== 执行仿真步骤 ==========
         try:
-            new_states, results = self.sim.step(
-                controls=self.controls,
-                boundary_params=self.boundary_params,
-                simulation_states=self.simulation_states
+            new_states, _ = self.sim.step(
+                controls=controls,
+                boundary_params=boundary_params,
+                simulation_states=simulation_states,
             )
+        except Exception as exc:
+            logger.error(f"Step {step} simulation failed: {exc}", exc_info=True)
+            raise
 
-            # 更新仿真状态（用于下一步）
-            self.simulation_states = new_states
+        output_results = self.export_results_from_states(new_states)
+        snapshot['simulation_states'] = new_states
+        snapshot['controls'] = controls
+        snapshot['boundary_params'] = boundary_params
 
-            # 转换仿真结果为标准格式
-            output_results = {}
-            for node_id, result in results.items():
-                state = new_states[node_id]
+        logger.info(f"Simulation step {step} completed with {len(output_results)} objects")
+        return snapshot, output_results
 
-                # 提取关键指标
-                output_results[node_id] = {
-                    'water_level': state.station_state.h_i_t,
-                    'water_flow': state.station_state.qtot_i_t,
-                    # 'gate_opening': 65.0,  # 默认开度
-                }
-
-            # 更新简单状态映射（向后兼容）
-            for object_id in self.state:
-                if object_id in output_results:
-                    self.state[object_id].update({
-                        'water_level': output_results[object_id]['water_level'],
-                        'water_flow': output_results[object_id]['water_flow'],
-                        # 'gate_opening': output_results[object_id]['gate_opening'],
-                    })
-
-            logger.info(f"✓ 第 {step} 步仿真完成，更新了 {len(output_results)} 个节点")
-            return output_results
-
-        except Exception as e:
-            logger.error(f"第 {step} 步仿真失败: {e}")
-            return {}
-
-    def update_controls(self, controls_update: Dict[int, Dict[str, DeviceControl]]):
-        """
-        更新特定节点的设备控制量。
-
-        Args:
-            controls_update: 新控制量 {node_id: {device_name: DeviceControl}}
-        """
+    def update_controls(self, controls_update: Dict[int, Dict[str, DeviceControl]]) -> None:
         for node_id, device_controls in controls_update.items():
             if node_id not in self.controls:
                 self.controls[node_id] = {}
             self.controls[node_id].update(device_controls)
-        logger.info(f"更新了 {len(controls_update)} 个节点的控制量")
+        logger.info(f"Updated controls for {len(controls_update)} nodes")
 
-    def update_boundary_params(self, boundary_update: Dict[int, Dict[str, BoundaryState]]):
-        """
-        更新特定节点的边界条件参数。
-
-        Args:
-            boundary_update: 新边界条件 {node_id: {boundary_type: BoundaryState}}
-        """
+    def update_boundary_params(self, boundary_update: Dict[int, Dict[str, BoundaryState]]) -> None:
         for node_id, boundaries in boundary_update.items():
             if node_id not in self.boundary_params:
                 self.boundary_params[node_id] = {}
             self.boundary_params[node_id].update(boundaries)
-        logger.info(f"更新了 {len(boundary_update)} 个节点的边界条件")
+        logger.info(f"Updated boundary params for {len(boundary_update)} nodes")
+
+    def export_results_from_states(self, simulation_states: Dict[int, Any]) -> Dict[int, Dict[str, float]]:
+        output_results: Dict[int, Dict[str, float]] = {}
+        for node_id, state in simulation_states.items():
+            output_results[node_id] = {
+                'water_level': float(getattr(state.station_state, 'h_i_t', 0.0)),
+                'water_flow': float(getattr(state.station_state, 'qtot_i_t', 0.0)),
+            }
+        return output_results
+
+    def _build_default_controls(self, simulation_states: Dict[int, Any]) -> Dict[int, Dict[str, DeviceControl]]:
+        controls: Dict[int, Dict[str, DeviceControl]] = {}
+        for node_id in sorted(simulation_states.keys()):
+            state = simulation_states[node_id]
+            controls[node_id] = {}
+            for device_name in getattr(state, 'device_states', {}).keys():
+                controls[node_id][device_name] = DeviceControl(
+                    device_name=device_name,
+                    e_i_t=65.0,
+                    n_i_t=1,
+                )
+        return controls
+
+    def _build_default_boundary_params(self, simulation_states: Dict[int, Any]) -> Dict[int, Dict[str, BoundaryState]]:
+        boundary_params: Dict[int, Dict[str, BoundaryState]] = {}
+        for node_id, state in simulation_states.items():
+            station_state = getattr(state, 'station_state', None)
+            if station_state is None:
+                continue
+
+            base_boundary = BoundaryState(
+                h_i_t=float(getattr(station_state, 'h_i_t', 0.0)),
+                hat_h_i_t=float(getattr(station_state, 'hat_h_i_t', 0.0)),
+                Inflow_i_t=float(getattr(station_state, 'inflow_i_t', 0.0)),
+                qtot_i_t=float(getattr(station_state, 'qtot_i_t', 0.0)),
+                boundary_id=str(node_id),
+            )
+            boundary_params[node_id] = {
+                'upstream_boundary': copy.deepcopy(base_boundary),
+                'downstream_boundary': copy.deepcopy(base_boundary),
+            }
+            boundary_params[node_id]['upstream_boundary'].boundary_type = 'upstream'
+            boundary_params[node_id]['downstream_boundary'].boundary_type = 'downstream'
+        return boundary_params
+
+    def _apply_boundary_conditions(
+        self,
+        boundary_params: Dict[int, Dict[str, BoundaryState]],
+        boundary_conditions: Dict[int, Dict[str, float]],
+    ) -> None:
+        if not boundary_conditions:
+            return
+
+        alias_map = {
+            'upstream_water_level': 'h_i_t',
+            'water_level': 'h_i_t',
+            'inflow': 'Inflow_i_t',
+            'inflow_i_t': 'Inflow_i_t',
+            'water_flow': 'qtot_i_t',
+            'flow': 'qtot_i_t',
+        }
+
+        for object_id, metric_values in boundary_conditions.items():
+            if object_id not in boundary_params:
+                current_state = self.simulation_states.get(object_id)
+                if current_state is None:
+                    continue
+                boundary_params[object_id] = self._build_default_boundary_params({object_id: current_state})[object_id]
+
+            for boundary_name in ('upstream_boundary', 'downstream_boundary'):
+                boundary = boundary_params[object_id].get(boundary_name)
+                if boundary is None:
+                    continue
+                for metric_code, value in metric_values.items():
+                    target_attr = alias_map.get(metric_code, metric_code)
+                    if hasattr(boundary, target_attr) and value is not None:
+                        setattr(boundary, target_attr, float(value))
+
+    def _apply_control_conditions(
+        self,
+        controls: Dict[int, Dict[str, DeviceControl]],
+        control_conditions: Dict[int, Dict[str, float]],
+    ) -> None:
+        if not control_conditions:
+            return
+
+        for object_id, metric_values in control_conditions.items():
+            if object_id not in controls:
+                continue
+
+            for device_control in controls[object_id].values():
+                for metric_code, value in metric_values.items():
+                    if value is None:
+                        continue
+                    if metric_code in {'gate_opening', 'opening', 'e_i_t'}:
+                        device_control.e_i_t = float(value)
+                    elif metric_code in {'unit_count', 'n_i_t'}:
+                        device_control.n_i_t = int(value)
+                    elif metric_code in {'target_flow'}:
+                        device_control.target_flow = float(value)
+                    elif metric_code in {'emergency_shutdown', 'maintenance_shutdown'} and float(value) > 0:
+                        device_control.e_i_t = 0.0
+                        device_control.target_flow = 0.0
 
     def _download_idz_config(self, idz_config_url: str) -> Optional[str]:
-        """
-        从代理配置 URL 下载 IDZ 配置文件。
-
-        Args:
-            idz_config_url: 代理配置文件 URL
-
-        Returns:
-            下载的 IDZ 配置文件路径，失败则返回 None
-        """
         try:
-            # 导入 AgentConfigLoader
-            from hydros_agent_sdk.agent_config import AgentConfigLoader
-
-            logger.info(f"加载代理配置: {idz_config_url}")
-            # agent_config = AgentConfigLoader.from_url(agent_configuration_url)
-
-            # 获取 idz_config_url
-            # idz_config_url = agent_config.get_idz_config_url()
             if not idz_config_url:
-                logger.warning("代理配置中未找到 idz_config_url")
+                logger.warning('idz_config_url is empty')
                 return None
 
-            logger.info(f"找到 IDZ 配置 URL: {idz_config_url}")
-
-            # 编码 URL 以处理非 ASCII 字符
             parsed = urlparse(idz_config_url)
             encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
             encoded_url = urlunparse((
@@ -370,56 +312,44 @@ class HydraulicSolver:
                 encoded_path,
                 parsed.params,
                 parsed.query,
-                parsed.fragment
+                parsed.fragment,
             ))
 
-            # 下载 IDZ 配置文件
-            logger.info(f"下载 IDZ 配置文件: {encoded_url}")
             request = Request(encoded_url)
             request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
 
             with urlopen(request, timeout=30) as response:
                 content = response.read().decode('utf-8')
 
-            # 解析 YAML 并修改节点名
             try:
                 import yaml
+
                 data = yaml.safe_load(content)
-
-                # 将 objects 节点名改为 components
-                if 'objects' in data:
+                if isinstance(data, dict) and 'objects' in data:
                     data['components'] = data.pop('objects')
-                    logger.info("✓ 已将 'objects' 节点名改为 'components'")
-
-                # 转换回 YAML 字符串
                 content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
             except ImportError:
-                logger.warning("未安装 PyYAML，跳过节点名修改")
-            except Exception as e:
-                logger.warning(f"修改节点名时出错: {e}，使用原始内容")
+                logger.warning('PyYAML not installed, skip IDZ YAML normalization')
+            except Exception as exc:
+                logger.warning(f'Failed to normalize IDZ YAML content: {exc}')
 
-            # 保存到 examples/data 目录，使用 job_instance_id 区分不同任务
-            # 使用绝对路径，确保从任何目录都能找到文件
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            data_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "data"))
+            data_dir = os.path.abspath(os.path.join(script_dir, '..', '..', 'data'))
             os.makedirs(data_dir, exist_ok=True)
 
-            # 使用 job_instance_id 生成唯一文件名，避免多任务冲突
-            filename = f"idz_config_{self.job_instance_id}.yml"
-            output_path = os.path.join(data_dir, filename)
+            output_path = os.path.join(data_dir, f'idz_config_{self.job_instance_id}.yml')
+            with open(output_path, 'w', encoding='utf-8') as file_handle:
+                file_handle.write(content)
 
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-            logger.info(f"✓ IDZ 配置文件已保存到: {output_path}")
+            logger.info(f'IDZ config saved to: {output_path}')
             return output_path
 
-        except ImportError as e:
-            logger.error(f"缺少依赖: {e}")
+        except ImportError as exc:
+            logger.error(f'Missing dependency while downloading IDZ config: {exc}')
             return None
-        except (HTTPError, URLError) as e:
-            logger.error(f"下载 IDZ 配置失败: {e}")
+        except (HTTPError, URLError) as exc:
+            logger.error(f'Failed to download IDZ config: {exc}')
             return None
-        except Exception as e:
-            logger.error(f"处理 IDZ 配置时出错: {e}")
+        except Exception as exc:
+            logger.error(f'Unexpected error while processing IDZ config: {exc}', exc_info=True)
             return None
