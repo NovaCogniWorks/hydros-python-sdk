@@ -402,18 +402,17 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_node_id="node-a",
         )
 
+        control_command = {
+            "target_agent_code": "PUMP_AGENT_001",
+            "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
+            "target_value": 85.5,
+            "object_id": 1021,
+            "object_type": HydroObjectType.TURBINE,
+        }
         pump_request = Mock(name="pump_request")
-        with patch.object(agent, "_build_station_target_value_request", return_value=pump_request) as build_request, \
-             patch.object(agent, "send_command") as send_command:
-            agent._send_control_commands([
-                {
-                    "target_agent_code": "PUMP_AGENT_001",
-                    "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
-                    "target_value": 85.5,
-                    "object_id": 1021,
-                    "object_type": HydroObjectType.TURBINE,
-                }
-            ])
+        with patch.object(CentralSchedulingAgent, "_build_station_target_value_request", return_value=pump_request) as build_request, \
+             patch.object(CentralSchedulingAgent, "send_command") as send_command:
+            agent._send_control_commands([control_command])
 
         build_request.assert_called_once_with(
             target_agent_code="PUMP_AGENT_001",
