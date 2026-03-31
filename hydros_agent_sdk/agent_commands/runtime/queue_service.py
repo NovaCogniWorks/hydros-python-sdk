@@ -175,13 +175,20 @@ class AgentCommandQueueService:
     def _build_log_entry(self, command: AgentCommandRequest, source_id: str) -> AgentCommandLogEntry:
         source_is_local = bool(command.source and self.state_manager.is_local_agent(command.source))
         target_is_local = bool(command.target and self.state_manager.is_local_agent(command.target))
+        context = command.context
+        tenant_id = str(context.tenant.tenant_id) if context.tenant and context.tenant.tenant_id else None
+        biz_scenario_id = (
+            str(context.biz_scenario.biz_scenario_id)
+            if context.biz_scenario and context.biz_scenario.biz_scenario_id
+            else None
+        )
 
         return AgentCommandLogEntry(
             command_id=command.command_id,
             source_id=source_id,
-            tenant_id=str(command.context.tenant.tenant_id),
-            biz_scenario_id=str(command.context.biz_scenario.biz_scenario_id),
-            biz_scene_instance_id=command.context.biz_scene_instance_id,
+            tenant_id=tenant_id,
+            biz_scenario_id=biz_scenario_id,
+            biz_scene_instance_id=context.biz_scene_instance_id,
             command_type=command.command_type,
             command_request=command.model_dump_json(by_alias=True),
             source_agent_id=command.source.agent_id if command.source else None,
