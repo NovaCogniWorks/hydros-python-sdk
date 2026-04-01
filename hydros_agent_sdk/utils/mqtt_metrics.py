@@ -22,9 +22,14 @@ class MqttMetrics(BaseModel):
     """
     source_id: str = Field(..., description="Source identifier (e.g., agent code)")
     job_instance_id: str = Field(..., description="Job instance ID (e.g., biz_scene_instance_id)")
+    biz_scenario_instance_id: Optional[str] = Field(None, description="Business scenario instance ID")
     object_id: int = Field(..., description="Water network object ID")
     object_name: str = Field(..., description="Water network object name")
+    object_type: Optional[str] = Field(None, description="Water network object type")
     step_index: int = Field(..., description="Simulation step index")
+    data_index: Optional[int] = Field(None, description="Data index, typically same as step index")
+    source_type: Optional[str] = Field(None, description="Source type, e.g. MQTT")
+    source_time: Optional[str] = Field(None, description="Source time in ISO-8601 string format")
     source_timestamp_ms: int = Field(..., description="Source timestamp in milliseconds")
     metrics_code: str = Field(..., description="Metrics code (e.g., water_level, flow_rate)")
     value: float = Field(..., description="Metrics value")
@@ -35,9 +40,14 @@ class MqttMetrics(BaseModel):
             "example": {
                 "source_id": "TWINS_SIMULATION_AGENT",
                 "job_instance_id": "task_123",
+                "biz_scenario_instance_id": "task_123",
                 "object_id": 1001,
                 "object_name": "Gate_01",
+                "object_type": "Gate",
                 "step_index": 10,
+                "data_index": 10,
+                "source_type": "MQTT",
+                "source_time": "2025-01-01T00:10:00",
                 "source_timestamp_ms": 1706601234567,
                 "metrics_code": "gate_opening",
                 "value": 0.75
@@ -120,7 +130,12 @@ def create_mock_metrics(
     step_index: int,
     metrics_code: str,
     value: float,
-    timestamp_ms: Optional[int] = None
+    timestamp_ms: Optional[int] = None,
+    biz_scenario_instance_id: Optional[str] = None,
+    object_type: Optional[str] = None,
+    data_index: Optional[int] = None,
+    source_type: Optional[str] = None,
+    source_time: Optional[str] = None,
 ) -> MqttMetrics:
     """
     Create a mock metrics object for testing.
@@ -134,6 +149,11 @@ def create_mock_metrics(
         metrics_code: Metrics code (e.g., water_level, flow_rate)
         value: Metrics value
         timestamp_ms: Optional timestamp in milliseconds (defaults to current time)
+        biz_scenario_instance_id: Optional business scenario instance ID
+        object_type: Optional object type
+        data_index: Optional data index
+        source_type: Optional source type
+        source_time: Optional source time string
 
     Returns:
         MqttMetrics object
@@ -144,9 +164,14 @@ def create_mock_metrics(
     return MqttMetrics(
         source_id=source_id,
         job_instance_id=job_instance_id,
+        biz_scenario_instance_id=biz_scenario_instance_id,
         object_id=object_id,
         object_name=object_name,
+        object_type=object_type,
         step_index=step_index,
+        data_index=data_index,
+        source_type=source_type,
+        source_time=source_time,
         source_timestamp_ms=timestamp_ms,
         metrics_code=metrics_code,
         value=value

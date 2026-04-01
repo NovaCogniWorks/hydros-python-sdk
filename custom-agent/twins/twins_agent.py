@@ -11,9 +11,10 @@ import os
 import sys
 import threading
 import time
-from typing import ClassVar, Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
-# Add current directory to Python path for hydraulic_solver import
+# 将当前目录加入 Python 路径，便于导入本地 hydraulic_solver
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -63,9 +64,14 @@ logger = logging.getLogger(__name__)
 
 
 class MyTwinsSimulationAgent(TwinsSimulationAgent):
-    """Digital twins simulation agent with rolling forecast support."""
+    """支持滚动预测的数字孪生仿真智能体。"""
 
-    DEFAULT_BOUNDARY_METRICS: ClassVar[List[str]] = ['inflow', 'upstream_water_level']
+    DEFAULT_BOUNDARY_METRICS: ClassVar[List[str]] = [
+        'inflow',
+        'upstream_water_level',
+        'water_flow',
+        'water_level',
+    ]
     DEFAULT_SCENARIO_GROUPS: ClassVar[Dict[str, set[str]]] = {
         'weather_forecast': {'weather_forecast', 'weather_inflow', 'forecast_inflow'},
         'water_use_plan': {'water_use_plan', 'planned_demand', 'planned_outflow'},
@@ -117,16 +123,75 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         self._rolling_cycle = 10
         self._forecast_horizon = 0
         self._trigger_on_condition_update = True
-        self._force_forecast_on_next_tick = False
         self._boundary_condition_metrics = set(self.DEFAULT_BOUNDARY_METRICS)
         self._scenario_metric_groups = {
             name: set(values) for name, values in self.DEFAULT_SCENARIO_GROUPS.items()
         }
         self._boundary_metric_aliases = dict(self.DEFAULT_BOUNDARY_ALIASES)
         self._control_metric_aliases = dict(self.DEFAULT_CONTROL_ALIASES)
+        self._biz_scene_configuration: Dict[str, Any] = {}
         self._forecast_results_cache: Dict[int, Dict[int, Dict[str, float]]] = {}
+        self._forecast_anchor_step = 0
+        self._last_forecast_start_step: Optional[int] = None
+        self._last_forecast_end_step: int = 0
+        self._last_event_forecast_step: Optional[int] = None
 
         logger.info(f"MyTwinsSimulationAgent created: {agent_id}")
+
+    def load_agent_configuration(self, request) -> None:
+        super().load_agent_configuration(request)
+        self._load_biz_scene_configuration(request)
+
+    def _load_biz_scene_configuration(self, request=None) -> None:
+        biz_scene_configuration_url = self.properties.get_property('biz_scene_configuration_url')
+        if not biz_scene_configuration_url and request is not None:
+            biz_scene_configuration_url = getattr(request, 'biz_scene_configuration_url', None)
+            if biz_scene_configuration_url:
+                self.properties['biz_scene_configuration_url'] = biz_scene_configuration_url
+        if not biz_scene_configuration_url:
+            logger.info("No biz_scene_configuration_url configured, skipping scene configuration load")
+            return
+
+        from hydros_agent_sdk.utils.yaml_loader import YamlLoader
+
+        scene_config = YamlLoader.from_url(str(biz_scene_configuration_url))
+        if not isinstance(scene_config, dict):
+            raise ValueError(
+                f"biz scene configuration must be a dictionary, got {type(scene_config).__name__}"
+            )
+
+        self._biz_scene_configuration = copy.deepcopy(scene_config)
+
+        # 保留原始场景 YAML，且同时把顶层配置展开到现有 properties 查询链路中。
+        self.properties['biz_scene_configuration'] = copy.deepcopy(scene_config)
+        self.properties.update(scene_config)
+
+        sim_agent_properties = scene_config.get('sim_agent_properties')
+        if isinstance(sim_agent_properties, dict):
+            for key, value in sim_agent_properties.items():
+                self.properties.setdefault(str(key), value)
+            self._apply_sim_agent_property_aliases(sim_agent_properties)
+
+        logger.info(
+            "Loaded biz scene configuration from %s with %s top-level keys",
+            biz_scene_configuration_url,
+            len(scene_config),
+        )
+
+    def _apply_sim_agent_property_aliases(self, sim_agent_properties: Dict[str, Any]) -> None:
+        property_aliases = {
+            'sim_step_size': 'time_step',
+            'roll_steps': 'rolling_cycle',
+            'output_future_steps': 'forecast_horizon',
+        }
+
+        for source_key, target_key in property_aliases.items():
+            if source_key not in sim_agent_properties:
+                continue
+            existing_value = self.properties.get_property(target_key)
+            if existing_value not in (None, '', 0, '0', False):
+                continue
+            self.properties[target_key] = sim_agent_properties[source_key]
 
     def _initialize_twins_model(self):
         logger.info("Initializing digital twins model...")
@@ -172,19 +237,38 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             if not current_results:
                 return []
 
-            if self._should_trigger_forecast(step):
-                window_results = self._run_forecast_window(
-                    start_step=step,
-                    anchor_results=current_results,
-                )
-                metrics_list = self._convert_window_results_to_metrics(window_results)
+            forecast_plan = self._build_periodic_forecast_plan(step)
+            if not forecast_plan:
                 logger.info(
-                    "Rolling forecast emitted for step %s covering %s future steps",
+                    "Tick=%s 未命中发送窗口，本步不发送业务数据，forecast_horizon=%s, anchor=%s, roll_steps=%s",
                     step,
                     self._forecast_horizon,
+                    self._forecast_anchor_step,
+                    self._rolling_cycle,
                 )
-            else:
-                metrics_list = self._convert_results_to_metrics(current_results, step_index=step)
+                return []
+
+            window_results = self._run_forecast_window(
+                start_step=forecast_plan['start_step'],
+                end_step=int(forecast_plan['window_end_step']),
+                result_window_from_step=int(forecast_plan['result_window_from_step']),
+                anchor_results=current_results,
+            )
+            metrics_list = self._convert_window_results_to_metrics(
+                window_results,
+                send_from_step=forecast_plan['send_from_step'],
+                send_to_step=forecast_plan['send_to_step'],
+            )
+            self._record_forecast_plan_execution(forecast_plan)
+            logger.info(
+                "Rolling forecast emitted for tick=%s, start=%s, send_range=[%s,%s], horizon=%s, trigger=%s",
+                step,
+                forecast_plan['start_step'],
+                forecast_plan['send_from_step'],
+                forecast_plan['send_to_step'],
+                self._forecast_horizon,
+                forecast_plan['trigger_type'],
+            )
 
             logger.info(f"Generated {len(metrics_list)} metrics for step {step}")
             return metrics_list
@@ -273,11 +357,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             normalized_code = metrics_code.lower()
             object_id = int(time_series.object_id)
 
-            boundary_target = self._boundary_metric_aliases.get(metrics_code)
-            if boundary_target is None:
-                boundary_target = self._boundary_metric_aliases.get(normalized_code)
-            if boundary_target is None and normalized_code in normalized_boundary_metrics:
-                boundary_target = metrics_code
+            boundary_target = self._resolve_boundary_metric_target(
+                time_series=time_series,
+                metrics_code=metrics_code,
+                normalized_code=normalized_code,
+                normalized_boundary_metrics=normalized_boundary_metrics,
+            )
             if boundary_target is not None:
                 boundary_conditions.setdefault(object_id, {})[boundary_target] = float(value)
 
@@ -292,6 +377,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _run_forecast_window(
         self,
         start_step: int,
+        end_step: Optional[int] = None,
+        result_window_from_step: Optional[int] = None,
         anchor_results: Optional[Dict[int, Dict[str, float]]] = None,
     ) -> Dict[int, Dict[int, Dict[str, float]]]:
         if not self._hydraulic_solver:
@@ -300,16 +387,22 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         if anchor_results is None:
             anchor_results = self._hydraulic_solver.get_current_results()
 
-        window_results: Dict[int, Dict[int, Dict[str, float]]] = {
-            start_step: copy.deepcopy(anchor_results)
-        }
+        window_results: Dict[int, Dict[int, Dict[str, float]]] = {}
 
-        if self._forecast_horizon <= 0:
+        if end_step is None:
+            end_step = self._calculate_forecast_end_step(start_step)
+        if result_window_from_step is None:
+            result_window_from_step = start_step
+
+        if start_step >= result_window_from_step:
+            window_results[start_step] = copy.deepcopy(anchor_results)
+
+        if end_step <= start_step:
             self._merge_forecast_results(window_results)
             return window_results
 
         snapshot = self._hydraulic_solver.snapshot()
-        for target_step in range(start_step + 1, start_step + self._forecast_horizon + 1):
+        for target_step in range(start_step + 1, end_step + 1):
             boundary_conditions, control_conditions = self._collect_step_inputs(target_step)
             snapshot, step_results = self._hydraulic_solver.solve_step_from_snapshot(
                 step=target_step,
@@ -317,7 +410,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 boundary_conditions=boundary_conditions,
                 control_conditions=control_conditions,
             )
-            window_results[target_step] = step_results
+            if target_step >= result_window_from_step:
+                window_results[target_step] = step_results
 
         self._merge_forecast_results(window_results)
         return window_results
@@ -325,14 +419,77 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _should_trigger_forecast(self, step: int) -> bool:
         if self._forecast_horizon <= 0:
             return False
+        if step == 1:
+            return True
+        anchor_step = max(0, self._forecast_anchor_step)
+        if step < anchor_step:
+            return False
+        return ((step - anchor_step) % self._rolling_cycle) == 0
 
-        triggered_by_cycle = (step % self._rolling_cycle) == 0
-        triggered_by_event = self._force_forecast_on_next_tick
-        should_trigger = triggered_by_cycle or triggered_by_event
+    def _build_periodic_forecast_plan(self, step: int) -> Optional[Dict[str, int | str]]:
+        if not self._should_trigger_forecast(step):
+            return None
 
-        if should_trigger:
-            self._force_forecast_on_next_tick = False
-        return should_trigger
+        start_step = step
+        send_to_step = self._calculate_periodic_forecast_end_step(start_step)
+
+        if step == 1:
+            result_window_from_step = start_step
+            send_from_step = start_step
+        else:
+            result_window_from_step = start_step + self._rolling_cycle
+            send_from_step = max(start_step, self._last_forecast_end_step + 1)
+
+        if send_from_step > send_to_step:
+            logger.info(
+                "Skip periodic forecast send at step=%s because send range is empty, anchor=%s, last_sent_end=%s",
+                step,
+                self._forecast_anchor_step,
+                self._last_forecast_end_step,
+            )
+            return None
+
+        return {
+            'trigger_type': 'periodic',
+            'start_step': start_step,
+            'window_end_step': send_to_step,
+            'result_window_from_step': result_window_from_step,
+            'send_from_step': send_from_step,
+            'send_to_step': send_to_step,
+        }
+
+    def _build_event_forecast_plan(self, step: int) -> Optional[Dict[str, int | str]]:
+        if self._forecast_horizon <= 0:
+            return None
+
+        start_step = max(0, step)
+        return {
+            'trigger_type': 'event',
+            'start_step': start_step,
+            'window_end_step': self._calculate_forecast_end_step(start_step),
+            'result_window_from_step': start_step,
+            'send_from_step': start_step,
+            'send_to_step': self._calculate_forecast_end_step(start_step),
+        }
+
+    def _calculate_forecast_end_step(self, start_step: int) -> int:
+        return start_step + max(self._forecast_horizon - 1, 0)
+
+    def _calculate_periodic_forecast_end_step(self, start_step: int) -> int:
+        if start_step == 1:
+            return self._calculate_forecast_end_step(start_step)
+        return start_step + max(self._forecast_horizon, 0)
+
+    def _record_forecast_plan_execution(self, forecast_plan: Dict[str, int | str]) -> None:
+        start_step = int(forecast_plan['start_step'])
+        send_to_step = int(forecast_plan['send_to_step'])
+        trigger_type = str(forecast_plan['trigger_type'])
+
+        self._last_forecast_start_step = start_step
+        self._last_forecast_end_step = max(self._last_forecast_end_step, send_to_step)
+        if trigger_type == 'event':
+            self._forecast_anchor_step = start_step
+            self._last_event_forecast_step = start_step
 
     def _merge_forecast_results(self, window_results: Dict[int, Dict[int, Dict[str, float]]]) -> None:
         for step, results in window_results.items():
@@ -341,10 +498,23 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _convert_window_results_to_metrics(
         self,
         window_results: Dict[int, Dict[int, Dict[str, float]]],
+        send_from_step: Optional[int] = None,
+        send_to_step: Optional[int] = None,
     ) -> List[MqttMetrics]:
         metrics_list: List[MqttMetrics] = []
         for step in sorted(window_results.keys()):
+            if send_from_step is not None and step < send_from_step:
+                continue
+            if send_to_step is not None and step > send_to_step:
+                continue
             metrics_list.extend(self._convert_results_to_metrics(window_results[step], step_index=step))
+        metrics_list.sort(
+            key=lambda metric: (
+                getattr(metric, 'step_index', -1),
+                getattr(metric, 'object_id', -1),
+                str(getattr(metric, 'metrics_code', '')),
+            )
+        )
         return metrics_list
 
     def _convert_results_to_metrics(
@@ -376,6 +546,55 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         return metrics_list
 
+    def _create_metrics(
+        self,
+        object_id: int,
+        object_name: str,
+        object_type: str,
+        step_index: int,
+        metrics_code: str,
+        value: float,
+    ) -> MqttMetrics:
+        timestamp_ms = self._calculate_source_timestamp_ms(step_index)
+        return create_mock_metrics(
+            source_id=self.agent_code,
+            job_instance_id=self.biz_scene_instance_id,
+            biz_scenario_instance_id=self.biz_scene_instance_id,
+            object_id=object_id,
+            object_name=object_name,
+            object_type=object_type,
+            step_index=step_index,
+            data_index=step_index,
+            source_type='MQTT',
+            source_time=self._format_source_time(timestamp_ms),
+            metrics_code=metrics_code,
+            value=value,
+            timestamp_ms=timestamp_ms,
+        )
+
+    def _calculate_source_timestamp_ms(self, data_index: int) -> int:
+        biz_start_time = self.properties.get_property('biz_start_time')
+        sim_step_size = self._as_int(self.properties.get_property('sim_step_size', 60), 60)
+
+        if not biz_start_time:
+            return int(time.time() * 1000)
+
+        try:
+            start_time = datetime.strptime(str(biz_start_time), '%Y/%m/%d %H:%M:%S')
+            source_time = start_time + timedelta(seconds=max(0, data_index) * max(1, sim_step_size))
+            return int(source_time.timestamp() * 1000)
+        except Exception as exc:
+            logger.warning(
+                "Failed to calculate source timestamp from biz_start_time=%s, sim_step_size=%s: %s",
+                biz_start_time,
+                sim_step_size,
+                exc,
+            )
+            return int(time.time() * 1000)
+
+    def _format_source_time(self, timestamp_ms: int) -> str:
+        return datetime.fromtimestamp(timestamp_ms / 1000).isoformat(timespec='seconds')
+
     def _build_topology_mappings(self) -> Tuple[Dict[int, Dict[str, object]], Dict[int, Dict[str, object]]]:
         node_info: Dict[int, Dict[str, object]] = {}
         cross_section_info: Dict[int, Dict[str, object]] = {}
@@ -401,6 +620,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     cross_section_ids.append(child.object_id)
                     cross_section_info[child.object_id] = {
                         'name': child.object_name,
+                        'type': child.object_type,
                         'parent_id': top_obj.object_id,
                         'parent_type': top_obj.object_type,
                     }
@@ -419,14 +639,14 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         step_index: int,
     ) -> None:
         node_name = str(node_info['name'])
+        node_type = str(node_info['type'])
 
         if 'water_level' in values or 'h_i_t' in values:
             water_level = values.get('water_level', values.get('h_i_t', 0.0))
-            metrics_list.append(create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
+            metrics_list.append(self._create_metrics(
                 object_id=node_id,
                 object_name=node_name,
+                object_type=node_type,
                 step_index=step_index,
                 metrics_code='water_level',
                 value=water_level,
@@ -434,11 +654,10 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         if 'water_flow' in values or 'qtot_i_t' in values or 'q_out' in values:
             water_flow = values.get('water_flow', values.get('qtot_i_t', values.get('q_out', 0.0)))
-            metrics_list.append(create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
+            metrics_list.append(self._create_metrics(
                 object_id=node_id,
                 object_name=node_name,
+                object_type=node_type,
                 step_index=step_index,
                 metrics_code='water_flow',
                 value=water_flow,
@@ -464,20 +683,19 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         for index, cs_id in enumerate(cross_section_ids):
             cs_name = str(cross_section_info.get(cs_id, {}).get('name', f'CS_{cs_id}'))
-            metrics_list.append(create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
+            cs_type = str(cross_section_info.get(cs_id, {}).get('type', 'CrossSection'))
+            metrics_list.append(self._create_metrics(
                 object_id=cs_id,
                 object_name=cs_name,
+                object_type=cs_type,
                 step_index=step_index,
                 metrics_code='water_level',
                 value=node_water_level,
             ))
-            metrics_list.append(create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
+            metrics_list.append(self._create_metrics(
                 object_id=cs_id,
                 object_name=cs_name,
+                object_type=cs_type,
                 step_index=step_index,
                 metrics_code='water_flow',
                 value=q_in if index == 0 else q_out,
@@ -492,12 +710,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         step_index: int,
     ) -> None:
         node_name = str(node_info['name'])
+        node_type = str(node_info['type'])
         for metrics_code, value in values.items():
-            metrics_list.append(create_mock_metrics(
-                source_id=self.agent_code,
-                job_instance_id=self.biz_scene_instance_id,
+            metrics_list.append(self._create_metrics(
                 object_id=node_id,
                 object_name=node_name,
+                object_type=node_type,
                 step_index=step_index,
                 metrics_code=metrics_code,
                 value=value,
@@ -519,7 +737,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     state_key = f"{time_series.object_id}_{time_series.metrics_code}"
                     self._simulation_state[state_key] = time_series
 
-                if self._is_forecast_related_metric(time_series.metrics_code):
+                if self._is_forecast_related_time_series(time_series):
                     relevant_update = True
             except Exception as exc:
                 logger.error(
@@ -530,36 +748,92 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         if not relevant_update or not self._trigger_on_condition_update or self._forecast_horizon <= 0:
             return
 
-        self._force_forecast_on_next_tick = True
         if not self._hydraulic_solver:
             return
 
         try:
             with self._forecast_lock:
+                forecast_plan = self._build_event_forecast_plan(self._current_step)
+                if not forecast_plan:
+                    return
+
                 current_results = self._hydraulic_solver.get_current_results()
                 window_results = self._run_forecast_window(
-                    start_step=self._current_step,
+                    start_step=int(forecast_plan['start_step']),
+                    end_step=int(forecast_plan['window_end_step']),
+                    result_window_from_step=int(forecast_plan['result_window_from_step']),
                     anchor_results=current_results,
                 )
-                metrics_list = self._convert_window_results_to_metrics(window_results)
+                metrics_list = self._convert_window_results_to_metrics(
+                    window_results,
+                    send_from_step=int(forecast_plan['send_from_step']),
+                    send_to_step=int(forecast_plan['send_to_step']),
+                )
                 if metrics_list:
                     self.send_metrics_batch(metrics_list)
+                    self._record_forecast_plan_execution(forecast_plan)
                     logger.info(
-                        "Triggered immediate rolling forecast after condition update, step=%s, metrics=%s",
-                        self._current_step,
+                        "Triggered immediate rolling forecast after condition update, start=%s, send_range=[%s,%s], metrics=%s",
+                        forecast_plan['start_step'],
+                        forecast_plan['send_from_step'],
+                        forecast_plan['send_to_step'],
                         len(metrics_list),
                     )
-                    self._force_forecast_on_next_tick = False
         except Exception as exc:
             logger.error(f"Immediate forecast after condition update failed: {exc}", exc_info=True)
 
-    def _is_forecast_related_metric(self, metrics_code: Optional[str]) -> bool:
+    def _resolve_boundary_metric_target(
+        self,
+        time_series: ObjectTimeSeries,
+        metrics_code: str,
+        normalized_code: str,
+        normalized_boundary_metrics: set[str],
+    ) -> Optional[str]:
+        boundary_target = self._boundary_metric_aliases.get(metrics_code)
+        if boundary_target is None:
+            boundary_target = self._boundary_metric_aliases.get(normalized_code)
+        if boundary_target is not None:
+            return boundary_target
+
+        if normalized_code == 'water_level':
+            return 'h_i_t'
+
+        if normalized_code != 'water_flow':
+            return None
+
+        descriptor = ' '.join(
+            str(value).lower()
+            for value in (
+                time_series.time_series_name,
+                time_series.object_name,
+                time_series.object_type,
+            )
+            if value
+        )
+
+        if any(keyword in descriptor for keyword in ('入流', 'inflow', '旁侧', '侧向', 'lateral')):
+            return 'Inflow_i_t'
+
+        if any(keyword in descriptor for keyword in ('出流', 'outflow', '需水', 'demand', '取水')):
+            return 'qtot_i_t'
+
+        if normalized_code in normalized_boundary_metrics:
+            if normalized_code == 'water_flow':
+                return 'Inflow_i_t'
+            return metrics_code
+
+        return 'Inflow_i_t'
+
+    def _is_forecast_related_time_series(self, time_series: ObjectTimeSeries) -> bool:
+        metrics_code = time_series.metrics_code
         if not metrics_code:
             return False
         normalized = str(metrics_code).lower()
         if normalized in {key.lower() for key in self._boundary_metric_aliases.keys()}:
             return True
         if normalized in {key.lower() for key in self._control_metric_aliases.keys()}:
+            return True
+        if normalized in {'water_flow', 'water_level'}:
             return True
         for group_metrics in self._scenario_metric_groups.values():
             if normalized in {item.lower() for item in group_metrics}:
@@ -589,8 +863,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         return super().on_terminate(request)
 
     def get_metrics_topic(self) -> str:
-        return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"
-        # return f"/hydros/data/edges/{self.hydros_cluster_id}/{self.biz_scene_instance_id}"
+        # return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"
+        return f"/hydros/data/edges/{self.hydros_cluster_id}/{self.biz_scene_instance_id}"
 
     @staticmethod
     def _as_int(value, default: int) -> int:
@@ -685,4 +959,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
