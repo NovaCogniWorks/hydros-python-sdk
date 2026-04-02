@@ -178,7 +178,7 @@ class HydraulicSolver:
         snapshot['controls'] = controls
         snapshot['boundary_params'] = boundary_params
 
-        logger.info(f"Simulation step {step} completed with {len(output_results)} objects")
+        # logger.info(f"Simulation step {step} completed with {len(output_results)} objects")
         return snapshot, output_results
 
     def update_controls(self, controls_update: Dict[int, Dict[str, DeviceControl]]) -> None:

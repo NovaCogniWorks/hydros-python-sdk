@@ -286,7 +286,7 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # Use Pydantic's model_dump() to properly serialize nested models
-        logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
+        # logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
 
     def send_command(self, command: SimCommand):
         """

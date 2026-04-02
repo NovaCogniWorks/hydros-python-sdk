@@ -45,11 +45,12 @@ FULL_LOG_MODE = '--full-log' in sys.argv
 # 配置统一日志
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
+ENV_FILE = os.path.join(EXAMPLES_DIR, "env.properties")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # Load env config to get cluster_id and node_id for logging
 try:
-    env_config = load_env_config()
+    env_config = load_env_config(ENV_FILE)
     hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
     hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
 except Exception:
@@ -393,8 +394,8 @@ class MultiAgentCoordinator:
 
                 # 加载环境配置（所有 agent 共享，只加载一次）
                 if env_config is None:
-                    # 使用共享的 env.properties（在 examples 目录下）
-                    env_config = load_env_config()
+                    # 优先使用当前 launcher 目录下的 env.properties。
+                    env_config = load_env_config(ENV_FILE)
                     logger.info(f"  Cluster ID: {env_config['hydros_cluster_id']}")
                     logger.info(f"  Node ID: {env_config['hydros_node_id']}")
 

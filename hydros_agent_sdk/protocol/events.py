@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional, Any, Literal, Union
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from .models import SimulationContext, ObjectTimeSeries
 from .base import HydroBaseModel
 
@@ -15,6 +15,10 @@ class BaseHydroEvent(HydroBaseModel):
     hydro_event_source_type: Optional[str] = None
     hydro_event_source: Optional[str] = None
     hydro_event_description: Optional[str] = None
+    time_series_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("time_series_url", "event_content_url")
+    )
 
 class HydroEvent(BaseHydroEvent):
     pass

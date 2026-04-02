@@ -15,6 +15,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    TimeSeriesCalculationRequest,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
@@ -236,6 +237,54 @@ class MultiAgentCallback(SimCoordinationCallback):
                     agent.send_response(response)
             except Exception as e:
                 logger.error(f"Error in time series update for {agent_code}: {e}", exc_info=True)
+
+    def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
+        """
+        Handle calculation request for the target agent.
+
+        Unlike time series data update which broadcasts to all agents in a context,
+        calculation requests should be routed only to the target agent specified
+        by request.target_agent_instance.
+        """
+        context_id = request.context.biz_scene_instance_id
+        context_agents = self.agents.get(context_id)
+
+        if not context_agents:
+            logger.error(
+                "No agents found for calculation request: context=%s, command_id=%s",
+                context_id,
+                request.command_id,
+            )
+            return
+
+        target_agent_code = request.target_agent_instance.agent_code
+        target_agent = context_agents.get(target_agent_code)
+
+        if not target_agent:
+            logger.warning(
+                "Target agent '%s' not found for calculation request: context=%s, command_id=%s, available_agents=%s",
+                target_agent_code,
+                context_id,
+                request.command_id,
+                list(context_agents.keys()),
+            )
+            return
+
+        try:
+            logger.info(
+                "Routing calculation request to agent: context=%s, command_id=%s, target_agent=%s",
+                context_id,
+                request.command_id,
+                target_agent_code,
+            )
+            target_agent.on_time_series_calculation(request)
+        except Exception as e:
+            logger.error(
+                "Error in time series calculation for %s: %s",
+                target_agent_code,
+                e,
+                exc_info=True,
+            )
 
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
         """Handle outflow time series data update for all agents in the context."""
