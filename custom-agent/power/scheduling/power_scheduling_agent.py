@@ -179,28 +179,22 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 3. 直接下发控制指令
         logger.info("优化完成，开始下发控制指令")
-
-        pump_request = self._build_station_target_value_request(
-            target_agent_code="PUMP_AGENT_001",
-            target_command_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
-            target_value=85.5,
-            object_id=1021,
-            object_type=HydroObjectType.TURBINE,
-        )
-        if pump_request is not None:
-            self.send_command(pump_request)
-
-        gate_request = self._build_station_target_value_request(
-            target_agent_code="GATE_AGENT_002",
-            target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
-            target_value=1.2,
-            object_id=1041,
-            object_type=HydroObjectType.GATE,
-        )
-        if gate_request is not None:
-            self.send_command(gate_request)
-
-        return None
+        return [
+            {
+                "target_agent_code": "PUMP_AGENT_001",
+                "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
+                "target_value": 85.5,
+                "object_id": 1021,
+                "object_type": HydroObjectType.TURBINE,
+            },
+            {
+                "target_agent_code": "GATE_AGENT_002",
+                "target_command_type": DeviceValueTypeEnum.GATE_OPENING.code,
+                "target_value": 1.2,
+                "object_id": 1041,
+                "object_type": HydroObjectType.GATE,
+            },
+        ]
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:

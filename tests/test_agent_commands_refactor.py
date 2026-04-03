@@ -377,6 +377,95 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(request.target_value_type, DeviceValueTypeEnum.GATE_OPENING.code)
         self.assertEqual(request.target_value, 1.25)
 
+    def test_central_scheduling_agent_sends_control_commands_in_base_method(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-008")
+        agent = TestCentralSchedulingAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-008",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+
+        control_command = {
+            "target_agent_code": "PUMP_AGENT_001",
+            "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
+            "target_value": 85.5,
+            "object_id": 1021,
+            "object_type": HydroObjectType.TURBINE,
+        }
+        pump_request = Mock(name="pump_request")
+        with patch.object(CentralSchedulingAgent, "_build_station_target_value_request", return_value=pump_request) as build_request, \
+             patch.object(CentralSchedulingAgent, "send_command") as send_command:
+            agent._send_control_commands([control_command])
+
+        build_request.assert_called_once_with(
+            target_agent_code="PUMP_AGENT_001",
+            target_command_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
+            target_value=85.5,
+            object_id=1021,
+            object_type=HydroObjectType.TURBINE,
+        )
+        send_command.assert_called_once_with(pump_request)
+
+    def test_central_scheduling_agent_caches_recent_field_metrics_by_horizon(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-007")
+        agent = TestCentralSchedulingAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-007",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+        )
+
+        for step_index, value in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0)]:
+            agent._on_field_metrics_received(
+                "metrics/topic",
+                {
+                    "object_id": 1001,
+                    "metrics_code": "flow",
+                    "value": value,
+                    "timestamp": f"ts-{step_index}",
+                    "step_index": step_index,
+                },
+            )
+
+        self.assertEqual(agent.get_field_metrics_value(1001, "flow"), 4.0)
+        self.assertEqual(set(agent.get_field_metrics_history().keys()), {2, 3, 4})
+        self.assertNotIn(1, agent.get_field_metrics_history())
+        self.assertEqual(agent.get_field_metrics_by_step(4)["1001_flow"]["value"], 4.0)
+
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \
              patch("hydros_agent_sdk.utils.id_generator.choice", return_value="A"):

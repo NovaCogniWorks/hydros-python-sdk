@@ -450,6 +450,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         return commands
 
+        return [
+            {
+                "target_agent_code": "STATION_AGENT",
+                "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
+                "target_value": -6,
+                "object_id": 1021,
+                "object_type": HydroObjectType.PUMP,
+            }
+        ]
+
     def on_next(self, actual_levels, actual_flows, step):
         """
         接收环境/仿真器真实数据反馈。更新智能体内部观察期和上层积分器。

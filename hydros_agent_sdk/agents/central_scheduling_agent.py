@@ -131,6 +131,7 @@ class CentralSchedulingAgent(TickableAgent):
 
         # 现地设备实时指标缓存
         self._field_metrics_cache: Dict[str, Any] = {}
+        self._field_metrics_step_cache: Dict[int, Dict[str, Any]] = {}
 
         # 现地指标订阅主题
         self._metrics_subscription_topic = None
@@ -290,16 +291,26 @@ class CentralSchedulingAgent(TickableAgent):
             object_id = payload.get('object_id')
             metrics_code = payload.get('metrics_code')
             value = payload.get('value')
-            timestamp = payload.get('timestamp')
+            step_index = payload.get('step_index', payload.get('step'))
 
-            if object_id and metrics_code:
+            if object_id is not None and metrics_code:
                 cache_key = f"{object_id}_{metrics_code}"
                 self._field_metrics_cache[cache_key] = {
                     'object_id': object_id,
                     'metrics_code': metrics_code,
                     'value': value,
-                    'timestamp': timestamp
+                    'step_index': step_index,
                 }
+
+                if step_index is not None:
+                    self._field_metrics_step_cache.setdefault(int(step_index), {})
+                    self._field_metrics_step_cache[int(step_index)][cache_key] = {
+                        'object_id': object_id,
+                        'metrics_code': metrics_code,
+                        'value': value,
+                        'step_index': int(step_index),
+                    }
+                    self._trim_field_metrics_step_cache()
 
                 logger.debug(f"Cached field metrics: {cache_key} = {value}")
 
@@ -373,7 +384,8 @@ class CentralSchedulingAgent(TickableAgent):
         """
         向目标智能体发送控制指令。
 
-        这是未来智能体间指令实现的占位符。
+        这里统一把“控制指令描述”转换成真正的 agent command 并发送，
+        这样上层优化逻辑只负责产生命令意图。
 
         参数:
             control_commands: 控制指令列表
@@ -381,16 +393,30 @@ class CentralSchedulingAgent(TickableAgent):
         logger.info(f"Sending {len(control_commands)} control commands to agents")
 
         for command in control_commands:
-            target_agent = command.get('target_agent')
-            command_type = command.get('command_type')
-            parameters = command.get('parameters', {})
+            target_agent_code = command.get('target_agent_code')
+            target_command_type = command.get('target_command_type')
+            target_value = command.get('target_value')
+            object_id = command.get('object_id')
+            object_type = command.get('object_type')
 
             logger.info(
-                f"Control command: target={target_agent}, "
-                f"type={command_type}, params={parameters}"
+                f"Control command: target={target_agent_code}, "
+                f"type={target_command_type}, value={target_value}, object_id={object_id}"
             )
 
-            # TODO：后续补齐真正的智能体间指令发送实现
+            if not target_agent_code or not target_command_type:
+                logger.warning(f"控制指令缺少必要字段，已跳过: {command}")
+                continue
+
+            command_request = self._build_station_target_value_request(
+                target_agent_code=target_agent_code,
+                target_command_type=target_command_type,
+                target_value=target_value,
+                object_id=object_id,
+                object_type=object_type,
+            )
+            if command_request is not None:
+                self.send_command(command_request)
 
     def get_field_metrics_value(
         self,
@@ -414,6 +440,41 @@ class CentralSchedulingAgent(TickableAgent):
             return metrics_data.get('value')
 
         return None
+
+    def get_field_metrics_by_step(self, step_index: int) -> Dict[str, Dict[str, Any]]:
+        """
+        获取指定步长的现地指标缓存。
+
+        参数:
+            step_index: 仿真步长
+
+        返回:
+            该步长下的指标快照
+        """
+        return dict(self._field_metrics_step_cache.get(int(step_index), {}))
+
+    def get_field_metrics_history(self) -> Dict[int, Dict[str, Dict[str, Any]]]:
+        """
+        获取最近缓存的步长指标历史。
+
+        返回:
+            按步长分组的指标缓存
+        """
+        return {step: dict(metrics) for step, metrics in self._field_metrics_step_cache.items()}
+
+    def _trim_field_metrics_step_cache(self) -> None:
+        """只保留 optimization_horizon 范围内的步长缓存。"""
+        if self._optimization_horizon <= 0:
+            self._field_metrics_step_cache.clear()
+            return
+
+        step_indexes = sorted(self._field_metrics_step_cache.keys())
+        excess_count = len(step_indexes) - self._optimization_horizon
+        if excess_count <= 0:
+            return
+
+        for step_index in step_indexes[:excess_count]:
+            self._field_metrics_step_cache.pop(step_index, None)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
