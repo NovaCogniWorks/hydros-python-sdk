@@ -19,12 +19,24 @@ class BaseHydroEvent(HydroBaseModel):
         default=None,
         validation_alias=AliasChoices("time_series_url", "event_content_url")
     )
+    direct_load_time_series: Optional[bool] = None
+    auto_hydro_event_enable: Optional[bool] = None
+    priority: Optional[str] = None
+    valid: Optional[bool] = None
+    hydro_environment_type: Optional[str] = None
 
 class HydroEvent(BaseHydroEvent):
     pass
 
 class TimeSeriesDataChangedEvent(HydroEvent):
-    hydro_event_type: Union[Literal["TIME_SERIES_DATA_UPDATED"], Literal["TimeSeriesDataChangedEvent"]] = "TIME_SERIES_DATA_UPDATED"
+    hydro_event_type: Union[
+        Literal["TIME_SERIES_DATA_UPDATED"],
+        Literal["TimeSeriesDataChangedEvent"],
+        Literal["WATER_USE"],
+        Literal["WEATHER_FORECAST"],
+        Literal["WEATHER_FOR_CAST"],
+        Literal["DEVICE_STATUS_CHANGE"],
+    ] = "TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
 class OutflowTimeSeriesDataChangedEvent(HydroEvent):

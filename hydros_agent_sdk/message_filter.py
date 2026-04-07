@@ -166,5 +166,5 @@ class MessageFilter:
             return False
 
         # Passed both filters
-        logger.debug(f"Message accepted: {sim_command.command_type}, command_id={sim_command.command_id}")
+        logger.info(f"Message accepted: {sim_command.command_type}, command_id={sim_command.command_id}")
         return True

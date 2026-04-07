@@ -79,7 +79,8 @@ class HydroAgentInstance(HydroAgent):
     hydros_cluster_id: str
     hydros_node_id: str
     context: SimulationContext
-    agent_biz_status: AgentBizStatus
+    agent_instance_status: Optional[str] = None
+    agent_status: AgentBizStatus = Field()
     drive_mode: AgentDriveMode
 
 class TopHydroObject(HydroBaseModel):

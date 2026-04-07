@@ -209,10 +209,17 @@ class HydraulicSolver:
         for node_id in sorted(simulation_states.keys()):
             state = simulation_states[node_id]
             controls[node_id] = {}
-            for device_name in getattr(state, 'device_states', {}).keys():
+            existing_controls = getattr(state, 'device_controls', {}) or {}
+            if existing_controls:
+                for device_name, device_control in existing_controls.items():
+                    controls[node_id][device_name] = copy.deepcopy(device_control)
+                continue
+
+            device_states = getattr(state, 'device_states', {}) or {}
+            for device_name in device_states.keys():
                 controls[node_id][device_name] = DeviceControl(
-                    device_name=device_name,
-                    e_i_t=65.0,
+                    device_name=str(device_name),
+                    e_i_t=0.0,
                     n_i_t=1,
                 )
         return controls

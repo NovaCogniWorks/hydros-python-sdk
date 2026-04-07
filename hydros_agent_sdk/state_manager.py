@@ -187,7 +187,7 @@ class AgentStateManager:
         """
         agent = self._agent_instances.get(agent_id)
         if agent:
-            agent.agent_biz_status = status
+            agent.agent_status = status
             logger.info(f"Updated agent {agent_id} status to: {status}")
         else:
             logger.warning(f"Cannot update status: agent {agent_id} not found")
@@ -203,7 +203,7 @@ class AgentStateManager:
             The agent status if found, None otherwise
         """
         agent = self._agent_instances.get(agent_id)
-        return agent.agent_biz_status if agent else None
+        return agent.agent_status if agent else None
 
     # ========================================================================
     # Local/Remote Agent Tracking (from AgentContextManager)

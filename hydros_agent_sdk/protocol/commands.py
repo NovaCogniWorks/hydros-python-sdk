@@ -12,7 +12,10 @@ SIMCMD_TASK_TERMINATE_RESPONSE = "task_terminate_response"
 SIMCMD_TICK_CMD_REQUEST = "tick_cmd_request"
 SIMCMD_TICK_CMD_RESPONSE = "tick_cmd_response"
 SIMCMD_TIME_SERIES_CALCULATION_REQUEST = "calculation_request"
+SIMCMD_DEVICE_STATUS_CHANGE_REQUEST = "device_status_change_request"
 SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "calculation_response"
+SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
+SIMCMD_DEVICE_STATUS_CHAGNE_RESPONSE = "device_status_chagne_response"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "time_series_data_update_request"
 SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
@@ -74,12 +77,16 @@ from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEve
 from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
-    command_type: Literal["calculation_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
+    command_type: Literal["calculation_request", "device_status_change_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
     target_agent_instance: HydroAgentInstance
     hydro_event: HydroEvent
 
 class TimeSeriesCalculationResponse(SimCoordinationResponse):
-    command_type: Literal["calculation_response"] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
+    command_type: Literal[
+        "calculation_response",
+        "device_status_change_response",
+        "device_status_chagne_response",
+    ] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
     hydro_event: HydroEvent
     object_time_series_list: List[ObjectTimeSeries]
 

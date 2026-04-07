@@ -48,7 +48,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             ↓
         HydroAgentInstance (running instance)
             - agent_id, biz_scene_instance_id, hydros_cluster_id, hydros_node_id
-            - context, agent_biz_status, drive_mode
+            - context, agent_instance_status, agent_status, drive_mode
             ↓
         BaseHydroAgent (behavioral base class)
             - Adds lifecycle methods: on_init(), on_tick(), on_terminate()
@@ -93,7 +93,8 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_instance_status: Optional[str] = None,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -110,7 +111,8 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             context: Simulation context for this agent
             hydros_cluster_id: Cluster ID where this agent runs
             hydros_node_id: Node ID where this agent runs
-            agent_biz_status: Initial business status (default: INIT)
+            agent_status: Initial business status (default: INIT)
+            agent_instance_status: Initial agent instance status
             drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional URL to agent configuration (will be loaded from SimTaskInitRequest if not provided)
             **kwargs: Additional keyword arguments for HydroAgentInstance
@@ -132,7 +134,8 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
             context=context,
-            agent_biz_status=agent_biz_status,
+            agent_instance_status=agent_instance_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             **kwargs
         )
@@ -151,7 +154,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         logger.info(f"  - Agent Name: {self.agent_name}")
         logger.info(f"  - Agent Type: {self.agent_type}")
         logger.info(f"  - Context: {self.biz_scene_instance_id}")
-        logger.info(f"  - Status: {self.agent_biz_status}")
+        logger.info(f"  - Status: {self.agent_status}")
         logger.info(f"  - Drive Mode: {self.drive_mode}")
 
     @abstractmethod

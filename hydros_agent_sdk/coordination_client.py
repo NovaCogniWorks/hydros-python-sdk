@@ -46,6 +46,7 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_TASK_TERMINATE_REQUEST,
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
+    SIMCMD_DEVICE_STATUS_CHANGE_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
@@ -211,6 +212,7 @@ class SimCoordinationClient:
             SIMCMD_TASK_TERMINATE_REQUEST: self._handle_task_terminate,
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
+            SIMCMD_DEVICE_STATUS_CHANGE_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
             SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
             SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
@@ -350,6 +352,7 @@ class SimCoordinationClient:
 
             # Parse JSON
             data = json.loads(payload_str)
+            self._log_raw_event_fields(data)
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
 
@@ -363,6 +366,42 @@ class SimCoordinationClient:
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
+
+    def _log_raw_event_fields(self, data: Dict) -> None:
+        """打印时间序列类消息的原始事件字段，便于排查字段丢失问题。"""
+        if not isinstance(data, dict):
+            return
+
+        command_type = data.get("command_type")
+        event_key = None
+        if command_type == SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST:
+            event_key = "time_series_data_changed_event"
+        elif command_type == SIMCMD_TIME_SERIES_CALCULATION_REQUEST:
+            event_key = "hydro_event"
+
+        if not event_key:
+            return
+
+        raw_event = data.get(event_key)
+        if not isinstance(raw_event, dict):
+            logger.info(
+                "原始事件字段检查：command_type=%s，event_key=%s，raw_event_type=%s",
+                command_type,
+                event_key,
+                type(raw_event).__name__,
+            )
+            return
+
+        raw_keys = sorted(raw_event.keys())
+        logger.info(
+            "原始事件字段检查：command_type=%s，event_key=%s，keys=%s，time_series_url=%s，event_content_url=%s，direct_load_time_series=%s",
+            command_type,
+            event_key,
+            raw_keys,
+            raw_event.get("time_series_url"),
+            raw_event.get("event_content_url"),
+            raw_event.get("direct_load_time_series"),
+        )
 
     # ========================================================================
     # Message Handling

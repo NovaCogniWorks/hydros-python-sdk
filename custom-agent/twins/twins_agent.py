@@ -88,7 +88,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     DEFAULT_SCENARIO_GROUPS: ClassVar[Dict[str, set[str]]] = {
         'weather_forecast': {'weather_forecast', 'weather_inflow', 'forecast_inflow'},
         'water_use_plan': {'water_use_plan', 'planned_demand', 'planned_outflow'},
-        'emergency_maintenance': {'emergency_maintenance', 'maintenance_shutdown'},
+        'emergency_maintenance': {'emergency_maintenance', 'maintenance_shutdown', 'device_fault'},
     }
     DEFAULT_BOUNDARY_ALIASES: ClassVar[Dict[str, str]] = {
         'inflow': 'Inflow_i_t',
@@ -105,6 +105,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         'opening': 'e_i_t',
         'emergency_maintenance': 'maintenance_shutdown',
         'maintenance_shutdown': 'maintenance_shutdown',
+        'device_fault': 'maintenance_shutdown',
     }
 
     def __init__(
@@ -148,12 +149,31 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         self._last_forecast_start_step: Optional[int] = None
         self._last_forecast_end_step: int = 0
         self._last_event_forecast_step: Optional[int] = None
+        self._simulation_total_steps: Optional[int] = None
         self._weather_forecast_inflow_cache: Dict[str, float] = {}
         self._weather_forecast_target_nodes: set[int] = set()
         self._weather_forecast_source_series_keys: set[str] = set()
+        self._weather_forecast_authoritative_series_keys: set[str] = set()
+        self._weather_forecast_source_object_ids: set[int] = set()
+        self._water_use_source_series_keys: set[str] = set()
+        self._water_use_authoritative_series_keys: set[str] = set()
+        self._water_use_source_object_ids: set[int] = set()
+        self._emergency_maintenance_source_series_keys: set[str] = set()
+        self._water_use_plan_cache: Dict[str, float] = {}
+        self._water_use_target_objects: set[int] = set()
+        self._emergency_maintenance_cache: Dict[str, float] = {}
+        self._emergency_maintenance_target_metric_by_key: Dict[str, str] = {}
+        self._emergency_maintenance_target_objects: set[int] = set()
+        self._gate_max_opening_cache: Dict[int, float] = {}
         self._weather_forecast_steps_by_node: Dict[int, List[int]] = {}
+        self._water_use_steps_by_object: Dict[int, List[int]] = {}
+        self._emergency_maintenance_steps_by_object: Dict[int, List[int]] = {}
         self._weather_forecast_logged_hits: set[str] = set()
         self._weather_forecast_logged_injections: set[str] = set()
+        self._water_use_logged_hits: set[str] = set()
+        self._water_use_logged_injections: set[str] = set()
+        self._emergency_maintenance_logged_hits: set[str] = set()
+        self._emergency_maintenance_logged_injections: set[str] = set()
 
         logger.info(f"MyTwinsSimulationAgent created: {agent_id}")
 
@@ -325,6 +345,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _load_forecast_config(self) -> None:
         self._rolling_cycle = max(1, self._as_int(self.properties.get_property('rolling_cycle', 10), 10))
         self._forecast_horizon = max(0, self._as_int(self.properties.get_property('forecast_horizon', 0), 0))
+        self._simulation_total_steps = self._resolve_simulation_total_steps()
         self._trigger_on_condition_update = self._as_bool(
             self.properties.get_property('trigger_forecast_on_condition_update', True),
             True,
@@ -364,6 +385,19 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             self._trigger_on_condition_update,
         )
 
+    def _resolve_simulation_total_steps(self) -> Optional[int]:
+        """从场景 YAML 中读取 total_steps，作为任务结束步的权威来源。"""
+        total_steps = self.properties.get_property('total_steps')
+        if total_steps in (None, '', 0, '0'):
+            return None
+
+        resolved_steps = self._as_int(total_steps, 0)
+        if resolved_steps <= 0:
+            return None
+
+        logger.info("从场景配置中解析到 total_steps=%s", resolved_steps)
+        return resolved_steps
+
     def _collect_step_inputs(
         self,
         step: int,
@@ -380,6 +414,14 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             if raw_cache_key in self._weather_forecast_source_series_keys:
                 # 天气预报工况会先做“断面/渠道对象 -> 算法节点”的映射，
                 # 原始 object_id 不能直接送入求解器，因此在常规注入链路中跳过。
+                continue
+            if raw_cache_key in self._water_use_source_series_keys:
+                # 用水计划工况走“object_id + step -> qtot_i_t”的步级缓存注入链路，
+                # 避免与原始序列直接注入重复。
+                continue
+            if raw_cache_key in self._emergency_maintenance_source_series_keys:
+                # 应急检修工况走“object_id + step -> maintenance_shutdown”的步级缓存注入链路，
+                # 避免与原始序列直接注入重复。
                 continue
 
             value = self._extract_time_series_value(time_series, step)
@@ -406,22 +448,181 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 control_conditions.setdefault(object_id, {})[control_target] = float(value)
 
         self._merge_weather_forecast_inputs(step, boundary_conditions)
+        self._merge_water_use_inputs(step, boundary_conditions)
+        self._merge_emergency_maintenance_inputs(step, control_conditions)
         return boundary_conditions, control_conditions
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        处理时间序列更新请求，并在天气预报事件到达时提前构建步级入流缓存。
+        处理时间序列更新请求。
+
+        支持两类需要优先下载 time_series_url 的事件：
+        1. 天气预报事件
+        2. 用水计划事件
         """
         event = getattr(request, 'time_series_data_changed_event', None)
-        time_series_list = self._resolve_weather_forecast_time_series_list(event)
-        source_type = getattr(event, 'hydro_event_source_type', None)
+        original_time_series_list = self._resolve_event_time_series_list(event)
+        time_series_list = original_time_series_list
+        event_marker = self._resolve_event_marker(event)
+        weather_refresh = False
+        water_use_refresh = False
+        if self._is_weather_forecast_source(event_marker):
+            time_series_list, weather_refresh = self._filter_weather_forecast_source_time_series(
+                time_series_list,
+                hydro_event=event,
+            )
+        if self._is_water_use_source(event_marker):
+            time_series_list, water_use_refresh = self._filter_water_use_source_time_series(
+                time_series_list,
+                hydro_event=event,
+            )
 
-        self._sync_weather_forecast_series_marks(time_series_list, source_type)
-        if self._is_weather_forecast_source(source_type):
-            self._reset_weather_forecast_cache()
-            self._cache_weather_forecast_time_series(time_series_list)
+        self._sync_weather_forecast_series_marks(time_series_list, event_marker, refresh=weather_refresh)
+        self._sync_water_use_series_marks(time_series_list, event_marker, refresh=water_use_refresh)
+        self._sync_emergency_maintenance_series_marks(time_series_list, event_marker)
+        if self._is_weather_forecast_source(event_marker):
+            if weather_refresh:
+                self._reset_weather_forecast_cache()
+                self._cache_weather_forecast_time_series(time_series_list)
+            elif not time_series_list:
+                logger.info(
+                    "忽略非源天气预报事件缓存重建：event_id=%s，time_series_url=%s，原因=事件序列不在源天气series_key集合内",
+                    getattr(event, 'hydro_event_id', None),
+                    getattr(event, 'time_series_url', None),
+                )
+            logger.info(
+                "天气预报事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，direct_load_time_series=%s，auto_hydro_event_enable=%s，priority=%s",
+                getattr(event, 'hydro_event_id', None),
+                getattr(event, 'hydro_event_type', None),
+                event_marker,
+                getattr(event, 'time_series_url', None),
+                len(time_series_list),
+                getattr(event, 'direct_load_time_series', None),
+                getattr(event, 'auto_hydro_event_enable', None),
+                getattr(event, 'priority', None),
+            )
+            if not time_series_list:
+                if weather_refresh or not original_time_series_list:
+                    logger.warning(
+                        "天气预报事件未解析到有效序列：event_id=%s，time_series_url=%s，object_time_series为空",
+                        getattr(event, 'hydro_event_id', None),
+                        getattr(event, 'time_series_url', None),
+                    )
+                else:
+                    logger.info(
+                        "天气预报事件已被源series_key过滤为空：event_id=%s，time_series_url=%s",
+                        getattr(event, 'hydro_event_id', None),
+                        getattr(event, 'time_series_url', None),
+                    )
+        elif self._is_water_use_source(event_marker):
+            if water_use_refresh:
+                self._reset_water_use_cache()
+                self._cache_water_use_time_series(time_series_list)
+            elif not time_series_list:
+                logger.info(
+                    "忽略非源用水计划事件缓存重建：event_id=%s，time_series_url=%s，原因=事件序列不在源计划series_key集合内",
+                    getattr(event, 'hydro_event_id', None),
+                    getattr(event, 'time_series_url', None),
+                )
+            logger.info(
+                "用水计划事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，direct_load_time_series=%s，auto_hydro_event_enable=%s，priority=%s",
+                getattr(event, 'hydro_event_id', None),
+                getattr(event, 'hydro_event_type', None),
+                event_marker,
+                getattr(event, 'time_series_url', None),
+                len(time_series_list),
+                getattr(event, 'direct_load_time_series', None),
+                getattr(event, 'auto_hydro_event_enable', None),
+                getattr(event, 'priority', None),
+            )
+            if not time_series_list:
+                if water_use_refresh or not original_time_series_list:
+                    logger.warning(
+                        "用水计划事件未解析到有效序列：event_id=%s，time_series_url=%s，object_time_series为空",
+                        getattr(event, 'hydro_event_id', None),
+                        getattr(event, 'time_series_url', None),
+                    )
+                else:
+                    logger.info(
+                        "用水计划事件已被源series_key过滤为空：event_id=%s，time_series_url=%s",
+                        getattr(event, 'hydro_event_id', None),
+                        getattr(event, 'time_series_url', None),
+                    )
+        elif self._is_emergency_maintenance_source(event_marker):
+            self._reset_emergency_maintenance_cache()
+            self._cache_emergency_maintenance_time_series(time_series_list)
+            logger.info(
+                "应急检修事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，auto_hydro_event_enable=%s，priority=%s",
+                getattr(event, 'hydro_event_id', None),
+                getattr(event, 'hydro_event_type', None),
+                event_marker,
+                getattr(event, 'time_series_url', None),
+                len(time_series_list),
+                getattr(event, 'auto_hydro_event_enable', None),
+                getattr(event, 'priority', None),
+            )
 
-        return super().on_time_series_data_update(request)
+        logger.info(
+            "事件时间序列准备写入本地缓存：command_id=%s，event_marker=%s，序列条数=%s",
+            request.command_id,
+            event_marker,
+            len(time_series_list),
+        )
+
+        try:
+            if event and time_series_list:
+                should_persist_raw_cache = (
+                    (not self._is_weather_forecast_source(event_marker)) or weather_refresh
+                ) and (
+                    (not self._is_water_use_source(event_marker)) or water_use_refresh
+                )
+                allow_immediate_forecast = (
+                    (
+                        (not self._is_weather_forecast_source(event_marker))
+                        or weather_refresh
+                    )
+                    and (
+                        (not self._is_water_use_source(event_marker))
+                        or water_use_refresh
+                    )
+                )
+                for time_series in time_series_list:
+                    cache_key = self._build_raw_time_series_cache_key(time_series)
+                    if cache_key is None or not should_persist_raw_cache:
+                        continue
+
+                    self._time_series_cache[cache_key] = time_series
+                    logger.info(
+                        "事件时间序列缓存写入：event_marker=%s，cache_key=%s，点数=%s",
+                        event_marker,
+                        cache_key,
+                        len(time_series.time_series or []),
+                    )
+
+                self.on_boundary_condition_update(
+                    time_series_list,
+                    persist_raw_cache=should_persist_raw_cache,
+                    allow_immediate_forecast=allow_immediate_forecast,
+                )
+
+            response = TimeSeriesDataUpdateResponse(
+                context=self.context,
+                command_id=request.command_id,
+                command_status=CommandStatus.SUCCEED,
+                source_agent_instance=self,
+                broadcast=False,
+            )
+            return response
+        except Exception as exc:
+            logger.error(f"Error handling time series data update: {exc}", exc_info=True)
+            return TimeSeriesDataUpdateResponse(
+                context=self.context,
+                command_id=request.command_id,
+                command_status=CommandStatus.FAILED,
+                source_agent_instance=self,
+                error_message=str(exc),
+                broadcast=False,
+            )
 
     def _run_forecast_window(
         self,
@@ -490,6 +691,13 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         else:
             send_from_step = max(step + 1, self._last_forecast_end_step + 1)
             send_to_step = self._last_forecast_end_step + self._rolling_cycle
+            if self._simulation_total_steps is not None:
+                next_periodic_step = step + self._rolling_cycle
+                if next_periodic_step > self._simulation_total_steps:
+                    send_to_step = max(
+                        send_to_step,
+                        self._simulation_total_steps + self._forecast_horizon,
+                    )
             result_window_from_step = send_from_step
             include_realtime_metrics = False
             emit_metrics = True
@@ -783,7 +991,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 value=value,
             ))
 
-    def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
+    def on_boundary_condition_update(
+        self,
+        time_series_list: List[ObjectTimeSeries],
+        persist_raw_cache: bool = True,
+        allow_immediate_forecast: bool = True,
+    ):
         logger.info(f"Updating digital twins with {len(time_series_list)} boundary conditions")
         relevant_update = False
 
@@ -795,12 +1008,11 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     time_series.metrics_code,
                     len(time_series.time_series),
                 )
-                if time_series.object_id and time_series.metrics_code:
-                    cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
+                cache_key = self._build_raw_time_series_cache_key(time_series)
+                if persist_raw_cache and cache_key is not None:
                     self._time_series_cache[cache_key] = time_series
-                if self._simulation_state and time_series.object_id:
-                    state_key = f"{time_series.object_id}_{time_series.metrics_code}"
-                    self._simulation_state[state_key] = time_series
+                if persist_raw_cache and self._simulation_state and cache_key is not None:
+                    self._simulation_state[cache_key] = time_series
 
                 if self._is_forecast_related_time_series(time_series):
                     relevant_update = True
@@ -810,7 +1022,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     exc_info=True,
                 )
 
-        if not relevant_update or not self._trigger_on_condition_update or self._forecast_horizon <= 0:
+        if (
+            not relevant_update
+            or not allow_immediate_forecast
+            or not self._trigger_on_condition_update
+            or self._forecast_horizon <= 0
+        ):
             return
 
         if not self._hydraulic_solver:
@@ -882,11 +1099,45 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             with self._forecast_lock:
                 # 允许中心在 calculation_request 中直接携带时间序列输入，
                 # 这样无需额外等待 time_series_data_update_request 也能立即计算。
-                self._ingest_event_time_series(request.hydro_event)
-                if self._is_weather_forecast_source(getattr(request.hydro_event, 'hydro_event_source_type', None)):
-                    self._reset_weather_forecast_cache()
-                    self._cache_weather_forecast_time_series(
-                        self._resolve_weather_forecast_time_series_list(request.hydro_event)
+                resolved_event_time_series = self._resolve_event_time_series_list(request.hydro_event)
+                resolved_event_time_series, weather_refresh, water_use_refresh = self._ingest_event_time_series(
+                    request.hydro_event,
+                    object_time_series=resolved_event_time_series,
+                )
+                event_marker = self._resolve_event_marker(request.hydro_event)
+                if self._is_weather_forecast_source(event_marker):
+                    if weather_refresh:
+                        self._reset_weather_forecast_cache()
+                        self._cache_weather_forecast_time_series(
+                            resolved_event_time_series
+                        )
+                    else:
+                        logger.info(
+                            "忽略非源天气预报计算事件缓存重建：command_id=%s，event_id=%s，time_series_url=%s",
+                            request.command_id,
+                            getattr(request.hydro_event, 'hydro_event_id', None),
+                            getattr(request.hydro_event, 'time_series_url', None),
+                        )
+                elif self._is_water_use_source(event_marker):
+                    if water_use_refresh:
+                        self._reset_water_use_cache()
+                        self._cache_water_use_time_series(resolved_event_time_series)
+                    logger.info(
+                        "用水计划计算事件已接收：command_id=%s，event_type=%s，event_marker=%s，time_series_url=%s",
+                        request.command_id,
+                        getattr(request.hydro_event, 'hydro_event_type', None),
+                        event_marker,
+                        getattr(request.hydro_event, 'time_series_url', None),
+                    )
+                elif self._is_emergency_maintenance_source(event_marker):
+                    self._reset_emergency_maintenance_cache()
+                    self._cache_emergency_maintenance_time_series(resolved_event_time_series)
+                    logger.info(
+                        "应急检修计算事件已接收：command_id=%s，event_type=%s，event_marker=%s，time_series_url=%s",
+                        request.command_id,
+                        getattr(request.hydro_event, 'hydro_event_type', None),
+                        event_marker,
+                        getattr(request.hydro_event, 'time_series_url', None),
                     )
 
                 start_step = self._resolve_calculation_start_step(request)
@@ -995,27 +1246,257 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 return ts_value.value
         return None
 
-    def _ingest_event_time_series(self, hydro_event: Any) -> None:
-        """将 calculation_request 携带的时间序列直接并入本地缓存。"""
-        object_time_series = self._resolve_weather_forecast_time_series_list(hydro_event)
-        if not object_time_series:
-            return
+    def _build_raw_time_series_cache_key(self, time_series: ObjectTimeSeries) -> Optional[str]:
+        if not time_series.object_id or not time_series.metrics_code:
+            return None
+        return f"{time_series.object_id}_{time_series.metrics_code}"
 
+    def _is_water_use_plan_series(self, time_series: ObjectTimeSeries) -> bool:
+        metrics_code = getattr(time_series, 'metrics_code', None)
+        if not metrics_code:
+            return False
+        normalized_code = str(metrics_code).strip().lower()
+        return normalized_code in {'water_flow', 'water_use_plan', 'planned_demand', 'planned_outflow'}
+
+    def _is_emergency_maintenance_series(self, time_series: ObjectTimeSeries) -> bool:
+        metrics_code = getattr(time_series, 'metrics_code', None)
+        if not metrics_code:
+            return False
+        normalized_code = str(metrics_code).strip().lower()
+        return normalized_code in {
+            'device_fault',
+            'device_status',
+            'device_status_change',
+            'emergency_maintenance',
+            'maintenance_shutdown',
+            'gate_opening',
+            'opening',
+        }
+
+    def _resolve_emergency_maintenance_target(
+        self,
+        time_series: ObjectTimeSeries,
+        raw_value: float,
+    ) -> Tuple[Optional[str], Optional[float]]:
+        """把应急检修事件序列转换为求解器控制目标和值。"""
+        metrics_code = str(getattr(time_series, 'metrics_code', '')).strip().lower()
+        object_id = self._as_int(getattr(time_series, 'object_id', None), -1)
+        if metrics_code in {
+            'device_fault',
+            'device_status',
+            'device_status_change',
+            'emergency_maintenance',
+            'maintenance_shutdown',
+        }:
+            return 'maintenance_shutdown', float(raw_value)
+        if metrics_code in {'gate_opening', 'opening'}:
+            if object_id <= 0:
+                return None, None
+            opening_percent = self._convert_gate_opening_to_percent(object_id, float(raw_value))
+            if opening_percent is None:
+                return None, None
+            return 'e_i_t', opening_percent
+        return None, None
+
+    def _convert_gate_opening_to_percent(self, object_id: int, opening_meters: float) -> Optional[float]:
+        """把闸门开度米数转换为 e_i_t 百分比。"""
+        max_opening = self._resolve_gate_max_opening(object_id)
+        if max_opening is None or max_opening <= 0:
+            logger.warning(
+                "无法转换闸门开度百分比：对象ID=%s，开度米数=%s，原因=max_opening缺失",
+                object_id,
+                opening_meters,
+            )
+            return None
+
+        current_opening_percent = self._get_current_gate_opening_percent(object_id)
+        opening_percent = max(0.0, min(100.0, float(opening_meters) / max_opening * 100.0))
+        logger.info(
+            "应急检修闸门开度换算：对象ID=%s，开度米数=%s，max_opening=%s，当前开度百分比=%s，目标开度百分比=%s",
+            object_id,
+            float(opening_meters),
+            float(max_opening),
+            current_opening_percent,
+            float(opening_percent),
+        )
+        return float(opening_percent)
+
+    def _resolve_gate_max_opening(self, object_id: int) -> Optional[float]:
+        """优先从内存拓扑解析 max_opening，失败时回落到 objects.yaml。"""
+        cached_value = self._gate_max_opening_cache.get(object_id)
+        if cached_value is not None:
+            return cached_value
+
+        topology_value = self._find_gate_max_opening_from_topology(object_id)
+        if topology_value is not None:
+            self._gate_max_opening_cache[object_id] = topology_value
+            return topology_value
+
+        yaml_value = self._find_gate_max_opening_from_objects_modeling(object_id)
+        if yaml_value is not None:
+            self._gate_max_opening_cache[object_id] = yaml_value
+            return yaml_value
+        return None
+
+    def _find_gate_max_opening_from_topology(self, object_id: int) -> Optional[float]:
+        if not self._topology:
+            return None
+
+        def _iter_topology_objects() -> List[Any]:
+            items: List[Any] = []
+            for top_obj in getattr(self._topology, 'top_objects', []) or []:
+                items.append(top_obj)
+                items.extend(list(getattr(top_obj, 'children', []) or []))
+            return items
+
+        for topo_obj in _iter_topology_objects():
+            if self._as_int(getattr(topo_obj, 'object_id', None), -1) != object_id:
+                continue
+            parameters = getattr(topo_obj, 'parameters', None)
+            value = self._extract_max_opening_from_parameters(parameters)
+            if value is not None:
+                return value
+        return None
+
+    def _find_gate_max_opening_from_objects_modeling(self, object_id: int) -> Optional[float]:
+        objects_modeling_url = self.properties.get_property('hydros_objects_modeling_url')
+        if not objects_modeling_url:
+            return None
+        try:
+            parsed = urlparse(str(objects_modeling_url))
+            encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
+            encoded_url = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                encoded_path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            ))
+            request = Request(encoded_url)
+            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
+            with urlopen(request, timeout=30) as response:
+                content = response.read().decode('utf-8')
+
+            import yaml
+
+            data = yaml.safe_load(content)
+            candidates = data if isinstance(data, list) else data.get('objects', []) if isinstance(data, dict) else []
+            for item in candidates or []:
+                if self._as_int(item.get('id'), -1) != object_id:
+                    continue
+                return self._extract_max_opening_from_parameters(item.get('parameters'))
+        except Exception as exc:
+            logger.warning(
+                "从objects.yaml读取max_opening失败：对象ID=%s，url=%s，error=%s",
+                object_id,
+                objects_modeling_url,
+                exc,
+            )
+        return None
+
+    def _extract_max_opening_from_parameters(self, parameters: Any) -> Optional[float]:
+        if parameters is None:
+            return None
+        if isinstance(parameters, dict):
+            value = parameters.get('max_opening')
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+        value = getattr(parameters, 'max_opening', None)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _get_current_gate_opening_percent(self, object_id: int) -> Optional[float]:
+        if not self._hydraulic_solver:
+            return None
+        controls = getattr(self._hydraulic_solver, 'controls', {}) or {}
+        object_controls = controls.get(object_id, {})
+        for device_control in object_controls.values():
+            current_value = getattr(device_control, 'e_i_t', None)
+            if current_value is not None:
+                try:
+                    return float(current_value)
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _ingest_event_time_series(
+        self,
+        hydro_event: Any,
+        object_time_series: Optional[List[ObjectTimeSeries]] = None,
+    ) -> Tuple[List[ObjectTimeSeries], bool, bool]:
+        """将 calculation_request 携带的时间序列直接并入本地缓存。"""
+        if object_time_series is None:
+            object_time_series = self._resolve_event_time_series_list(hydro_event)
+        if not object_time_series:
+            return [], False, False
+
+        event_marker = self._resolve_event_marker(hydro_event)
+        weather_refresh = False
+        water_use_refresh = False
+        if self._is_weather_forecast_source(event_marker):
+            object_time_series, weather_refresh = self._filter_weather_forecast_source_time_series(
+                object_time_series,
+                hydro_event=hydro_event,
+            )
+            if not object_time_series and not weather_refresh:
+                logger.info(
+                    "忽略非源天气预报时间序列并入：event_id=%s，time_series_url=%s",
+                    getattr(hydro_event, 'hydro_event_id', None),
+                    getattr(hydro_event, 'time_series_url', None),
+                )
+                return [], False, False
+        if self._is_water_use_source(event_marker):
+            object_time_series, water_use_refresh = self._filter_water_use_source_time_series(
+                object_time_series,
+                hydro_event=hydro_event,
+            )
+            if not object_time_series:
+                logger.info(
+                    "忽略非源用水计划时间序列并入：event_id=%s，time_series_url=%s",
+                    getattr(hydro_event, 'hydro_event_id', None),
+                    getattr(hydro_event, 'time_series_url', None),
+                )
+                return [], weather_refresh, False
+
+        self._sync_weather_forecast_series_marks(object_time_series, event_marker, refresh=weather_refresh)
+        self._sync_water_use_series_marks(object_time_series, event_marker, refresh=water_use_refresh)
+        self._sync_emergency_maintenance_series_marks(object_time_series, event_marker)
+        should_persist_raw_cache = (
+            ((not self._is_weather_forecast_source(event_marker)) or weather_refresh)
+            and ((not self._is_water_use_source(event_marker)) or water_use_refresh)
+        )
         for time_series in object_time_series:
-            if not time_series.object_id or not time_series.metrics_code:
+            cache_key = self._build_raw_time_series_cache_key(time_series)
+            if cache_key is None:
                 continue
 
-            cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
-            self._time_series_cache[cache_key] = time_series
+            if should_persist_raw_cache:
+                self._time_series_cache[cache_key] = time_series
+                logger.info(
+                    "计算事件时间序列缓存写入：event_marker=%s，cache_key=%s，点数=%s",
+                    event_marker,
+                    cache_key,
+                    len(time_series.time_series or []),
+                )
 
-            if self._simulation_state is not None:
-                self._simulation_state[cache_key] = time_series
+                if self._simulation_state is not None:
+                    self._simulation_state[cache_key] = time_series
 
-        logger.info("Merged %s event time series into local cache", len(object_time_series))
+        logger.info("计算事件时间序列已并入本地缓存：event_marker=%s，序列条数=%s", event_marker, len(object_time_series))
+        return object_time_series, weather_refresh, water_use_refresh
 
-    def _resolve_weather_forecast_time_series_list(self, hydro_event: Any) -> List[ObjectTimeSeries]:
+    def _resolve_event_time_series_list(self, hydro_event: Any) -> List[ObjectTimeSeries]:
         """
-        解析天气预报事件中的时间序列列表。
+        解析事件中的时间序列列表。
 
         优先级：
         1. 如果事件带有 time_series_url，则下载 JSON 并读取其中的 object_time_series
@@ -1024,25 +1505,29 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         if hydro_event is None:
             return []
 
+        event_marker = self._resolve_event_marker(hydro_event)
+        source_label = self._resolve_event_source_label(event_marker)
         time_series_url = getattr(hydro_event, 'time_series_url', None)
         if time_series_url:
-            downloaded_series = self._download_time_series_from_url(str(time_series_url))
+            downloaded_series = self._download_time_series_from_url(str(time_series_url), source_label)
             if downloaded_series:
                 logger.info(
-                    "天气预报时间序列下载成功：time_series_url=%s，序列条数=%s",
+                    "%s时间序列下载成功：time_series_url=%s，序列条数=%s",
+                    source_label,
                     time_series_url,
                     len(downloaded_series),
                 )
                 return downloaded_series
             logger.warning(
-                "天气预报时间序列下载后未解析到有效数据，回退使用事件内联 object_time_series：time_series_url=%s",
+                "%s时间序列下载后未解析到有效数据，回退使用事件内联 object_time_series：time_series_url=%s",
+                source_label,
                 time_series_url,
             )
 
         return list(getattr(hydro_event, 'object_time_series', None) or [])
 
-    def _download_time_series_from_url(self, time_series_url: str) -> List[ObjectTimeSeries]:
-        """下载天气预报时间序列 JSON，并提取其中的 object_time_series。"""
+    def _download_time_series_from_url(self, time_series_url: str, source_label: str = "事件") -> List[ObjectTimeSeries]:
+        """下载事件时间序列 JSON，并提取其中的 object_time_series。"""
         try:
             parsed = urlparse(time_series_url)
             encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
@@ -1065,22 +1550,45 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             raw_series_list = data.get('object_time_series', [])
             object_time_series_list = [ObjectTimeSeries.model_validate(item) for item in raw_series_list]
             logger.info(
-                "天气预报时间序列下载并解析完成：time_series_url=%s，object_time_series条数=%s",
+                "%s时间序列下载并解析完成：time_series_url=%s，object_time_series条数=%s",
+                source_label,
                 time_series_url,
                 len(object_time_series_list),
             )
             return object_time_series_list
         except (HTTPError, URLError) as exc:
-            logger.error(f"下载天气预报时间序列失败：url={time_series_url}, error={exc}")
+            logger.error(f"下载{source_label}时间序列失败：url={time_series_url}, error={exc}")
             return []
         except Exception as exc:
-            logger.error(f"解析天气预报时间序列失败：url={time_series_url}, error={exc}", exc_info=True)
+            logger.error(f"解析{source_label}时间序列失败：url={time_series_url}, error={exc}", exc_info=True)
             return []
+
+    def _resolve_event_marker(self, hydro_event: Any) -> Optional[str]:
+        """统一提取事件识别标记，优先来源类型，没有则回退事件类型。"""
+        if hydro_event is None:
+            return None
+        source_type = getattr(hydro_event, 'hydro_event_source_type', None)
+        if source_type not in (None, ''):
+            return str(source_type)
+        event_type = getattr(hydro_event, 'hydro_event_type', None)
+        if event_type not in (None, ''):
+            return str(event_type)
+        return None
+
+    def _resolve_event_source_label(self, event_marker: Optional[str]) -> str:
+        if self._is_weather_forecast_source(event_marker):
+            return "天气预报"
+        if self._is_water_use_source(event_marker):
+            return "用水计划"
+        if self._is_emergency_maintenance_source(event_marker):
+            return "应急检修"
+        return "事件"
 
     def _sync_weather_forecast_series_marks(
         self,
         time_series_list: List[ObjectTimeSeries],
         source_type: Optional[str],
+        refresh: bool = False,
     ) -> None:
         """
         同步“哪些原始时间序列属于天气预报”的标记集合。
@@ -1089,16 +1597,202 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         避免后续常规工况被误跳过。
         """
         is_weather_source = self._is_weather_forecast_source(source_type)
-        if is_weather_source:
+        if is_weather_source and refresh:
             self._weather_forecast_source_series_keys.clear()
         for time_series in time_series_list:
-            if not time_series.object_id or not time_series.metrics_code:
+            if (
+                not time_series.object_id
+                or not time_series.metrics_code
+                or not self._is_weather_forecast_series(time_series)
+            ):
                 continue
             raw_cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
             if is_weather_source:
                 self._weather_forecast_source_series_keys.add(raw_cache_key)
             else:
                 self._weather_forecast_source_series_keys.discard(raw_cache_key)
+
+    def _is_weather_forecast_series(self, time_series: ObjectTimeSeries) -> bool:
+        if not time_series.metrics_code:
+            return False
+        normalized_code = str(time_series.metrics_code).strip().lower()
+        return normalized_code in {
+            'water_flow',
+            'weather_forecast',
+            'weather_inflow',
+            'forecast_inflow',
+        }
+
+    def _sync_water_use_series_marks(
+        self,
+        time_series_list: List[ObjectTimeSeries],
+        source_type: Optional[str],
+        refresh: bool = False,
+    ) -> None:
+        """同步哪些原始时间序列属于用水计划，用于稳定映射到 qtot_i_t。"""
+        is_water_use_source = self._is_water_use_source(source_type)
+        if is_water_use_source and refresh:
+            self._water_use_source_series_keys.clear()
+        for time_series in time_series_list:
+            if (
+                time_series.object_id is None
+                or not time_series.metrics_code
+                or not self._is_water_use_plan_series(time_series)
+            ):
+                continue
+            raw_cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
+            if is_water_use_source:
+                self._water_use_source_series_keys.add(raw_cache_key)
+            else:
+                self._water_use_source_series_keys.discard(raw_cache_key)
+
+    def _sync_emergency_maintenance_series_marks(
+        self,
+        time_series_list: List[ObjectTimeSeries],
+        source_type: Optional[str],
+    ) -> None:
+        """同步哪些原始时间序列属于应急检修，用于稳定映射到 maintenance_shutdown。"""
+        is_emergency_source = self._is_emergency_maintenance_source(source_type)
+        if is_emergency_source:
+            self._emergency_maintenance_source_series_keys.clear()
+        for time_series in time_series_list:
+            if (
+                time_series.object_id is None
+                or not time_series.metrics_code
+                or not self._is_emergency_maintenance_series(time_series)
+            ):
+                continue
+            raw_cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
+            if is_emergency_source:
+                self._emergency_maintenance_source_series_keys.add(raw_cache_key)
+            else:
+                self._emergency_maintenance_source_series_keys.discard(raw_cache_key)
+
+    def _filter_water_use_source_time_series(
+        self,
+        time_series_list: List[ObjectTimeSeries],
+        hydro_event: Any,
+    ) -> Tuple[List[ObjectTimeSeries], bool]:
+        """
+        过滤“真正属于用水计划源输入”的序列。
+
+        规则：
+        1. 带 time_series_url 的事件视为权威源，使用该批 object_time_series 刷新源集合
+        2. 不带 time_series_url 的后续 WATER_USE 事件，只保留已知源 raw key
+        3. 若当前还没有源对象集合且事件也不带 URL，则不重建缓存，避免把计算结果节点误当成计划源
+        """
+        time_series_url = getattr(hydro_event, 'time_series_url', None)
+        candidate_time_series = [
+            time_series for time_series in time_series_list if self._is_water_use_plan_series(time_series)
+        ]
+        if time_series_url:
+            authoritative_series_keys = {
+                self._build_raw_time_series_cache_key(time_series)
+                for time_series in candidate_time_series
+            }
+            authoritative_series_keys = {
+                key for key in authoritative_series_keys if key is not None
+            }
+            source_object_ids = {
+                int(time_series.object_id)
+                for time_series in candidate_time_series
+                if time_series.object_id is not None
+            }
+            self._water_use_authoritative_series_keys = authoritative_series_keys
+            self._water_use_source_object_ids = source_object_ids
+            logger.info(
+                "用水计划源集合已刷新：time_series_url=%s，object_ids=%s，series_keys=%s",
+                time_series_url,
+                sorted(source_object_ids),
+                sorted(authoritative_series_keys),
+            )
+            return candidate_time_series, True
+
+        if not self._water_use_authoritative_series_keys:
+            logger.warning(
+                "用水计划事件未携带time_series_url，且尚未建立源series_key集合，跳过缓存重建：event_id=%s",
+                getattr(hydro_event, 'hydro_event_id', None),
+            )
+            return [], False
+
+        filtered_list = [
+            time_series
+            for time_series in candidate_time_series
+            if self._build_raw_time_series_cache_key(time_series) in self._water_use_authoritative_series_keys
+        ]
+        if len(filtered_list) != len(time_series_list):
+            logger.info(
+                "用水计划事件已按源series_key过滤：event_id=%s，原序列条数=%s，保留条数=%s，源object_ids=%s，源series_keys=%s",
+                getattr(hydro_event, 'hydro_event_id', None),
+                len(time_series_list),
+                len(filtered_list),
+                sorted(self._water_use_source_object_ids),
+                sorted(self._water_use_authoritative_series_keys),
+            )
+        return filtered_list, False
+
+    def _filter_weather_forecast_source_time_series(
+        self,
+        time_series_list: List[ObjectTimeSeries],
+        hydro_event: Any,
+    ) -> Tuple[List[ObjectTimeSeries], bool]:
+        """
+        过滤“真正属于天气预报源输入”的序列。
+
+        规则：
+        1. 带 time_series_url 的事件视为权威源，使用该批 object_time_series 刷新源集合
+        2. 不带 time_series_url 的后续 WEATHER 事件，只保留已知源 raw key
+        3. 若当前还没有源集合且事件也不带 URL，则不重建缓存，避免把计算结果节点误当成天气源
+        """
+        time_series_url = getattr(hydro_event, 'time_series_url', None)
+        candidate_time_series = [
+            time_series for time_series in time_series_list if self._is_weather_forecast_series(time_series)
+        ]
+        if time_series_url:
+            authoritative_series_keys = {
+                self._build_raw_time_series_cache_key(time_series)
+                for time_series in candidate_time_series
+            }
+            authoritative_series_keys = {
+                key for key in authoritative_series_keys if key is not None
+            }
+            source_object_ids = {
+                int(time_series.object_id)
+                for time_series in candidate_time_series
+                if time_series.object_id is not None
+            }
+            self._weather_forecast_authoritative_series_keys = authoritative_series_keys
+            self._weather_forecast_source_object_ids = source_object_ids
+            logger.info(
+                "天气预报源集合已刷新：time_series_url=%s，object_ids=%s，series_keys=%s",
+                time_series_url,
+                sorted(source_object_ids),
+                sorted(authoritative_series_keys),
+            )
+            return candidate_time_series, True
+
+        if not self._weather_forecast_authoritative_series_keys:
+            logger.warning(
+                "天气预报事件未携带time_series_url，且尚未建立源series_key集合，跳过缓存重建：event_id=%s",
+                getattr(hydro_event, 'hydro_event_id', None),
+            )
+            return [], False
+
+        filtered_list = [
+            time_series
+            for time_series in candidate_time_series
+            if self._build_raw_time_series_cache_key(time_series) in self._weather_forecast_authoritative_series_keys
+        ]
+        if len(filtered_list) != len(time_series_list):
+            logger.info(
+                "天气预报事件已按源series_key过滤：event_id=%s，原序列条数=%s，保留条数=%s，源object_ids=%s，源series_keys=%s",
+                getattr(hydro_event, 'hydro_event_id', None),
+                len(time_series_list),
+                len(filtered_list),
+                sorted(self._weather_forecast_source_object_ids),
+                sorted(self._weather_forecast_authoritative_series_keys),
+            )
+        return filtered_list, False
 
     def _reset_weather_forecast_cache(self) -> None:
         """收到新的天气预报事件后，重建天气缓存，避免历史节点残留。"""
@@ -1108,6 +1802,25 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         self._weather_forecast_logged_hits.clear()
         self._weather_forecast_logged_injections.clear()
         logger.info("天气预报缓存已清空，准备按最新事件重建")
+
+    def _reset_water_use_cache(self) -> None:
+        """收到新的用水计划事件后，重建步级缓存，避免历史计划残留。"""
+        self._water_use_plan_cache.clear()
+        self._water_use_target_objects.clear()
+        self._water_use_steps_by_object.clear()
+        self._water_use_logged_hits.clear()
+        self._water_use_logged_injections.clear()
+        logger.info("用水计划缓存已清空，准备按最新事件重建")
+
+    def _reset_emergency_maintenance_cache(self) -> None:
+        """收到新的应急检修事件后，重建步级缓存，避免历史故障残留。"""
+        self._emergency_maintenance_cache.clear()
+        self._emergency_maintenance_target_metric_by_key.clear()
+        self._emergency_maintenance_target_objects.clear()
+        self._emergency_maintenance_steps_by_object.clear()
+        self._emergency_maintenance_logged_hits.clear()
+        self._emergency_maintenance_logged_injections.clear()
+        logger.info("应急检修缓存已清空，准备按最新事件重建")
 
     def _cache_weather_forecast_time_series(self, time_series_list: List[ObjectTimeSeries]) -> None:
         """
@@ -1177,6 +1890,141 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         logger.info("Cached %s weather forecast inflow points", cached_count)
 
+    def _cache_water_use_time_series(self, time_series_list: List[ObjectTimeSeries]) -> None:
+        """
+        将用水计划工况转换为“object_id + step -> value”的缓存。
+
+        规则：
+        1. 直接使用事件里的 object_id 作为求解注入目标
+        2. 以 object_id#step 作为缓存键
+        3. 当前步命中后统一注入 qtot_i_t
+        """
+        cached_count = 0
+
+        for time_series in time_series_list:
+            if time_series.object_id is None or not time_series.metrics_code:
+                continue
+            if not self._is_water_use_plan_series(time_series):
+                logger.info(
+                    "跳过非计划流量用水序列：对象ID=%s，time_series_name=%s，metrics_code=%s",
+                    time_series.object_id,
+                    time_series.time_series_name,
+                    time_series.metrics_code,
+                )
+                continue
+
+            object_id = int(time_series.object_id)
+            self._water_use_target_objects.add(object_id)
+            logger.info(
+                "用水计划映射建立成功：对象ID=%s，metrics_code=%s，序列名=%s，点数=%s",
+                object_id,
+                time_series.metrics_code,
+                time_series.time_series_name,
+                len(time_series.time_series),
+            )
+
+            for ts_value in time_series.time_series:
+                if ts_value.step is None or ts_value.value is None:
+                    continue
+                step = int(ts_value.step)
+                cache_key = self._build_water_use_cache_key(object_id, step)
+                self._water_use_plan_cache[cache_key] = float(ts_value.value)
+                step_list = self._water_use_steps_by_object.setdefault(object_id, [])
+                if step not in step_list:
+                    step_list.append(step)
+                logger.info(
+                    "用水计划缓存写入：cache_key=%s，对象ID=%s，step=%s，value=%s",
+                    cache_key,
+                    object_id,
+                    step,
+                    float(ts_value.value),
+                )
+                cached_count += 1
+
+            self._water_use_steps_by_object[object_id].sort()
+            logger.info(
+                "用水计划生效步已准备：对象ID=%s，steps=%s",
+                object_id,
+                self._water_use_steps_by_object[object_id],
+            )
+
+        logger.info("Cached %s water use plan points", cached_count)
+
+    def _cache_emergency_maintenance_time_series(self, time_series_list: List[ObjectTimeSeries]) -> None:
+        """
+        将应急检修工况转换为“object_id + step -> shutdown_flag”的缓存。
+
+        规则：
+        1. 直接使用事件里的 object_id 作为控制注入目标
+        2. 以 object_id#step 作为缓存键
+        3. 当前步命中后统一注入 maintenance_shutdown
+        """
+        cached_count = 0
+
+        for time_series in time_series_list:
+            if time_series.object_id is None or not time_series.metrics_code:
+                continue
+            if not self._is_emergency_maintenance_series(time_series):
+                logger.info(
+                    "跳过非故障控制应急检修序列：对象ID=%s，time_series_name=%s，metrics_code=%s",
+                    time_series.object_id,
+                    time_series.time_series_name,
+                    time_series.metrics_code,
+                )
+                continue
+
+            object_id = int(time_series.object_id)
+            logger.info(
+                "应急检修映射建立成功：对象ID=%s，metrics_code=%s，序列名=%s，点数=%s",
+                object_id,
+                time_series.metrics_code,
+                time_series.time_series_name,
+                len(time_series.time_series),
+            )
+
+            for ts_value in time_series.time_series:
+                if ts_value.step is None or ts_value.value is None:
+                    continue
+                step = int(ts_value.step)
+                cache_key = self._build_emergency_maintenance_cache_key(object_id, step)
+                target_metric, resolved_value = self._resolve_emergency_maintenance_target(
+                    time_series,
+                    float(ts_value.value),
+                )
+                if target_metric is None or resolved_value is None:
+                    logger.info(
+                        "跳过无法解析的应急检修控制点：对象ID=%s，metrics_code=%s，step=%s，value=%s",
+                        object_id,
+                        time_series.metrics_code,
+                        step,
+                        float(ts_value.value),
+                    )
+                    continue
+                self._emergency_maintenance_target_objects.add(object_id)
+                self._emergency_maintenance_cache[cache_key] = float(resolved_value)
+                self._emergency_maintenance_target_metric_by_key[cache_key] = target_metric
+                step_list = self._emergency_maintenance_steps_by_object.setdefault(object_id, [])
+                if step not in step_list:
+                    step_list.append(step)
+                logger.info(
+                    "应急检修缓存写入：cache_key=%s，对象ID=%s，step=%s，target=%s，value=%s",
+                    cache_key,
+                    object_id,
+                    step,
+                    target_metric,
+                    float(resolved_value),
+                )
+                cached_count += 1
+
+            self._emergency_maintenance_steps_by_object[object_id].sort()
+            logger.info(
+                "应急检修生效步已准备：对象ID=%s，steps=%s",
+                object_id,
+                self._emergency_maintenance_steps_by_object[object_id],
+            )
+
+        logger.info("Cached %s emergency maintenance points", cached_count)
+
     def _resolve_weather_target_node_id(self, source_object_id: int) -> Optional[int]:
         """
         根据 topology 的 downstream_map，把天气预报对象 ID 映射为算法节点 ID。
@@ -1216,8 +2064,70 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     float(cached_value),
                 )
 
+    def _merge_water_use_inputs(
+        self,
+        step: int,
+        boundary_conditions: Dict[int, Dict[str, float]],
+    ) -> None:
+        """把当前步命中的用水计划合并到边界条件中。"""
+        if not self._water_use_target_objects:
+            return
+
+        for object_id in self._water_use_target_objects:
+            effective_step, cached_value = self._get_water_use_value(object_id, step)
+            if cached_value is None:
+                continue
+            boundary_conditions.setdefault(object_id, {})['qtot_i_t'] = float(cached_value)
+            injection_log_key = f"{object_id}#{step}#{effective_step}"
+            if injection_log_key not in self._water_use_logged_injections:
+                self._water_use_logged_injections.add(injection_log_key)
+                logger.info(
+                    "用水计划已注入：当前步=%s，对象ID=%s，生效步=%s，target=%s，value=%s",
+                    step,
+                    object_id,
+                    effective_step,
+                    'qtot_i_t',
+                    float(cached_value),
+                )
+
+    def _merge_emergency_maintenance_inputs(
+        self,
+        step: int,
+        control_conditions: Dict[int, Dict[str, float]],
+    ) -> None:
+        """把当前步命中的应急检修合并到控制条件中。"""
+        if not self._emergency_maintenance_target_objects:
+            return
+
+        for object_id in self._emergency_maintenance_target_objects:
+            effective_step, cached_value = self._get_emergency_maintenance_value(object_id, step)
+            if cached_value is None:
+                continue
+            cache_key = self._build_emergency_maintenance_cache_key(object_id, effective_step)
+            target_metric = self._emergency_maintenance_target_metric_by_key.get(cache_key, 'maintenance_shutdown')
+            control_conditions.setdefault(object_id, {})[target_metric] = float(cached_value)
+            injection_log_key = f"{object_id}#{step}#{effective_step}"
+            if injection_log_key not in self._emergency_maintenance_logged_injections:
+                self._emergency_maintenance_logged_injections.add(injection_log_key)
+                logger.info(
+                    "应急检修已注入：当前步=%s，对象ID=%s，生效步=%s，target=%s，value=%s",
+                    step,
+                    object_id,
+                    effective_step,
+                    target_metric,
+                    float(cached_value),
+                )
+
     def _build_weather_forecast_cache_key(self, object_id: int, step: int) -> str:
         """生成天气预报步级缓存键。"""
+        return f"{object_id}#{step}"
+
+    def _build_water_use_cache_key(self, object_id: int, step: int) -> str:
+        """生成用水计划步级缓存键。"""
+        return f"{object_id}#{step}"
+
+    def _build_emergency_maintenance_cache_key(self, object_id: int, step: int) -> str:
+        """生成应急检修步级缓存键。"""
         return f"{object_id}#{step}"
 
     def _get_weather_forecast_value(self, object_id: int, step: int) -> Tuple[Optional[int], Optional[float]]:
@@ -1268,12 +2178,125 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             )
         return effective_step, cached_value
 
+    def _get_water_use_value(self, object_id: int, step: int) -> Tuple[Optional[int], Optional[float]]:
+        """
+        获取当前步应生效的用水计划值。
+
+        规则：
+        1. 找到该对象所有计划步中小于等于当前 step 的最大步
+        2. 返回该步对应的值
+        3. 如果当前步早于第一个计划步，则返回 None
+        """
+        step_list = self._water_use_steps_by_object.get(object_id, [])
+        if not step_list:
+            logger.info(
+                "用水计划查找跳过：对象ID=%s，当前步=%s，原因=没有缓存步",
+                object_id,
+                step,
+            )
+            return None, None
+
+        effective_step: Optional[int] = None
+        for candidate_step in step_list:
+            if candidate_step > step:
+                break
+            effective_step = candidate_step
+
+        if effective_step is None:
+            logger.info(
+                "用水计划查找跳过：对象ID=%s，当前步=%s，首个生效步=%s",
+                object_id,
+                step,
+                step_list[0],
+            )
+            return None, None
+
+        cache_key = self._build_water_use_cache_key(object_id, effective_step)
+        cached_value = self._water_use_plan_cache.get(cache_key)
+        hit_log_key = f"{object_id}#{step}#{effective_step}"
+        if hit_log_key not in self._water_use_logged_hits:
+            self._water_use_logged_hits.add(hit_log_key)
+            logger.info(
+                "用水计划查找命中：对象ID=%s，当前步=%s，生效步=%s，cache_key=%s，target=%s，value=%s",
+                object_id,
+                step,
+                effective_step,
+                cache_key,
+                'qtot_i_t',
+                cached_value,
+            )
+        return effective_step, cached_value
+
+    def _get_emergency_maintenance_value(self, object_id: int, step: int) -> Tuple[Optional[int], Optional[float]]:
+        """
+        获取当前步应生效的应急检修值。
+
+        规则：
+        1. 找到该对象所有故障步中小于等于当前 step 的最大步
+        2. 返回该步对应的值
+        3. 如果当前步早于第一个故障步，则返回 None
+        """
+        step_list = self._emergency_maintenance_steps_by_object.get(object_id, [])
+        if not step_list:
+            logger.info(
+                "应急检修查找跳过：对象ID=%s，当前步=%s，原因=没有缓存步",
+                object_id,
+                step,
+            )
+            return None, None
+
+        effective_step: Optional[int] = None
+        for candidate_step in step_list:
+            if candidate_step > step:
+                break
+            effective_step = candidate_step
+
+        if effective_step is None:
+            logger.info(
+                "应急检修查找跳过：对象ID=%s，当前步=%s，首个生效步=%s",
+                object_id,
+                step,
+                step_list[0],
+            )
+            return None, None
+
+        cache_key = self._build_emergency_maintenance_cache_key(object_id, effective_step)
+        cached_value = self._emergency_maintenance_cache.get(cache_key)
+        target_metric = self._emergency_maintenance_target_metric_by_key.get(cache_key, 'maintenance_shutdown')
+        hit_log_key = f"{object_id}#{step}#{effective_step}"
+        if hit_log_key not in self._emergency_maintenance_logged_hits:
+            self._emergency_maintenance_logged_hits.add(hit_log_key)
+            logger.info(
+                "应急检修查找命中：对象ID=%s，当前步=%s，生效步=%s，cache_key=%s，target=%s，value=%s",
+                object_id,
+                step,
+                effective_step,
+                cache_key,
+                target_metric,
+                cached_value,
+            )
+        return effective_step, cached_value
+
     def _is_weather_forecast_source(self, source_type: Optional[str]) -> bool:
         """判断事件来源是否为天气预报。"""
         if not source_type:
             return False
         normalized = str(source_type).strip().upper()
         return normalized in {'WEATHER_FOR_CAST', 'WEATHER_FORECAST'}
+
+    def _is_water_use_source(self, source_type: Optional[str]) -> bool:
+        """判断事件来源是否为用水计划。"""
+        if not source_type:
+            return False
+        normalized = str(source_type).strip().upper()
+        return normalized == 'WATER_USE'
+
+    def _is_emergency_maintenance_source(self, source_type: Optional[str]) -> bool:
+        """判断事件来源是否为应急检修/设备故障。"""
+        if not source_type:
+            return False
+        normalized = str(source_type).strip().upper()
+        return normalized in {'DEVICE_FAULT', 'DEVICE_STATUS_CHANGE', 'EMERGENCY_MAINTENANCE'}
 
     def _resolve_calculation_start_step(self, request: TimeSeriesCalculationRequest) -> int:
         """
