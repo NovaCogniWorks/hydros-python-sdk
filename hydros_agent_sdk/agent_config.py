@@ -19,8 +19,9 @@ Example usage:
 """
 
 import logging
+from datetime import date, datetime
 from typing import Optional, Any, Dict
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -31,6 +32,7 @@ except ImportError:
     yaml = None
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
+from hydros_agent_sdk.utils.yaml_loader import fetch_url_text
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,13 @@ class AgentConfiguration(HydroBaseModel):
     description: Optional[str] = None
     waterway: Optional[Waterway] = None
     properties: AgentProperties
+
+    @field_validator('release_at', mode='before')
+    @classmethod
+    def normalize_release_at(cls, value: Any) -> Any:
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value
 
     def get_agent_code(self) -> str:
         """
@@ -160,33 +169,8 @@ class AgentConfigLoader:
         logger.info(f"Loading agent configuration from URL: {url}")
 
         try:
-            # Encode URL to handle non-ASCII characters (e.g., Chinese characters)
-            # Split URL into parts and encode only the path part
-            from urllib.parse import urlparse, urlunparse
-            parsed = urlparse(url)
-
-            # Encode the path component while preserving already-encoded characters
-            encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
-
-            # Reconstruct the URL with encoded path
-            encoded_url = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                encoded_path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-
-            logger.debug(f"Encoded URL: {encoded_url}")
-
-            # Create request with proper headers
-            request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
-
-            with urlopen(request, timeout=timeout) as response:
-                content = response.read().decode('utf-8')
-                return AgentConfigLoader.from_yaml_string(content)
+            content = fetch_url_text(url, timeout=timeout)
+            return AgentConfigLoader.from_yaml_string(content)
         except HTTPError as e:
             logger.error(f"HTTP error loading configuration from {url}: {e.code} {e.reason}")
             raise

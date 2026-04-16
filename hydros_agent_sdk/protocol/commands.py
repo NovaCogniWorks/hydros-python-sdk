@@ -54,8 +54,8 @@ class SimTaskInitRequest(SimCoordinationRequest):
 
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
-    created_agent_instances: List[HydroAgentInstance]
-    managed_top_objects: Dict[str, List[TopHydroObject]]
+    created_agent_instances: List[HydroAgentInstance] = Field(default_factory=list)
+    managed_top_objects: Dict[str, List[TopHydroObject]] = Field(default_factory=dict)
 
 class SimTaskTerminateRequest(SimCoordinationRequest):
     command_type: Literal["task_terminate_request"] = SIMCMD_TASK_TERMINATE_REQUEST
@@ -79,7 +79,9 @@ from .models import ObjectTimeSeries
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
     command_type: Literal["calculation_request", "device_status_change_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
     target_agent_instance: HydroAgentInstance
-    hydro_event: HydroEvent
+    hydro_event: HydroEvent = Field(
+        validation_alias=AliasChoices("hydro_event", "device_status_change_event")
+    )
 
 class TimeSeriesCalculationResponse(SimCoordinationResponse):
     command_type: Literal[
@@ -87,7 +89,9 @@ class TimeSeriesCalculationResponse(SimCoordinationResponse):
         "device_status_change_response",
         "device_status_chagne_response",
     ] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
-    hydro_event: HydroEvent
+    hydro_event: HydroEvent = Field(
+        validation_alias=AliasChoices("hydro_event", "device_status_change_event")
+    )
     object_time_series_list: List[ObjectTimeSeries]
 
 class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
@@ -125,7 +129,7 @@ class AgentInstanceStatusReport(SimCommand):
     """
     command_type: Literal["report_agent_instance_status"] = SIMCMD_AGENT_INSTANCE_STATUS_REPORT
     source_agent_instance: HydroAgentInstance
-    created_state: str
+    created_state: Optional[str] = None
     init_result: Optional[Dict[str, Any]] = None
 
 class ParameterIdentifiedReport(SimCommand):

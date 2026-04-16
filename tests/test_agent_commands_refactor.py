@@ -47,7 +47,7 @@ def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: 
         hydros_cluster_id="demo-cluster",
         hydros_node_id=node_id,
         context=context,
-        agent_biz_status=AgentBizStatus.INIT,
+        agent_status=AgentBizStatus.INIT,
         drive_mode=AgentDriveMode.PROACTIVE,
     )
 

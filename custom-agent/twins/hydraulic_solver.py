@@ -13,8 +13,6 @@ import os
 import threading
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse, urlunparse
-from urllib.request import Request, urlopen
 
 # Add current directory to path for local imports
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +25,7 @@ if _idz_dir not in __import__('sys').path:
     __import__('sys').path.insert(0, _idz_dir)
 
 from corelib.core.hydro_simulator import HydroSimulator
+from hydros_agent_sdk.utils.yaml_loader import fetch_url_text
 from simulation_states import BoundaryState, DeviceControl
 
 logger = logging.getLogger(__name__)
@@ -84,17 +83,20 @@ class HydraulicSolver:
     def __init__(self, job_instance_id: str):
         self.job_instance_id = job_instance_id
         self.sim = None
+        self.topology = None
         self.simulation_states: Dict[int, Any] = {}
         self.controls: Dict[int, Dict[str, DeviceControl]] = {}
         self.boundary_params: Dict[int, Dict[str, BoundaryState]] = {}
         self.initial_states: Dict[int, Any] = {}
+        self.initial_states_source_data: Dict[str, Any] = {}
         self.state: Dict[int, Dict[str, float]] = {}
         logger.info(f"Hydraulic solver initialized for job: {job_instance_id}")
 
-    def initialize(self, topology, idz_config_url: str) -> None:
+    def initialize(self, topology, idz_config_url: str, initial_states_url: Optional[str] = None) -> None:
         logger.info("Initializing hydraulic solver with topology")
+        self.topology = topology
 
-        idz_config_file = self._download_idz_config(idz_config_url)
+        idz_config_file = self._download_idz_config(idz_config_url, initial_states_url)
         if not idz_config_file:
             raise RuntimeError("Failed to download IDZ configuration file")
 
@@ -226,25 +228,85 @@ class HydraulicSolver:
 
     def _build_default_boundary_params(self, simulation_states: Dict[int, Any]) -> Dict[int, Dict[str, BoundaryState]]:
         boundary_params: Dict[int, Dict[str, BoundaryState]] = {}
-        for node_id, state in simulation_states.items():
-            station_state = getattr(state, 'station_state', None)
-            if station_state is None:
-                continue
+        boundary_node_ids = sorted(int(node_id) for node_id in simulation_states.keys())
+        if not boundary_node_ids:
+            return boundary_params
 
-            base_boundary = BoundaryState(
-                h_i_t=float(getattr(station_state, 'h_i_t', 0.0)),
-                hat_h_i_t=float(getattr(station_state, 'hat_h_i_t', 0.0)),
-                Inflow_i_t=float(getattr(station_state, 'inflow_i_t', 0.0)),
-                qtot_i_t=float(getattr(station_state, 'qtot_i_t', 0.0)),
-                boundary_id=str(node_id),
-            )
-            boundary_params[node_id] = {
-                'upstream_boundary': copy.deepcopy(base_boundary),
-                'downstream_boundary': copy.deepcopy(base_boundary),
-            }
-            boundary_params[node_id]['upstream_boundary'].boundary_type = 'upstream'
-            boundary_params[node_id]['downstream_boundary'].boundary_type = 'downstream'
+        first_boundary_override, last_boundary_override = self._extract_boundary_overrides()
+
+        first_node_id = boundary_node_ids[0]
+        first_boundary = self._build_boundary_state_for_node(
+            node_id=first_node_id,
+            state=simulation_states.get(first_node_id),
+            boundary_type='upstream',
+            override=first_boundary_override,
+        )
+        if first_boundary is not None:
+            boundary_params[first_node_id] = {'upstream_boundary': first_boundary}
+
+        last_node_id = boundary_node_ids[-1]
+        last_boundary = self._build_boundary_state_for_node(
+            node_id=last_node_id,
+            state=simulation_states.get(last_node_id),
+            boundary_type='downstream',
+            override=last_boundary_override,
+        )
+        if last_boundary is not None:
+            boundary_params.setdefault(last_node_id, {})['downstream_boundary'] = last_boundary
+
         return boundary_params
+
+    def _extract_boundary_overrides(self) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        boundaries = (
+            self.initial_states_source_data.get('initial_states', {})
+            .get('boundaries', {})
+            .get('overrides', [])
+        )
+        if not isinstance(boundaries, list) or not boundaries:
+            return None, None
+
+        first_item = boundaries[0] if isinstance(boundaries[0], dict) else None
+        last_item = boundaries[-1] if isinstance(boundaries[-1], dict) else None
+        return first_item, last_item
+
+    def _build_boundary_state_for_node(
+        self,
+        node_id: int,
+        state: Any,
+        boundary_type: str,
+        override: Optional[Dict[str, Any]] = None,
+    ) -> Optional[BoundaryState]:
+        station_state = getattr(state, 'station_state', None)
+        if station_state is None:
+            return None
+
+        boundary = BoundaryState(
+            h_i_t=float(getattr(station_state, 'h_i_t', 0.0)),
+            hat_h_i_t=float(getattr(station_state, 'hat_h_i_t', 0.0)),
+            Inflow_i_t=float(getattr(station_state, 'inflow_i_t', 0.0)),
+            qtot_i_t=float(getattr(station_state, 'qtot_i_t', 0.0)),
+            boundary_id=str((override or {}).get('id') or node_id),
+            boundary_type=boundary_type,
+        )
+
+        if not isinstance(override, dict):
+            return boundary
+
+        metric_code = str(override.get('metrics_code') or '').strip().lower()
+        value = override.get('value')
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return boundary
+
+        if boundary_type == 'upstream' and metric_code in {'water_flow', 'inflow'}:
+            boundary.Inflow_i_t = numeric_value
+            boundary.qtot_i_t = numeric_value
+        elif boundary_type == 'downstream' and metric_code in {'water_level', 'water_depth'}:
+            boundary.h_i_t = numeric_value
+            boundary.hat_h_i_t = numeric_value
+
+        return boundary
 
     def _apply_boundary_conditions(
         self,
@@ -268,7 +330,10 @@ class HydraulicSolver:
                 current_state = self.simulation_states.get(object_id)
                 if current_state is None:
                     continue
-                boundary_params[object_id] = self._build_default_boundary_params({object_id: current_state})[object_id]
+                node_boundary_params = self._build_default_boundary_params({object_id: current_state})
+                if object_id not in node_boundary_params:
+                    continue
+                boundary_params[object_id] = node_boundary_params[object_id]
 
             for boundary_name in ('upstream_boundary', 'downstream_boundary'):
                 boundary = boundary_params[object_id].get(boundary_name)
@@ -288,10 +353,11 @@ class HydraulicSolver:
             return
 
         for object_id, metric_values in control_conditions.items():
-            if object_id not in controls:
+            target_controls = self._resolve_target_device_controls(controls, object_id)
+            if not target_controls:
                 continue
 
-            for device_control in controls[object_id].values():
+            for device_control in target_controls:
                 for metric_code, value in metric_values.items():
                     if value is None:
                         continue
@@ -305,33 +371,250 @@ class HydraulicSolver:
                         device_control.e_i_t = 0.0
                         device_control.target_flow = 0.0
 
-    def _download_idz_config(self, idz_config_url: str) -> Optional[str]:
+    def _resolve_target_device_controls(
+        self,
+        controls: Dict[int, Dict[str, DeviceControl]],
+        object_id: int,
+    ) -> list[DeviceControl]:
+        object_controls = controls.get(object_id)
+        if object_controls:
+            return list(object_controls.values())
+
+        object_name = self._resolve_topology_object_name(object_id)
+        if not object_name:
+            return []
+
+        matched_controls: list[DeviceControl] = []
+        matched_node_ids: list[int] = []
+        for node_id, device_controls in controls.items():
+            device_control = device_controls.get(object_name)
+            if device_control is not None:
+                matched_controls.append(device_control)
+                matched_node_ids.append(node_id)
+
+        if matched_controls:
+            if len(matched_controls) > 1:
+                logger.warning(
+                    "Multiple control targets resolved by device name: object_id=%s, object_name=%s, node_ids=%s",
+                    object_id,
+                    object_name,
+                    matched_node_ids,
+                )
+            logger.info(
+                "Resolved control target by device name: object_id=%s, object_name=%s, matches=%s, node_ids=%s",
+                object_id,
+                object_name,
+                len(matched_controls),
+                matched_node_ids,
+            )
+        return matched_controls
+
+    def _resolve_topology_object_name(self, object_id: int) -> Optional[str]:
+        if not self.topology:
+            return None
+
+        for top_obj in getattr(self.topology, 'top_objects', []) or []:
+            matched_name = self._match_object_name(top_obj, object_id)
+            if matched_name:
+                return matched_name
+            for child in getattr(top_obj, 'children', []) or []:
+                matched_name = self._match_object_name(child, object_id)
+                if matched_name:
+                    return matched_name
+        return None
+
+    @staticmethod
+    def _match_object_name(obj: Any, object_id: int) -> Optional[str]:
+        candidates = [getattr(obj, 'object_id', None), getattr(obj, 'id', None)]
+        for candidate in candidates:
+            try:
+                if int(candidate) == object_id:
+                    return str(getattr(obj, 'object_name', getattr(obj, 'name', '')))
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _iter_initial_state_items(initial_states_data: Dict[str, Any]) -> list[Dict[str, Any]]:
+        result: list[Dict[str, Any]] = []
+        for category_config in (initial_states_data.get('initial_states') or {}).values():
+            if not isinstance(category_config, dict):
+                continue
+            overrides = category_config.get('overrides')
+            if isinstance(overrides, dict):
+                for items in overrides.values():
+                    if isinstance(items, list):
+                        result.extend(item for item in items if isinstance(item, dict))
+            elif isinstance(overrides, list):
+                result.extend(item for item in overrides if isinstance(item, dict))
+        return result
+
+    @staticmethod
+    def _update_state_value(initial_state: Dict[str, Any], key: str, value: Any) -> bool:
+        if value is None:
+            return False
+        try:
+            initial_state[key] = float(value)
+        except (TypeError, ValueError):
+            initial_state[key] = value
+        return True
+
+    def _apply_initial_states_overrides(
+        self,
+        idz_data: Dict[str, Any],
+        initial_states_data: Dict[str, Any],
+    ) -> int:
+        objects = idz_data.get('objects')
+        if not isinstance(objects, list):
+            return 0
+
+        object_map = {
+            int(obj['id']): obj for obj in objects
+            if isinstance(obj, dict) and obj.get('id') is not None
+        }
+        ordered_objects = [obj for obj in objects if isinstance(obj, dict) and obj.get('id') is not None]
+        child_map: Dict[int, Dict[str, Any]] = {}
+        cross_section_parent_map: Dict[int, tuple[Dict[str, Any], int]] = {}
+        for obj in objects:
+            if not isinstance(obj, dict):
+                continue
+            for child in obj.get('device_children', []) or []:
+                if isinstance(child, dict) and child.get('id') is not None:
+                    child_map[int(child['id'])] = child
+            for index, cross_section in enumerate(obj.get('cross_section_children', []) or []):
+                if isinstance(cross_section, dict) and cross_section.get('id') is not None:
+                    cross_section_parent_map[int(cross_section['id'])] = (obj, index)
+
+        applied = 0
+        for item in self._iter_initial_state_items(initial_states_data):
+            object_id = item.get('id')
+            metric_code = str(item.get('metrics_code') or '').strip()
+            value = item.get('value')
+            if object_id is None or not metric_code:
+                continue
+
+            try:
+                object_id = int(object_id)
+            except (TypeError, ValueError):
+                continue
+
+            target_object = object_map.get(object_id)
+            target_child = child_map.get(object_id)
+            cross_section_parent = cross_section_parent_map.get(object_id)
+
+            if target_child is not None:
+                initial_state = target_child.setdefault('initial_state', {})
+                if metric_code == 'gate_opening':
+                    applied += int(self._update_state_value(initial_state, 'opening', value))
+                elif metric_code == 'water_flow':
+                    applied += int(self._update_state_value(initial_state, 'outflow', value))
+                elif metric_code == 'water_level':
+                    applied += int(self._update_state_value(initial_state, 'water_level', value))
+                continue
+
+            if cross_section_parent is not None:
+                parent_object, cross_section_index = cross_section_parent
+                initial_state = parent_object.setdefault('initial_state', {})
+
+                if metric_code in {'water_level', 'water_depth'}:
+                    target_key = 'water_level' if cross_section_index == 0 else 'water_level_back'
+                    applied += int(self._update_state_value(initial_state, target_key, value))
+                elif metric_code == 'water_flow':
+                    target_key = 'inflow' if cross_section_index == 0 else 'outflow'
+                    applied += int(self._update_state_value(initial_state, target_key, value))
+                continue
+
+            if target_object is None:
+                continue
+
+            initial_state = target_object.setdefault('initial_state', {})
+            target_type = str(target_object.get('type') or '')
+
+            if metric_code == 'water_flow':
+                target_key = 'outflow' if target_type in {'DisturbanceNode', 'GateStation'} else 'water_flow'
+                applied += int(self._update_state_value(initial_state, target_key, value))
+            elif metric_code in {'water_level', 'water_depth'}:
+                applied += int(self._update_state_value(initial_state, 'water_level', value))
+            elif metric_code == 'inflow':
+                applied += int(self._update_state_value(initial_state, 'inflow', value))
+            elif metric_code == 'water_level_back':
+                applied += int(self._update_state_value(initial_state, 'water_level_back', value))
+
+        applied += self._apply_boundary_fallbacks(initial_states_data, ordered_objects, cross_section_parent_map)
+        return applied
+
+    def _apply_boundary_fallbacks(
+        self,
+        initial_states_data: Dict[str, Any],
+        ordered_objects: list[Dict[str, Any]],
+        cross_section_parent_map: Dict[int, tuple[Dict[str, Any], int]],
+    ) -> int:
+        if not ordered_objects:
+            return 0
+
+        boundaries = (
+            initial_states_data.get('initial_states', {})
+            .get('boundaries', {})
+            .get('overrides', [])
+        )
+        if not isinstance(boundaries, list) or not boundaries:
+            return 0
+
+        first_object = ordered_objects[0]
+        last_object = ordered_objects[-1]
+        applied = 0
+
+        for index, item in enumerate(boundaries):
+            if not isinstance(item, dict):
+                continue
+
+            object_id = item.get('id')
+            try:
+                if object_id is not None and int(object_id) in cross_section_parent_map:
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+            metric_code = str(item.get('metrics_code') or '').strip()
+            value = item.get('value')
+            target_object = first_object if index == 0 else last_object
+            initial_state = target_object.setdefault('initial_state', {})
+
+            if metric_code == 'water_flow':
+                target_key = 'inflow' if index == 0 else 'outflow'
+                applied += int(self._update_state_value(initial_state, target_key, value))
+            elif metric_code in {'water_level', 'water_depth'}:
+                target_key = 'water_level' if index == 0 else 'water_level_back'
+                applied += int(self._update_state_value(initial_state, target_key, value))
+
+        return applied
+
+    def _download_idz_config(self, idz_config_url: str, initial_states_url: Optional[str] = None) -> Optional[str]:
         try:
             if not idz_config_url:
                 logger.warning('idz_config_url is empty')
                 return None
 
-            parsed = urlparse(idz_config_url)
-            encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
-            encoded_url = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                encoded_path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment,
-            ))
-
-            request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
-
-            with urlopen(request, timeout=30) as response:
-                content = response.read().decode('utf-8')
+            content = fetch_url_text(idz_config_url, timeout=30)
 
             try:
                 import yaml
 
                 data = yaml.safe_load(content)
+                applied_overrides = 0
+                if initial_states_url and isinstance(data, dict):
+                    initial_states_content = fetch_url_text(initial_states_url, timeout=30)
+                    initial_states_data = yaml.safe_load(initial_states_content)
+                    if isinstance(initial_states_data, dict):
+                        self.initial_states_source_data = copy.deepcopy(initial_states_data)
+                        applied_overrides = self._apply_initial_states_overrides(data, initial_states_data)
+                        logger.info(
+                            "Applied %s initial_state override(s) from %s",
+                            applied_overrides,
+                            initial_states_url,
+                        )
+                    else:
+                        self.initial_states_source_data = {}
                 if isinstance(data, dict) and 'objects' in data:
                     data['components'] = data.pop('objects')
                 content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)

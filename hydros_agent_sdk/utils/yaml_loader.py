@@ -18,10 +18,11 @@ Example usage:
 """
 
 import logging
+import subprocess
 from typing import Any, Dict, Optional
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 try:
     import yaml
@@ -29,6 +30,84 @@ except ImportError:
     yaml = None
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_url_path(url: str) -> str:
+    parsed = urlparse(url)
+    encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=%')
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        encoded_path,
+        parsed.params,
+        parsed.query,
+        parsed.fragment
+    ))
+
+
+def _is_ssl_eof_error(error: URLError) -> bool:
+    reason = getattr(error, 'reason', error)
+    return 'UNEXPECTED_EOF_WHILE_READING' in str(reason)
+
+
+def fetch_url_text(url: str, timeout: int = 30, user_agent: str = 'Hydros-Agent-SDK/0.1.3') -> str:
+    encoded_url = _encode_url_path(url)
+
+    try:
+        request = Request(encoded_url)
+        request.add_header('User-Agent', user_agent)
+        with urlopen(request, timeout=timeout) as response:
+            return response.read().decode('utf-8')
+    except URLError as exc:
+        if not _is_ssl_eof_error(exc):
+            raise
+
+        logger.warning("Retrying URL via PowerShell after SSL EOF: %s", url)
+        candidate_urls = []
+        for candidate in (unquote(encoded_url), encoded_url):
+            if candidate not in candidate_urls:
+                candidate_urls.append(candidate)
+
+        fallback_errors: list[str] = []
+
+        for candidate_url in candidate_urls:
+            escaped_url = candidate_url.replace("'", "''")
+            command = (
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+                "$ProgressPreference = 'SilentlyContinue'; "
+                "[Net.ServicePointManager]::SecurityProtocol = "
+                "[Net.SecurityProtocolType]::Tls12 -bor 12288; "
+                f"(Invoke-WebRequest -UseBasicParsing '{escaped_url}' -TimeoutSec {int(timeout)}).Content"
+            )
+
+            try:
+                completed = subprocess.run(
+                    ['powershell', '-NoProfile', '-Command', command],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    check=True,
+                    timeout=max(timeout + 5, timeout * 2),
+                )
+                return completed.stdout
+            except subprocess.CalledProcessError as ps_exc:
+                stderr = (ps_exc.stderr or '').strip()
+                fallback_errors.append(
+                    f"candidate={candidate_url}, error={stderr or ps_exc}"
+                )
+            except Exception as ps_exc:
+                fallback_errors.append(
+                    f"candidate={candidate_url}, error={ps_exc}"
+                )
+
+        logger.warning(
+            "PowerShell fallback failed for %s after %s candidate(s): %s",
+            url,
+            len(candidate_urls),
+            " | ".join(fallback_errors),
+        )
+        raise exc
 
 
 class YamlLoader:
@@ -70,32 +149,8 @@ class YamlLoader:
         logger.info(f"Loading YAML from URL: {url}")
 
         try:
-            # Encode URL to handle non-ASCII characters (e.g., Chinese characters)
-            # Split URL into parts and encode only the path part
-            parsed = urlparse(url)
-
-            # Encode the path component while preserving already-encoded characters
-            encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
-
-            # Reconstruct the URL with encoded path
-            encoded_url = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                encoded_path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-
-            logger.debug(f"Encoded URL: {encoded_url}")
-
-            # Create request with proper headers
-            request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
-
-            with urlopen(request, timeout=timeout) as response:
-                content = response.read().decode('utf-8')
-                return YamlLoader.from_yaml_string(content)
+            content = fetch_url_text(url, timeout=timeout)
+            return YamlLoader.from_yaml_string(content)
         except HTTPError as e:
             logger.error(f"HTTP error loading YAML from {url}: {e.code} {e.reason}")
             raise

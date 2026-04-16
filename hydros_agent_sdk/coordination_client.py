@@ -37,16 +37,17 @@ from hydros_agent_sdk.protocol.commands import (
     SimCoordinationRequest,
     SimCoordinationResponse,
     SimCommandEnvelope,
+    get_command_type,
     OutflowTimeSeriesRequest,
 
     # Command type constants
     SIMCMD_TASK_INIT_REQUEST,
     SIMCMD_TASK_INIT_RESPONSE,
+    SIMCMD_TASK_TERMINATE_RESPONSE,
     SIMCMD_TICK_CMD_REQUEST,
     SIMCMD_TASK_TERMINATE_REQUEST,
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
-    SIMCMD_DEVICE_STATUS_CHANGE_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
@@ -54,6 +55,29 @@ from hydros_agent_sdk.protocol.commands import (
 import json
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_SIM_COMMAND_TYPES = {
+    "task_init_request",
+    "task_init_response",
+    "task_terminate_request",
+    "task_terminate_response",
+    "tick_cmd_request",
+    "tick_cmd_response",
+    "calculation_request",
+    "device_status_change_request",
+    "calculation_response",
+    "device_status_change_response",
+    "device_status_chagne_response",
+    "time_series_data_update_request",
+    "time_series_data_update_response",
+    "outflow_time_series_request",
+    "outflow_time_series_response",
+    "outflow_time_series_data_update_request",
+    "outflow_time_series_data_update_response",
+    "report_agent_instance_status",
+    "identified_params_report",
+    "report_hydro_alert",
+}
 
 
 def _create_mqtt_client(client_id: str) -> mqtt.Client:
@@ -212,7 +236,6 @@ class SimCoordinationClient:
             SIMCMD_TASK_TERMINATE_REQUEST: self._handle_task_terminate,
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
-            SIMCMD_DEVICE_STATUS_CHANGE_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
             SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
             SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
@@ -353,6 +376,12 @@ class SimCoordinationClient:
             # Parse JSON
             data = json.loads(payload_str)
             self._log_raw_event_fields(data)
+            command_type = get_command_type(data)
+            if command_type not in SUPPORTED_SIM_COMMAND_TYPES:
+                logger.warning("Ignoring unsupported sim command type: %s", command_type)
+                return
+            if self._should_ignore_raw_command(data):
+                return
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
 
@@ -366,6 +395,36 @@ class SimCoordinationClient:
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
+
+    def _should_ignore_raw_command(self, data: Dict) -> bool:
+        """Ignore coordination messages for agent types not hosted in this process."""
+        if not isinstance(data, dict):
+            return False
+
+        command_type = data.get("command_type")
+        if command_type != SIMCMD_TASK_INIT_RESPONSE:
+            return False
+
+        callback = self.sim_coordination_callback
+        local_agent_codes = set(getattr(callback, "agent_factories", {}).keys())
+        if not local_agent_codes:
+            return False
+
+        source_agent = data.get("source_agent_instance")
+        if not isinstance(source_agent, dict):
+            return False
+
+        source_agent_code = source_agent.get("agent_code")
+        if source_agent_code in local_agent_codes:
+            return False
+
+        logger.info(
+            "Ignoring task_init_response for non-local agent: agent_code=%s, local_agent_codes=%s, command_id=%s",
+            source_agent_code,
+            sorted(local_agent_codes),
+            data.get("command_id"),
+        )
+        return True
 
     def _log_raw_event_fields(self, data: Dict) -> None:
         """打印时间序列类消息的原始事件字段，便于排查字段丢失问题。"""
@@ -598,6 +657,8 @@ class SimCoordinationClient:
             try:
                 # Serialize command
                 payload = command.model_dump_json(by_alias=True)
+                if command.command_type in {SIMCMD_TASK_INIT_RESPONSE, SIMCMD_TASK_TERMINATE_RESPONSE}:
+                    logger.info("Outgoing %s payload: %s", command.command_type, payload)
 
                 # Publish to MQTT
                 print(self.topic)

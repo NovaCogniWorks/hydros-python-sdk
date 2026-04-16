@@ -14,6 +14,7 @@ from enum import Enum
 
 import yaml
 from pydantic import BaseModel, Field
+from hydros_agent_sdk.utils.yaml_loader import fetch_url_text
 
 logger = logging.getLogger(__name__)
 
@@ -275,23 +276,9 @@ class HydroObjectUtilsV2:
             Exception: If the URL cannot be accessed or YAML cannot be parsed
         """
         try:
-            # Handle non-ASCII characters in URL
-            parsed_url = urllib.parse.urlparse(url)
-            encoded_path = urllib.parse.quote(parsed_url.path.encode('utf-8'))
-            encoded_url = urllib.parse.urlunparse((
-                parsed_url.scheme,
-                parsed_url.netloc,
-                encoded_path,
-                parsed_url.params,
-                parsed_url.query,
-                parsed_url.fragment
-            ))
-
             logger.info(f"Loading YAML from URL: {url}")
-
-            with urllib.request.urlopen(encoded_url) as response:
-                content = response.read().decode('utf-8')
-                yaml_data = yaml.safe_load(content)
+            content = fetch_url_text(url)
+            yaml_data = yaml.safe_load(content)
 
             logger.info(f"Successfully loaded YAML from {url}")
             return yaml_data
@@ -317,12 +304,13 @@ class HydroObjectUtilsV2:
         """
         yaml_data = HydroObjectUtilsV2.load_remote_yaml(topology_model_config_url)
 
-        # Extract objects and cross_sections
         objects_list = yaml_data.get('objects', [])
         cross_sections_list = yaml_data.get('cross_sections', [])
 
-        # Build cross_sections map for efficient lookup
-        cross_sections_map = {cs['id']: cs for cs in cross_sections_list}
+        cross_sections_map = {
+            cs['id']: cs for cs in cross_sections_list
+            if isinstance(cs, dict) and cs.get('id') is not None
+        }
 
         logger.info(f"Parsing {len(objects_list)} objects from YAML")
 
@@ -347,14 +335,38 @@ class HydroObjectUtilsV2:
             # Process children
             children = []
 
-            # Process cross_section_children
             cross_section_children = obj_data.get('cross_section_children', [])
             for cs_child in cross_section_children:
-                child_id = cs_child.get('id')
-                child_type = cs_child.get('type', 'CrossSection')
-                child_name = cs_child.get('name', '')
+                if not isinstance(cs_child, dict):
+                    logger.warning("Skipping invalid cross_section child under object %s: %r", object_id, cs_child)
+                    continue
 
-                # Get parameters from cross_sections map
+                section_ref = cs_child.get('section_ref', {})
+                if not isinstance(section_ref, dict):
+                    logger.warning(
+                        "Skipping cross_section child without section_ref under object %s: %r",
+                        object_id,
+                        cs_child,
+                    )
+                    continue
+
+                child_id = section_ref.get('id')
+                if child_id is None:
+                    logger.warning(
+                        "Skipping cross_section child without section_ref.id under object %s: %r",
+                        object_id,
+                        cs_child,
+                    )
+                    continue
+
+                child_type = 'CrossSection'
+                child_name = str(
+                    cs_child.get('alias_name')
+                    or section_ref.get('name')
+                    or cs_child.get('name')
+                    or ''
+                )
+
                 child_params = {}
                 if child_id in cross_sections_map:
                     cs_data = cross_sections_map[child_id]
@@ -374,10 +386,17 @@ class HydroObjectUtilsV2:
                 )
                 children.append(child_obj)
 
-            # Process device_children
             device_children = obj_data.get('device_children', [])
             for dev_child in device_children:
+                if not isinstance(dev_child, dict):
+                    logger.warning("Skipping invalid device child under object %s: %r", object_id, dev_child)
+                    continue
+
                 child_id = dev_child.get('id')
+                if child_id is None:
+                    logger.warning("Skipping device child without id under object %s: %r", object_id, dev_child)
+                    continue
+
                 child_type = dev_child.get('type', 'Device')
                 child_name = dev_child.get('name', '')
 

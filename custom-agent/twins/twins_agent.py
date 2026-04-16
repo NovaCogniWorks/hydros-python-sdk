@@ -29,6 +29,7 @@ from hydros_agent_sdk import (
     HydroAgentFactory,
     MultiAgentCallback,
     SimCoordinationClient,
+    load_agent_config,
     load_env_config,
     setup_logging,
 )
@@ -235,6 +236,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     def _initialize_twins_model(self):
         logger.info("Initializing digital twins model...")
         idz_config_url = self.properties.get_property('idz_config_url')
+        initial_states_url = self.properties.get_property('initial_states')
 
         with AgentErrorContext(
             ErrorCodes.MODEL_INITIALIZATION_FAILURE,
@@ -250,7 +252,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 ErrorCodes.MODEL_INITIALIZATION_FAILURE,
                 agent_name=self.agent_code,
             ) as ctx:
-                self._hydraulic_solver.initialize(self._topology, idz_config_url)
+                self._hydraulic_solver.initialize(self._topology, idz_config_url, initial_states_url)
 
             if ctx.has_error:
                 raise RuntimeError(f"Solver initialization failed: {ctx.error_message}")
@@ -456,9 +458,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         处理时间序列更新请求。
 
-        支持两类需要优先下载 time_series_url 的事件：
-        1. 天气预报事件
-        2. 用水计划事件
+        天气预报事件按新逻辑直接使用 event.object_time_series；
+        用水计划事件同样直接使用 event.object_time_series。
         """
         event = getattr(request, 'time_series_data_changed_event', None)
         original_time_series_list = self._resolve_event_time_series_list(event)
@@ -486,33 +487,28 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 self._cache_weather_forecast_time_series(time_series_list)
             elif not time_series_list:
                 logger.info(
-                    "忽略非源天气预报事件缓存重建：event_id=%s，time_series_url=%s，原因=事件序列不在源天气series_key集合内",
+                    "忽略非源天气预报事件缓存重建：event_id=%s，原因=事件序列不在源天气series_key集合内",
                     getattr(event, 'hydro_event_id', None),
-                    getattr(event, 'time_series_url', None),
                 )
             logger.info(
-                "天气预报事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，direct_load_time_series=%s，auto_hydro_event_enable=%s，priority=%s",
+                "天气预报事件已解析：event_id=%s，event_type=%s，event_marker=%s，序列条数=%s，auto_hydro_event_enable=%s，priority=%s",
                 getattr(event, 'hydro_event_id', None),
                 getattr(event, 'hydro_event_type', None),
                 event_marker,
-                getattr(event, 'time_series_url', None),
                 len(time_series_list),
-                getattr(event, 'direct_load_time_series', None),
                 getattr(event, 'auto_hydro_event_enable', None),
                 getattr(event, 'priority', None),
             )
             if not time_series_list:
                 if weather_refresh or not original_time_series_list:
                     logger.warning(
-                        "天气预报事件未解析到有效序列：event_id=%s，time_series_url=%s，object_time_series为空",
+                        "天气预报事件未解析到有效序列：event_id=%s，object_time_series为空",
                         getattr(event, 'hydro_event_id', None),
-                        getattr(event, 'time_series_url', None),
                     )
                 else:
                     logger.info(
-                        "天气预报事件已被源series_key过滤为空：event_id=%s，time_series_url=%s",
+                        "天气预报事件已被源series_key过滤为空：event_id=%s",
                         getattr(event, 'hydro_event_id', None),
-                        getattr(event, 'time_series_url', None),
                     )
         elif self._is_water_use_source(event_marker):
             if water_use_refresh:
@@ -520,43 +516,37 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                 self._cache_water_use_time_series(time_series_list)
             elif not time_series_list:
                 logger.info(
-                    "忽略非源用水计划事件缓存重建：event_id=%s，time_series_url=%s，原因=事件序列不在源计划series_key集合内",
+                    "忽略非源用水计划事件缓存重建：event_id=%s，原因=事件序列不在源计划series_key集合内",
                     getattr(event, 'hydro_event_id', None),
-                    getattr(event, 'time_series_url', None),
                 )
             logger.info(
-                "用水计划事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，direct_load_time_series=%s，auto_hydro_event_enable=%s，priority=%s",
+                "用水计划事件已解析：event_id=%s，event_type=%s，event_marker=%s，序列条数=%s，auto_hydro_event_enable=%s，priority=%s",
                 getattr(event, 'hydro_event_id', None),
                 getattr(event, 'hydro_event_type', None),
                 event_marker,
-                getattr(event, 'time_series_url', None),
                 len(time_series_list),
-                getattr(event, 'direct_load_time_series', None),
                 getattr(event, 'auto_hydro_event_enable', None),
                 getattr(event, 'priority', None),
             )
             if not time_series_list:
                 if water_use_refresh or not original_time_series_list:
                     logger.warning(
-                        "用水计划事件未解析到有效序列：event_id=%s，time_series_url=%s，object_time_series为空",
+                        "用水计划事件未解析到有效序列：event_id=%s，object_time_series为空",
                         getattr(event, 'hydro_event_id', None),
-                        getattr(event, 'time_series_url', None),
                     )
                 else:
                     logger.info(
-                        "用水计划事件已被源series_key过滤为空：event_id=%s，time_series_url=%s",
+                        "用水计划事件已被源series_key过滤为空：event_id=%s",
                         getattr(event, 'hydro_event_id', None),
-                        getattr(event, 'time_series_url', None),
                     )
         elif self._is_emergency_maintenance_source(event_marker):
             self._reset_emergency_maintenance_cache()
             self._cache_emergency_maintenance_time_series(time_series_list)
             logger.info(
-                "应急检修事件已解析：event_id=%s，event_type=%s，event_marker=%s，time_series_url=%s，序列条数=%s，auto_hydro_event_enable=%s，priority=%s",
+                "应急检修事件已解析：event_id=%s，event_type=%s，event_marker=%s，序列条数=%s，auto_hydro_event_enable=%s，priority=%s",
                 getattr(event, 'hydro_event_id', None),
                 getattr(event, 'hydro_event_type', None),
                 event_marker,
-                getattr(event, 'time_series_url', None),
                 len(time_series_list),
                 getattr(event, 'auto_hydro_event_enable', None),
                 getattr(event, 'priority', None),
@@ -671,10 +661,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             return False
         if step == 1:
             return True
-        anchor_step = max(0, self._forecast_anchor_step)
-        if step < anchor_step:
-            return False
-        return ((step - anchor_step) % self._rolling_cycle) == 0
+        return (step % self._rolling_cycle) == 0
 
     def _build_periodic_forecast_plan(self, step: int) -> Optional[Dict[str, int | str]]:
         if not self._should_trigger_forecast(step):
@@ -689,15 +676,11 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             include_realtime_metrics = False
             emit_metrics = True
         else:
-            send_from_step = max(step + 1, self._last_forecast_end_step + 1)
-            send_to_step = self._last_forecast_end_step + self._rolling_cycle
-            if self._simulation_total_steps is not None:
-                next_periodic_step = step + self._rolling_cycle
-                if next_periodic_step > self._simulation_total_steps:
-                    send_to_step = max(
-                        send_to_step,
-                        self._simulation_total_steps + self._forecast_horizon,
-                    )
+            # 周期发送窗口按“当前步 + 一个滚动周期”开始，避免被事件触发的发送历史扰动。
+            send_from_step = step + self._rolling_cycle
+            send_to_step = step + self._forecast_horizon
+            if self._simulation_total_steps is not None and step + self._rolling_cycle > self._simulation_total_steps:
+                send_to_step = max(send_to_step, self._simulation_total_steps + self._forecast_horizon)
             result_window_from_step = send_from_step
             include_realtime_metrics = False
             emit_metrics = True
@@ -1069,7 +1052,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         处理中心下发的 calculation_request。
 
         当前实现采用保守策略：
-        1. 如事件中携带 object_time_series，则先并入本地时间序列缓存
+        1. 非天气预报/用水计划/应急检修事件如携带 object_time_series，则先并入本地时间序列缓存
         2. 以“当前步或事件指定步”为起点执行一轮滚动预测
         3. 将预测结果转换为 ObjectTimeSeries 后回传 coordinator
         """
@@ -1097,47 +1080,32 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         try:
             with self._forecast_lock:
-                # 允许中心在 calculation_request 中直接携带时间序列输入，
-                # 这样无需额外等待 time_series_data_update_request 也能立即计算。
-                resolved_event_time_series = self._resolve_event_time_series_list(request.hydro_event)
-                resolved_event_time_series, weather_refresh, water_use_refresh = self._ingest_event_time_series(
-                    request.hydro_event,
-                    object_time_series=resolved_event_time_series,
-                )
                 event_marker = self._resolve_event_marker(request.hydro_event)
                 if self._is_weather_forecast_source(event_marker):
-                    if weather_refresh:
-                        self._reset_weather_forecast_cache()
-                        self._cache_weather_forecast_time_series(
-                            resolved_event_time_series
-                        )
-                    else:
-                        logger.info(
-                            "忽略非源天气预报计算事件缓存重建：command_id=%s，event_id=%s，time_series_url=%s",
-                            request.command_id,
-                            getattr(request.hydro_event, 'hydro_event_id', None),
-                            getattr(request.hydro_event, 'time_series_url', None),
-                        )
-                elif self._is_water_use_source(event_marker):
-                    if water_use_refresh:
-                        self._reset_water_use_cache()
-                        self._cache_water_use_time_series(resolved_event_time_series)
                     logger.info(
-                        "用水计划计算事件已接收：command_id=%s，event_type=%s，event_marker=%s，time_series_url=%s",
+                        "天气预报 calculation_request 不再触发事件并入与缓存重建：command_id=%s，event_id=%s",
                         request.command_id,
-                        getattr(request.hydro_event, 'hydro_event_type', None),
-                        event_marker,
-                        getattr(request.hydro_event, 'time_series_url', None),
+                        getattr(request.hydro_event, 'hydro_event_id', None),
+                    )
+                elif self._is_water_use_source(event_marker):
+                    logger.info(
+                        "用水计划 calculation_request 不再触发事件并入与缓存重建：command_id=%s，event_id=%s",
+                        request.command_id,
+                        getattr(request.hydro_event, 'hydro_event_id', None),
                     )
                 elif self._is_emergency_maintenance_source(event_marker):
-                    self._reset_emergency_maintenance_cache()
-                    self._cache_emergency_maintenance_time_series(resolved_event_time_series)
                     logger.info(
-                        "应急检修计算事件已接收：command_id=%s，event_type=%s，event_marker=%s，time_series_url=%s",
+                        "应急检修 calculation_request 不再触发事件并入与缓存重建：command_id=%s，event_id=%s",
                         request.command_id,
-                        getattr(request.hydro_event, 'hydro_event_type', None),
-                        event_marker,
-                        getattr(request.hydro_event, 'time_series_url', None),
+                        getattr(request.hydro_event, 'hydro_event_id', None),
+                    )
+                else:
+                    # 非天气预报事件仍允许在 calculation_request 中直接携带时间序列输入，
+                    # 这样无需额外等待 time_series_data_update_request 也能立即计算。
+                    resolved_event_time_series = self._resolve_event_time_series_list(request.hydro_event)
+                    resolved_event_time_series, weather_refresh, water_use_refresh = self._ingest_event_time_series(
+                        request.hydro_event,
+                        object_time_series=resolved_event_time_series,
                     )
 
                 start_step = self._resolve_calculation_start_step(request)
@@ -1350,7 +1318,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             return items
 
         for topo_obj in _iter_topology_objects():
-            if self._as_int(getattr(topo_obj, 'object_id', None), -1) != object_id:
+            if not self._object_matches_id(topo_obj, object_id):
                 continue
             parameters = getattr(topo_obj, 'parameters', None)
             value = self._extract_max_opening_from_parameters(parameters)
@@ -1381,11 +1349,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             import yaml
 
             data = yaml.safe_load(content)
-            candidates = data if isinstance(data, list) else data.get('objects', []) if isinstance(data, dict) else []
-            for item in candidates or []:
-                if self._as_int(item.get('id'), -1) != object_id:
-                    continue
-                return self._extract_max_opening_from_parameters(item.get('parameters'))
+            return self._find_gate_max_opening_in_structure(data, object_id)
         except Exception as exc:
             logger.warning(
                 "从objects.yaml读取max_opening失败：对象ID=%s，url=%s，error=%s",
@@ -1399,14 +1363,74 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         if parameters is None:
             return None
         if isinstance(parameters, dict):
-            value = parameters.get('max_opening')
-            if value is None:
-                return None
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
+            direct_value = self._coerce_float(
+                parameters.get('max_opening', parameters.get('maxOpening'))
+            )
+            if direct_value is not None:
+                return direct_value
+            nested_value = self._coerce_float(parameters.get('value'))
+            if nested_value is not None:
+                return nested_value
+            for key in ('parameters', 'attrs', 'attributes'):
+                nested_parameters = parameters.get(key)
+                nested_result = self._extract_max_opening_from_parameters(nested_parameters)
+                if nested_result is not None:
+                    return nested_result
+            for item in parameters.values():
+                nested_result = self._extract_max_opening_from_parameters(item)
+                if nested_result is not None:
+                    return nested_result
+            return None
+        if isinstance(parameters, (list, tuple, set)):
+            for item in parameters:
+                if isinstance(item, dict):
+                    key = str(item.get('key', item.get('name', item.get('code', '')))).strip().lower()
+                    if key in {'max_opening', 'maxopening'}:
+                        direct_value = self._coerce_float(item.get('value', item.get('default_value')))
+                        if direct_value is not None:
+                            return direct_value
+                nested_result = self._extract_max_opening_from_parameters(item)
+                if nested_result is not None:
+                    return nested_result
+            return None
         value = getattr(parameters, 'max_opening', None)
+        direct_value = self._coerce_float(value)
+        if direct_value is not None:
+            return direct_value
+        camel_value = self._coerce_float(getattr(parameters, 'maxOpening', None))
+        if camel_value is not None:
+            return camel_value
+        return self._coerce_float(getattr(parameters, 'value', None))
+
+    def _find_gate_max_opening_in_structure(self, data: Any, object_id: int) -> Optional[float]:
+        if data is None:
+            return None
+        if isinstance(data, dict):
+            if self._object_matches_id(data, object_id):
+                value = self._extract_max_opening_from_parameters(data.get('parameters'))
+                if value is not None:
+                    return value
+            for item in data.values():
+                value = self._find_gate_max_opening_in_structure(item, object_id)
+                if value is not None:
+                    return value
+            return None
+        if isinstance(data, (list, tuple, set)):
+            for item in data:
+                value = self._find_gate_max_opening_in_structure(item, object_id)
+                if value is not None:
+                    return value
+        return None
+
+    def _object_matches_id(self, obj: Any, object_id: int) -> bool:
+        if isinstance(obj, dict):
+            candidates = [obj.get('object_id'), obj.get('id')]
+        else:
+            candidates = [getattr(obj, 'object_id', None), getattr(obj, 'id', None)]
+        return any(self._as_int(candidate, -1) == object_id for candidate in candidates)
+
+    @staticmethod
+    def _coerce_float(value: Any) -> Optional[float]:
         if value is None:
             return None
         try:
@@ -1418,8 +1442,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         if not self._hydraulic_solver:
             return None
         controls = getattr(self._hydraulic_solver, 'controls', {}) or {}
-        object_controls = controls.get(object_id, {})
-        for device_control in object_controls.values():
+        if hasattr(self._hydraulic_solver, '_resolve_target_device_controls'):
+            target_controls = self._hydraulic_solver._resolve_target_device_controls(controls, object_id)
+        else:
+            object_controls = controls.get(object_id, {})
+            target_controls = list(object_controls.values())
+        for device_control in target_controls:
             current_value = getattr(device_control, 'e_i_t', None)
             if current_value is not None:
                 try:
@@ -1449,9 +1477,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             )
             if not object_time_series and not weather_refresh:
                 logger.info(
-                    "忽略非源天气预报时间序列并入：event_id=%s，time_series_url=%s",
+                    "忽略非源天气预报时间序列并入：event_id=%s",
                     getattr(hydro_event, 'hydro_event_id', None),
-                    getattr(hydro_event, 'time_series_url', None),
                 )
                 return [], False, False
         if self._is_water_use_source(event_marker):
@@ -1461,9 +1488,8 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             )
             if not object_time_series:
                 logger.info(
-                    "忽略非源用水计划时间序列并入：event_id=%s，time_series_url=%s",
+                    "忽略非源用水计划时间序列并入：event_id=%s",
                     getattr(hydro_event, 'hydro_event_id', None),
-                    getattr(hydro_event, 'time_series_url', None),
                 )
                 return [], weather_refresh, False
 
@@ -1499,13 +1525,28 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         解析事件中的时间序列列表。
 
         优先级：
-        1. 如果事件带有 time_series_url，则下载 JSON 并读取其中的 object_time_series
-        2. 否则退回事件内联的 object_time_series
+        1. 天气预报/用水计划/应急检修事件直接使用内联 object_time_series，不下载 JSON
+        2. 其他事件如带有 time_series_url，则下载 JSON 并读取其中的 object_time_series
+        3. 否则退回事件内联的 object_time_series
         """
         if hydro_event is None:
             return []
 
         event_marker = self._resolve_event_marker(hydro_event)
+        if (
+            self._is_weather_forecast_source(event_marker)
+            or self._is_water_use_source(event_marker)
+            or self._is_emergency_maintenance_source(event_marker)
+        ):
+            inline_series = list(getattr(hydro_event, 'object_time_series', None) or [])
+            logger.info(
+                "%s事件直接使用内联 object_time_series：event_id=%s，序列条数=%s",
+                self._resolve_event_source_label(event_marker),
+                getattr(hydro_event, 'hydro_event_id', None),
+                len(inline_series),
+            )
+            return inline_series
+
         source_label = self._resolve_event_source_label(event_marker)
         time_series_url = getattr(hydro_event, 'time_series_url', None)
         if time_series_url:
@@ -1677,59 +1718,40 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         过滤“真正属于用水计划源输入”的序列。
 
         规则：
-        1. 带 time_series_url 的事件视为权威源，使用该批 object_time_series 刷新源集合
-        2. 不带 time_series_url 的后续 WATER_USE 事件，只保留已知源 raw key
-        3. 若当前还没有源对象集合且事件也不带 URL，则不重建缓存，避免把计算结果节点误当成计划源
+        1. time_series_data_update_request 中的用水计划事件直接以 object_time_series 作为权威源
+        2. 使用该批 object_time_series 刷新源集合
+        3. 若事件没有有效计划序列，则不重建缓存
         """
-        time_series_url = getattr(hydro_event, 'time_series_url', None)
         candidate_time_series = [
             time_series for time_series in time_series_list if self._is_water_use_plan_series(time_series)
         ]
-        if time_series_url:
-            authoritative_series_keys = {
-                self._build_raw_time_series_cache_key(time_series)
-                for time_series in candidate_time_series
-            }
-            authoritative_series_keys = {
-                key for key in authoritative_series_keys if key is not None
-            }
-            source_object_ids = {
-                int(time_series.object_id)
-                for time_series in candidate_time_series
-                if time_series.object_id is not None
-            }
-            self._water_use_authoritative_series_keys = authoritative_series_keys
-            self._water_use_source_object_ids = source_object_ids
-            logger.info(
-                "用水计划源集合已刷新：time_series_url=%s，object_ids=%s，series_keys=%s",
-                time_series_url,
-                sorted(source_object_ids),
-                sorted(authoritative_series_keys),
-            )
-            return candidate_time_series, True
-
-        if not self._water_use_authoritative_series_keys:
+        if not candidate_time_series:
             logger.warning(
-                "用水计划事件未携带time_series_url，且尚未建立源series_key集合，跳过缓存重建：event_id=%s",
+                "用水计划事件未提供有效计划序列，跳过缓存重建：event_id=%s",
                 getattr(hydro_event, 'hydro_event_id', None),
             )
             return [], False
-
-        filtered_list = [
-            time_series
+        authoritative_series_keys = {
+            self._build_raw_time_series_cache_key(time_series)
             for time_series in candidate_time_series
-            if self._build_raw_time_series_cache_key(time_series) in self._water_use_authoritative_series_keys
-        ]
-        if len(filtered_list) != len(time_series_list):
-            logger.info(
-                "用水计划事件已按源series_key过滤：event_id=%s，原序列条数=%s，保留条数=%s，源object_ids=%s，源series_keys=%s",
-                getattr(hydro_event, 'hydro_event_id', None),
-                len(time_series_list),
-                len(filtered_list),
-                sorted(self._water_use_source_object_ids),
-                sorted(self._water_use_authoritative_series_keys),
-            )
-        return filtered_list, False
+        }
+        authoritative_series_keys = {
+            key for key in authoritative_series_keys if key is not None
+        }
+        source_object_ids = {
+            int(time_series.object_id)
+            for time_series in candidate_time_series
+            if time_series.object_id is not None
+        }
+        self._water_use_authoritative_series_keys = authoritative_series_keys
+        self._water_use_source_object_ids = source_object_ids
+        logger.info(
+            "用水计划源集合已刷新：event_id=%s，object_ids=%s，series_keys=%s",
+            getattr(hydro_event, 'hydro_event_id', None),
+            sorted(source_object_ids),
+            sorted(authoritative_series_keys),
+        )
+        return candidate_time_series, True
 
     def _filter_weather_forecast_source_time_series(
         self,
@@ -1740,59 +1762,40 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         过滤“真正属于天气预报源输入”的序列。
 
         规则：
-        1. 带 time_series_url 的事件视为权威源，使用该批 object_time_series 刷新源集合
-        2. 不带 time_series_url 的后续 WEATHER 事件，只保留已知源 raw key
-        3. 若当前还没有源集合且事件也不带 URL，则不重建缓存，避免把计算结果节点误当成天气源
+        1. time_series_data_update_request 中的天气预报事件直接以 object_time_series 作为权威源
+        2. 使用该批 object_time_series 刷新源集合
+        3. 若事件没有有效天气序列，则不重建缓存
         """
-        time_series_url = getattr(hydro_event, 'time_series_url', None)
         candidate_time_series = [
             time_series for time_series in time_series_list if self._is_weather_forecast_series(time_series)
         ]
-        if time_series_url:
-            authoritative_series_keys = {
-                self._build_raw_time_series_cache_key(time_series)
-                for time_series in candidate_time_series
-            }
-            authoritative_series_keys = {
-                key for key in authoritative_series_keys if key is not None
-            }
-            source_object_ids = {
-                int(time_series.object_id)
-                for time_series in candidate_time_series
-                if time_series.object_id is not None
-            }
-            self._weather_forecast_authoritative_series_keys = authoritative_series_keys
-            self._weather_forecast_source_object_ids = source_object_ids
-            logger.info(
-                "天气预报源集合已刷新：time_series_url=%s，object_ids=%s，series_keys=%s",
-                time_series_url,
-                sorted(source_object_ids),
-                sorted(authoritative_series_keys),
-            )
-            return candidate_time_series, True
-
-        if not self._weather_forecast_authoritative_series_keys:
+        if not candidate_time_series:
             logger.warning(
-                "天气预报事件未携带time_series_url，且尚未建立源series_key集合，跳过缓存重建：event_id=%s",
+                "天气预报事件未提供有效天气序列，跳过缓存重建：event_id=%s",
                 getattr(hydro_event, 'hydro_event_id', None),
             )
             return [], False
-
-        filtered_list = [
-            time_series
+        authoritative_series_keys = {
+            self._build_raw_time_series_cache_key(time_series)
             for time_series in candidate_time_series
-            if self._build_raw_time_series_cache_key(time_series) in self._weather_forecast_authoritative_series_keys
-        ]
-        if len(filtered_list) != len(time_series_list):
-            logger.info(
-                "天气预报事件已按源series_key过滤：event_id=%s，原序列条数=%s，保留条数=%s，源object_ids=%s，源series_keys=%s",
-                getattr(hydro_event, 'hydro_event_id', None),
-                len(time_series_list),
-                len(filtered_list),
-                sorted(self._weather_forecast_source_object_ids),
-                sorted(self._weather_forecast_authoritative_series_keys),
-            )
-        return filtered_list, False
+        }
+        authoritative_series_keys = {
+            key for key in authoritative_series_keys if key is not None
+        }
+        source_object_ids = {
+            int(time_series.object_id)
+            for time_series in candidate_time_series
+            if time_series.object_id is not None
+        }
+        self._weather_forecast_authoritative_series_keys = authoritative_series_keys
+        self._weather_forecast_source_object_ids = source_object_ids
+        logger.info(
+            "天气预报源集合已刷新：event_id=%s，object_ids=%s，series_keys=%s",
+            getattr(hydro_event, 'hydro_event_id', None),
+            sorted(source_object_ids),
+            sorted(authoritative_series_keys),
+        )
+        return candidate_time_series, True
 
     def _reset_weather_forecast_cache(self) -> None:
         """收到新的天气预报事件后，重建天气缓存，避免历史节点残留。"""
@@ -2412,6 +2415,8 @@ def main():
     mqtt_password = env_config.get('mqtt_password')
 
     config_file = os.path.join(script_dir, 'agent.properties')
+    agent_config = load_agent_config(config_file)
+    registered_agent_code = str(agent_config.get('agent_code', 'TWINS_SIMULATION_AGENT')).strip() or 'TWINS_SIMULATION_AGENT'
 
     agent_factory = HydroAgentFactory(
         agent_class=MyTwinsSimulationAgent,
@@ -2420,7 +2425,7 @@ def main():
     )
 
     callback = MultiAgentCallback(node_id=os.getenv('HYDROS_NODE_ID', 'LOCAL'))
-    callback.register_agent_factory('TWINS_SIMULATION_AGENT', agent_factory)
+    callback.register_agent_factory(registered_agent_code, agent_factory)
 
     sim_coordination_client = SimCoordinationClient(
         broker_url=broker_url,
@@ -2439,6 +2444,7 @@ def main():
         logger.info('=' * 70)
         logger.info(f'Environment config: {env_file}')
         logger.info(f'Agent config: {config_file}')
+        logger.info(f'Registered Agent Code: {registered_agent_code}')
         logger.info(f'MQTT Broker: {broker_url}:{broker_port}')
         logger.info(f'MQTT Topic: {topic}')
         logger.info('=' * 70)

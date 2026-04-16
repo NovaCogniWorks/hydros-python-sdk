@@ -12,6 +12,16 @@ from configparser import ConfigParser
 
 logger = logging.getLogger(__name__)
 
+ENV_OVERRIDE_MAP = {
+    'MQTT_BROKER_URL': 'mqtt_broker_url',
+    'MQTT_BROKER_PORT': 'mqtt_broker_port',
+    'MQTT_TOPIC': 'mqtt_topic',
+    'MQTT_USERNAME': 'mqtt_username',
+    'MQTT_PASSWORD': 'mqtt_password',
+    'HYDROS_CLUSTER_ID': 'hydros_cluster_id',
+    'HYDROS_NODE_ID': 'hydros_node_id',
+}
+
 
 def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     """
@@ -60,6 +70,16 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
 
     # Load properties
     config = load_properties_file(env_file)
+
+    # Apply environment variable overrides before auto-generating mqtt_topic.
+    overridden_keys = []
+    for env_name, config_key in ENV_OVERRIDE_MAP.items():
+        env_value = os.getenv(env_name)
+        if env_value:
+            config[config_key] = env_value
+            overridden_keys.append(config_key)
+    if overridden_keys:
+        logger.info(f"Applied env overrides for: {', '.join(sorted(overridden_keys))}")
 
     # Auto-generate mqtt_topic from hydros_cluster_id if not provided
     if 'mqtt_topic' not in config or not config['mqtt_topic']:

@@ -94,6 +94,14 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 - **Boundary Conditions**: External inputs (rainfall, gate operations, sensor data, etc.)
 - **Time Series**: Historical and real-time data used to drive simulation
 
+## Event Rules
+
+- Weather forecast events are handled only from `time_series_data_update_request`, and the agent reads time series directly from `time_series_data_changed_event.object_time_series`.
+- Water use events follow the same rule as weather forecast events: only `time_series_data_update_request` updates caches, and data comes from inline `object_time_series`.
+- Device status change events use the inline `object_time_series` payload to rebuild emergency-maintenance caches.
+- For weather forecast, water use, and device status change, `calculation_request` no longer rebuilds event caches.
+- If a `calculation_request` for those three event families targets an agent that does not exist locally, the multi-agent dispatcher ignores it directly instead of warning.
+
 ## Next Steps
 
 1. Understand the agent lifecycle by reading `twins_agent.py`
