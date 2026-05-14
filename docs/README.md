@@ -20,10 +20,10 @@
    - 配置模板
    - 适合快速查找
 
-3. **[模板项目](../examples/template_agent/)**
-   - 可直接使用的项目模板
-   - 包含完整的配置和代码
-   - 复制即用，快速上手
+3. **[示例工程导航](../examples/README.md)**
+   - 当前仓库内可直接运行的示例入口
+   - 包含 `twins`、`ontology`、`outflowplan` 和多 Agent 启动方式
+   - 适合基于现有示例改造自己的 Agent
 
 ---
 
@@ -68,15 +68,15 @@
 ### 5 分钟快速上手
 
 ```bash
-# 1. 复制模板项目
-cp -r examples/template_agent my_agent
-cd my_agent
+# 1. 进入示例目录
+cd examples
 
-# 2. 修改配置
-# 编辑 agent.properties 和 env.properties
+# 2. 先运行一个现成示例
+python multi_agent_launcher.py twins
 
-# 3. 运行智能体
-python run.py
+# 3. 再尝试多 Agent 或事件驱动示例
+python multi_agent_launcher.py twins ontology
+cd agents/outflowplan && python outflow_plan_agent.py
 ```
 
 ### 学习路径
@@ -84,7 +84,7 @@ python run.py
 ```
 第 1 步: 阅读《新手智能体开发指南》
    ↓
-第 2 步: 复制并运行模板项目
+第 2 步: 运行现有示例（建议先从 twins 或 ontology 开始）
    ↓
 第 3 步: 查看示例代码（twins/ontology）
    ↓
@@ -99,23 +99,33 @@ python run.py
 
 ### 完整示例
 
-- **[模板智能体](../examples/template_agent/)** - 通用模板，适合所有场景
 - **[孪生仿真智能体](../examples/agents/twins/)** - 高精度水力仿真
 - **[本体仿真智能体](../examples/agents/ontology/)** - 基于规则的推理
-- **[中央调度智能体](../examples/agents/centralscheduling/)** - MPC 优化调度
+- **[出流规划智能体](../examples/agents/outflowplan/)** - 事件驱动的 outflow planning 示例
+- **[中央调度目录](../examples/agents/centralscheduling/)** - 当前仅保留配置占位，暂无完整示例实现
 
 ### 代码片段
 
 ```python
 # 最简单的智能体实现
 from hydros_agent_sdk.agents import TickableAgent
+from hydros_agent_sdk.protocol.commands import SimTaskInitResponse, SimTaskTerminateResponse
+from hydros_agent_sdk.protocol.models import CommandStatus
 
 class MyAgent(TickableAgent):
     def on_init(self, request):
         self.load_agent_configuration(request)
         self.state_manager.init_task(self.context, [self])
         self.state_manager.add_local_agent(self)
-        return SimTaskInitResponse(...)
+        return SimTaskInitResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            created_agent_instances=[self],
+            managed_top_objects={},
+            broadcast=False,
+        )
 
     def on_tick_simulation(self, request):
         # 你的仿真逻辑
@@ -124,7 +134,13 @@ class MyAgent(TickableAgent):
     def on_terminate(self, request):
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
-        return SimTaskTerminateResponse(...)
+        return SimTaskTerminateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False,
+        )
 ```
 
 ---
@@ -162,16 +178,14 @@ docs/
 └── ERROR_HANDLING.md              # 错误处理详解
 
 examples/
-├── template_agent/                # 模板项目
-│   ├── README.md                  # 模板使用说明
-│   ├── template_agent.py          # 智能体实现
-│   ├── run.py                     # 启动脚本
-│   ├── agent.properties           # 智能体配置
-│   └── env.properties             # 环境配置
+├── README.md                      # 示例导航
+├── multi_agent_launcher.py        # 多 Agent 启动入口
+├── env.properties                 # 默认环境配置
 ├── agents/
 │   ├── twins/                     # 孪生仿真示例
 │   ├── ontology/                  # 本体仿真示例
-│   └── centralscheduling/         # 中央调度示例
+│   ├── outflowplan/               # 事件驱动出流规划示例
+│   └── centralscheduling/         # 中央调度配置占位
 └── error_handling_example.py      # 错误处理示例
 
 hydros_agent_sdk/
@@ -190,7 +204,7 @@ hydros_agent_sdk/
 
 **A**: 按以下顺序学习：
 1. 阅读《新手智能体开发指南》前 3 章
-2. 复制 `template_agent` 并运行
+2. 运行 `examples/multi_agent_launcher.py twins`
 3. 查看 `twins` 或 `ontology` 示例
 4. 实现自己的业务逻辑
 
@@ -244,7 +258,7 @@ import pdb; pdb.set_trace()
    - 设计数据流和接口
 
 2. **开发阶段**
-   - 从模板开始
+   - 从现有示例开始
    - 逐步实现功能
    - 添加错误处理
    - 编写日志
