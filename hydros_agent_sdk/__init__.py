@@ -5,11 +5,11 @@ Official Python SDK for the Hydros ecosystem, providing simulation agent
 coordination and MQTT protocol support.
 """
 
-from hydros_agent_sdk.coordination_client import SimCoordinationClient
+from typing import Optional
+
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
-from hydros_agent_sdk.mqtt import HydrosMqttClient
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.agent_config import (
@@ -92,6 +92,19 @@ from hydros_agent_sdk.error_handling import (
 )
 
 __version__ = "0.1.3"
+
+_optional_mqtt_import_error: Optional[ModuleNotFoundError] = None
+
+try:
+    from hydros_agent_sdk.coordination_client import SimCoordinationClient
+    from hydros_agent_sdk.mqtt import HydrosMqttClient
+except ModuleNotFoundError as exc:
+    if exc.name and exc.name.startswith("paho"):
+        _optional_mqtt_import_error = exc
+        SimCoordinationClient = None
+        HydrosMqttClient = None
+    else:
+        raise
 
 __all__ = [
     # Core client and callback

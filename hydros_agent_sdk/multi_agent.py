@@ -9,15 +9,15 @@ import logging
 from typing import Dict, Optional, Any
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
-from hydros_agent_sdk.protocol.commands import (
+from hydros_agent_sdk.contract.v1 import (
     SimTaskInitRequest,
     SimTaskInitResponse,
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
+    CommandStatus,
 )
-from hydros_agent_sdk.protocol.models import CommandStatus
 
 logger = logging.getLogger(__name__)
 
@@ -90,28 +90,22 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_sim_task_init(self, request: SimTaskInitRequest):
         """
         Handle task initialization for multiple agents.
-
-        This method:
-        1. Iterates through request.agent_list
-        2. For each agent_code that has a registered factory, creates an instance
-        3. Collects all created agent instances
-        4. Returns a single SimTaskInitResponse with all instances
         """
-        context_id = request.context.biz_scene_instance_id
+        context_id = request.context_ref.biz_scene_instance_id
 
         if self._client is None:
             raise RuntimeError("Coordination client not set")
 
-        print(request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
-        logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
+        requested_agents = request.agent_definition_refs
+        logger.info(f"  Requested agents: {[a.agent_code for a in requested_agents]}")
 
         # Track agents created in this task
-        created_agents = []
+        created_agent_refs = []
         context_agents = {}
 
-        # Process each agent in agent_list
-        for agent_def in request.agent_list:
+        # Process each agent definition
+        for agent_def in requested_agents:
             agent_code = agent_def.agent_code
 
             # Check if we have a factory for this agent_code
@@ -124,61 +118,79 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.info(f"  Creating agent: {agent_code}")
 
             try:
-                # Create agent instance
+                # Create agent instance using legacy context for factory compatibility
+                legacy_context = getattr(request, 'context', None)
+                if legacy_context is None:
+                    from hydros_agent_sdk.protocol.models import SimulationContext
+                    legacy_context = SimulationContext(
+                        biz_scene_instance_id=request.context_ref.biz_scene_instance_id,
+                        valid=request.context_ref.valid or True,
+                    )
+
                 agent = factory.create_agent(
                     sim_coordination_client=self._client,
-                    context=request.context
+                    context=legacy_context
                 )
 
-                # Initialize agent
+                # Initialize agent (returns legacy SimTaskInitResponse)
                 response = agent.on_init(request)
 
-                # Collect created agent instance
-                if response and hasattr(response, 'source_agent_instance'):
-                    created_agents.append(response.source_agent_instance)
+                # Collect created agent instance ref from the response
+                if response and hasattr(response, 'source_agent_instance_ref') and response.source_agent_instance_ref:
+                    created_agent_refs.append(response.source_agent_instance_ref)
+                elif response and hasattr(response, 'source_agent_instance'):
+                    # Build ref from legacy agent instance
+                    from hydros_agent_sdk.contract.v1.common import AgentInstanceRef
+                    legacy_agent = response.source_agent_instance
+                    ref = AgentInstanceRef(
+                        agent_id=legacy_agent.agent_id,
+                        agent_code=legacy_agent.agent_code,
+                        agent_type=legacy_agent.agent_type,
+                        biz_scene_instance_id=legacy_agent.biz_scene_instance_id,
+                        hydros_cluster_id=legacy_agent.hydros_cluster_id,
+                        hydros_node_id=legacy_agent.hydros_node_id,
+                        drive_mode=legacy_agent.drive_mode,
+                    )
+                    created_agent_refs.append(ref)
 
                 # Store agent
                 context_agents[agent_code] = agent
 
-                logger.info(f"  ✓ Agent created and initialized: {agent_code}")
+                logger.info(f"  Agent created and initialized: {agent_code}")
 
             except Exception as e:
-                logger.error(f"  ✗ Failed to create agent {agent_code}: {e}", exc_info=True)
-                # Continue with other agents
+                logger.error(f"  Failed to create agent {agent_code}: {e}", exc_info=True)
 
         # Store agents for this context
         if context_agents:
             self.agents[context_id] = context_agents
 
         # Return single response with all created instances
-        if created_agents:
-            # Use the first created agent as source_agent_instance
-            # (protocol limitation - should ideally support multiple sources)
-            first_agent = created_agents[0]
+        if created_agent_refs:
+            first_ref = created_agent_refs[0]
 
-            # Generate a unique command_id for the response
             import uuid
             command_id = f"RESP_{context_id}_{uuid.uuid4().hex[:8]}"
 
             response = SimTaskInitResponse(
                 command_id=command_id,
-                context=request.context,
+                context_ref=request.context_ref,
                 command_status=CommandStatus.SUCCEED,
-                source_agent_instance=first_agent,
-                created_agent_instances=created_agents,
+                source_agent_instance_ref=first_ref,
+                created_agent_instances=created_agent_refs,
                 managed_top_objects={}
             )
 
             # Send response
             self._client.enqueue(response)
 
-            logger.info(f"SimTaskInitResponse sent with {len(created_agents)} agent(s)")
+            logger.info(f"SimTaskInitResponse sent with {len(created_agent_refs)} agent(s)")
         else:
             logger.warning(f"No agents created for task {context_id}")
 
     def on_tick(self, request: TickCmdRequest):
         """Handle tick command for all agents in the context."""
-        context_id = request.context.biz_scene_instance_id
+        context_id = request.context_ref.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
         if not context_agents:
@@ -196,7 +208,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """Handle task termination for all agents in the context."""
-        context_id = request.context.biz_scene_instance_id
+        context_id = request.context_ref.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
         if not context_agents:
@@ -219,7 +231,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """Handle time series data update for all agents in the context."""
-        context_id = request.context.biz_scene_instance_id
+        context_id = request.context_ref.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
         if not context_agents:
@@ -242,7 +254,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         Unlike on_tick or on_time_series_data_update which broadcast to all agents,
         this method routes the request only to the target agent specified in the request.
         """
-        context_id = request.context.biz_scene_instance_id
+        context_id = request.context_ref.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
         if not context_agents:
@@ -250,7 +262,8 @@ class MultiAgentCallback(SimCoordinationCallback):
             return
 
         # Extract target agent code from request
-        target_agent_code = request.target_agent_instance.agent_code
+        target_agent = request.target_agent_instance_ref
+        target_agent_code = target_agent.agent_code
 
         # Find the target agent
         target_agent = context_agents.get(target_agent_code)

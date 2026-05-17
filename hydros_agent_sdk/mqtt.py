@@ -5,6 +5,7 @@ import paho.mqtt.client as mqtt
 from pydantic import ValidationError
 
 from hydros_agent_sdk.protocol.commands import SimCommandEnvelope, HydroCmd, SimCommand
+from hydros_agent_sdk.adapters.legacy import backfill_legacy_command_payload
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 
@@ -51,6 +52,7 @@ class CommandDispatcher:
 
             # Parse JSON
             data = json.loads(payload_str)
+            data = backfill_legacy_command_payload(data)
 
             # Use Pydantic to parse into the correct object type using the Discriminated Union
             envelope = SimCommandEnvelope(command=data)

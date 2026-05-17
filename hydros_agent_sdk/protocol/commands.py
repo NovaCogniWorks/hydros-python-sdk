@@ -1,8 +1,9 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import Field, Discriminator
+from pydantic import AliasChoices, Field
 from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
 from .base import HydroBaseModel
+from hydros_agent_sdk.contract.v1.common import AgentDefinitionRef, AgentInstanceRef, TaskContextRef
 
 # Constants for Command Types
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"
@@ -26,6 +27,7 @@ class HydroCmd(HydroBaseModel):
 class SimCommand(HydroCmd):
     command_type: str
     context: SimulationContext
+    context_ref: Optional[TaskContextRef] = None
     broadcast: bool = False
 
 # --- Base Request/Response ---
@@ -38,12 +40,14 @@ class SimCoordinationResponse(SimCommand):
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     source_agent_instance: HydroAgentInstance
+    source_agent_instance_ref: Optional[AgentInstanceRef] = None
 
 # --- Specific Commands ---
 
 class SimTaskInitRequest(SimCoordinationRequest):
     command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
     agent_list: List[HydroAgent]
+    agent_definition_refs: Optional[List[AgentDefinitionRef]] = None
     biz_scene_configuration_url: Optional[str] = None
 
 class SimTaskInitResponse(SimCoordinationResponse):
@@ -73,6 +77,7 @@ from .models import ObjectTimeSeries
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
     command_type: Literal["calculation_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
     target_agent_instance: HydroAgentInstance
+    target_agent_instance_ref: Optional[AgentInstanceRef] = None
     hydro_event: HydroEvent
 
 class TimeSeriesCalculationResponse(SimCoordinationResponse):
@@ -90,6 +95,7 @@ class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
 class OutflowTimeSeriesRequest(SimCoordinationRequest):
     command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
     target_agent_instance: HydroAgentInstance
+    target_agent_instance_ref: Optional[AgentInstanceRef] = None
     hydro_event: HydroEvent
 
 # --- Report Commands ---
@@ -101,8 +107,16 @@ class AgentInstanceStatusReport(SimCommand):
     """
     command_type: Literal["report_agent_instance_status"] = SIMCMD_AGENT_INSTANCE_STATUS_REPORT
     source_agent_instance: HydroAgentInstance
-    created_state: str
+    source_agent_instance_ref: Optional[AgentInstanceRef] = None
+    agent_instance_status: str = Field(
+        validation_alias=AliasChoices("agent_instance_status", "created_state"),
+        serialization_alias="agent_instance_status",
+    )
     init_result: Optional[Dict[str, Any]] = None
+
+    @property
+    def created_state(self) -> str:
+        return self.agent_instance_status
 
 class ParameterIdentifiedReport(SimCommand):
     """
@@ -111,6 +125,7 @@ class ParameterIdentifiedReport(SimCommand):
     """
     command_type: Literal["identified_params_report"] = SIMCMD_IDENTIFIED_PARAMS_REPORT
     source_agent_instance: HydroAgentInstance
+    source_agent_instance_ref: Optional[AgentInstanceRef] = None
     recognized_params: List[Dict[str, Any]]  # List of IdentifiedParam objects
 
 class HydroAlertUpdatedReport(SimCommand):
@@ -120,6 +135,7 @@ class HydroAlertUpdatedReport(SimCommand):
     """
     command_type: Literal["report_hydro_alert"] = SIMCMD_HYDRO_ALERT_REPORT
     source_agent_instance: HydroAgentInstance
+    source_agent_instance_ref: Optional[AgentInstanceRef] = None
     hydro_alert_event: Dict[str, Any]  # HydroAlertEvent object
 
 # --- Union for Polymorphic Deserialization ---

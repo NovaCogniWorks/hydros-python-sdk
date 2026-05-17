@@ -17,14 +17,16 @@ import paho.mqtt.client as mqtt
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
+from hydros_agent_sdk.adapters.legacy import normalize_command_payload
 from hydros_agent_sdk.logging_config import (
     set_biz_scene_instance_id,
     set_biz_component,
     set_hydros_cluster_id,
     set_hydros_node_id
 )
-from hydros_agent_sdk.protocol.commands import (
-    SimCommand,
+from hydros_agent_sdk.contract.v1 import (
+    SimCommand as ContractSimCommand,
+    SimCommandEnvelope as ContractEnvelope,
     SimTaskInitRequest,
     SimTaskInitResponse,
     TickCmdRequest,
@@ -34,7 +36,6 @@ from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
     SimCoordinationRequest,
     SimCoordinationResponse,
-    SimCommandEnvelope,
     OutflowTimeSeriesRequest,
 
     # Command type constants
@@ -45,11 +46,25 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
+    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
+)
+from hydros_agent_sdk.protocol.commands import (
+    SimCommand as LegacySimCommand,
+    SimCoordinationRequest as LegacySimCoordinationRequest,
+    SimCoordinationResponse as LegacySimCoordinationResponse,
+    AgentInstanceStatusReport as LegacyAgentInstanceStatusReport,
 )
 import json
 
 logger = logging.getLogger(__name__)
+
+
+def _agent_like(command, attr_name: str):
+    ref_attr = f"{attr_name}_ref"
+    ref_value = getattr(command, ref_attr, None)
+    if ref_value:
+        return ref_value
+    return getattr(command, attr_name, None)
 
 
 class SimCoordinationClient:
@@ -159,7 +174,7 @@ class SimCoordinationClient:
         self._intentional_disconnect = False
 
         # Outgoing message queue
-        self.out_message_queue: Queue[SimCommand] = Queue()
+        self.out_message_queue: Queue = Queue()
 
         # Thread management
         self.running = Event()
@@ -173,7 +188,7 @@ class SimCoordinationClient:
 
     def _register_handlers(self):
         """Register all command handlers that route to callback methods."""
-        self.handlers: Dict[str, Callable[[SimCommand], None]] = {
+        self.handlers: Dict[str, Callable] = {
             SIMCMD_TASK_INIT_REQUEST: self._handle_task_init,
             SIMCMD_TASK_INIT_RESPONSE: self._handle_task_init_response,
             SIMCMD_TICK_CMD_REQUEST: self._handle_tick,
@@ -243,25 +258,19 @@ class SimCoordinationClient:
 
         logger.info("SimCoordinationClient stopped")
 
-    def enqueue(self, command: SimCommand):
+    def enqueue(self, command):
         """
         Enqueue a command for sending.
 
         The command will be sent asynchronously by the queue thread.
-
-        Args:
-            command: The command to send
         """
         self.out_message_queue.put(command)
         # Use Pydantic's model_dump() to properly serialize nested models
         logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
 
-    def send_command(self, command: SimCommand):
+    def send_command(self, command):
         """
         Send a command immediately (synchronous).
-
-        Args:
-            command: The command to send
         """
         self._send_with_retry(command)
 
@@ -314,7 +323,8 @@ class SimCoordinationClient:
 
             # Parse JSON
             data = json.loads(payload_str)
-            envelope = SimCommandEnvelope(command=data)
+            data = normalize_command_payload(data)
+            envelope = ContractEnvelope(command=data)
             command = envelope.command
 
             # Apply message filters
@@ -332,21 +342,12 @@ class SimCoordinationClient:
     # Message Handling
     # ========================================================================
 
-    def _set_logging_context(self, command: SimCommand):
+    def _set_logging_context(self, command):
         """
         Set logging context from command for structured logging.
 
         Extracts context information from the command and sets it in the logging
         context so all subsequent logs will include this information.
-
-        The logging context includes:
-        - hydros_cluster_id: From state_manager (loaded from env.properties)
-        - hydros_node_id: From state_manager (loaded from env.properties)
-        - biz_scene_instance_id: From command's SimulationContext
-        - biz_component: Agent ID or component name (e.g., "SIM_COORDINATOR")
-
-        Args:
-            command: The command to extract context from
         """
         # Set hydros_cluster_id from state_manager
         cluster_id = self.state_manager.get_cluster_id()
@@ -359,8 +360,9 @@ class SimCoordinationClient:
             set_hydros_node_id(node_id)
 
         # Set biz_scene_instance_id from command's context (SimulationContext)
-        if hasattr(command, 'context') and command.context:
-            biz_scene_instance_id = command.context.biz_scene_instance_id
+        context_like = getattr(command, 'context_ref', None) or getattr(command, 'context', None)
+        if context_like:
+            biz_scene_instance_id = context_like.biz_scene_instance_id
             if biz_scene_instance_id:
                 set_biz_scene_instance_id(biz_scene_instance_id)
 
@@ -370,15 +372,9 @@ class SimCoordinationClient:
         if component:
             set_biz_component(component)
 
-    def _handle_incoming_message(self, command: SimCommand):
+    def _handle_incoming_message(self, command):
         """
         Handle an incoming command by routing it to the appropriate handler.
-
-        Automatically sets logging context (task_id, biz_component, node_id) before
-        calling the handler, so all logs within the handler will include this context.
-
-        Args:
-            command: The command to handle
         """
         # Set logging context from command
         self._set_logging_context(command)
@@ -397,55 +393,47 @@ class SimCoordinationClient:
     # Command Handlers (route to callback)
     # ========================================================================
 
-    def _handle_task_init(self, command: SimCommand):
+    def _handle_task_init(self, command):
         """Handle task init request."""
-        request = command
-        assert isinstance(request, SimTaskInitRequest)
-        self.sim_coordination_callback.on_sim_task_init(request)
+        assert isinstance(command, SimTaskInitRequest)
+        self.sim_coordination_callback.on_sim_task_init(command)
 
-    def _handle_task_init_response(self, command: SimCommand):
+    def _handle_task_init_response(self, command):
         """Handle task init response from remote agent."""
-        response = command
-        assert isinstance(response, SimTaskInitResponse)
-        if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
-            self.sim_coordination_callback.on_agent_instance_sibling_created(response)
+        assert isinstance(command, SimTaskInitResponse)
+        if self.sim_coordination_callback.is_remote_agent(_agent_like(command, "source_agent_instance")):
+            self.sim_coordination_callback.on_agent_instance_sibling_created(command)
 
-    def _handle_tick(self, command: SimCommand):
+    def _handle_tick(self, command):
         """Handle tick command."""
-        request = command
-        assert isinstance(request, TickCmdRequest)
-        self.sim_coordination_callback.on_tick(request)
+        assert isinstance(command, TickCmdRequest)
+        self.sim_coordination_callback.on_tick(command)
 
-    def _handle_task_terminate(self, command: SimCommand):
+    def _handle_task_terminate(self, command):
         """Handle task terminate request."""
-        request = command
-        assert isinstance(request, SimTaskTerminateRequest)
-        self.sim_coordination_callback.on_task_terminate(request)
+        assert isinstance(command, SimTaskTerminateRequest)
+        self.sim_coordination_callback.on_task_terminate(command)
 
-    def _handle_time_series_data_update(self, command: SimCommand):
+    def _handle_time_series_data_update(self, command):
         """Handle time series data update."""
-        request = command
-        assert isinstance(request, TimeSeriesDataUpdateRequest)
-        self.sim_coordination_callback.on_time_series_data_update(request)
+        assert isinstance(command, TimeSeriesDataUpdateRequest)
+        self.sim_coordination_callback.on_time_series_data_update(command)
 
-    def _handle_time_series_calculation(self, command: SimCommand):
+    def _handle_time_series_calculation(self, command):
         """Handle time series calculation."""
-        request = command
-        assert isinstance(request, TimeSeriesCalculationRequest)
-        self.sim_coordination_callback.on_time_series_calculation(request)
+        assert isinstance(command, TimeSeriesCalculationRequest)
+        self.sim_coordination_callback.on_time_series_calculation(command)
 
-    def _handle_agent_status_report(self, command: SimCommand):
+    def _handle_agent_status_report(self, command):
         """Handle agent status report from remote agent."""
-        report = command
-        assert isinstance(report, AgentInstanceStatusReport)
-        if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
-            self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
+        assert isinstance(command, AgentInstanceStatusReport)
+        if self.sim_coordination_callback.is_remote_agent(_agent_like(command, "source_agent_instance")):
+            self.sim_coordination_callback.on_agent_instance_sibling_status_updated(command)
 
-    def _handle_outflow_time_series_request(self, command: SimCommand):
+    def _handle_outflow_time_series_request(self, command):
         """Handle outflow time series request."""
-        request = command
-        assert isinstance(request, OutflowTimeSeriesRequest)
-        self.sim_coordination_callback.on_outflow_time_series(request)
+        assert isinstance(command, OutflowTimeSeriesRequest)
+        self.sim_coordination_callback.on_outflow_time_series(command)
 
     # ========================================================================
     # Outgoing Message Queue
@@ -475,40 +463,31 @@ class SimCoordinationClient:
 
         logger.info("Queue processing thread stopped")
 
-    def _should_send(self, command: SimCommand) -> bool:
+    def _should_send(self, command) -> bool:
         """
         Check if a command should be sent.
 
         Similar to Java's needSend() method.
-
-        Args:
-            command: The command to check
-
-        Returns:
-            True if the command should be sent, False otherwise
         """
         # Don't send requests (only responses and reports)
-        if isinstance(command, SimCoordinationRequest):
+        if isinstance(command, (SimCoordinationRequest, LegacySimCoordinationRequest)):
             return False
 
         # Send responses only from local agents
-        if isinstance(command, SimCoordinationResponse):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
+        if isinstance(command, (SimCoordinationResponse, LegacySimCoordinationResponse)):
+            return self.state_manager.is_local_agent(_agent_like(command, "source_agent_instance"))
 
         # Send reports only from local agents
-        if isinstance(command, AgentInstanceStatusReport):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
+        if isinstance(command, (AgentInstanceStatusReport, LegacyAgentInstanceStatusReport)):
+            return self.state_manager.is_local_agent(_agent_like(command, "source_agent_instance"))
 
         return False
 
-    def _send_with_retry(self, command: SimCommand):
+    def _send_with_retry(self, command):
         """
         Send a command with retry logic.
 
         Similar to Java's sendAsyncWithRetry() method.
-
-        Args:
-            command: The command to send
         """
         attempt = 0
         command_id = command.command_id

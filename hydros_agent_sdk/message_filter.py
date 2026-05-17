@@ -6,12 +6,20 @@ SimCoordinationSlave.messageArrived() and AgentCommonService.isActiveToTaskSimCo
 """
 
 import logging
+from typing import Any
 from hydros_agent_sdk.protocol.commands import (
-    SimCommand,
-    SimTaskInitRequest,
-    SimTaskInitResponse,
-    SimCoordinationRequest,
-    AgentInstanceStatusReport,
+    SimCommand as LegacySimCommand,
+    SimTaskInitRequest as LegacySimTaskInitRequest,
+    SimTaskInitResponse as LegacySimTaskInitResponse,
+    SimCoordinationRequest as LegacySimCoordinationRequest,
+    AgentInstanceStatusReport as LegacyAgentInstanceStatusReport,
+)
+from hydros_agent_sdk.contract.v1 import (
+    SimCommand as ContractSimCommand,
+    SimTaskInitRequest as ContractSimTaskInitRequest,
+    SimTaskInitResponse as ContractSimTaskInitResponse,
+    SimCoordinationRequest as ContractSimCoordinationRequest,
+    AgentInstanceStatusReport as ContractAgentInstanceStatusReport,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -34,7 +42,21 @@ class MessageFilter:
     def __init__(self, context_manager: AgentStateManager):
         self.context_manager = context_manager
 
-    def is_active_to_task_sim_command(self, sim_command: SimCommand) -> bool:
+    @staticmethod
+    def _command_context(command) -> Any:
+        context_ref = getattr(command, 'context_ref', None)
+        if context_ref:
+            return context_ref
+        return getattr(command, 'context', None)
+
+    @staticmethod
+    def _source_agent(command) -> Any:
+        source_agent_instance_ref = getattr(command, 'source_agent_instance_ref', None)
+        if source_agent_instance_ref:
+            return source_agent_instance_ref
+        return getattr(command, 'source_agent_instance', None)
+
+    def is_active_to_task_sim_command(self, sim_command) -> bool:
         """
         Check if the command should be processed based on active contexts.
 
@@ -61,27 +83,26 @@ class MessageFilter:
             True if the command should be processed, False if it should be filtered out
         """
         # Always accept task init requests
-        if isinstance(sim_command, SimTaskInitRequest):
+        if isinstance(sim_command, (ContractSimTaskInitRequest, LegacySimTaskInitRequest)):
             logger.debug(f"Accepting SimTaskInitRequest: {sim_command.command_id}")
             return True
 
         # Check if the command's context is active
-        if hasattr(sim_command, 'context') and sim_command.context:
-            has_context = self.context_manager.has_active_context(sim_command.context)
+        command_context = self._command_context(sim_command)
+        if command_context:
+            has_context = self.context_manager.has_active_context(command_context)
             if has_context:
-                logger.debug(f"Accepting command {sim_command.command_type} for active context: "
-                           f"{sim_command.context.biz_scene_instance_id}")
+                logger.debug(f"Accepting command {sim_command.command_type} for active context")
                 return True
             else:
-                logger.debug(f"Filtering out command {sim_command.command_type} for inactive context: "
-                           f"{sim_command.context.biz_scene_instance_id}")
+                logger.debug(f"Filtering out command {sim_command.command_type} for inactive context")
                 return False
 
         # No context or not active
         logger.debug(f"Filtering out command {sim_command.command_type}: no active context")
         return False
 
-    def is_received(self, sim_command: SimCommand) -> bool:
+    def is_received(self, sim_command) -> bool:
         """
         Check if a received message should be processed.
 
@@ -111,13 +132,13 @@ class MessageFilter:
             True if the message should be processed, False otherwise
         """
         # Always receive requests
-        if isinstance(sim_command, SimCoordinationRequest):
+        if isinstance(sim_command, (ContractSimCoordinationRequest, LegacySimCoordinationRequest)):
             logger.debug(f"Receiving request: {sim_command.command_type}")
             return True
 
         # For AgentInstanceStatusReport, only receive from remote agents
-        if isinstance(sim_command, AgentInstanceStatusReport):
-            is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
+        if isinstance(sim_command, (ContractAgentInstanceStatusReport, LegacyAgentInstanceStatusReport)):
+            is_remote = self.context_manager.is_remote_agent(self._source_agent(sim_command))
             if is_remote:
                 logger.debug(f"Receiving AgentInstanceStatusReport from remote agent: {sim_command.command_type}")
                 return True
@@ -126,8 +147,8 @@ class MessageFilter:
                 return False
 
         # For SimTaskInitResponse, only receive from remote agents
-        if isinstance(sim_command, SimTaskInitResponse):
-            is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
+        if isinstance(sim_command, (ContractSimTaskInitResponse, LegacySimTaskInitResponse)):
+            is_remote = self.context_manager.is_remote_agent(self._source_agent(sim_command))
             if is_remote:
                 logger.debug(f"Receiving SimTaskInitResponse from remote agent: {sim_command.command_type}")
                 return True
@@ -139,7 +160,7 @@ class MessageFilter:
         logger.debug(f"Filtering out message (not in receive list): {sim_command.command_type}")
         return False
 
-    def should_process_message(self, sim_command: SimCommand) -> bool:
+    def should_process_message(self, sim_command) -> bool:
         """
         Combined filter: check both active context and receive filters.
 

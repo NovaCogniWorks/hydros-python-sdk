@@ -5,7 +5,7 @@ This module provides centralized state management for Hydro agent services,
 handling simulation contexts, agent instances, and task lifecycle tracking.
 """
 
-from typing import Optional, Set, Dict, List
+from typing import Optional, Set, Dict, List, Any
 from datetime import datetime
 from enum import Enum
 import logging
@@ -100,20 +100,22 @@ class AgentStateManager:
         Add a simulation context to the active set.
         Called when a task is initialized.
         """
-        if context and context.biz_scene_instance_id:
-            self._active_contexts.add(context.biz_scene_instance_id)
-            logger.info(f"Added active context: {context.biz_scene_instance_id}")
+        context_id = self._extract_context_id(context)
+        if context_id:
+            self._active_contexts.add(context_id)
+            logger.info(f"Added active context: {context_id}")
 
-    def remove_active_context(self, context: SimulationContext):
+    def remove_active_context(self, context: Any):
         """
         Remove a simulation context from the active set.
         Called when a task is terminated.
         """
-        if context and context.biz_scene_instance_id:
-            self._active_contexts.discard(context.biz_scene_instance_id)
-            logger.info(f"Removed active context: {context.biz_scene_instance_id}")
+        context_id = self._extract_context_id(context)
+        if context_id:
+            self._active_contexts.discard(context_id)
+            logger.info(f"Removed active context: {context_id}")
 
-    def has_active_context(self, context: SimulationContext) -> bool:
+    def has_active_context(self, context: Any) -> bool:
         """
         Check if a simulation context is currently active.
 
@@ -123,11 +125,12 @@ class AgentStateManager:
         Returns:
             True if the context is active, False otherwise
         """
-        if not context or not context.biz_scene_instance_id:
+        context_id = self._extract_context_id(context)
+        if not context_id:
             return False
 
-        is_active = context.biz_scene_instance_id in self._active_contexts
-        logger.debug(f"Context {context.biz_scene_instance_id} active: {is_active}")
+        is_active = context_id in self._active_contexts
+        logger.debug(f"Context {context_id} active: {is_active}")
         return is_active
 
     def get_active_contexts(self) -> Set[str]:
@@ -143,16 +146,17 @@ class AgentStateManager:
     # Agent Instance Management
     # ========================================================================
 
-    def register_agent_instance(self, agent: HydroAgentInstance):
+    def register_agent_instance(self, agent: Any):
         """
         Register an agent instance.
 
         Args:
-            agent: The agent instance to register
+            agent: HydroAgentInstance, AgentInstanceRef, or dict with agent_id
         """
-        if agent and agent.agent_id:
-            self._agent_instances[agent.agent_id] = agent
-            logger.info(f"Registered agent instance: {agent.agent_id}")
+        agent_id = self._extract_agent_id(agent)
+        if agent and agent_id:
+            self._agent_instances[agent_id] = agent
+            logger.info(f"Registered agent instance: {agent_id}")
 
     def unregister_agent_instance(self, agent_id: str):
         """
@@ -209,29 +213,31 @@ class AgentStateManager:
     # Local/Remote Agent Tracking (from AgentContextManager)
     # ========================================================================
 
-    def add_local_agent(self, agent_instance: HydroAgentInstance):
+    def add_local_agent(self, agent_instance: Any):
         """
         Register a local agent instance.
 
         Args:
             agent_instance: The agent instance to register
         """
-        if agent_instance and agent_instance.agent_id:
-            self._local_agent_instances.add(agent_instance.agent_id)
-            logger.info(f"Registered local agent: {agent_instance.agent_id}")
+        agent_id = self._extract_agent_id(agent_instance)
+        if agent_id:
+            self._local_agent_instances.add(agent_id)
+            logger.info(f"Registered local agent: {agent_id}")
 
-    def remove_local_agent(self, agent_instance: HydroAgentInstance):
+    def remove_local_agent(self, agent_instance: Any):
         """
         Unregister a local agent instance.
 
         Args:
             agent_instance: The agent instance to unregister
         """
-        if agent_instance and agent_instance.agent_id:
-            self._local_agent_instances.discard(agent_instance.agent_id)
-            logger.info(f"Unregistered local agent: {agent_instance.agent_id}")
+        agent_id = self._extract_agent_id(agent_instance)
+        if agent_id:
+            self._local_agent_instances.discard(agent_id)
+            logger.info(f"Unregistered local agent: {agent_id}")
 
-    def is_local_agent(self, agent_instance: HydroAgentInstance) -> bool:
+    def is_local_agent(self, agent_instance: Any) -> bool:
         """
         Check if an agent instance is local (running on this node).
 
@@ -244,22 +250,25 @@ class AgentStateManager:
         if not agent_instance:
             return False
 
+        agent_id = self._extract_agent_id(agent_instance)
+        node_id = self._extract_node_id(agent_instance)
+
         # Check by agent_id first (explicit registration)
-        if agent_instance.agent_id in self._local_agent_instances:
+        if agent_id in self._local_agent_instances:
             return True
 
         # Check by node_id if available (implicit check)
         # Only consider it local if node_id matches AND agent is not explicitly registered as remote
-        if self._hydros_node_id and agent_instance.hydros_node_id == self._hydros_node_id:
+        if self._hydros_node_id and node_id == self._hydros_node_id:
             # If agent_id is known but not in local set, it's not local
-            if agent_instance.agent_id:
+            if agent_id:
                 return False
             # If agent_id is unknown, use node_id as fallback
             return True
 
         return False
 
-    def is_remote_agent(self, agent_instance: HydroAgentInstance) -> bool:
+    def is_remote_agent(self, agent_instance: Any) -> bool:
         """
         Check if an agent instance is remote (running on another node).
 
@@ -278,20 +287,20 @@ class AgentStateManager:
     # Task Lifecycle Management
     # ========================================================================
 
-    def init_task(self, context: SimulationContext, agents: Optional[List[HydroAgentInstance]] = None):
+    def init_task(self, context: Any, agents: Optional[List[Any]] = None):
         """
         Initialize a new task.
 
         Args:
-            context: The simulation context for the task
-            agents: Optional list of agents associated with this task
+            context: SimulationContext, TaskContextRef, or any object with biz_scene_instance_id
+            agents: Optional list of agents (HydroAgentInstance, AgentInstanceRef, or dict)
         """
-        if not context or not context.biz_scene_instance_id:
+        context_id = self._extract_context_id(context)
+        if not context_id:
             logger.warning("Cannot init task: invalid context")
             return
 
-        context_id = context.biz_scene_instance_id
-        agent_ids = [agent.agent_id for agent in agents if agent and agent.agent_id] if agents else []
+        agent_ids = [aid for agent in agents if agent and (aid := self._extract_agent_id(agent))] if agents else []
 
         # Create task state
         task_state = TaskState(context_id, agent_ids)
@@ -300,7 +309,8 @@ class AgentStateManager:
         # Register agents
         if agents:
             for agent in agents:
-                if agent and agent.agent_id:
+                agent_id = self._extract_agent_id(agent)
+                if agent and agent_id:
                     self.register_agent_instance(agent)
 
         # Add to active contexts
@@ -311,18 +321,17 @@ class AgentStateManager:
 
         logger.info(f"Initialized task: {context_id} with {len(agent_ids)} agents")
 
-    def terminate_task(self, context: SimulationContext):
+    def terminate_task(self, context: Any):
         """
         Terminate a task.
 
         Args:
             context: The simulation context for the task
         """
-        if not context or not context.biz_scene_instance_id:
+        context_id = self._extract_context_id(context)
+        if not context_id:
             logger.warning("Cannot terminate task: invalid context")
             return
-
-        context_id = context.biz_scene_instance_id
 
         # Update task state
         task_state = self._task_states.get(context_id)
@@ -396,3 +405,37 @@ class AgentStateManager:
         self._agent_instances.clear()
         self._local_agent_instances.clear()
         logger.info("Cleared all state (contexts, tasks, agents)")
+
+    # ========================================================================
+    # Compatibility helpers
+    # ========================================================================
+
+    @staticmethod
+    def _extract_context_id(context: Any) -> Optional[str]:
+        if context is None:
+            return None
+
+        if isinstance(context, dict):
+            return context.get("biz_scene_instance_id")
+
+        return getattr(context, "biz_scene_instance_id", None)
+
+    @staticmethod
+    def _extract_agent_id(agent_instance: Any) -> Optional[str]:
+        if agent_instance is None:
+            return None
+
+        if isinstance(agent_instance, dict):
+            return agent_instance.get("agent_id")
+
+        return getattr(agent_instance, "agent_id", None)
+
+    @staticmethod
+    def _extract_node_id(agent_instance: Any) -> Optional[str]:
+        if agent_instance is None:
+            return None
+
+        if isinstance(agent_instance, dict):
+            return agent_instance.get("hydros_node_id")
+
+        return getattr(agent_instance, "hydros_node_id", None)
