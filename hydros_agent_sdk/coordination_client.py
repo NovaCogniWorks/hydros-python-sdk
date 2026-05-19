@@ -9,6 +9,7 @@ Similar to Java's SimCoordinationSlave class.
 
 import logging
 import time
+import traceback
 from typing import Optional, Dict, Callable
 from queue import Queue, Empty
 from threading import Thread, Event
@@ -29,6 +30,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     TickCmdRequest,
     SimTaskTerminateRequest,
+    SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
@@ -47,6 +49,9 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
 )
+from hydros_agent_sdk.error_codes import ErrorCodes
+from hydros_agent_sdk.protocol.models import HydroAgentInstance
+from hydros_agent_sdk.runtime import ResponseFactory
 import json
 
 logger = logging.getLogger(__name__)
@@ -387,11 +392,110 @@ class SimCoordinationClient:
         if handler:
             try:
                 logger.debug(f"Handling command: {command.command_type}, id={command.command_id}")
-                handler(command)
+                result = handler(command)
+                self._handle_callback_result(result)
             except Exception as e:
                 logger.error(f"Error handling command {command.command_type}: {e}", exc_info=True)
+                error_response = self._create_error_response(command, e)
+                if error_response:
+                    self.enqueue(error_response)
         else:
             logger.warning(f"No handler registered for command type: {command.command_type}")
+
+    def _handle_callback_result(self, result):
+        """
+        Send callback return values through the normal outgoing queue.
+
+        This keeps the existing side-effect style callbacks working while also
+        supporting the simpler pattern of returning a response from callbacks.
+        """
+        if result is None:
+            return
+
+        if isinstance(result, SimCommand):
+            self.enqueue(result)
+            return
+
+        if isinstance(result, (list, tuple)):
+            for item in result:
+                self._handle_callback_result(item)
+            return
+
+        logger.debug("Ignoring unsupported callback result type: %s", type(result).__name__)
+
+    def _create_error_response(self, command: SimCommand, error: Exception) -> Optional[SimCoordinationResponse]:
+        """
+        Convert uncaught handler exceptions into failed responses when possible.
+
+        Some request types, especially task init before an agent exists, may not
+        have enough local agent context to satisfy the protocol's required
+        source_agent_instance field. In that case we log and leave the exception
+        as an infrastructure error rather than fabricating an invalid response.
+        """
+        source_agent = self._resolve_error_source_agent(command)
+        if source_agent is None:
+            logger.error(
+                "Cannot create error response for command %s (%s): no source agent available",
+                command.command_id,
+                command.command_type,
+            )
+            return None
+
+        error_code = ErrorCodes.SYSTEM_ERROR
+
+        if isinstance(command, SimTaskInitRequest):
+            error_code = ErrorCodes.AGENT_INIT_FAILURE
+            factory_method = ResponseFactory.init_failed
+        elif isinstance(command, TickCmdRequest):
+            error_code = ErrorCodes.AGENT_TICK_FAILURE
+            factory_method = ResponseFactory.tick_failed
+        elif isinstance(command, SimTaskTerminateRequest):
+            error_code = ErrorCodes.AGENT_TERMINATE_FAILURE
+            factory_method = ResponseFactory.terminate_failed
+        elif isinstance(command, TimeSeriesDataUpdateRequest):
+            error_code = ErrorCodes.TIME_SERIES_UPDATE_FAILURE
+            factory_method = ResponseFactory.time_series_data_update_failed
+        elif isinstance(command, TimeSeriesCalculationRequest):
+            error_code = ErrorCodes.TIME_SERIES_CALCULATION_FAILURE
+            factory_method = ResponseFactory.time_series_calculation_failed
+        else:
+            factory_method = None
+
+        if factory_method is None:
+            logger.debug("No error response mapping for command type: %s", command.command_type)
+            return None
+
+        agent_name = getattr(source_agent, "agent_code", self.sim_coordination_callback.get_component())
+        error_detail = f"{error}\n{traceback.format_exc()}"
+        error_message = error_code.format_message(agent_name, error_detail)
+
+        return factory_method(
+            source_agent,
+            command,
+            error_code=error_code.code,
+            error_message=error_message,
+        )
+
+    def _resolve_error_source_agent(self, command: SimCommand) -> Optional[HydroAgentInstance]:
+        """Find a local agent instance suitable as source_agent_instance."""
+        target_agent = getattr(command, "target_agent_instance", None)
+        if target_agent is not None:
+            return target_agent
+
+        context = getattr(command, "context", None)
+        context_id = getattr(context, "biz_scene_instance_id", None)
+        if context_id:
+            agents = self.state_manager.get_agents_for_context(context_id)
+            if agents:
+                return agents[0]
+
+            callback_agents = getattr(self.sim_coordination_callback, "agents", None)
+            if isinstance(callback_agents, dict):
+                context_agents = callback_agents.get(context_id)
+                if isinstance(context_agents, dict) and context_agents:
+                    return next(iter(context_agents.values()))
+
+        return None
 
     # ========================================================================
     # Command Handlers (route to callback)
@@ -401,51 +505,53 @@ class SimCoordinationClient:
         """Handle task init request."""
         request = command
         assert isinstance(request, SimTaskInitRequest)
-        self.sim_coordination_callback.on_sim_task_init(request)
+        return self.sim_coordination_callback.on_sim_task_init(request)
 
     def _handle_task_init_response(self, command: SimCommand):
         """Handle task init response from remote agent."""
         response = command
         assert isinstance(response, SimTaskInitResponse)
         if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
-            self.sim_coordination_callback.on_agent_instance_sibling_created(response)
+            return self.sim_coordination_callback.on_agent_instance_sibling_created(response)
+        return None
 
     def _handle_tick(self, command: SimCommand):
         """Handle tick command."""
         request = command
         assert isinstance(request, TickCmdRequest)
-        self.sim_coordination_callback.on_tick(request)
+        return self.sim_coordination_callback.on_tick(request)
 
     def _handle_task_terminate(self, command: SimCommand):
         """Handle task terminate request."""
         request = command
         assert isinstance(request, SimTaskTerminateRequest)
-        self.sim_coordination_callback.on_task_terminate(request)
+        return self.sim_coordination_callback.on_task_terminate(request)
 
     def _handle_time_series_data_update(self, command: SimCommand):
         """Handle time series data update."""
         request = command
         assert isinstance(request, TimeSeriesDataUpdateRequest)
-        self.sim_coordination_callback.on_time_series_data_update(request)
+        return self.sim_coordination_callback.on_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
         """Handle time series calculation."""
         request = command
         assert isinstance(request, TimeSeriesCalculationRequest)
-        self.sim_coordination_callback.on_time_series_calculation(request)
+        return self.sim_coordination_callback.on_time_series_calculation(request)
 
     def _handle_agent_status_report(self, command: SimCommand):
         """Handle agent status report from remote agent."""
         report = command
         assert isinstance(report, AgentInstanceStatusReport)
         if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
-            self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
+            return self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
+        return None
 
     def _handle_outflow_time_series_request(self, command: SimCommand):
         """Handle outflow time series request."""
         request = command
         assert isinstance(request, OutflowTimeSeriesRequest)
-        self.sim_coordination_callback.on_outflow_time_series(request)
+        return self.sim_coordination_callback.on_outflow_time_series(request)
 
     # ========================================================================
     # Outgoing Message Queue
@@ -493,6 +599,10 @@ class SimCoordinationClient:
 
         # Send responses only from local agents
         if isinstance(command, SimCoordinationResponse):
+            if isinstance(command, SimTaskTerminateResponse):
+                node_id = self.state_manager.get_node_id()
+                if node_id and command.source_agent_instance.hydros_node_id == node_id:
+                    return True
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         # Send reports only from local agents
@@ -519,7 +629,6 @@ class SimCoordinationClient:
                 payload = command.model_dump_json(by_alias=True)
 
                 # Publish to MQTT
-                print(self.topic)
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
 

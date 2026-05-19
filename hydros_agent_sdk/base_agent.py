@@ -267,6 +267,23 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         self.sim_coordination_client.enqueue(response)
 
+    @property
+    def runtime_context(self):
+        """
+        Lightweight runtime facade for new agent code.
+
+        Existing agents can keep using sim_coordination_client, state_manager,
+        and properties directly. Newer code can depend on this narrower context
+        as we gradually separate runtime concerns from business logic.
+        """
+        from hydros_agent_sdk.runtime import AgentContext
+
+        return AgentContext(
+            client=self.sim_coordination_client,
+            state_manager=self.state_manager,
+            agent=self,
+        )
+
     def load_agent_configuration(self, request: SimTaskInitRequest) -> None:
         """
         Load agent configuration from SimTaskInitRequest.

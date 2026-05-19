@@ -7,7 +7,7 @@ with tick-driven simulation capabilities and time series data update handling.
 
 import logging
 from abc import abstractmethod
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics

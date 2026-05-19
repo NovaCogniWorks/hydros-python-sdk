@@ -9,6 +9,7 @@ from typing import Optional, Set, Dict, List
 from datetime import datetime
 from enum import Enum
 import logging
+from threading import RLock
 
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -68,6 +69,7 @@ class AgentStateManager:
         self._local_agent_instances: Set[str] = set()  # local agent_id set
         self._hydros_cluster_id: Optional[str] = None  # current cluster ID
         self._hydros_node_id: Optional[str] = None  # current node ID
+        self._lock = RLock()
 
     # ========================================================================
     # Cluster and Node Management
@@ -75,21 +77,25 @@ class AgentStateManager:
 
     def set_cluster_id(self, cluster_id: str):
         """Set the current cluster ID."""
-        self._hydros_cluster_id = cluster_id
+        with self._lock:
+            self._hydros_cluster_id = cluster_id
         logger.info(f"Cluster ID set to: {cluster_id}")
 
     def get_cluster_id(self) -> Optional[str]:
         """Get the current cluster ID."""
-        return self._hydros_cluster_id
+        with self._lock:
+            return self._hydros_cluster_id
 
     def set_node_id(self, node_id: str):
         """Set the current node ID."""
-        self._hydros_node_id = node_id
+        with self._lock:
+            self._hydros_node_id = node_id
         logger.info(f"Node ID set to: {node_id}")
 
     def get_node_id(self) -> Optional[str]:
         """Get the current node ID."""
-        return self._hydros_node_id
+        with self._lock:
+            return self._hydros_node_id
 
     # ========================================================================
     # Context Management (from AgentContextManager)
@@ -101,7 +107,8 @@ class AgentStateManager:
         Called when a task is initialized.
         """
         if context and context.biz_scene_instance_id:
-            self._active_contexts.add(context.biz_scene_instance_id)
+            with self._lock:
+                self._active_contexts.add(context.biz_scene_instance_id)
             logger.info(f"Added active context: {context.biz_scene_instance_id}")
 
     def remove_active_context(self, context: SimulationContext):
@@ -110,7 +117,8 @@ class AgentStateManager:
         Called when a task is terminated.
         """
         if context and context.biz_scene_instance_id:
-            self._active_contexts.discard(context.biz_scene_instance_id)
+            with self._lock:
+                self._active_contexts.discard(context.biz_scene_instance_id)
             logger.info(f"Removed active context: {context.biz_scene_instance_id}")
 
     def has_active_context(self, context: SimulationContext) -> bool:
@@ -126,7 +134,8 @@ class AgentStateManager:
         if not context or not context.biz_scene_instance_id:
             return False
 
-        is_active = context.biz_scene_instance_id in self._active_contexts
+        with self._lock:
+            is_active = context.biz_scene_instance_id in self._active_contexts
         logger.debug(f"Context {context.biz_scene_instance_id} active: {is_active}")
         return is_active
 
@@ -137,7 +146,8 @@ class AgentStateManager:
         Returns:
             Set of active biz_scene_instance_id values
         """
-        return self._active_contexts.copy()
+        with self._lock:
+            return self._active_contexts.copy()
 
     # ========================================================================
     # Agent Instance Management
@@ -151,7 +161,8 @@ class AgentStateManager:
             agent: The agent instance to register
         """
         if agent and agent.agent_id:
-            self._agent_instances[agent.agent_id] = agent
+            with self._lock:
+                self._agent_instances[agent.agent_id] = agent
             logger.info(f"Registered agent instance: {agent.agent_id}")
 
     def unregister_agent_instance(self, agent_id: str):
@@ -161,9 +172,11 @@ class AgentStateManager:
         Args:
             agent_id: The ID of the agent to unregister
         """
-        if agent_id in self._agent_instances:
-            del self._agent_instances[agent_id]
-            logger.info(f"Unregistered agent instance: {agent_id}")
+        with self._lock:
+            if agent_id in self._agent_instances:
+                del self._agent_instances[agent_id]
+                self._local_agent_instances.discard(agent_id)
+                logger.info(f"Unregistered agent instance: {agent_id}")
 
     def get_agent_instance(self, agent_id: str) -> Optional[HydroAgentInstance]:
         """
@@ -175,7 +188,8 @@ class AgentStateManager:
         Returns:
             The agent instance if found, None otherwise
         """
-        return self._agent_instances.get(agent_id)
+        with self._lock:
+            return self._agent_instances.get(agent_id)
 
     def update_agent_status(self, agent_id: str, status: AgentBizStatus):
         """
@@ -185,9 +199,11 @@ class AgentStateManager:
             agent_id: The agent ID
             status: The new status
         """
-        agent = self._agent_instances.get(agent_id)
+        with self._lock:
+            agent = self._agent_instances.get(agent_id)
+            if agent:
+                agent.agent_biz_status = status
         if agent:
-            agent.agent_biz_status = status
             logger.info(f"Updated agent {agent_id} status to: {status}")
         else:
             logger.warning(f"Cannot update status: agent {agent_id} not found")
@@ -202,8 +218,9 @@ class AgentStateManager:
         Returns:
             The agent status if found, None otherwise
         """
-        agent = self._agent_instances.get(agent_id)
-        return agent.agent_biz_status if agent else None
+        with self._lock:
+            agent = self._agent_instances.get(agent_id)
+            return agent.agent_biz_status if agent else None
 
     # ========================================================================
     # Local/Remote Agent Tracking (from AgentContextManager)
@@ -217,7 +234,8 @@ class AgentStateManager:
             agent_instance: The agent instance to register
         """
         if agent_instance and agent_instance.agent_id:
-            self._local_agent_instances.add(agent_instance.agent_id)
+            with self._lock:
+                self._local_agent_instances.add(agent_instance.agent_id)
             logger.info(f"Registered local agent: {agent_instance.agent_id}")
 
     def remove_local_agent(self, agent_instance: HydroAgentInstance):
@@ -228,7 +246,8 @@ class AgentStateManager:
             agent_instance: The agent instance to unregister
         """
         if agent_instance and agent_instance.agent_id:
-            self._local_agent_instances.discard(agent_instance.agent_id)
+            with self._lock:
+                self._local_agent_instances.discard(agent_instance.agent_id)
             logger.info(f"Unregistered local agent: {agent_instance.agent_id}")
 
     def is_local_agent(self, agent_instance: HydroAgentInstance) -> bool:
@@ -244,18 +263,19 @@ class AgentStateManager:
         if not agent_instance:
             return False
 
-        # Check by agent_id first (explicit registration)
-        if agent_instance.agent_id in self._local_agent_instances:
-            return True
+        with self._lock:
+            # Check by agent_id first (explicit registration)
+            if agent_instance.agent_id in self._local_agent_instances:
+                return True
 
-        # Check by node_id if available (implicit check)
-        # Only consider it local if node_id matches AND agent is not explicitly registered as remote
-        if self._hydros_node_id and agent_instance.hydros_node_id == self._hydros_node_id:
-            # If agent_id is known but not in local set, it's not local
-            if agent_instance.agent_id:
-                return False
-            # If agent_id is unknown, use node_id as fallback
-            return True
+            # Check by node_id if available (implicit check)
+            # Only consider it local if node_id matches AND agent is not explicitly registered as remote
+            if self._hydros_node_id and agent_instance.hydros_node_id == self._hydros_node_id:
+                # If agent_id is known but not in local set, it's not local
+                if agent_instance.agent_id:
+                    return False
+                # If agent_id is unknown, use node_id as fallback
+                return True
 
         return False
 
@@ -293,21 +313,22 @@ class AgentStateManager:
         context_id = context.biz_scene_instance_id
         agent_ids = [agent.agent_id for agent in agents if agent and agent.agent_id] if agents else []
 
-        # Create task state
-        task_state = TaskState(context_id, agent_ids)
-        self._task_states[context_id] = task_state
+        with self._lock:
+            # Create task state
+            task_state = TaskState(context_id, agent_ids)
+            self._task_states[context_id] = task_state
 
-        # Register agents
-        if agents:
-            for agent in agents:
-                if agent and agent.agent_id:
-                    self.register_agent_instance(agent)
+            # Register agents
+            if agents:
+                for agent in agents:
+                    if agent and agent.agent_id:
+                        self.register_agent_instance(agent)
 
-        # Add to active contexts
-        self.add_active_context(context)
+            # Add to active contexts
+            self.add_active_context(context)
 
-        # Update task status to ACTIVE
-        task_state.status = TaskStatus.ACTIVE
+            # Update task status to ACTIVE
+            task_state.status = TaskStatus.ACTIVE
 
         logger.info(f"Initialized task: {context_id} with {len(agent_ids)} agents")
 
@@ -324,18 +345,19 @@ class AgentStateManager:
 
         context_id = context.biz_scene_instance_id
 
-        # Update task state
-        task_state = self._task_states.get(context_id)
-        if task_state:
-            task_state.status = TaskStatus.TERMINATING
-            task_state.terminated_at = datetime.now()
+        with self._lock:
+            # Update task state
+            task_state = self._task_states.get(context_id)
+            if task_state:
+                task_state.status = TaskStatus.TERMINATING
+                task_state.terminated_at = datetime.now()
 
-        # Remove from active contexts
-        self.remove_active_context(context)
+            # Remove from active contexts
+            self.remove_active_context(context)
 
-        # Mark task as terminated
-        if task_state:
-            task_state.status = TaskStatus.TERMINATED
+            # Mark task as terminated
+            if task_state:
+                task_state.status = TaskStatus.TERMINATED
 
         logger.info(f"Terminated task: {context_id}")
 
@@ -349,7 +371,8 @@ class AgentStateManager:
         Returns:
             The task state if found, None otherwise
         """
-        return self._task_states.get(context_id)
+        with self._lock:
+            return self._task_states.get(context_id)
 
     def get_active_tasks(self) -> List[TaskState]:
         """
@@ -358,10 +381,11 @@ class AgentStateManager:
         Returns:
             List of active task states
         """
-        return [
-            task for task in self._task_states.values()
-            if task.status == TaskStatus.ACTIVE
-        ]
+        with self._lock:
+            return [
+                task for task in self._task_states.values()
+                if task.status == TaskStatus.ACTIVE
+            ]
 
     def get_agents_for_context(self, context_id: str) -> List[HydroAgentInstance]:
         """
@@ -373,17 +397,18 @@ class AgentStateManager:
         Returns:
             List of agent instances for the context
         """
-        task_state = self._task_states.get(context_id)
-        if not task_state:
-            return []
+        with self._lock:
+            task_state = self._task_states.get(context_id)
+            if not task_state:
+                return []
 
-        agents = []
-        for agent_id in task_state.agent_ids:
-            agent = self._agent_instances.get(agent_id)
-            if agent:
-                agents.append(agent)
+            agents = []
+            for agent_id in task_state.agent_ids:
+                agent = self._agent_instances.get(agent_id)
+                if agent:
+                    agents.append(agent)
 
-        return agents
+            return agents
 
     # ========================================================================
     # Utility
@@ -391,8 +416,9 @@ class AgentStateManager:
 
     def clear(self):
         """Clear all state."""
-        self._active_contexts.clear()
-        self._task_states.clear()
-        self._agent_instances.clear()
-        self._local_agent_instances.clear()
+        with self._lock:
+            self._active_contexts.clear()
+            self._task_states.clear()
+            self._agent_instances.clear()
+            self._local_agent_instances.clear()
         logger.info("Cleared all state (contexts, tasks, agents)")

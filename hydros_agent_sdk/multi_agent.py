@@ -102,7 +102,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         if self._client is None:
             raise RuntimeError("Coordination client not set")
 
-        print(request.biz_scene_configuration_url)
+        logger.debug("Task configuration URL: %s", request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
         logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
 
@@ -169,12 +169,11 @@ class MultiAgentCallback(SimCoordinationCallback):
                 managed_top_objects={}
             )
 
-            # Send response
-            self._client.enqueue(response)
-
-            logger.info(f"SimTaskInitResponse sent with {len(created_agents)} agent(s)")
+            logger.info(f"SimTaskInitResponse created with {len(created_agents)} agent(s)")
+            return response
         else:
             logger.warning(f"No agents created for task {context_id}")
+            return None
 
     def on_tick(self, request: TickCmdRequest):
         """Handle tick command for all agents in the context."""
@@ -183,16 +182,18 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return
+            return None
 
         # Forward tick to all agents in this context
+        responses = []
         for agent_code, agent in context_agents.items():
             try:
                 response = agent.on_tick(request)
                 if response:
-                    agent.send_response(response)
+                    responses.append(response)
             except Exception as e:
                 logger.error(f"Error in tick for {agent_code}: {e}", exc_info=True)
+        return responses
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """Handle task termination for all agents in the context."""
@@ -201,14 +202,15 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return
+            return None
 
         # Terminate all agents in this context
+        responses = []
         for agent_code, agent in context_agents.items():
             try:
                 response = agent.on_terminate(request)
                 if response:
-                    agent.send_response(response)
+                    responses.append(response)
                 logger.info(f"Agent terminated: {agent_code}")
             except Exception as e:
                 logger.error(f"Error terminating {agent_code}: {e}", exc_info=True)
@@ -216,6 +218,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         # Remove agents from tracking
         del self.agents[context_id]
         logger.info(f"All agents terminated for context: {context_id}")
+        return responses
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """Handle time series data update for all agents in the context."""
@@ -224,16 +227,18 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return
+            return None
 
         # Forward update to all agents in this context
+        responses = []
         for agent_code, agent in context_agents.items():
             try:
                 response = agent.on_time_series_data_update(request)
                 if response:
-                    agent.send_response(response)
+                    responses.append(response)
             except Exception as e:
                 logger.error(f"Error in time series update for {agent_code}: {e}", exc_info=True)
+        return responses
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
@@ -247,7 +252,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return
+            return None
 
         # Extract target agent code from request
         target_agent_code = request.target_agent_instance.agent_code
@@ -260,16 +265,16 @@ class MultiAgentCallback(SimCoordinationCallback):
                 f"Target agent '{target_agent_code}' not found in context {context_id}. "
                 f"Available agents: {list(context_agents.keys())}"
             )
-            return
+            return None
 
         # Forward request to the target agent only
         try:
             logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
             response = target_agent.on_outflow_time_series(request)
-            if response:
-                target_agent.send_response(response)
+            return response
         except Exception as e:
             logger.error(
                 f"Error in outflow time series for {target_agent_code}: {e}",
                 exc_info=True
             )
+            return None
