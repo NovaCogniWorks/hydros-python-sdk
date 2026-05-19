@@ -8,7 +8,7 @@ from hydros_agent_sdk.protocol.models import (
     SimulationContext,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.testing import FakeRuntime
+from tests.helpers import FakeRuntime
 
 
 def make_context():
