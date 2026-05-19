@@ -182,7 +182,7 @@ class AgentConfigLoader:
 
             # Create request with proper headers
             request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
+            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.4')
 
             with urlopen(request, timeout=timeout) as response:
                 content = response.read().decode('utf-8')
