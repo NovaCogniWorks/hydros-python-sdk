@@ -20,6 +20,8 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateResponse,
     TimeSeriesCalculationRequest,
     OutflowTimeSeriesRequest,
 )
@@ -229,6 +231,27 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         logger.info(f"Time series data update: {request.command_id}")
 
         return TimeSeriesDataUpdateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,  # self is already a HydroAgentInstance
+            broadcast=False
+        )
+
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
+        """
+        Handle outflow time series data update.
+
+        Default implementation calls standard time series update logic.
+
+        Args:
+            request: Outflow time series data update request
+
+        Returns:
+            outflow time series data update response
+        """
+        logger.info(f"Outflow time series data update: {request.command_id}")
+        return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,

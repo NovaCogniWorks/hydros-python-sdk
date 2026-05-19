@@ -15,6 +15,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
@@ -217,6 +218,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         # Remove agents from tracking
         del self.agents[context_id]
+        super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
 
@@ -238,6 +240,26 @@ class MultiAgentCallback(SimCoordinationCallback):
                     responses.append(response)
             except Exception as e:
                 logger.error(f"Error in time series update for {agent_code}: {e}", exc_info=True)
+        return responses
+
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
+        """Handle outflow time series data update for all agents in the context."""
+        context_id = request.context.biz_scene_instance_id
+        context_agents = self.agents.get(context_id)
+
+        if not context_agents:
+            logger.error(f"No agents found for context: {context_id}")
+            return None
+
+        # Forward update to all agents in this context
+        responses = []
+        for agent_code, agent in context_agents.items():
+            try:
+                response = agent.on_outflow_time_series_data_update(request)
+                if response:
+                    responses.append(response)
+            except Exception as e:
+                logger.error(f"Error in outflow time series update for {agent_code}: {e}", exc_info=True)
         return responses
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):

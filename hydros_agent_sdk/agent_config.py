@@ -20,6 +20,7 @@ Example usage:
 
 import logging
 from typing import Optional, Any, Dict
+from pydantic import ConfigDict
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -61,14 +62,11 @@ class OutputConfig(HydroBaseModel):
 
 class AgentProperties(HydroBaseModel):
     """Agent properties containing business logic configuration."""
+    model_config = ConfigDict(extra='allow')
+
     driven_by_coordinator: Optional[bool] = None
     hydro_environment_type: Optional[str] = None
     hydros_objects_modeling_url: Optional[str] = None
-
-
-    # Allow additional properties not explicitly defined
-    class Config:
-        extra = "allow"
 
 
 class AgentConfiguration(HydroBaseModel):
@@ -78,15 +76,17 @@ class AgentConfiguration(HydroBaseModel):
     This model represents the full structure of an agent configuration YAML file,
     including agent metadata, waterway information, and business properties.
     """
+    model_config = ConfigDict(extra='allow')
+
     agent_code: str
     agent_type: str
     agent_name: str
     agent_configuration_url: Optional[str] = None
-    version: str
-    release_at: str
-    author: Author
-    description: str
-    waterway: Waterway
+    version: Optional[str] = None
+    release_at: Optional[str] = None
+    author: Optional[Author] = None
+    description: Optional[str] = None
+    waterway: Optional[Waterway] = None
     properties: AgentProperties
 
     def get_agent_code(self) -> str:

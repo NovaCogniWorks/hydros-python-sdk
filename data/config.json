@@ -1,0 +1,231 @@
+{
+  "project": "三座串联梯级泵站调度优化",
+  "description": "Three cascaded pump stations scheduling optimization",
+  "data_files": {
+    "demand_plan": "data/inflow-demand-plan.xlsx"
+  },
+  "global_params": {
+    "rho": 1000,
+    "g": 9.81
+  },
+  "flow_depart": {
+    "step_q": 1.0,
+    "step_h": 0.1,
+    "data_dir": "data",
+    "output_dir": "output"
+  },
+  "scheduling": {
+    "horizon_hours": 72,
+    "dt_hours": 1,
+    "target_avg_flow_last_station": 100,
+    "output_dir": "output",
+    "max_flow_delta": 100.0,
+    "w_level_penalty": 0.0
+  },
+  "runtime": {
+    "odd": {
+      "odd1_flow_tolerance": 2.0,
+      "odd1_level_tolerance": 0.15,
+      "odd4_flow_tolerance": 28.0,
+      "odd4_level_tolerance": 0.5,
+      "odd2_fit_threshold": 0.62,
+      "odd_domain_plot_split_ratio": 0.5
+    },
+    "search": {
+      "head_search_tolerance": 0.35,
+      "flow_search_tolerance": 8.0,
+      "candidate_pool_limit": 60
+    },
+    "upper_scheduler": {
+      "upper_level_penalty": 10.0,
+      "upper_flow_smooth_penalty": 0.5,
+      "upper_level_correction_gain": 0.25
+    },
+    "lower_controller": {
+      "control_horizon_lower": 10,
+      "opening_change_threshold": 0.5,
+      "station_memory_init_age": 999,
+      "lower_flow_weight": 3.0,
+      "lower_level_weight": 2.5,
+      "lower_opening_weight": 0.05,
+      "lower_switch_weight": 3.0,
+      "lower_adjust_count_weight": 0.8
+    },
+    "environment": {
+      "hidden_disturbance_scale": 3.0,
+      "hidden_disturbance_pool1_wave_factor": 1.0,
+      "hidden_disturbance_pool1_period_hours": 24.0,
+      "hidden_disturbance_pool1_pulse_factor": 0.5,
+      "hidden_disturbance_pool1_pulse_start_hour": 18.0,
+      "hidden_disturbance_pool1_pulse_end_hour": 21.0,
+      "hidden_disturbance_pool2_wave_factor": 0.8,
+      "hidden_disturbance_pool2_period_hours": 18.0,
+      "hidden_disturbance_pool2_pulse_factor": -0.4,
+      "hidden_disturbance_pool2_pulse_start_hour": 35.0,
+      "hidden_disturbance_pool2_pulse_end_hour": 39.0,
+      "hidden_disturbance_pool2_pulse_cycle_hours": 48.0,
+      "env_substeps": 6,
+      "boundary_area_scale": 5.0,
+      "basin_clip_margin_b0": 2.0,
+      "basin_clip_margin_b1": 1.0,
+      "basin_clip_margin_b2": 1.5,
+      "basin_clip_margin_b3": 1.0
+    },
+    "observer": {
+      "observer_gain": 0.35,
+      "observer_smoothing": 0.7
+    },
+    "output": {
+      "console_verbose": true,
+      "console_float_precision": 3,
+      "output_dir": "output",
+      "save_step_plots": true
+    }
+  },
+  "stations": [
+    {
+      "id": 1,
+      "name": "Station1",
+      "level_up_min": 12.75,
+      "level_up_max": 16.8,
+      "level_down_min": 10.58,
+      "level_down_max": 13.84,
+      "init_level_up": 14.5595,
+      "init_level_down": 12.5125,
+      "init_flow": 100,
+      "num_units": 5,
+      "units": [
+        {
+          "id": 1,
+          "name": "Pump1",
+          "init_status": 1,
+          "init_opening": 61.0
+        },
+        {
+          "id": 2,
+          "name": "Pump2",
+          "init_status": 1,
+          "init_opening": 61.0
+        },
+        {
+          "id": 3,
+          "name": "Pump3",
+          "init_status": 1,
+          "init_opening": 61.0
+        },
+        {
+          "id": 4,
+          "name": "Pump4",
+          "init_status": 1,
+          "init_opening": 61.0
+        },
+        {
+          "id": 5,
+          "name": "Pump5",
+          "init_status": 1,
+          "init_opening": 61.0
+        }
+      ],
+      "units_file": {
+        "tableE": "station1-tableE.xlsx",
+        "tableR": "station1-tableR.xlsx"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Station2",
+      "level_up_min": 18.0,
+      "level_up_max": 22.7,
+      "level_down_min": 12.3,
+      "level_down_max": 16.7,
+      "init_level_up": 20.5288667,
+      "init_level_down": 14.20535,
+      "init_flow": 60,
+      "num_units": 4,
+      "units": [
+        {
+          "id": 1,
+          "name": "Pump1",
+          "init_status": 1,
+          "init_opening": 22.6
+        },
+        {
+          "id": 2,
+          "name": "Pump2",
+          "init_status": 1,
+          "init_opening": 22.6
+        },
+        {
+          "id": 3,
+          "name": "Pump3",
+          "init_status": 1,
+          "init_opening": -2.0
+        },
+        {
+          "id": 4,
+          "name": "Pump4",
+          "init_status": 1,
+          "init_opening": -2.0
+        }
+      ],
+      "units_file": {
+        "tableE": "station2-tableE.xlsx",
+        "tableR": "station2-tableR.xlsx"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Station3",
+      "level_up_min": 20.18,
+      "level_up_max": 24.02,
+      "level_down_min": 18.1,
+      "level_down_max": 22.1,
+      "init_level_up": 22.7338333,
+      "init_level_down": 20.1605,
+      "init_flow": 100,
+      "num_units": 4,
+      "units": [
+        {
+          "id": 1,
+          "name": "pump1",
+          "init_status": 1,
+          "init_opening": 34.4
+        },
+        {
+          "id": 2,
+          "name": "pump2",
+          "init_status": 1,
+          "init_opening": 34.4
+        },
+        {
+          "id": 3,
+          "name": "pump3",
+          "init_status": 1,
+          "init_opening": 34.4
+        },
+        {
+          "id": 4,
+          "name": "pump4",
+          "init_status": 1,
+          "init_opening": 34.4
+        }
+      ],
+      "units_file": {
+        "tableE": "station3-tableE.xlsx",
+        "tableR": "station3-tableR.xlsx"
+      }
+    }
+  ],
+  "canal_pools": [
+    {
+      "id": 1,
+      "name": "Pool 1 (Station 1 -> Station 2)",
+      "area": 5000000
+    },
+    {
+      "id": 2,
+      "name": "Pool 2 (Station 2 -> Station 3)",
+      "area": 2450000
+    }
+  ]
+}

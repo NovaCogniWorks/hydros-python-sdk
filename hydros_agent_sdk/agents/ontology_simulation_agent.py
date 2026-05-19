@@ -208,7 +208,7 @@ class OntologySimulationAgent(TickableAgent):
         Default implementation does nothing.
         """
         logger.info("Initializing ontology model...")
-        # TODO: Load ontology rules, constraints, etc.
+        # TODO：加载本体规则、约束等内容。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -267,7 +267,7 @@ class OntologySimulationAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO: Update ontology model state
+            # TODO：更新本体模型状态
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
