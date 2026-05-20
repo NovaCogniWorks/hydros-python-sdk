@@ -3,6 +3,7 @@ import numpy as np
 import os
 import math
 import json
+import yaml
 import warnings
 from scipy.optimize import minimize
 from scipy.spatial import Delaunay
@@ -149,10 +150,12 @@ def generate_flow_depart(station_id, target_unit_names, config_path="data/config
     """
     print(f"\n{'='*10} Starting Flow Depart Calculation {'='*10}")
     
-    # Load config
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+            if config_path.endswith('.yaml') or config_path.endswith('.yml'):
+                config = yaml.safe_load(f)
+            else:
+                config = json.load(f)
     except Exception as e:
         print(f"Error reading config: {e}")
         return None

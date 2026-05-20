@@ -377,88 +377,295 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
         self.mpc_output = {}
 
+    def _lazy_init_odd_mpc(self):
+        if hasattr(self, 'odd_initialized') and self.odd_initialized:
+            return
+            
+        import os
+        from odd_dmpc.config import load_runtime_context
+        from odd_dmpc.flow_service import FlowDepartService
+        from odd_dmpc.local_controller import LocalController
+        from odd_dmpc.observers import DisturbanceObserverBank
+        from odd_dmpc.odd_supervisor import ODDSupervisor
+        from odd_dmpc.upper_scheduler import UpperScheduler
+        from odd_dmpc.types import LowerFeedback, StationMemory
+        from odd_dmpc.environment import _boundary_plan_from_snapshot
+        import pandas as pd
+        
+        # Determine the data directory
+        config_path = "data/config_odd.yaml"
+        if not os.path.exists(config_path):
+            config_path = "../../../data/config_odd.yaml"
+            
+        context = load_runtime_context(config_path)
+        self.system_config = context["system_config"]
+        self.runtime = context["runtime"]
+        
+        self.odd_demand_plan = context["demand_plan"]
+        
+        self.flow_service = FlowDepartService(self.system_config, config_path=config_path)
+        self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
+        self.supervisor = ODDSupervisor(self.runtime)
+        self.observers = DisturbanceObserverBank(self.system_config, self.runtime)
+        
+        self.available_units_map = {
+            station.id: [unit.id for unit in station.units]
+            for station in self.system_config.stations
+        }
+        
+        self.lower_feedback = LowerFeedback(
+            available_units_map={station_id: ids[:] for station_id, ids in self.available_units_map.items()},
+            feasible_flow_ranges={station.id: [0.0, 0.0] for station in self.system_config.stations},
+            current_modes={station.id: "ODD1" for station in self.system_config.stations},
+            plan_execution_errors={station.id: 0.0 for station in self.system_config.stations},
+            reconfigured_stations={station.id: False for station in self.system_config.stations},
+        )
+        
+        self.station_flow_history = {
+            station.id: []
+            for station in self.system_config.stations
+        }
+        
+        self.cumulative_last_station_flow = 0.0
+        self.station_memories = {}
+        
+        self.odd_initialized = True
+        self.upper_scheduler = UpperScheduler(
+            self.system_config,
+            self.odd_demand_plan,
+            self.runtime,
+            self.flow_service,
+            pd.DataFrame() # this will be updated in on_optimization
+        )
+
+
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
-        logger.info(f"--- 第 {step} 步：开始执行分布分层 MPC 滚动优化 ---")
-
-        # ============= 上层 MPC 优化 =============
-        # z_planned[1] = Pool1（S1出水侧，≈S1.current_up）
-        # z_planned[2] = Pool2（S2出水侧，≈S2.current_up）
-        # 必须传 [S1.current_up, S2.current_up]，否则水位初始化偏移一位
-        cur_levels = [self.stations[0].current_up, self.stations[1].current_up]
-        upper_res = self.upper_mpc.solve(cur_levels, self.demand_plan, self.observers, dt=3600)
+        self._lazy_init_odd_mpc()
         
-        # ============= 下层 分布式 MPC 优化 =============
-        lower_res = {}
-        commands = []
-        for s in self.stations:
-            # 读取上层目标，形成序列
-            horizon_lower = 10
-            ref_q_seq = upper_res["q_planned"][s.id][:horizon_lower]
-            
-            # 逐站计算预测扬程序列 H = 出水侧水位 - 进水侧水位
-            # S1: 从固定低位水源(current_down≈12.5m) 压入 Pool1(z_planned[1]≈14.5m)
-            #     H = Pool1 - source = z_planned[1] - current_down
-            # S2: 从 Pool1(z_planned[1]) 压入 Pool2(z_planned[2])，两侧均动态
-            #     H = Pool2 - Pool1 = z_planned[2] - z_planned[1]
-            # S3: 从 Pool2(z_planned[2]≈20.5m) 压入固定高位出水库(current_up≈22.7m)
-            #     H = current_up - Pool2 = current_up - z_planned[2]
-            if s.id == 1:
-                ref_h_seq = [z - s.current_down for z in upper_res["z_planned"][1][:horizon_lower]]
-            elif s.id == 2:
-                ref_h_seq = [
-                    upper_res["z_planned"][2][t] - upper_res["z_planned"][1][t]
-                    for t in range(min(horizon_lower, len(upper_res["z_planned"][1])))
-                ]
-            else:
-                ref_h_seq = [s.current_up - z for z in upper_res["z_planned"][2][:horizon_lower]]
-            
-            # 补齐长度
-            if len(ref_q_seq) < horizon_lower:
-                ref_q_seq.extend([ref_q_seq[-1]] * (horizon_lower - len(ref_q_seq)))
-                ref_h_seq.extend([ref_h_seq[-1]] * (horizon_lower - len(ref_h_seq)))
+        from odd_dmpc.types import EnvironmentObservation, StationMemory
+        from odd_dmpc.local_controller import StationControlContext
+        import pandas as pd
+        
+        station_back_levels = {s.id: s.current_up for s in self.stations}
+        station_front_levels = {s.id: s.current_down for s in self.stations}
+        station_heads = {s.id: s.current_up - s.current_down for s in self.stations}
+        
+        basin_levels = {
+            "b0": station_front_levels[1],
+            "b1": station_back_levels[1],
+            "b2": station_back_levels[2],
+            "b3": station_back_levels[3]
+        }
+        
+        station_flows = {
+            s.id: (self.station_flow_history[s.id][-1] if self.station_flow_history[s.id] else 0.0)
+            for s in self.stations
+        }
+        
+        pool_areas = {p.id: p.area for p in self.pools}
+        pool_levels = {p.id: basin_levels[f"b{p.id}"] for p in self.pools}
+        
+        observation = EnvironmentObservation(
+            time_index=step,
+            time_hours=step * float(self.system_config.dt_hours),
+            basin_levels=basin_levels,
+            basin_volumes={},
+            pool_areas=pool_areas,
+            basin_profiles=None,
+            anchor_basin_levels={"b0": basin_levels["b0"], "b3": basin_levels["b3"]},
+            boundary_nominal_flows={},
+            station_back_levels=station_back_levels,
+            station_front_levels=station_front_levels,
+            station_heads=station_heads,
+            station_flows=station_flows,
+            pool_levels=pool_levels
+        )
+        
+        # Init or update memories from our own self tracked state
+        if not self.station_memories:
+            for s in self.stations:
+                self.station_memories[s.id] = StationMemory(
+                    active_unit_ids=[],
+                    unit_openings={u: 0.0 for u in self.available_units_map[s.id]},
+                    unit_status={u: 0 for u in self.available_units_map[s.id]},
+                    time_since_adjust={u: 999 for u in self.available_units_map[s.id]},
+                    time_since_switch={u: 999 for u in self.available_units_map[s.id]},
+                    last_selected_flow=0.0,
+                    mode="ODD1"
+                )
                 
-            l_res = self.lower_mpcs[s.id].solve(ref_q_seq, ref_h_seq, step)
-            lower_res[s.id] = l_res
+        # Upper Scheduler
+        demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
+        self.observers.update(
+            prev_basin_levels=basin_levels,
+            next_basin_levels=basin_levels, # for test_mpc simplicity, we don't have prev
+            actual_flows=station_flows,
+            demand_row=demand_row,
+            prev_basin_volumes=None,
+            next_basin_volumes=None,
+            prev_basin_profiles=None,
+            next_basin_profiles=None,
+            defer_visibility=False,
+            step_hours=float(self.system_config.dt_hours),
+            pool_areas=pool_areas,
+        )
+        
+        # Boundary plan
+        boundary_levels_dict = {"upstream": basin_levels["b0"], "downstream": basin_levels["b3"]}
+        from odd_dmpc.environment import _boundary_plan_from_snapshot
+        boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
+        self.upper_scheduler.boundary_level_plan = boundary_level_plan
+        
+        horizon = max(int(self.system_config.horizon_hours - step), 1)
+        disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
+        
+        upper_plan = self.upper_scheduler.solve(
+            now=step,
+            env_snapshot=observation,
+            demand_state={"delivered_last_station_total": float(self.cumulative_last_station_flow)},
+            available_units_map=self.available_units_map,
+            disturbance_forecast=disturbance_forecast,
+            lower_feedback=self.lower_feedback,
+        )
+        
+        # Lower Controllers
+        actions = {}
+        upstream_selected_flows = {}
+        transfer_bundles = {}
+        
+        # First, pre-populate all transfer bundles so they are available for predictions
+        for station_id in self.system_config.station_ids:
+            station_memory = self.station_memories[station_id]
+            reference_flow = [float(f) for f in upper_plan.flow_refs[station_id]]
+            reference_back_level = [float(f) for f in upper_plan.station_back_levels[station_id]]
+            reference_front_level = [float(f) for f in upper_plan.station_front_levels[station_id]]
+            reference_head = [float(f) for f in upper_plan.station_heads[station_id]]
             
-            # 更新机组控制计数记忆，正式记录在0时刻的真正执行动作
-            for i, st in enumerate(l_res["status"][0]):
-                is_switch = (st != self.lower_mpcs[s.id].memory.status[i])
-                is_adjust = (st == 1 and abs(l_res["openings"][0][i] - self.lower_mpcs[s.id].memory.openings[i]) > 0.5)
-                self.lower_mpcs[s.id].memory.update(
-                    i, step, switch=is_switch, adjust=is_adjust,
-                    status=st, opening=l_res["openings"][0][i]
-                )
+            from odd_dmpc.types import TransferBundle
+            transfer_bundle = TransferBundle(
+                station_id=station_id,
+                reference_flow=reference_flow,
+                reference_back_level=reference_back_level,
+                reference_front_level=reference_front_level,
+                reference_head=reference_head,
+                active_unit_ids=station_memory.active_unit_ids[:],
+                time_since_adjust=station_memory.time_since_adjust.copy(),
+                time_since_switch=station_memory.time_since_switch.copy(),
+                disturbance_estimate=self.observers.get_estimate(),
+            )
+            transfer_bundles[station_id] = transfer_bundle
+
+        for station_id in self.system_config.station_ids:
+            station_model = self.flow_service.get_station_model(station_id, self.available_units_map[station_id])
+            station_memory = self.station_memories[station_id]
+            transfer_bundle = transfer_bundles[station_id]
+            
+            reference_flow = transfer_bundle.reference_flow
+            reference_back_level = transfer_bundle.reference_back_level
+            reference_front_level = transfer_bundle.reference_front_level
+            reference_head = transfer_bundle.reference_head
+            
+            decision = self.supervisor.select_mode(
+                station_id=station_id,
+                env_snapshot=observation,
+                upper_plan=upper_plan,
+                station_model=station_model,
+                station_memory=station_memory,
+                available_unit_ids=self.available_units_map[station_id],
+                force_reconfiguration=False,
+                reference_flow=reference_flow[0],
+                reference_back=reference_back_level[0],
+                reference_front=reference_front_level[0],
+            )
+            
+            ctx = StationControlContext(
+                station_id=station_id,
+                station_model=station_model,
+                available_unit_ids=self.available_units_map[station_id],
+                basin_levels=observation.basin_levels.copy(),
+                basin_profiles=None,
+                pool_areas=observation.pool_areas.copy(),
+                anchor_basin_levels=observation.anchor_basin_levels.copy(),
+                boundary_nominal_flows={},
+                current_back_level=observation.station_back_levels[station_id],
+                current_front_level=observation.station_front_levels[station_id],
+                current_head=observation.station_heads[station_id],
+                upper_flow_refs={sid: tb.reference_flow for sid, tb in transfer_bundles.items()},
+                flow_history={sid: self.station_flow_history[sid][:] for sid in self.station_flow_history},
+                boundary_level_plan=boundary_level_plan,
+                start_time_hours=float(observation.time_hours),
+                step_hours=float(self.system_config.dt_hours),
+                demand_plan=self.odd_demand_plan,
+            )
+            
+            action = self.local_controller.solve(
+                mode=decision.mode,
+                station_ctx=ctx,
+                upstream_prediction=upstream_selected_flows,
+                disturbance_forecast=disturbance_forecast,
+                transfer_bundle=transfer_bundle,
+                station_memory=station_memory,
+            )
+            
+            actions[station_id] = action
+            upstream_selected_flows[station_id] = float(action.selected_flow)
+            
+            # Update memory
+            new_active_ids = []
+            for uid, st in action.unit_status.items():
+                if st == 1: new_active_ids.append(uid)
+                if st != station_memory.unit_status.get(uid, 0):
+                    station_memory.time_since_switch[uid] = 0
+                else:
+                    station_memory.time_since_switch[uid] += 1
+                
+                old_op = station_memory.unit_openings.get(uid, 0.0)
+                new_op = action.unit_openings.get(uid, 0.0)
+                if abs(new_op - old_op) > 0.0: # simplified threshold
+                    station_memory.time_since_adjust[uid] = 0
+                else:
+                    station_memory.time_since_adjust[uid] += 1
                     
-            # 可选：此处构造水泵下发控制指令 commands.append(pump_request)
-            for i, st in enumerate(l_res["status"][0]):
-                pump_request = self._build_station_target_value_request(
-                    target_agent_code=f"STATION_{s.id}",
-                    target_command_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
-                    target_value=l_res["openings"][0][i],
-                    object_id=1000 + s.id * 10 + i, # Dummy ID
-                    object_type=HydroObjectType.PUMP,
-                )
-                if pump_request: 
-                    commands.append(pump_request)
-                    
+            station_memory.active_unit_ids = new_active_ids
+            station_memory.unit_status = action.unit_status.copy()
+            station_memory.unit_openings = action.unit_openings.copy()
+            station_memory.last_selected_flow = float(action.selected_flow)
+            station_memory.mode = action.mode
+            
+            self.station_flow_history[station_id].append(float(action.selected_flow))
+            
+            flow_min, flow_max = station_model.feasible_flow_range(observation.station_heads[station_id])
+            self.lower_feedback.feasible_flow_ranges[station_id] = [flow_min, flow_max]
+            self.lower_feedback.current_modes[station_id] = action.mode
+            self.lower_feedback.plan_execution_errors[station_id] = float(action.selected_flow - reference_flow[0])
+
+        self.cumulative_last_station_flow += float(actions[self.system_config.last_station_id].selected_flow) * float(self.system_config.dt_hours)
+
+        # map to previous output format for test_mpc
+        lower_res = {}
+        for s in self.stations:
+            action = actions[s.id]
+            st_list = [action.unit_status.get(u, 0) for u in self.available_units_map[s.id]]
+            op_list = [action.unit_openings.get(u, 0.0) for u in self.available_units_map[s.id]]
+            eff_list = [0.0] * len(st_list) # mock effs
+            lower_res[s.id] = {
+                "status": [st_list],
+                "openings": [op_list],
+                "effs": [eff_list],
+                "total_q": [action.selected_flow]
+            }
+            
+        # format upper_res
+        upper_res = {
+            "q_planned": {sid: upper_plan.flow_refs[sid] for sid in self.system_config.station_ids},
+            "z_planned": {sid: upper_plan.station_back_levels[sid] for sid in self.system_config.station_ids}
+        }
+            
         self.mpc_output = {"upper": upper_res, "lower": lower_res}
         
-        # 下发物理控制指令
-        for cmd in commands:
-            self.send_command(cmd)
-
-        return commands
-
-        return [
-            {
-                "target_agent_code": "STATION_AGENT",
-                "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
-                "target_value": -6,
-                "object_id": 1021,
-                "object_type": HydroObjectType.PUMP,
-            }
-        ]
+        commands = []
+        return self.mpc_output
 
     def on_next(self, actual_levels, actual_flows, step):
         """
