@@ -480,6 +480,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             )
 
         self.assertIsNotNone(request)
+        self.assertEqual(request.command_type, "update_station_target_value_request")
         self.assertEqual(request.target.agent_code, "PUMP_AGENT_001")
         self.assertEqual(request.target_value_type, DeviceValueTypeEnum.GATE_OPENING.code)
         self.assertEqual(request.target_value, 1.25)

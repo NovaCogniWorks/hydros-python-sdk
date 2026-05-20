@@ -97,8 +97,8 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
     """更通用的站点目标值下发请求。"""
 
     command_type: Literal[
-        "update_station_target_level_request"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_LEVEL_REQUEST
+        "update_station_target_value_request"
+    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST
     object_id: Optional[int] = None
     object_type: Optional[str] = None
     target_value_type: Optional[str] = None
@@ -110,8 +110,8 @@ class HydroStationTargetValueResponse(AgentCommandResponse):
     """更通用的站点目标值下发响应。"""
 
     command_type: Literal[
-        "update_station_target_level_response"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_LEVEL_RESPONSE
+        "update_station_target_value_response"
+    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_RESPONSE
     target_value_type: Optional[str] = None
     target_value: Optional[Any] = None
 
