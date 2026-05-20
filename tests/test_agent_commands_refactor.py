@@ -23,7 +23,10 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
+    TickCmdRequest,
+    TimeSeriesDataUpdateRequest,
 )
+from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import (
     AgentBizStatus,
     AgentDriveMode,
@@ -31,7 +34,9 @@ from hydros_agent_sdk.protocol.models import (
     HydroAgent,
     CommandStatus,
     HydroAgentInstance,
+    ObjectTimeSeries,
     SimulationContext,
+    TimeSeriesValue,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -69,7 +74,12 @@ class DirectGateHandler(AgentCommandHandler[HydroDirectGateOpeningRequest, Hydro
         )
 
 
-class TestCentralSchedulingAgent(CentralSchedulingAgent):
+class CentralSchedulingAgentForTest(CentralSchedulingAgent):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.optimization_steps = []
+        self.optimization_result = None
+
     def load_agent_configuration(self, request):
         # 测试里不走外部配置，直接给一个空 properties 就够了。
         return None
@@ -87,7 +97,8 @@ class TestCentralSchedulingAgent(CentralSchedulingAgent):
         )
 
     def on_optimization(self, step: int):
-        return None
+        self.optimization_steps.append(step)
+        return self.optimization_result
 
     def on_terminate(self, request: SimTaskTerminateRequest):
         self._shutdown_agent_command_client()
@@ -112,6 +123,32 @@ class TestSiblingCacheCallback(SimCoordinationCallback):
 
     def is_remote_agent(self, agent_instance) -> bool:
         return True
+
+
+def build_time_series_update_request(
+    context: SimulationContext,
+    command_id: str = "ts-update-001",
+    auto_schedule_at_step: int = 1,
+) -> TimeSeriesDataUpdateRequest:
+    return TimeSeriesDataUpdateRequest(
+        command_id=command_id,
+        context=context,
+        time_series_data_changed_event=TimeSeriesDataChangedEvent(
+            auto_schedule_at_step=auto_schedule_at_step,
+            hydro_event_source_type="WEATHER_FORECAST",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=1001,
+                    object_name="node-1001",
+                    metrics_code="water_flow",
+                    time_series=[
+                        TimeSeriesValue(step=auto_schedule_at_step, value=12.0),
+                        TimeSeriesValue(step=auto_schedule_at_step + 3, value=15.0),
+                    ],
+                )
+            ],
+        ),
+    )
 
 
 class AgentCommandsRefactorTest(unittest.TestCase):
@@ -297,7 +334,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-004")
-        agent = TestCentralSchedulingAgent(
+        agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-004",
             agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
@@ -351,7 +388,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-006")
-        agent = TestCentralSchedulingAgent(
+        agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-006",
             agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
@@ -391,7 +428,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-008")
-        agent = TestCentralSchedulingAgent(
+        agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-008",
             agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
@@ -437,7 +474,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-007")
-        agent = TestCentralSchedulingAgent(
+        agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-007",
             agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
@@ -465,6 +502,93 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(set(agent.get_field_metrics_history().keys()), {2, 3, 4})
         self.assertNotIn(1, agent.get_field_metrics_history())
         self.assertEqual(agent.get_field_metrics_by_step(4)["1001_flow"]["value"], 4.0)
+
+    def test_central_scheduling_agent_activates_mpc_on_time_series_update(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+            mpc_config_url="http://config/mpc.yaml",
+            target_and_constrain_config_url="http://config/control.yaml",
+        )
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        self.assertEqual(agent.optimization_steps, [5])
+        self.assertTrue(agent.is_mpc_optimizing_on_the_loop())
+        self.assertEqual(agent.mpc_task_state.start_step, 5)
+        self.assertEqual(agent.mpc_task_state.current_step, 5)
+        self.assertEqual(agent.mpc_task_state.rolling_interval_steps, 3)
+        self.assertEqual(agent.mpc_task_state.total_steps, 20)
+        self.assertEqual(agent.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
+        self.assertEqual(agent.mpc_task_state.target_and_constrain_config_url, "http://config/control.yaml")
+        self.assertEqual(len(agent.mpc_task_state.hydro_events), 1)
+        self.assertEqual(agent.agent_biz_status, AgentBizStatus.ACTIVE)
+
+    def test_central_scheduling_agent_rolls_only_after_event_activation(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-012")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-012",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+        )
+
+        agent.on_tick_simulation(TickCmdRequest(command_id="tick-before", context=context, step=0))
+        self.assertEqual(agent.optimization_steps, [])
+
+        agent.on_time_series_data_update(
+            build_time_series_update_request(context, command_id="ts-update-012", auto_schedule_at_step=1)
+        )
+        self.assertEqual(agent.optimization_steps, [1])
+
+        agent.on_tick_simulation(TickCmdRequest(command_id="tick-2", context=context, step=2))
+        self.assertEqual(agent.optimization_steps, [1])
+
+        agent.on_tick_simulation(TickCmdRequest(command_id="tick-4", context=context, step=4))
+        self.assertEqual(agent.optimization_steps, [1, 4])
+        self.assertEqual(agent.mpc_task_state.current_loop, 3)
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \
@@ -510,7 +634,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=callback,
         )
 
-        agent = TestCentralSchedulingAgent(
+        agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-006",
             agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
