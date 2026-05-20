@@ -1,7 +1,7 @@
 from hydros_agent_sdk.runtime import AgentContext, ResponseFactory
 from hydros_agent_sdk.protocol.commands import TickCmdRequest, SimTaskInitRequest
 from hydros_agent_sdk.protocol.models import (
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     CommandStatus,
     HydroAgent,
@@ -25,7 +25,7 @@ def make_agent(context):
         hydros_cluster_id="cluster",
         hydros_node_id="node",
         context=context,
-        agent_biz_status=AgentBizStatus.ACTIVE,
+        agent_status=AgentStatus.ACTIVE,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 

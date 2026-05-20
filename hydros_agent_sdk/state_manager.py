@@ -14,7 +14,7 @@ from threading import RLock
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     HydroAgentInstance,
-    AgentBizStatus
+    AgentStatus
 )
 
 logger = logging.getLogger(__name__)
@@ -191,7 +191,7 @@ class AgentStateManager:
         with self._lock:
             return self._agent_instances.get(agent_id)
 
-    def update_agent_status(self, agent_id: str, status: AgentBizStatus):
+    def update_agent_status(self, agent_id: str, status: AgentStatus):
         """
         Update the status of an agent instance.
 
@@ -202,13 +202,13 @@ class AgentStateManager:
         with self._lock:
             agent = self._agent_instances.get(agent_id)
             if agent:
-                agent.agent_biz_status = status
+                agent.agent_status = AgentStatus(status)
         if agent:
             logger.info(f"Updated agent {agent_id} status to: {status}")
         else:
             logger.warning(f"Cannot update status: agent {agent_id} not found")
 
-    def get_agent_status(self, agent_id: str) -> Optional[AgentBizStatus]:
+    def get_agent_status(self, agent_id: str) -> Optional[AgentStatus]:
         """
         Get the status of an agent instance.
 
@@ -220,7 +220,7 @@ class AgentStateManager:
         """
         with self._lock:
             agent = self._agent_instances.get(agent_id)
-            return agent.agent_biz_status if agent else None
+            return agent.agent_status if agent else None
 
     # ========================================================================
     # Local/Remote Agent Tracking (from AgentContextManager)

@@ -23,7 +23,7 @@ from hydros_agent_sdk.protocol.commands import (
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     CommandStatus,
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
     TimeSeriesValue,
@@ -80,7 +80,7 @@ class ModelCalculationAgent(BaseHydroAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentStatus = AgentStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.EVENT_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -97,7 +97,7 @@ class ModelCalculationAgent(BaseHydroAgent):
             context: Simulation context
             hydros_cluster_id: Cluster ID
             hydros_node_id: Node ID
-            agent_biz_status: Initial business status
+            agent_status: Initial business status
             drive_mode: Agent drive mode (default: EVENT_DRIVEN)
             agent_configuration_url: Optional configuration URL
             **kwargs: Additional keyword arguments
@@ -111,7 +111,7 @@ class ModelCalculationAgent(BaseHydroAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs

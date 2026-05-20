@@ -27,8 +27,9 @@ from .commands import (
     TimeSeriesDataUpdateResponse,
 )
 from .models import (
-    AgentBizStatus,
     AgentDriveMode,
+    AgentInstanceStatus,
+    AgentStatus,
     BizScenario,
     CommandStatus,
     HydroAgent,

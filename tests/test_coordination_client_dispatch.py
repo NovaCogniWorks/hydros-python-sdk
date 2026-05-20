@@ -6,7 +6,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdResponse,
 )
 from hydros_agent_sdk.protocol.models import (
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     CommandStatus,
     HydroAgentInstance,
@@ -30,7 +30,7 @@ def make_agent(context):
         hydros_cluster_id="cluster",
         hydros_node_id="node",
         context=context,
-        agent_biz_status=AgentBizStatus.ACTIVE,
+        agent_status=AgentStatus.ACTIVE,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 

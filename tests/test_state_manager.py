@@ -1,5 +1,5 @@
 from hydros_agent_sdk.protocol.models import (
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     HydroAgentInstance,
     SimulationContext,
@@ -22,7 +22,7 @@ def make_agent(context, agent_id="AGT_TEST", node_id="node"):
         hydros_cluster_id="cluster",
         hydros_node_id=node_id,
         context=context,
-        agent_biz_status=AgentBizStatus.INIT,
+        agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 

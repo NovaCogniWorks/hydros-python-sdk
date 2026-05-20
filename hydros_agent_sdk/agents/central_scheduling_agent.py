@@ -39,7 +39,7 @@ from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     CommandStatus,
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     HydroAgentInstance,
     ObjectTimeSeries,
@@ -126,7 +126,7 @@ class CentralSchedulingAgent(TickableAgent):
         hydros_cluster_id: str,
         hydros_node_id: str,
         optimization_horizon: int = 10,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentStatus = AgentStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -144,7 +144,7 @@ class CentralSchedulingAgent(TickableAgent):
             hydros_cluster_id: 集群 ID
             hydros_node_id: 节点 ID
             optimization_horizon: 滚动优化周期（tick 数）
-            agent_biz_status: 初始业务状态
+            agent_status: 初始业务状态
             drive_mode: 智能体驱动模式（默认：SIM_TICK_DRIVEN）
             agent_configuration_url: 可选的配置 URL
             **kwargs: 其他关键字参数
@@ -169,7 +169,7 @@ class CentralSchedulingAgent(TickableAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
@@ -485,7 +485,7 @@ class CentralSchedulingAgent(TickableAgent):
                     self._do_rolling_optimal(mpc_task_state)
                     self._last_optimization_step = request.step
 
-                object.__setattr__(self, "agent_biz_status", AgentBizStatus.ACTIVE)
+                object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
 
             # 返回可选指标
             return None
@@ -573,7 +573,7 @@ class CentralSchedulingAgent(TickableAgent):
                 self._mpc_task_state = mpc_task_state
                 self._do_rolling_optimal(mpc_task_state)
                 self._last_optimization_step = current_step
-                object.__setattr__(self, "agent_biz_status", AgentBizStatus.ACTIVE)
+                object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
                 return
 
             mpc_task_state = self._require_mpc_task_state()

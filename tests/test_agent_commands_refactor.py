@@ -40,7 +40,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import (
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     BizScenario,
     HydroAgent,
@@ -66,7 +66,7 @@ def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: 
         hydros_cluster_id="demo-cluster",
         hydros_node_id=node_id,
         context=context,
-        agent_biz_status=AgentBizStatus.INIT,
+        agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.PROACTIVE,
     )
 
@@ -617,7 +617,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
         self.assertEqual(agent.mpc_task_state.target_and_constrain_config_url, "http://config/control.yaml")
         self.assertEqual(len(agent.mpc_task_state.hydro_events), 1)
-        self.assertEqual(agent.agent_biz_status, AgentBizStatus.ACTIVE)
+        self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
     def test_central_scheduling_agent_rolls_only_after_event_activation(self):
         state_manager = AgentStateManager()

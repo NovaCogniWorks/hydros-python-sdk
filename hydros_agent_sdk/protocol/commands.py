@@ -1,7 +1,14 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
 from pydantic import Field, AliasChoices
-from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
+from .models import (
+    AgentInstanceStatus,
+    SimulationContext,
+    HydroAgent,
+    HydroAgentInstance,
+    TopHydroObject,
+    CommandStatus,
+)
 from .base import HydroBaseModel
 from hydros_agent_sdk.mpc.models import MpcResult
 
@@ -120,8 +127,19 @@ class AgentInstanceStatusReport(SimCommand):
     """
     command_type: Literal["report_agent_instance_status"] = SIMCMD_AGENT_INSTANCE_STATUS_REPORT
     source_agent_instance: HydroAgentInstance
-    created_state: str
+    agent_instance_status: AgentInstanceStatus = Field(
+        validation_alias=AliasChoices("agent_instance_status", "agentInstanceStatus", "created_state")
+    )
     init_result: Optional[Dict[str, Any]] = None
+
+    @property
+    def created_state(self) -> AgentInstanceStatus:
+        """Deprecated SDK name; use agent_instance_status."""
+        return self.agent_instance_status
+
+    @created_state.setter
+    def created_state(self, value: AgentInstanceStatus) -> None:
+        self.agent_instance_status = AgentInstanceStatus(value)
 
 class MpcResultReport(SimCommand):
     """

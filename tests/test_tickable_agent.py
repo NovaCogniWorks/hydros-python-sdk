@@ -5,7 +5,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
 )
 from hydros_agent_sdk.protocol.models import (
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     CommandStatus,
     SimulationContext,
@@ -60,7 +60,7 @@ def test_tickable_agent_can_be_instantiated():
         context=context,
         hydros_cluster_id="cluster",
         hydros_node_id="node",
-        agent_biz_status=AgentBizStatus.INIT,
+        agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 
@@ -80,7 +80,7 @@ def test_tickable_agent_exposes_runtime_context():
         context=context,
         hydros_cluster_id="cluster",
         hydros_node_id="node",
-        agent_biz_status=AgentBizStatus.INIT,
+        agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 

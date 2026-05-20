@@ -1,16 +1,30 @@
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import Field, ConfigDict
+from pydantic import AliasChoices, Field, ConfigDict
 from .base import HydroBaseModel
 
-class AgentBizStatus(str, Enum):
+class AgentStatus(str, Enum):
     """
-    Agent business status enumeration matching Java implementation.
+    Agent container management status enumeration matching Java implementation.
     """
     INIT = "INIT"
     IDLE = "IDLE"
     ACTIVE = "ACTIVE"
+    TERMINATED = "TERMINATED"
     FAILED = "FAILED"
+
+class AgentInstanceStatus(str, Enum):
+    """
+    Agent instance lifecycle status enumeration matching Java implementation.
+    """
+    INIT = "INIT"
+    READY = "READY"
+    RUNNING = "RUNNING"
+    WAITING = "WAITING"
+    PAUSED = "PAUSED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+    COMPLETED = "COMPLETED"
 
 class AgentDriveMode(str, Enum):
     """
@@ -76,11 +90,49 @@ class HydroAgentInstance(HydroAgent):
     """
     agent_id: str
     biz_scene_instance_id: str
-    hydros_cluster_id: str
-    hydros_node_id: str
+    cluster_id: str = Field(
+        validation_alias=AliasChoices(
+            "cluster_id",
+            "clusterId",
+            "hydros_cluster_id",
+            "hydrosClusterId",
+        )
+    )
+    node_id: str = Field(
+        validation_alias=AliasChoices(
+            "node_id",
+            "nodeId",
+            "hydros_node_id",
+            "hydrosNodeId",
+        )
+    )
     context: SimulationContext
-    agent_biz_status: AgentBizStatus
+    agent_status: AgentStatus = Field(
+        default=AgentStatus.INIT,
+        validation_alias=AliasChoices(
+            "agent_status",
+            "agentStatus",
+        )
+    )
     drive_mode: AgentDriveMode
+
+    @property
+    def hydros_cluster_id(self) -> str:
+        """Backward-compatible SDK name for Java-compatible cluster_id."""
+        return self.cluster_id
+
+    @hydros_cluster_id.setter
+    def hydros_cluster_id(self, value: str) -> None:
+        self.cluster_id = value
+
+    @property
+    def hydros_node_id(self) -> str:
+        """Backward-compatible SDK name for Java-compatible node_id."""
+        return self.node_id
+
+    @hydros_node_id.setter
+    def hydros_node_id(self, value: str) -> None:
+        self.node_id = value
 
 class TopHydroObject(HydroBaseModel):
     """
