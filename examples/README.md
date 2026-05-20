@@ -22,8 +22,9 @@ examples/
     │   ├── twins_agent.py         # Agent implementation example
     │   └── hydraulic_solver.py    # Business logic: hydraulic solver
     │
-    └── centralscheduling/         # Central scheduling agent (placeholder)
-        └── agent.properties
+    └── centralscheduling/         # Central scheduling agent using SDK default MPC path
+        ├── agent.properties
+        └── central_scheduling_agent.py
 ```
 
 ## 🎯 What's in Examples vs SDK

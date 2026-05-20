@@ -39,7 +39,7 @@ from hydros_agent_sdk.protocol.commands import (
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     CommandStatus,
-    AgentBizStatus,
+    AgentStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
 
             # 将智能体状态更新为 ACTIVE (活动)
-            object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+            object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
             return SimTaskInitResponse(
                 context=self.context,
