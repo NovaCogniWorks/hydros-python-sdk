@@ -287,7 +287,8 @@ hydros_node_id=default_central
 
 ### agent.properties (Agent Metadata)
 
-Each agent has its own configuration:
+Each agent has its own local metadata. Runtime parameters should come from
+the coordinator-provided `agent_configuration_url`, not from this local file.
 
 ```properties
 # Agent Identification
