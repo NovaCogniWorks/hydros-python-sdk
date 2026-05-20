@@ -22,6 +22,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
+    MpcResultReport,
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
@@ -179,6 +180,19 @@ class SimCoordinationCallback(ABC):
         """
         self._store_sibling_agent_instance(report.source_agent_instance)
         logger.info(f"Sibling agent status updated: {report.source_agent_instance.agent_id}")
+
+    def on_mpc_result(self, report: MpcResultReport):
+        """
+        Called when an MPC result report is received.
+
+        Default implementation only logs the event. Coordinator/data side
+        consumers should override this to persist or forward MPC results.
+        """
+        logger.info(
+            "MPC result report received: source=%s, result_count=%s",
+            report.source_agent_instance.agent_id,
+            len(report.mpc_results),
+        )
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """

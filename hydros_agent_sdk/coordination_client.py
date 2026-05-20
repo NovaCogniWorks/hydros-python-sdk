@@ -36,6 +36,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
+    MpcResultReport,
     SimCoordinationRequest,
     SimCoordinationResponse,
     SimCommandEnvelope,
@@ -49,6 +50,7 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
+    SIMCMD_MPC_RESULT_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
 )
@@ -201,6 +203,7 @@ class SimCoordinationClient:
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
+            SIMCMD_MPC_RESULT_REPORT: self._handle_mpc_result_report,
             SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
             SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
         }
@@ -571,6 +574,14 @@ class SimCoordinationClient:
             return self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
         return None
 
+    def _handle_mpc_result_report(self, command: SimCommand):
+        """Handle MPC result report from remote agents."""
+        report = command
+        assert isinstance(report, MpcResultReport)
+        if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
+            return self.sim_coordination_callback.on_mpc_result(report)
+        return None
+
     def _handle_outflow_time_series_request(self, command: SimCommand):
         """Handle outflow time series request."""
         request = command
@@ -630,7 +641,7 @@ class SimCoordinationClient:
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         # Send reports only from local agents
-        if isinstance(command, AgentInstanceStatusReport):
+        if isinstance(command, (AgentInstanceStatusReport, MpcResultReport)):
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         return False

@@ -5,14 +5,24 @@
 增加了模型预测控制（MPC）优化功能。
 """
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Iterable
 from abc import abstractmethod
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand, DeviceValueTypeEnum, HydroStationTargetValueRequest
+from hydros_agent_sdk.agent_commands.models import (
+    AgentCommand,
+    DeviceValueTypeEnum,
+    DisturbanceNodeWaterFlowRequest,
+    HydroDirectGateOpeningRequest,
+    HydroStationTargetValueRequest,
+)
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
+from hydros_agent_sdk.mpc.client import MpcPlanningClient
+from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
+from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 from hydros_agent_sdk.utils import generate_agent_command_id
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -144,6 +154,11 @@ class CentralSchedulingAgent(TickableAgent):
         configured_target_and_constrain_config_url = kwargs.pop(
             "target_and_constrain_config_url", None
         )
+        configured_mpc_service_base_url = kwargs.pop("mpc_service_base_url", None)
+        configured_mpc_planning_client = kwargs.pop("mpc_planning_client", None)
+        configured_mpc_result_reporter = kwargs.pop("mpc_result_reporter", None)
+        configured_mpc_sensor_provider = kwargs.pop("mpc_sensor_provider", None)
+        configured_object_agent_code_map = kwargs.pop("object_agent_code_map", None)
 
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -166,8 +181,20 @@ class CentralSchedulingAgent(TickableAgent):
         self._configured_total_steps = configured_total_steps
         self._configured_mpc_config_url = configured_mpc_config_url
         self._configured_target_and_constrain_config_url = configured_target_and_constrain_config_url
+        self._configured_mpc_service_base_url = configured_mpc_service_base_url
         self._mpc_task_state: Optional[MpcTaskState] = None
         self._time_series_update_lock = RLock()
+        self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
+            configured_mpc_sensor_provider
+        )
+        self._mpc_planning_client: Optional[MpcPlanningClient] = configured_mpc_planning_client
+        self._mpc_result_reporter: MpcResultReporter = configured_mpc_result_reporter or MpcResultReporter(
+            sim_coordination_client=sim_coordination_client
+        )
+        self._object_agent_code_map: Dict[str, str] = {
+            str(object_id): agent_code
+            for object_id, agent_code in (configured_object_agent_code_map or {}).items()
+        }
 
         # 优化模型与拓扑
         self._optimization_model = None
@@ -306,6 +333,19 @@ class CentralSchedulingAgent(TickableAgent):
             self._configured_target_and_constrain_config_url,
         )
 
+    def get_mpc_service_base_url(self) -> Optional[str]:
+        return self._get_string_property("mpc_service_base_url", self._configured_mpc_service_base_url)
+
+    def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
+        if self._mpc_planning_client is not None:
+            return self._mpc_planning_client
+
+        base_url = self.get_mpc_service_base_url()
+        if not base_url:
+            return None
+        self._mpc_planning_client = MpcPlanningClient(base_url=base_url)
+        return self._mpc_planning_client
+
     def is_mpc_optimizing_on_the_loop(self) -> bool:
         """Whether the task has already activated its rolling MPC loop."""
         return self._mpc_task_state is not None
@@ -376,12 +416,16 @@ class CentralSchedulingAgent(TickableAgent):
             metrics_code = payload.get('metrics_code')
             value = payload.get('value')
             step_index = payload.get('step_index', payload.get('step'))
+            object_type = payload.get('object_type', payload.get('objectType'))
+            position_code = payload.get('position_code', payload.get('positionCode'))
 
             if object_id is not None and metrics_code:
                 cache_key = f"{object_id}_{metrics_code}"
                 self._field_metrics_cache[cache_key] = {
                     'object_id': object_id,
+                    'object_type': object_type,
                     'metrics_code': metrics_code,
+                    'position_code': position_code,
                     'value': value,
                     'step_index': step_index,
                 }
@@ -390,7 +434,9 @@ class CentralSchedulingAgent(TickableAgent):
                     self._field_metrics_step_cache.setdefault(int(step_index), {})
                     self._field_metrics_step_cache[int(step_index)][cache_key] = {
                         'object_id': object_id,
+                        'object_type': object_type,
                         'metrics_code': metrics_code,
+                        'position_code': position_code,
                         'value': value,
                         'step_index': int(step_index),
                     }
@@ -541,7 +587,7 @@ class CentralSchedulingAgent(TickableAgent):
             raise RuntimeError("mpc_task_state is not initialized")
         return self._mpc_task_state
 
-    def _do_rolling_optimal(self, mpc_task_state: MpcTaskState) -> Optional[List[Dict[str, Any]]]:
+    def _do_rolling_optimal(self, mpc_task_state: MpcTaskState) -> Optional[List[Any]]:
         logger.info(
             "Executing MPC optimization: bizSceneInstanceId=%s, step=%s",
             self.context.biz_scene_instance_id,
@@ -554,23 +600,145 @@ class CentralSchedulingAgent(TickableAgent):
         logger.info("MPC optimization completed at step %s", mpc_task_state.current_step)
         return control_commands
 
-    @abstractmethod
-    def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
+    def on_optimization(self, step: int) -> Optional[List[Any]]:
         """
         执行 MPC 优化逻辑。
 
-        子类必须实现此方法以执行其特定的 MPC 优化逻辑。
+        默认实现会调用独立的 MpcPlanningClient，并通过 MpcResultReporter
+        回传 mpc_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
 
         参数:
             step: 当前仿真步长
 
         返回:
-            发送给智能体的控制指令列表，或 None
-            每个指令字典应包含：target_agent, command_type, parameters
+            需要发送给边缘智能体的控制指令列表，或 None
         """
-        pass
+        mpc_task_state = self._require_mpc_task_state()
+        mpc_client = self.get_or_create_mpc_planning_client()
+        if mpc_client is None:
+            logger.warning(
+                "MPC planning client is not configured; skip default optimization at step %s",
+                step,
+            )
+            return None
 
-    def _send_control_commands(self, control_commands: List[Dict[str, Any]]):
+        responses = mpc_client.execute_optimization(
+            mpc_task_state,
+            self.list_mpc_sensor_data(mpc_task_state),
+            sensor_provider=lambda: self.list_mpc_sensor_data(mpc_task_state),
+        )
+        if not responses:
+            return None
+
+        self._mpc_result_reporter.publish(self, mpc_task_state, responses)
+        return self._build_control_commands_from_mpc_responses(responses)
+
+    def list_mpc_sensor_data(self, mpc_task_state: Optional[MpcTaskState] = None) -> List[SensorData]:
+        """Return field metrics in the SensorDTO shape required by the MPC service."""
+        if self._mpc_sensor_provider is not None:
+            provider = self._mpc_sensor_provider
+            try:
+                signature = inspect.signature(provider)
+                if len(signature.parameters) >= 2:
+                    provided = provider(self, mpc_task_state)
+                elif len(signature.parameters) == 1:
+                    provided = provider(mpc_task_state)
+                else:
+                    provided = provider()
+            except (TypeError, ValueError):
+                provided = provider()
+            return [
+                item if isinstance(item, SensorData) else SensorData.model_validate(item)
+                for item in (provided or [])
+            ]
+
+        return [
+            SensorData.model_validate(value)
+            for value in self._field_metrics_cache.values()
+        ]
+
+    def _build_control_commands_from_mpc_responses(
+        self,
+        responses: List[MpcOptimizeResponse],
+    ) -> List[AgentCommand]:
+        control_commands: List[AgentCommand] = []
+        for response in responses:
+            if response.plan_type != "OPTIMAL":
+                continue
+            if not response.horizon_controls:
+                continue
+            first_control = response.horizon_controls[0]
+            for device_opening in first_control.opening_list or []:
+                if device_opening.value is None:
+                    continue
+                target_agent = self.resolve_target_agent_for_object(
+                    object_id=device_opening.object_id,
+                    device_type=device_opening.device_type,
+                )
+                if target_agent is None:
+                    logger.warning(
+                        "Cannot resolve target agent for MPC control: objectId=%s, deviceType=%s",
+                        device_opening.object_id,
+                        device_opening.device_type,
+                    )
+                    continue
+
+                if device_opening.device_type == "Gate":
+                    control_commands.append(
+                        HydroDirectGateOpeningRequest(
+                            command_id=generate_agent_command_id(),
+                            source=self,
+                            target=target_agent,
+                            object_id=device_opening.object_id,
+                            object_name=device_opening.object_name,
+                            object_type=device_opening.device_type,
+                            gate_opening=device_opening.value,
+                            need_ack_reply=True,
+                        )
+                    )
+                else:
+                    control_commands.append(
+                        DisturbanceNodeWaterFlowRequest(
+                            command_id=generate_agent_command_id(),
+                            source=self,
+                            target=target_agent,
+                            object_id=device_opening.node_id,
+                            object_name=device_opening.node_name,
+                            object_type=device_opening.device_type,
+                            value=device_opening.value,
+                            need_ack_reply=True,
+                        )
+                    )
+        return control_commands
+
+    def resolve_target_agent_for_object(
+        self,
+        object_id: Optional[int],
+        device_type: Optional[str] = None,
+    ) -> Optional[HydroAgentInstance]:
+        """Resolve the edge agent that owns the hydro object receiving MPC control."""
+        if object_id is None:
+            return None
+
+        agent_code = self._object_agent_code_map.get(str(object_id))
+        if agent_code:
+            return self.get_sibling_agent_instance(agent_code)
+
+        callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
+        if callback is None:
+            return None
+
+        resolver = getattr(callback, "get_agent_by_object_id", None)
+        if resolver is None:
+            return None
+
+        biz_scene_instance_id = self.context.biz_scene_instance_id if self.context else None
+        try:
+            return resolver(object_id=object_id, biz_scene_instance_id=biz_scene_instance_id)
+        except TypeError:
+            return resolver(object_id)
+
+    def _send_control_commands(self, control_commands: List[Any]):
         """
         向目标智能体发送控制指令。
 
@@ -583,6 +751,10 @@ class CentralSchedulingAgent(TickableAgent):
         logger.info(f"Sending {len(control_commands)} control commands to agents")
 
         for command in control_commands:
+            if isinstance(command, AgentCommand):
+                self.send_command(command)
+                continue
+
             target_agent_code = command.get('target_agent_code')
             target_command_type = command.get('target_command_type')
             target_value = command.get('target_value')

@@ -96,6 +96,19 @@ from hydros_agent_sdk.transport import (
     PublishRecord,
     Transport,
 )
+from hydros_agent_sdk.mpc import (
+    DeviceOpening,
+    HorizonControlStep,
+    MpcOptimizeRequest,
+    MpcOptimizeResponse,
+    MpcPlanningClient,
+    MpcPlanningError,
+    MpcResult,
+    MpcResultDetail,
+    SensorData,
+    TargetNode,
+)
+from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 
 # Import error handling
 from hydros_agent_sdk.error_codes import (
@@ -186,6 +199,17 @@ __all__ = [
     "InMemoryTransport",
     "PublishRecord",
     "Transport",
+    "DeviceOpening",
+    "HorizonControlStep",
+    "MpcOptimizeRequest",
+    "MpcOptimizeResponse",
+    "MpcPlanningClient",
+    "MpcPlanningError",
+    "MpcResult",
+    "MpcResultDetail",
+    "MpcResultReporter",
+    "SensorData",
+    "TargetNode",
 
     # Factory and multi-agent support
     "generate_agent_instance_id",

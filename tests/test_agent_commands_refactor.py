@@ -17,8 +17,20 @@ from hydros_agent_sdk.agent_commands import (
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import MpcTaskState
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
+from hydros_agent_sdk.coordination_client import SimCoordinationClient
+from hydros_agent_sdk.mpc.client import MpcPlanningClient
+from hydros_agent_sdk.mpc.models import (
+    DeviceOpening,
+    HorizonControlStep,
+    MpcOptimizeResponse,
+    SensorData,
+    TargetNode,
+)
+from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 from hydros_agent_sdk.protocol.commands import (
+    MpcResultReport,
     SimTaskInitRequest,
     SimTaskInitResponse,
     SimTaskTerminateRequest,
@@ -36,7 +48,9 @@ from hydros_agent_sdk.protocol.models import (
     HydroAgentInstance,
     ObjectTimeSeries,
     SimulationContext,
+    Tenant,
     TimeSeriesValue,
+    Waterway,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -109,6 +123,62 @@ class CentralSchedulingAgentForTest(CentralSchedulingAgent):
             source_agent_instance=self,
             broadcast=False,
         )
+
+
+class ProductionCentralSchedulingAgentForTest(CentralSchedulingAgent):
+    def load_agent_configuration(self, request):
+        return None
+
+    def on_init(self, request: SimTaskInitRequest):
+        return SimTaskInitResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            created_agent_instances=[self],
+            managed_top_objects={},
+            broadcast=False,
+        )
+
+    def on_terminate(self, request: SimTaskTerminateRequest):
+        return SimTaskTerminateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False,
+        )
+
+
+class FakeMpcPlanningClient:
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    def execute_optimization(self, mpc_task_state, sensor_data, sensor_provider=None):
+        self.calls.append(
+            {
+                "state": mpc_task_state,
+                "sensor_data": list(sensor_data),
+                "sensor_provider": sensor_provider,
+            }
+        )
+        return self.responses
+
+
+class FakeMpcResultReporter:
+    def __init__(self):
+        self.published = []
+
+    def publish(self, source_agent_instance, mpc_task_state, responses):
+        self.published.append(
+            {
+                "source": source_agent_instance,
+                "state": mpc_task_state,
+                "responses": list(responses),
+            }
+        )
+        return None
 
 
 class TestSiblingCacheCallback(SimCoordinationCallback):
@@ -589,6 +659,235 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-4", context=context, step=4))
         self.assertEqual(agent.optimization_steps, [1, 4])
         self.assertEqual(agent.mpc_task_state.current_loop, 3)
+
+    def test_mpc_planning_client_builds_java_compatible_request(self):
+        context = SimulationContext(biz_scene_instance_id="scene-013")
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=10,
+            current_step=15,
+            mpc_config_url="http://config/mpc.yaml",
+            target_and_constrain_config_url="http://config/control.yaml",
+        )
+        state.register_hydro_event(
+            TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WEATHER_FORECAST",
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=1001,
+                        object_name="lateral-inflow",
+                        time_series=[
+                            TimeSeriesValue(step=10, value=100.0),
+                            TimeSeriesValue(step=20, value=200.0),
+                        ],
+                    )
+                ],
+            )
+        )
+        state.register_hydro_event(
+            TimeSeriesDataChangedEvent(
+                hydro_event_source_type="DEVICE_FAULT",
+                object_time_series=[ObjectTimeSeries(object_id=2001)],
+            )
+        )
+        state.register_hydro_event(
+            TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WATER_USE",
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=3001,
+                        time_series=[
+                            TimeSeriesValue(step=15, value=3.0),
+                            TimeSeriesValue(step=18, value=4.0),
+                        ],
+                    )
+                ],
+            )
+        )
+        client = MpcPlanningClient(base_url="http://mpc.local", require_sensor_data=True)
+
+        request = client.build_optimize_request(
+            state,
+            [SensorData(object_id=9001, metrics_code="water_level", value=12.5, step_index=15)],
+        )
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        self.assertEqual(payload["biz_scene_instance_id"], "scene-013")
+        self.assertEqual(payload["stepIndex"], 15)
+        self.assertEqual(payload["mpcConfigUrl"], "http://config/mpc.yaml")
+        self.assertEqual(payload["controlConfigUrl"], "http://config/control.yaml")
+        self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
+        self.assertEqual(payload["sensorData"][0]["objectId"], 9001)
+        self.assertEqual(payload["sensorData"][0]["metricsCode"], "water_level")
+        self.assertEqual(payload["fixedControls"], {"2001": 0.0})
+        self.assertEqual(payload["targets"], {3001: [3.0, 4.0]})
+        self.assertTrue(payload["includeDiversion"])
+
+    def test_mpc_result_reporter_builds_result_report_payload(self):
+        context = SimulationContext(
+            biz_scene_instance_id="scene-014",
+            tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
+            biz_scenario=BizScenario(
+                biz_scenario_id="scenario-014",
+                biz_scenario_name="Scenario",
+            ),
+            waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
+        )
+        source = build_agent_instance("agent-014", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            loss=0.12,
+            gate_operations=1,
+            gate_amplitude=0.4,
+            horizon_controls=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            node_id=101,
+                            object_id=501,
+                            value=0.45,
+                        )
+                    ],
+                    target_node_list=[
+                        TargetNode(
+                            device_type="Canal",
+                            node_id=102,
+                            water_level=2.1,
+                            target_water_level=2.3,
+                            out_water_level=1.9,
+                            total_flow=33.0,
+                        )
+                    ],
+                )
+            ],
+        )
+
+        report = MpcResultReporter().build_report(source, state, [response])
+        payload = report.model_dump(by_alias=True)
+
+        self.assertIsInstance(report, MpcResultReport)
+        self.assertEqual(report.command_type, "mpc_result_report")
+        self.assertTrue(report.broadcast)
+        self.assertEqual(payload["source_agent_instance"]["agent_id"], "agent-014")
+        self.assertEqual(payload["mpc_results"][0]["biz_scene_instance_id"], "scene-014")
+        self.assertEqual(payload["mpc_results"][0]["waterway_id"], "waterway-014")
+        self.assertEqual(payload["mpc_results"][0]["tenant_id"], "tenant-014")
+        self.assertEqual(payload["mpc_results"][0]["biz_scenario_id"], "scenario-014")
+        self.assertEqual(payload["mpc_results"][0]["details"][0]["command_type"], "OPENING")
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
+
+    def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+            sim_coordination_callback=callback,
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-015")
+        target = build_agent_instance("gate-agent-015", "GATE_AGENT_015", "node-b", context)
+        callback._store_sibling_agent_instance(target)
+        mpc_response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            object_id=501,
+                            object_name="Gate 501",
+                            value=0.45,
+                        )
+                    ],
+                )
+            ],
+        )
+        mpc_client = FakeMpcPlanningClient([mpc_response])
+        reporter = FakeMpcResultReporter()
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-015",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+            mpc_planning_client=mpc_client,
+            mpc_result_reporter=reporter,
+            object_agent_code_map={501: "GATE_AGENT_015"},
+        )
+        agent._on_field_metrics_received(
+            "metrics/topic",
+            {
+                "object_id": 9001,
+                "object_type": "Sensor",
+                "metrics_code": "water_level",
+                "value": 12.5,
+                "step_index": 1,
+            },
+        )
+        sent_commands = []
+
+        with patch.object(agent, "send_command", side_effect=sent_commands.append):
+            agent.on_time_series_data_update(
+                build_time_series_update_request(context, command_id="ts-update-015", auto_schedule_at_step=1)
+            )
+
+        self.assertEqual(len(mpc_client.calls), 1)
+        self.assertEqual(mpc_client.calls[0]["state"].current_step, 1)
+        self.assertEqual(mpc_client.calls[0]["sensor_data"][0].object_id, 9001)
+        self.assertEqual(len(reporter.published), 1)
+        self.assertEqual(reporter.published[0]["source"], agent)
+        self.assertEqual(len(sent_commands), 1)
+        self.assertIsInstance(sent_commands[0], HydroDirectGateOpeningRequest)
+        self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015")
+        self.assertEqual(sent_commands[0].object_id, 501)
+        self.assertEqual(sent_commands[0].gate_opening, 0.45)
+
+    def test_coordination_client_sends_local_mpc_result_report(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        context = SimulationContext(biz_scene_instance_id="scene-016")
+        source = build_agent_instance("agent-016", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state_manager.add_local_agent(source)
+        client = SimCoordinationClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo-cluster",
+            sim_coordination_callback=TestSiblingCacheCallback(),
+            state_manager=state_manager,
+        )
+        report = MpcResultReport(
+            command_id="report-016",
+            context=context,
+            source_agent_instance=source,
+            mpc_results=[],
+            broadcast=True,
+        )
+
+        self.assertTrue(client._should_send(report))
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \

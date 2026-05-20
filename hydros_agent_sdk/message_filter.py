@@ -12,6 +12,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimCoordinationRequest,
     AgentInstanceStatusReport,
+    MpcResultReport,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -115,14 +116,14 @@ class MessageFilter:
             logger.debug(f"Receiving request: {sim_command.command_type}")
             return True
 
-        # For AgentInstanceStatusReport, only receive from remote agents
-        if isinstance(sim_command, AgentInstanceStatusReport):
+        # For explicit reports, only receive from remote agents
+        if isinstance(sim_command, (AgentInstanceStatusReport, MpcResultReport)):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:
-                logger.debug(f"Receiving AgentInstanceStatusReport from remote agent: {sim_command.command_type}")
+                logger.debug(f"Receiving report from remote agent: {sim_command.command_type}")
                 return True
             else:
-                logger.debug(f"Filtering out AgentInstanceStatusReport from local agent: {sim_command.command_type}")
+                logger.debug(f"Filtering out report from local agent: {sim_command.command_type}")
                 return False
 
         # For SimTaskInitResponse, only receive from remote agents

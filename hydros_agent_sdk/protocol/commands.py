@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any, Union, Literal
 from pydantic import Field, AliasChoices
 from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
 from .base import HydroBaseModel
+from hydros_agent_sdk.mpc.models import MpcResult
 
 # Constants for Command Types
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"
@@ -16,6 +17,7 @@ SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "calculation_response"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "time_series_data_update_request"
 SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
+SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
@@ -121,6 +123,15 @@ class AgentInstanceStatusReport(SimCommand):
     created_state: str
     init_result: Optional[Dict[str, Any]] = None
 
+class MpcResultReport(SimCommand):
+    """
+    Report for MPC optimization results.
+    Sent by central scheduling agents and consumed by coordinator/data.
+    """
+    command_type: Literal["mpc_result_report"] = SIMCMD_MPC_RESULT_REPORT
+    source_agent_instance: HydroAgentInstance
+    mpc_results: List[MpcResult]
+
 class ParameterIdentifiedReport(SimCommand):
     """
     Report for identified parameters.
@@ -158,6 +169,7 @@ CommandUnion = Union[
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
     AgentInstanceStatusReport,
+    MpcResultReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,
     # Add other commands here as needed
