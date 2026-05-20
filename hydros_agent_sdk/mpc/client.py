@@ -17,8 +17,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MPC_API_V1 = "/hydros/api/v1/mpc"
-MPC_PLANNING_START_PATH = f"{MPC_API_V1}/planning/start"
+MPC_PLANNING_START_PATH = f"/hydros/api/v1/mpc/planning/start"
 
 
 class MpcPlanningError(RuntimeError):
