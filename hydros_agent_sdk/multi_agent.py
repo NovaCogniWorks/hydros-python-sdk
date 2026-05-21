@@ -15,6 +15,8 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
+    TimeSeriesCalculationRequest,
+    OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
@@ -217,6 +219,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         # Remove agents from tracking
         del self.agents[context_id]
+        super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
 
@@ -239,6 +242,135 @@ class MultiAgentCallback(SimCoordinationCallback):
             except Exception as e:
                 logger.error(f"Error in time series update for {agent_code}: {e}", exc_info=True)
         return responses
+
+    def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
+        """
+        Handle calculation request for the target agent.
+
+        Unlike time series data update which broadcasts to all agents in a context,
+        calculation requests should be routed only to the target agent specified
+        by request.target_agent_instance.
+        """
+        context_id = request.context.biz_scene_instance_id
+        context_agents = self.agents.get(context_id)
+
+        if not context_agents:
+            logger.error(
+                "No agents found for calculation request: context=%s, command_id=%s",
+                context_id,
+                request.command_id,
+            )
+            return
+
+        target_agent_code = request.target_agent_instance.agent_code
+        target_agent = context_agents.get(target_agent_code)
+
+        if not target_agent:
+            if self._is_weather_forecast_calculation(request):
+                logger.info(
+                    "Ignore weather forecast calculation request without local target agent: context=%s, command_id=%s, target_agent=%s",
+                    context_id,
+                    request.command_id,
+                    target_agent_code,
+                )
+                return
+            if self._is_water_use_calculation(request):
+                logger.info(
+                    "Ignore water use calculation request without local target agent: context=%s, command_id=%s, target_agent=%s",
+                    context_id,
+                    request.command_id,
+                    target_agent_code,
+                )
+                return
+            if self._is_emergency_maintenance_calculation(request):
+                logger.info(
+                    "Ignore emergency maintenance calculation request without local target agent: context=%s, command_id=%s, target_agent=%s",
+                    context_id,
+                    request.command_id,
+                    target_agent_code,
+                )
+                return
+            logger.warning(
+                "Target agent '%s' not found for calculation request: context=%s, command_id=%s, available_agents=%s",
+                target_agent_code,
+                context_id,
+                request.command_id,
+                list(context_agents.keys()),
+            )
+            return
+
+        try:
+            logger.info(
+                "Routing calculation request to agent: context=%s, command_id=%s, target_agent=%s",
+                context_id,
+                request.command_id,
+                target_agent_code,
+            )
+            target_agent.on_time_series_calculation(request)
+        except Exception as e:
+            logger.error(
+                "Error in time series calculation for %s: %s",
+                target_agent_code,
+                e,
+                exc_info=True,
+            )
+
+    def _is_weather_forecast_calculation(self, request: TimeSeriesCalculationRequest) -> bool:
+        """Identify weather forecast calculation requests that should be ignored."""
+        hydro_event = getattr(request, "hydro_event", None)
+        if hydro_event is None:
+            return False
+
+        source_type = getattr(hydro_event, "hydro_event_source_type", None)
+        if source_type not in (None, ""):
+            return str(source_type).strip().upper() in {"WEATHER_FORECAST", "WEATHER_FOR_CAST"}
+
+        event_type = getattr(hydro_event, "hydro_event_type", None)
+        return str(event_type).strip().upper() in {"WEATHER_FORECAST", "WEATHER_FOR_CAST"}
+
+    def _is_water_use_calculation(self, request: TimeSeriesCalculationRequest) -> bool:
+        """Identify water use calculation requests that should be ignored."""
+        hydro_event = getattr(request, "hydro_event", None)
+        if hydro_event is None:
+            return False
+
+        source_type = getattr(hydro_event, "hydro_event_source_type", None)
+        if source_type not in (None, ""):
+            return str(source_type).strip().upper() == "WATER_USE"
+
+        event_type = getattr(hydro_event, "hydro_event_type", None)
+        return str(event_type).strip().upper() == "WATER_USE"
+
+    def _is_emergency_maintenance_calculation(self, request: TimeSeriesCalculationRequest) -> bool:
+        """Identify emergency maintenance calculation requests that should be ignored."""
+        hydro_event = getattr(request, "hydro_event", None)
+        if hydro_event is None:
+            return False
+
+        source_type = getattr(hydro_event, "hydro_event_source_type", None)
+        if source_type not in (None, ""):
+            return str(source_type).strip().upper() in {"DEVICE_FAULT", "DEVICE_STATUS_CHANGE", "EMERGENCY_MAINTENANCE"}
+
+        event_type = getattr(hydro_event, "hydro_event_type", None)
+        return str(event_type).strip().upper() in {"DEVICE_FAULT", "DEVICE_STATUS_CHANGE", "EMERGENCY_MAINTENANCE"}
+
+    def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
+        """Handle outflow time series data update for all agents in the context."""
+        context_id = request.context.biz_scene_instance_id
+        context_agents = self.agents.get(context_id)
+
+        if not context_agents:
+            logger.error(f"No agents found for context: {context_id}")
+            return
+
+        # Forward update to all agents in this context
+        for agent_code, agent in context_agents.items():
+            try:
+                response = agent.on_outflow_time_series_data_update(request)
+                if response:
+                    agent.send_response(response)
+            except Exception as e:
+                logger.error(f"Error in outflow time series update for {agent_code}: {e}", exc_info=True)
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """

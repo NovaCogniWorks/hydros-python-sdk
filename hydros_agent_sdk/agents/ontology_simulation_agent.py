@@ -69,7 +69,7 @@ class OntologySimulationAgent(TickableAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentBizStatus = AgentBizStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -86,7 +86,7 @@ class OntologySimulationAgent(TickableAgent):
             context: Simulation context
             hydros_cluster_id: Cluster ID
             hydros_node_id: Node ID
-            agent_biz_status: Initial business status
+            agent_status: Initial business status
             drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional configuration URL
             **kwargs: Additional keyword arguments
@@ -100,7 +100,7 @@ class OntologySimulationAgent(TickableAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
@@ -160,7 +160,7 @@ class OntologySimulationAgent(TickableAgent):
                 logger.warning("No hydros_objects_modeling_url configured")
 
             # Update agent status to ACTIVE
-            object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+            object.__setattr__(self, 'agent_status', AgentBizStatus.ACTIVE)
 
             # Register with state manager
             self.state_manager.init_task(self.context, [self])
@@ -208,7 +208,7 @@ class OntologySimulationAgent(TickableAgent):
         Default implementation does nothing.
         """
         logger.info("Initializing ontology model...")
-        # TODO: Load ontology rules, constraints, etc.
+        # TODO：加载本体规则、约束等内容。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -267,7 +267,7 @@ class OntologySimulationAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO: Update ontology model state
+            # TODO：更新本体模型状态
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
@@ -326,3 +326,12 @@ class OntologySimulationAgent(TickableAgent):
                 source_agent_instance=self,
                 broadcast=False
             )
+
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Returns:
+            MQTT topic string for ontology simulation metrics
+        """
+        return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"

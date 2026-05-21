@@ -58,7 +58,7 @@ cd examples/agents/ontology
 python ontology_agent.py
 
 cd examples/agents/outflowplan
-python outflow_plan_agent.py
+python pump_outflow_plan_agent.py
 ```
 
 ## Architecture

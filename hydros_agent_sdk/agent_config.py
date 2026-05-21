@@ -19,7 +19,9 @@ Example usage:
 """
 
 import logging
+from datetime import date, datetime
 from typing import Optional, Any, Dict
+from pydantic import ConfigDict, field_validator
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -30,6 +32,7 @@ except ImportError:
     yaml = None
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
+from hydros_agent_sdk.utils.yaml_loader import fetch_url_text
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +64,11 @@ class OutputConfig(HydroBaseModel):
 
 class AgentProperties(HydroBaseModel):
     """Agent properties containing business logic configuration."""
+    model_config = ConfigDict(extra='allow')
+
     driven_by_coordinator: Optional[bool] = None
     hydro_environment_type: Optional[str] = None
     hydros_objects_modeling_url: Optional[str] = None
-
-
-    # Allow additional properties not explicitly defined
-    class Config:
-        extra = "allow"
 
 
 class AgentConfiguration(HydroBaseModel):
@@ -78,16 +78,25 @@ class AgentConfiguration(HydroBaseModel):
     This model represents the full structure of an agent configuration YAML file,
     including agent metadata, waterway information, and business properties.
     """
+    model_config = ConfigDict(extra='allow')
+
     agent_code: str
     agent_type: str
     agent_name: str
     agent_configuration_url: Optional[str] = None
-    version: str
-    release_at: str
-    author: Author
-    description: str
-    waterway: Waterway
+    version: Optional[str] = None
+    release_at: Optional[str] = None
+    author: Optional[Author] = None
+    description: Optional[str] = None
+    waterway: Optional[Waterway] = None
     properties: AgentProperties
+
+    @field_validator('release_at', mode='before')
+    @classmethod
+    def normalize_release_at(cls, value: Any) -> Any:
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value
 
     def get_agent_code(self) -> str:
         """
@@ -160,33 +169,8 @@ class AgentConfigLoader:
         logger.info(f"Loading agent configuration from URL: {url}")
 
         try:
-            # Encode URL to handle non-ASCII characters (e.g., Chinese characters)
-            # Split URL into parts and encode only the path part
-            from urllib.parse import urlparse, urlunparse
-            parsed = urlparse(url)
-
-            # Encode the path component while preserving already-encoded characters
-            encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
-
-            # Reconstruct the URL with encoded path
-            encoded_url = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                encoded_path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-
-            logger.debug(f"Encoded URL: {encoded_url}")
-
-            # Create request with proper headers
-            request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.3')
-
-            with urlopen(request, timeout=timeout) as response:
-                content = response.read().decode('utf-8')
-                return AgentConfigLoader.from_yaml_string(content)
+            content = fetch_url_text(url, timeout=timeout)
+            return AgentConfigLoader.from_yaml_string(content)
         except HTTPError as e:
             logger.error(f"HTTP error loading configuration from {url}: {e.code} {e.reason}")
             raise

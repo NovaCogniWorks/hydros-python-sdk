@@ -12,6 +12,7 @@ from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.mqtt import HydrosMqttClient
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_properties import AgentProperties
+from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.agent_config import (
     AgentConfigLoader,
     AgentConfiguration,
@@ -27,6 +28,18 @@ from hydros_agent_sdk.utils import (
     SimpleChildObject,
     HydroObjectType,
     MetricsCodes,
+    generate_agent_instance_id,
+    generate_system_command_id,
+    generate_agent_command_id,
+    generate_coordination_command_id,
+    generate_alert_id,
+    generate_sim_task_id,
+    generate_hydro_event_id,
+    generate_mqtt_client_id,
+    generate_monitor_rule_id,
+    generate_data_series_id,
+    generate_sse_session_id,
+    generate_user_id,
     MqttMetrics,
     send_metrics,
     send_metrics_batch,
@@ -65,10 +78,7 @@ from hydros_agent_sdk.agents import (
 )
 
 # Import factory and multi-agent support
-from hydros_agent_sdk.factory import (
-    generate_agent_instance_id,
-    HydroAgentFactory,
-)
+from hydros_agent_sdk.factory import HydroAgentFactory
 from hydros_agent_sdk.multi_agent import (
     MultiAgentCallback,
 )
@@ -99,6 +109,48 @@ from hydros_agent_sdk.error_handling import (
     AgentErrorContext,
     validate_request,
 )
+from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.protocol.system_commands import (
+    HydroCommandLogReportRequest,
+    SystemCmd,
+    SystemCommand,
+    SystemCommandRequest,
+    SystemCommandResponse,
+)
+from hydros_agent_sdk.agent_commands import (
+    HydroCmd as AgentHydroCmd,
+    AgentCommand,
+    AgentCommandRequest,
+    AgentCommandResponse,
+    AgentCommandTypes,
+    ALL_AGENT_COMMAND_TYPES,
+    DisturbanceNodeWaterFlowRequest,
+    DisturbanceNodeWaterFlowResponse,
+    HydroCommandReceivedAckReply,
+    HydroDirectGateOpeningRequest,
+    HydroDirectGateOpeningResponse,
+    HydroEventReportRequest,
+    HydroEventReportResponse,
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
+    HydroTargetWaterLevelRequest,
+    HydroTargetWaterLevelResponse,
+    build_ack_reply,
+    DeviceValueTypeEnum,
+    AgentCommandLogOperations,
+    AgentCommandLogSnapshot,
+    AgentCommandLogStats,
+    AgentCommandEnvelope,
+    AgentCommandHandler,
+    AgentCommandHandlerRegistry,
+    AgentCommandLogEntry,
+    AgentCommandLogStore,
+    SqliteAgentCommandLogStore,
+    AgentCommandQueueService,
+    AgentCommandRuntime,
+    AgentCommandClient,
+    HydroCommandLogReportScheduler,
+)
 
 __version__ = "0.1.3"
 
@@ -107,6 +159,7 @@ __all__ = [
     "SimCoordinationClient",
     "SimCoordinationCallback",
     "BaseHydroAgent",
+    "HydrosTopics",
 
     # State management
     "AgentStateManager",
@@ -136,6 +189,17 @@ __all__ = [
 
     # Factory and multi-agent support
     "generate_agent_instance_id",
+    "generate_system_command_id",
+    "generate_agent_command_id",
+    "generate_coordination_command_id",
+    "generate_alert_id",
+    "generate_sim_task_id",
+    "generate_hydro_event_id",
+    "generate_mqtt_client_id",
+    "generate_monitor_rule_id",
+    "generate_data_series_id",
+    "generate_sse_session_id",
+    "generate_user_id",
     "HydroAgentFactory",
     "MultiAgentCallback",
 
@@ -147,6 +211,48 @@ __all__ = [
     "safe_execute",
     "AgentErrorContext",
     "validate_request",
+
+    # System commands
+    "SystemCmd",
+    "SystemCommand",
+    "SystemCommandRequest",
+    "SystemCommandResponse",
+    "CommandLogDTO",
+    "HydroCommandLogReportRequest",
+
+    # Agent command runtime
+    "AgentHydroCmd",
+    "AgentCommand",
+    "AgentCommandRequest",
+    "AgentCommandResponse",
+    "AgentCommandTypes",
+    "ALL_AGENT_COMMAND_TYPES",
+    "DisturbanceNodeWaterFlowRequest",
+    "DisturbanceNodeWaterFlowResponse",
+    "HydroCommandReceivedAckReply",
+    "HydroDirectGateOpeningRequest",
+    "HydroDirectGateOpeningResponse",
+    "HydroEventReportRequest",
+    "HydroEventReportResponse",
+    "HydroStationTargetValueRequest",
+    "HydroStationTargetValueResponse",
+    "HydroTargetWaterLevelRequest",
+    "HydroTargetWaterLevelResponse",
+    "build_ack_reply",
+    "DeviceValueTypeEnum",
+    "AgentCommandLogOperations",
+    "AgentCommandLogSnapshot",
+    "AgentCommandLogStats",
+    "AgentCommandEnvelope",
+    "AgentCommandHandler",
+    "AgentCommandHandlerRegistry",
+    "AgentCommandLogEntry",
+    "AgentCommandLogStore",
+    "SqliteAgentCommandLogStore",
+    "AgentCommandQueueService",
+    "AgentCommandRuntime",
+    "AgentCommandClient",
+    "HydroCommandLogReportScheduler",
 
     # Utility classes
     "HydroObjectUtilsV2",

@@ -93,20 +93,21 @@ def handle_agent_errors(
 
                 # Create error response
                 try:
+                    # Pre-populate required fields for specific response types to pass Pydantic validation
+                    extra_fields = {}
+                    if func.__name__ == "on_init" or response_class.__name__ == "SimTaskInitResponse":
+                        extra_fields["created_agent_instances"] = []
+                        extra_fields["managed_top_objects"] = {}
+
                     response = response_class(
-                        command_id=getattr(request, 'command_id', 'UNKNOWN'),
-                        context=getattr(request, 'context', getattr(self, 'context', None)),
+                        command_id=getattr(request, "command_id", "UNKNOWN"),
+                        context=getattr(request, "context", getattr(self, "context", None)),
                         command_status=CommandStatus.FAILED,
                         error_code=error_code.code,
                         error_message=error_message,
                         source_agent_instance=self,
+                        **extra_fields
                     )
-
-                    # Add response-specific fields
-                    if hasattr(response, 'created_agent_instances'):
-                        response.created_agent_instances = []
-                    if hasattr(response, 'managed_top_objects'):
-                        response.managed_top_objects = {}
 
                     return response
 

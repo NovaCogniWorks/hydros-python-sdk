@@ -72,7 +72,7 @@ class TickableAgent(BaseHydroAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentBizStatus = AgentBizStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -89,7 +89,7 @@ class TickableAgent(BaseHydroAgent):
             context: Simulation context
             hydros_cluster_id: Cluster ID
             hydros_node_id: Node ID
-            agent_biz_status: Initial business status
+            agent_status: Initial business status
             drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional configuration URL
             **kwargs: Additional keyword arguments
@@ -103,7 +103,7 @@ class TickableAgent(BaseHydroAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
@@ -351,13 +351,26 @@ class TickableAgent(BaseHydroAgent):
         """
         from hydros_agent_sdk.utils.mqtt_metrics import send_metrics_batch
 
-        metrics_topic = f"{self.sim_coordination_client.topic}/metrics"
+        metrics_topic = self.get_metrics_topic()
         send_metrics_batch(
             mqtt_client=self.sim_coordination_client.mqtt_client,
             topic=metrics_topic,
             metrics_list=metrics_list,
             qos=0
         )
+
+    @abstractmethod
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Subclasses must implement this method to define their specific metrics topic.
+        The topic format should be: /hydros/simulation/jobs/{biz_scene_instance_id}/{agent_type}/objects
+
+        Returns:
+            MQTT topic string for metrics
+        """
+        pass
 
     @property
     def current_step(self) -> int:

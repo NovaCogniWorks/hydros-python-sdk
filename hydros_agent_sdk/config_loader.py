@@ -12,6 +12,16 @@ from configparser import ConfigParser
 
 logger = logging.getLogger(__name__)
 
+ENV_OVERRIDE_MAP = {
+    'MQTT_BROKER_URL': 'mqtt_broker_url',
+    'MQTT_BROKER_PORT': 'mqtt_broker_port',
+    'MQTT_TOPIC': 'mqtt_topic',
+    'MQTT_USERNAME': 'mqtt_username',
+    'MQTT_PASSWORD': 'mqtt_password',
+    'HYDROS_CLUSTER_ID': 'hydros_cluster_id',
+    'HYDROS_NODE_ID': 'hydros_node_id',
+}
+
 
 def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     """
@@ -30,20 +40,24 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
         FileNotFoundError: If env.properties file does not exist
         ValueError: If required properties are missing
     """
-    # Determine the env.properties path
-    # Always use the shared env.properties in examples directory
+    # 解析 env.properties 路径：
+    # 1. 如果调用方显式传入了相对路径，优先按当前工作目录解析
+    # 2. 只有在使用默认值且当前目录找不到时，才回退到 examples/env.properties
     if not os.path.isabs(env_file):
-        # Get the examples directory
-        # This file is in hydros_agent_sdk, so we need to find examples directory
-        current_file = os.path.abspath(__file__)
-        sdk_dir = os.path.dirname(current_file)
-        project_root = os.path.dirname(sdk_dir)
-        examples_dir = os.path.join(project_root, "examples")
-        shared_env_file = os.path.join(examples_dir, "env.properties")
+        requested_env_file = os.path.abspath(env_file)
+        if os.path.exists(requested_env_file):
+            env_file = requested_env_file
+        else:
+            current_file = os.path.abspath(__file__)
+            sdk_dir = os.path.dirname(current_file)
+            project_root = os.path.dirname(sdk_dir)
+            examples_dir = os.path.join(project_root, "examples")
+            shared_env_file = os.path.join(examples_dir, "env.properties")
 
-        # Use shared config if it exists
-        if os.path.exists(shared_env_file):
-            env_file = shared_env_file
+            if env_file == "./env.properties" and os.path.exists(shared_env_file):
+                env_file = shared_env_file
+            else:
+                env_file = requested_env_file
 
     # Check if file exists
     if not os.path.exists(env_file):
@@ -56,6 +70,16 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
 
     # Load properties
     config = load_properties_file(env_file)
+
+    # Apply environment variable overrides before auto-generating mqtt_topic.
+    overridden_keys = []
+    for env_name, config_key in ENV_OVERRIDE_MAP.items():
+        env_value = os.getenv(env_name)
+        if env_value:
+            config[config_key] = env_value
+            overridden_keys.append(config_key)
+    if overridden_keys:
+        logger.info(f"Applied env overrides for: {', '.join(sorted(overridden_keys))}")
 
     # Auto-generate mqtt_topic from hydros_cluster_id if not provided
     if 'mqtt_topic' not in config or not config['mqtt_topic']:
@@ -111,7 +135,7 @@ def load_properties_file(file_path: str) -> Dict[str, str]:
     config = ConfigParser()
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             config_string = '[DEFAULT]\n' + f.read()
         config.read_string(config_string)
 
@@ -149,7 +173,7 @@ def load_agent_config(config_file: str) -> Dict[str, str]:
 
     try:
         # Read properties file
-        with open(config_file, 'r') as f:
+        with open(config_file, 'r', encoding='utf-8') as f:
             config_string = '[DEFAULT]\n' + f.read()
         config.read_string(config_string)
 

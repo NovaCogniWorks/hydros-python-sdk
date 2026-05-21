@@ -1,6 +1,7 @@
 from __future__ import annotations
+from datetime import datetime
 from typing import List, Optional, Any, Literal, Union
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from .models import SimulationContext, ObjectTimeSeries
 from .base import HydroBaseModel
 
@@ -14,17 +15,43 @@ class BaseHydroEvent(HydroBaseModel):
     hydro_event_source_type: Optional[str] = None
     hydro_event_source: Optional[str] = None
     hydro_event_description: Optional[str] = None
+    time_series_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("time_series_url", "event_content_url")
+    )
+    direct_load_time_series: Optional[bool] = None
+    auto_hydro_event_enable: Optional[bool] = None
+    priority: Optional[str] = None
+    valid: Optional[bool] = None
+    hydro_environment_type: Optional[str] = None
 
 class HydroEvent(BaseHydroEvent):
     pass
 
 class TimeSeriesDataChangedEvent(HydroEvent):
-    hydro_event_type: Literal["TIME_SERIES_DATA_UPDATED"] = "TIME_SERIES_DATA_UPDATED"
+    hydro_event_type: Union[
+        Literal["TIME_SERIES_DATA_UPDATED"],
+        Literal["TimeSeriesDataChangedEvent"],
+        Literal["WATER_USE"],
+        Literal["WEATHER_FORECAST"],
+        Literal["WEATHER_FOR_CAST"],
+        Literal["DEVICE_STATUS_CHANGE"],
+    ] = "TIME_SERIES_DATA_UPDATED"
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
+
+class OutflowTimeSeriesDataChangedEvent(HydroEvent):
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES_DATA_UPDATED"] = "OUTFLOW_TIME_SERIES_DATA_UPDATED"
+    object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
+
+class OutflowTimeSeriesEvent(HydroEvent):
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
+    event_content_url: str
+    priority: Optional[str] = None
 
 # Union for polymorphic events if needed later
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
+    OutflowTimeSeriesEvent,
     # Add generic HydroEvent as fallback?
     HydroEvent
 ]

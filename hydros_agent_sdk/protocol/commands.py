@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import Field, Discriminator
+from pydantic import Field, AliasChoices
 from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
 from .base import HydroBaseModel
 
@@ -12,13 +12,19 @@ SIMCMD_TASK_TERMINATE_RESPONSE = "task_terminate_response"
 SIMCMD_TICK_CMD_REQUEST = "tick_cmd_request"
 SIMCMD_TICK_CMD_RESPONSE = "tick_cmd_response"
 SIMCMD_TIME_SERIES_CALCULATION_REQUEST = "calculation_request"
+SIMCMD_DEVICE_STATUS_CHANGE_REQUEST = "device_status_change_request"
 SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "calculation_response"
+SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
+SIMCMD_DEVICE_STATUS_CHAGNE_RESPONSE = "device_status_chagne_response"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "time_series_data_update_request"
 SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
+SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE = "outflow_time_series_response"
+SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_update_request"
+SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
 
 class HydroCmd(HydroBaseModel):
     command_id: str
@@ -48,8 +54,8 @@ class SimTaskInitRequest(SimCoordinationRequest):
 
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
-    created_agent_instances: List[HydroAgentInstance]
-    managed_top_objects: Dict[str, List[TopHydroObject]]
+    created_agent_instances: List[HydroAgentInstance] = Field(default_factory=list)
+    managed_top_objects: Dict[str, List[TopHydroObject]] = Field(default_factory=dict)
 
 class SimTaskTerminateRequest(SimCoordinationRequest):
     command_type: Literal["task_terminate_request"] = SIMCMD_TASK_TERMINATE_REQUEST
@@ -67,17 +73,25 @@ class TickCmdResponse(SimCoordinationResponse):
 
 # --- Time Series Commands ---
 
-from .events import HydroEvent, TimeSeriesDataChangedEvent
+from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEvent, OutflowTimeSeriesDataChangedEvent
 from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
-    command_type: Literal["calculation_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
+    command_type: Literal["calculation_request", "device_status_change_request"] = SIMCMD_TIME_SERIES_CALCULATION_REQUEST
     target_agent_instance: HydroAgentInstance
-    hydro_event: HydroEvent
+    hydro_event: HydroEvent = Field(
+        validation_alias=AliasChoices("hydro_event", "device_status_change_event")
+    )
 
 class TimeSeriesCalculationResponse(SimCoordinationResponse):
-    command_type: Literal["calculation_response"] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
-    hydro_event: HydroEvent
+    command_type: Literal[
+        "calculation_response",
+        "device_status_change_response",
+        "device_status_chagne_response",
+    ] = SIMCMD_TIME_SERIES_CALCULATION_RESPONSE
+    hydro_event: HydroEvent = Field(
+        validation_alias=AliasChoices("hydro_event", "device_status_change_event")
+    )
     object_time_series_list: List[ObjectTimeSeries]
 
 class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
@@ -90,7 +104,21 @@ class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
 class OutflowTimeSeriesRequest(SimCoordinationRequest):
     command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
     target_agent_instance: HydroAgentInstance
+    hydro_event: OutflowTimeSeriesEvent = Field(
+        validation_alias=AliasChoices("hydro_event", "outflow_time_series_event")
+    )
+
+class OutflowTimeSeriesResponse(SimCoordinationResponse):
+    command_type: Literal["outflow_time_series_response"] = SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE
     hydro_event: HydroEvent
+    outflow_time_series_map: Dict[str, List[ObjectTimeSeries]]
+
+class OutflowTimeSeriesDataUpdateRequest(SimCoordinationRequest):
+    command_type: Literal["outflow_time_series_data_update_request"] = SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
+    outflow_time_series_data_changed_event: OutflowTimeSeriesDataChangedEvent
+
+class OutflowTimeSeriesDataUpdateResponse(SimCoordinationResponse):
+    command_type: Literal["outflow_time_series_data_update_response"] = SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE
 
 # --- Report Commands ---
 
@@ -101,7 +129,7 @@ class AgentInstanceStatusReport(SimCommand):
     """
     command_type: Literal["report_agent_instance_status"] = SIMCMD_AGENT_INSTANCE_STATUS_REPORT
     source_agent_instance: HydroAgentInstance
-    created_state: str
+    created_state: Optional[str] = None
     init_result: Optional[Dict[str, Any]] = None
 
 class ParameterIdentifiedReport(SimCommand):
@@ -137,6 +165,9 @@ CommandUnion = Union[
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
     OutflowTimeSeriesRequest,
+    OutflowTimeSeriesResponse,
+    OutflowTimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateResponse,
     AgentInstanceStatusReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,

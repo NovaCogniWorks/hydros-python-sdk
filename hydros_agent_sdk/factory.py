@@ -7,12 +7,10 @@ with standardized ID generation and configuration loading.
 
 import os
 import logging
-import random
-import string
-from datetime import datetime
 from typing import Dict, Optional, Type, TypeVar, Generic, TYPE_CHECKING
 from configparser import ConfigParser
 
+from hydros_agent_sdk.utils import generate_agent_instance_id
 from hydros_agent_sdk.protocol.models import SimulationContext
 
 if TYPE_CHECKING:
@@ -22,36 +20,6 @@ logger = logging.getLogger(__name__)
 
 # Type variable for agent type (must be a BaseHydroAgent subclass)
 AgentType = TypeVar('AgentType', bound='BaseHydroAgent')
-
-
-def generate_agent_instance_id(agent_code: str) -> str:
-    """
-    Generate agent instance ID following the Java implementation pattern.
-
-    Format: AGT{yyyyMMddHHmm}{6_random_alphanumeric}_{agent_code}
-    Example: AGT202602040856HZ18NF_TWINS_SIMULATION_AGENT
-
-    This matches the Java implementation:
-    public static String generateAgentInstanceId(HydroAgent hydroAgent) {
-        String timestampStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
-        String randomLetters = RandomStringUtils.secure().nextAlphanumeric(6).toUpperCase();
-        return "AGT" + timestampStr + randomLetters + "_" + hydroAgent.getAgentCode();
-    }
-
-    Args:
-        agent_code: The agent code (e.g., "TWINS_SIMULATION_AGENT")
-
-    Returns:
-        Generated agent instance ID
-    """
-    # Generate timestamp string (yyyyMMddHHmm)
-    timestamp_str = datetime.now().strftime("%Y%m%d%H%M")
-
-    # Generate 6 random alphanumeric characters (uppercase)
-    random_letters = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
-    # Combine: AGT + timestamp + random + _ + agent_code
-    return f"AGT{timestamp_str}{random_letters}_{agent_code}"
 
 
 class HydroAgentFactory(Generic[AgentType]):

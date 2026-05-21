@@ -70,7 +70,7 @@ class TwinsSimulationAgent(TickableAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentBizStatus = AgentBizStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -87,7 +87,7 @@ class TwinsSimulationAgent(TickableAgent):
             context: Simulation context
             hydros_cluster_id: Cluster ID
             hydros_node_id: Node ID
-            agent_biz_status: Initial business status
+            agent_status: Initial business status
             drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional configuration URL
             **kwargs: Additional keyword arguments
@@ -101,7 +101,7 @@ class TwinsSimulationAgent(TickableAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
@@ -165,7 +165,7 @@ class TwinsSimulationAgent(TickableAgent):
                 logger.warning("No hydros_objects_modeling_url configured")
 
             # Update agent status to ACTIVE
-            object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+            object.__setattr__(self, 'agent_status', AgentBizStatus.ACTIVE)
 
             # Register with state manager
             self.state_manager.init_task(self.context, [self])
@@ -214,7 +214,7 @@ class TwinsSimulationAgent(TickableAgent):
         Default implementation does nothing.
         """
         logger.info("Initializing digital twins model...")
-        # TODO: Initialize hydraulic solver, state estimator, etc.
+        # TODO：初始化水力求解器、状态估计器等组件。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -296,7 +296,7 @@ class TwinsSimulationAgent(TickableAgent):
             state_key = f"{time_series.object_id}_{time_series.metrics_code}"
             self._simulation_state[state_key] = time_series
 
-            # TODO: Update hydraulic solver boundary conditions
+            # TODO：更新水力求解器的边界条件
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
@@ -356,3 +356,12 @@ class TwinsSimulationAgent(TickableAgent):
                 source_agent_instance=self,
                 broadcast=False
             )
+
+    def get_metrics_topic(self) -> str:
+        """
+        Get the MQTT topic for sending metrics data.
+
+        Returns:
+            MQTT topic string for digital twins simulation metrics
+        """
+        return f"{self.hydros_cluster_id}/hydros/simulation/jobs/{self.biz_scene_instance_id}/realtime/objects"

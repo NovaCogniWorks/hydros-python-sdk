@@ -18,6 +18,7 @@ import paho.mqtt.client as mqtt
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
+from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.logging_config import (
     set_biz_scene_instance_id,
     set_biz_component,
@@ -32,22 +33,26 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
+    OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
     SimCoordinationRequest,
     SimCoordinationResponse,
     SimCommandEnvelope,
+    get_command_type,
     OutflowTimeSeriesRequest,
 
     # Command type constants
     SIMCMD_TASK_INIT_REQUEST,
     SIMCMD_TASK_INIT_RESPONSE,
+    SIMCMD_TASK_TERMINATE_RESPONSE,
     SIMCMD_TICK_CMD_REQUEST,
     SIMCMD_TASK_TERMINATE_REQUEST,
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
+    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
+    SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
 )
 from hydros_agent_sdk.error_codes import ErrorCodes
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
@@ -55,6 +60,49 @@ from hydros_agent_sdk.runtime import ResponseFactory
 import json
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_SIM_COMMAND_TYPES = {
+    "task_init_request",
+    "task_init_response",
+    "task_terminate_request",
+    "task_terminate_response",
+    "tick_cmd_request",
+    "tick_cmd_response",
+    "calculation_request",
+    "device_status_change_request",
+    "calculation_response",
+    "device_status_change_response",
+    "device_status_chagne_response",
+    "time_series_data_update_request",
+    "time_series_data_update_response",
+    "outflow_time_series_request",
+    "outflow_time_series_response",
+    "outflow_time_series_data_update_request",
+    "outflow_time_series_data_update_response",
+    "report_agent_instance_status",
+    "identified_params_report",
+    "report_hydro_alert",
+}
+
+
+def _create_mqtt_client(client_id: str) -> mqtt.Client:
+    """Create a paho client compatible with both 1.x and 2.x."""
+    callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
+    if callback_api_version is not None:
+        return mqtt.Client(
+            callback_api_version=callback_api_version.VERSION2,
+            client_id=client_id,
+            protocol=mqtt.MQTTv311,
+        )
+    return mqtt.Client(
+        client_id=client_id,
+        protocol=mqtt.MQTTv311,
+    )
+
+
+def _reason_code_value(reason_code) -> int:
+    """Normalize paho reason code objects and legacy integer rc values."""
+    return getattr(reason_code, "value", reason_code)
 
 
 class SimCoordinationClient:
@@ -101,8 +149,9 @@ class SimCoordinationClient:
         self,
         broker_url: str,
         broker_port: int,
-        topic: str,
-        sim_coordination_callback: SimCoordinationCallback,
+        topic: Optional[str] = None,
+        hydros_cluster_id: Optional[str] = None,
+        sim_coordination_callback: Optional[SimCoordinationCallback] = None,
         state_manager: Optional[AgentStateManager] = None,
         qos: int = 1,
         max_retry_count: int = 5,
@@ -117,8 +166,8 @@ class SimCoordinationClient:
             broker_url: MQTT broker URL (e.g., "tcp://192.168.1.24")
             broker_port: MQTT broker port (default: 1883)
             topic: MQTT topic to subscribe to
-            callback: SimCoordinationCallback implementation
-            client_id: Optional MQTT client ID (auto-generated if not provided)
+            hydros_cluster_id: Optional cluster ID used to derive the coordination topic
+            sim_coordination_callback: SimCoordinationCallback implementation
             state_manager: Optional state manager (created if not provided)
             qos: MQTT QoS level (default: 1)
             max_retry_count: Maximum retry count for sending messages (default: 5)
@@ -128,7 +177,14 @@ class SimCoordinationClient:
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
-        self.topic = topic
+        if topic:
+            self.topic = topic
+        elif hydros_cluster_id:
+            self.topic = HydrosTopics.get_coordination_command_topic(hydros_cluster_id)
+        else:
+            raise ValueError("topic 和 hydros_cluster_id 不能同时为空")
+        if sim_coordination_callback is None:
+            raise ValueError("sim_coordination_callback is required")
         self.sim_coordination_callback = sim_coordination_callback
         self.qos = qos
         self.max_retry_count = max_retry_count
@@ -146,7 +202,7 @@ class SimCoordinationClient:
         self.message_filter = MessageFilter(self.state_manager)
 
         # Initialize MQTT client
-        self.mqtt_client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311)
+        self.mqtt_client = _create_mqtt_client(self.client_id)
         self.mqtt_client.on_connect = self._on_connect
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.on_disconnect = self._on_disconnect
@@ -186,7 +242,8 @@ class SimCoordinationClient:
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
-            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request
+            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
+            SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
         }
         logger.info(f"Registered {len(self.handlers)} command handlers")
 
@@ -259,7 +316,7 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # Use Pydantic's model_dump() to properly serialize nested models
-        logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
+        # logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
 
     def send_command(self, command: SimCommand):
         """
@@ -274,8 +331,9 @@ class SimCoordinationClient:
     # MQTT Callbacks
     # ========================================================================
 
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         """MQTT connection callback. Also handles auto-reconnect re-subscription."""
+        rc = _reason_code_value(reason_code)
         if rc == 0:
             was_connected = self.connected.is_set()
             if was_connected:
@@ -297,8 +355,11 @@ class SimCoordinationClient:
             reason = rc_reasons.get(rc, "unknown")
             logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
-    def _on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
         """MQTT disconnection callback."""
+        if properties is None and reason_code == 0 and isinstance(disconnect_flags, int):
+            reason_code = disconnect_flags
+        rc = _reason_code_value(reason_code)
         self.connected.clear()
         if rc == 0 or self._intentional_disconnect:
             logger.info("Disconnected from MQTT broker (clean)")
@@ -319,6 +380,13 @@ class SimCoordinationClient:
 
             # Parse JSON
             data = json.loads(payload_str)
+            self._log_raw_event_fields(data)
+            command_type = get_command_type(data)
+            if command_type not in SUPPORTED_SIM_COMMAND_TYPES:
+                logger.warning("Ignoring unsupported sim command type: %s", command_type)
+                return
+            if self._should_ignore_raw_command(data):
+                return
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
 
@@ -332,6 +400,72 @@ class SimCoordinationClient:
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
+
+    def _should_ignore_raw_command(self, data: Dict) -> bool:
+        """Ignore coordination messages for agent types not hosted in this process."""
+        if not isinstance(data, dict):
+            return False
+
+        command_type = data.get("command_type")
+        if command_type != SIMCMD_TASK_INIT_RESPONSE:
+            return False
+
+        callback = self.sim_coordination_callback
+        local_agent_codes = set(getattr(callback, "agent_factories", {}).keys())
+        if not local_agent_codes:
+            return False
+
+        source_agent = data.get("source_agent_instance")
+        if not isinstance(source_agent, dict):
+            return False
+
+        source_agent_code = source_agent.get("agent_code")
+        if source_agent_code in local_agent_codes:
+            return False
+
+        logger.info(
+            "Ignoring task_init_response for non-local agent: agent_code=%s, local_agent_codes=%s, command_id=%s",
+            source_agent_code,
+            sorted(local_agent_codes),
+            data.get("command_id"),
+        )
+        return True
+
+    def _log_raw_event_fields(self, data: Dict) -> None:
+        """打印时间序列类消息的原始事件字段，便于排查字段丢失问题。"""
+        if not isinstance(data, dict):
+            return
+
+        command_type = data.get("command_type")
+        event_key = None
+        if command_type == SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST:
+            event_key = "time_series_data_changed_event"
+        elif command_type == SIMCMD_TIME_SERIES_CALCULATION_REQUEST:
+            event_key = "hydro_event"
+
+        if not event_key:
+            return
+
+        raw_event = data.get(event_key)
+        if not isinstance(raw_event, dict):
+            logger.info(
+                "原始事件字段检查：command_type=%s，event_key=%s，raw_event_type=%s",
+                command_type,
+                event_key,
+                type(raw_event).__name__,
+            )
+            return
+
+        raw_keys = sorted(raw_event.keys())
+        logger.info(
+            "原始事件字段检查：command_type=%s，event_key=%s，keys=%s，time_series_url=%s，event_content_url=%s，direct_load_time_series=%s",
+            command_type,
+            event_key,
+            raw_keys,
+            raw_event.get("time_series_url"),
+            raw_event.get("event_content_url"),
+            raw_event.get("direct_load_time_series"),
+        )
 
     # ========================================================================
     # Message Handling
@@ -533,6 +667,12 @@ class SimCoordinationClient:
         assert isinstance(request, TimeSeriesDataUpdateRequest)
         return self.sim_coordination_callback.on_time_series_data_update(request)
 
+    def _handle_outflow_time_series_data_update(self, command: SimCommand):
+        """Handle outflow time series data update."""
+        request = command
+        assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
+        self.sim_coordination_callback.on_outflow_time_series_data_update(request)
+
     def _handle_time_series_calculation(self, command: SimCommand):
         """Handle time series calculation."""
         request = command
@@ -627,6 +767,8 @@ class SimCoordinationClient:
             try:
                 # Serialize command
                 payload = command.model_dump_json(by_alias=True)
+                if command.command_type in {SIMCMD_TASK_INIT_RESPONSE, SIMCMD_TASK_TERMINATE_RESPONSE}:
+                    logger.info("Outgoing %s payload: %s", command.command_type, payload)
 
                 # Publish to MQTT
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)

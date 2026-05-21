@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import Field, ConfigDict
+from pydantic import Field, ConfigDict, AliasChoices
 from .base import HydroBaseModel
 
 class AgentBizStatus(str, Enum):
@@ -76,10 +76,17 @@ class HydroAgentInstance(HydroAgent):
     """
     agent_id: str
     biz_scene_instance_id: str
-    hydros_cluster_id: str
-    hydros_node_id: str
+    hydros_cluster_id: str = Field(
+        validation_alias=AliasChoices("hydros_cluster_id", "hydrosClusterId"),
+        serialization_alias="hydrosClusterId",
+    )
+    hydros_node_id: str = Field(
+        validation_alias=AliasChoices("hydros_node_id", "hydrosNodeId"),
+        serialization_alias="hydrosNodeId",
+    )
     context: SimulationContext
-    agent_biz_status: AgentBizStatus
+    agent_instance_status: Optional[str] = None
+    agent_status: AgentBizStatus = Field()
     drive_mode: AgentDriveMode
 
 class TopHydroObject(HydroBaseModel):

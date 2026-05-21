@@ -54,3 +54,4 @@ Thumbs.db
 # Project specific
 *.bak
 *.tmp
+/data/agent_data.db
