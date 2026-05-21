@@ -25,6 +25,7 @@ sys.path.insert(0, PROJECT_ROOT)
 # 添加 examples 目录到 Python 路径
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, EXAMPLES_DIR)
+ENV_FILE = os.path.join(EXAMPLES_DIR, "env.properties")
 
 from hydros_agent_sdk import (
     setup_logging,
@@ -49,7 +50,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # Load env config to get cluster_id and node_id for logging
 try:
-    env_config = load_env_config()
+    env_config = load_env_config(ENV_FILE)
     hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
     hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
 except Exception:
@@ -110,8 +111,10 @@ def find_agent_class(agent_dir: str) -> Optional[type]:
         找到的 Agent 类，如果没找到返回 None
     """
     # 扫描目录下的所有 Python 文件
-    py_files = [f for f in os.listdir(agent_dir)
-                if f.endswith('.py') and not f.startswith('__')]
+    py_files = [
+        f for f in os.listdir(agent_dir)
+        if f.endswith('.py') and not f.startswith('__') and not f.startswith('test_')
+    ]
 
     if not py_files:
         logger.warning(f"No Python files found in {agent_dir}")
@@ -378,8 +381,8 @@ class MultiAgentCoordinator:
 
                 # 加载环境配置（所有 agent 共享，只加载一次）
                 if env_config is None:
-                    # 使用共享的 env.properties（在 examples 目录下）
-                    env_config = load_env_config()
+                    # 使用当前 launcher 目录下的 env.properties
+                    env_config = load_env_config(ENV_FILE)
                     logger.info(f"  Cluster ID: {env_config['hydros_cluster_id']}")
                     logger.info(f"  Node ID: {env_config['hydros_node_id']}")
 
