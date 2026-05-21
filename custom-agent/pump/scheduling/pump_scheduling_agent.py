@@ -447,16 +447,20 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.local_controller import StationControlContext
         import pandas as pd
         
+        from odd_dmpc.environment import _level_keys, _ordered_station_ids
+        level_keys = _level_keys(self.system_config)
+        station_ids = _ordered_station_ids(self.system_config)
+
         station_back_levels = {s.id: s.current_up for s in self.stations}
         station_front_levels = {s.id: s.current_down for s in self.stations}
         station_heads = {s.id: s.current_up - s.current_down for s in self.stations}
         
-        basin_levels = {
-            "b0": station_front_levels[1],
-            "b1": station_back_levels[1],
-            "b2": station_back_levels[2],
-            "b3": station_back_levels[3]
-        }
+        basin_levels = {}
+        if station_ids and level_keys:
+            basin_levels[level_keys[0]] = station_front_levels.get(station_ids[0], 0.0)
+            for i, sid in enumerate(station_ids):
+                if i + 1 < len(level_keys):
+                    basin_levels[level_keys[i + 1]] = station_back_levels.get(sid, 0.0)
         
         station_flows = {
             s.id: (self.station_flow_history[s.id][-1] if self.station_flow_history[s.id] else 0.0)
@@ -464,7 +468,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         }
         
         pool_areas = {p.id: p.area for p in self.pools}
-        pool_levels = {p.id: basin_levels[f"b{p.id}"] for p in self.pools}
+        pool_levels = {}
+        if self.system_config.pool_ids:
+            for i, pool_id in enumerate(self.system_config.pool_ids):
+                if i + 1 < len(level_keys):
+                    pool_levels[pool_id] = basin_levels.get(level_keys[i + 1], 0.0)
+                    
+        anchor_basin_levels = {}
+        if level_keys:
+            anchor_basin_levels[level_keys[0]] = basin_levels.get(level_keys[0], 0.0)
+            anchor_basin_levels[level_keys[-1]] = basin_levels.get(level_keys[-1], 0.0)
         
         observation = EnvironmentObservation(
             time_index=step,
@@ -473,7 +486,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             basin_volumes={},
             pool_areas=pool_areas,
             basin_profiles=None,
-            anchor_basin_levels={"b0": basin_levels["b0"], "b3": basin_levels["b3"]},
+            anchor_basin_levels=anchor_basin_levels,
             boundary_nominal_flows={},
             station_back_levels=station_back_levels,
             station_front_levels=station_front_levels,
@@ -512,7 +525,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         )
         
         # Boundary plan
-        boundary_levels_dict = {"upstream": basin_levels["b0"], "downstream": basin_levels["b3"]}
+        boundary_levels_dict = {}
+        for node in self.system_config.topology.boundary_nodes:
+            key = str(node.mpc_key or node.id or node.hydro_node)
+            if node.mpc_key and node.mpc_key in basin_levels:
+                boundary_levels_dict[node.id] = basin_levels[node.mpc_key]
+            else:
+                boundary_levels_dict[node.id] = basin_levels.get(key, 0.0)
+        
+        if not boundary_levels_dict and level_keys:
+            boundary_levels_dict["upstream"] = basin_levels.get(level_keys[0], 0.0)
+            boundary_levels_dict["downstream"] = basin_levels.get(level_keys[-1], 0.0)
+            
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
         self.upper_scheduler.boundary_level_plan = boundary_level_plan
