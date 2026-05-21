@@ -4,6 +4,7 @@ set -euo pipefail
 export DOCKER_HOST="${DOCKER_HOST:-tcp://prod.hydros.yuma.intra:2375}"
 VERSION="${VERSION:-v1.0.0}"
 
+BASE_IMAGE="${BASE_IMAGE:-python:3.11-slim}"
 IMAGE_NAME="${IMAGE_NAME:-hydros-pump-agent}"
 CONTAINER_NAME="${CONTAINER_NAME:-hydros-pump-agent}"
 HYDROS_NODE_ID="${HYDROS_NODE_ID:-docker-edge}"
@@ -21,8 +22,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PUMP_DIR="${REPO_ROOT}/custom-agent/pump"
 
+echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
 docker build \
     -f "${PUMP_DIR}/Dockerfile" \
+    --build-arg BASE_IMAGE="${BASE_IMAGE}" \
     -t "${IMAGE_NAME}:${VERSION}" \
     "${REPO_ROOT}"
 

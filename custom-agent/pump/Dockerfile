@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+ARG BASE_IMAGE=python:3.11-slim
+FROM ${BASE_IMAGE}
 
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PIP_EXTRA_INDEX_URL=
