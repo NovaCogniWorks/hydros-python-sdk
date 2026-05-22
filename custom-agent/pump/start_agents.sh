@@ -40,17 +40,16 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  outflowplan         Power Agent"
-    echo "  pump                Pump Agent"
+    echo "  outflowplan         Pump Outflow Plan Agent"
     echo "  scheduling          Scheduling Agent"
     echo ""
     echo "示例:"
-    echo "  $0 outflowplan               # 启动 power agent"
-    echo "  $0 outflowplan pump          # 在同一进程中启动 power 和 pump agents"
+    echo "  $0 outflowplan               # 启动出流计划智能体"
+    echo "  $0 outflowplan scheduling    # 在同一进程中启动出流计划和调度智能体"
     echo "  $0 --all                    # 启动所有 agents"
     echo "  $0 --logs                   # 查看日志"
-    echo "  $0 --debug outflowplan       # 启用调试模式启动 power agent"
-    echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
+    echo "  $0 --debug outflowplan       # 启用调试模式启动出流计划智能体"
+    echo "  $0 -d outflowplan scheduling # 启用调试模式启动多个 agents"
     echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
     echo ""
     echo "调试模式:"
@@ -73,19 +72,14 @@ list_agents() {
     echo -e "${GREEN}可用的 Agents:${NC}"
     echo ""
 
-    if [ -f "${SCRIPT_DIR}/outflowplan/power_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Power Agent"
-        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_agent.py"
+    if [ -f "${SCRIPT_DIR}/outflowplan/pump_outflow_plan_agent.py" ]; then
+        echo -e "  ${BLUE}outflowplan${NC} - Pump Outflow Plan Agent"
+        echo "                 路径: ${SCRIPT_DIR}/outflowplan/pump_outflow_plan_agent.py"
     fi
 
-    if [ -f "${SCRIPT_DIR}/pump/outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}pump${NC}       - Pump Agent"
-        echo "                 路径: ${SCRIPT_DIR}/pump/outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/scheduling/scheduling_agent.py" ]; then
+    if [ -f "${SCRIPT_DIR}/scheduling/pump_scheduling_agent.py" ]; then
         echo -e "  ${BLUE}scheduling${NC} - Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/scheduling/scheduling_agent.py"
+        echo "                 路径: ${SCRIPT_DIR}/scheduling/pump_scheduling_agent.py"
     fi
 
     echo ""

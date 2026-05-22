@@ -40,4 +40,4 @@ RUN mkdir -p /opt/hydros/custom-agent/pump/logs
 
 EXPOSE 8015
 
-CMD ["bash", "./start_agents.sh", "pump"]
+CMD ["bash", "./start_agents.sh", "outflowplan", "scheduling"]

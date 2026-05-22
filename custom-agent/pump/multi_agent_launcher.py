@@ -312,7 +312,7 @@ class MultiAgentCoordinator:
             ValueError: 如果 agent 不存在或加载失败
         """
         # 兼容别名
-        if agent_name == 'power':
+        if agent_name in ('power', 'pump'):
             agent_name = 'outflowplan'
 
         # 1. 构建 agent 目录路径
