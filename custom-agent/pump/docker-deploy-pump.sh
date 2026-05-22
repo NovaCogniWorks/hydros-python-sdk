@@ -23,6 +23,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PUMP_DIR="${REPO_ROOT}/custom-agent/pump"
 
 echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
+echo "Container start args: ${START_ARGS}"
 docker build \
     -f "${PUMP_DIR}/Dockerfile" \
     --build-arg BASE_IMAGE="${BASE_IMAGE}" \
