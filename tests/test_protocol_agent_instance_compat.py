@@ -1,8 +1,13 @@
-from hydros_agent_sdk.protocol.commands import AgentInstanceStatusReport
+from hydros_agent_sdk.protocol.commands import (
+    AgentInstanceStatusReport,
+    SimCommandEnvelope,
+    SimTaskInitResponse,
+)
 from hydros_agent_sdk.protocol.models import (
     AgentDriveMode,
     AgentInstanceStatus,
     AgentStatus,
+    CommandStatus,
     HydroAgentInstance,
     SimulationContext,
 )
@@ -98,3 +103,33 @@ def test_agent_instance_status_report_uses_java_status_field():
     payload = report.model_dump(mode="json", by_alias=True)
     assert payload["agent_instance_status"] == "RUNNING"
     assert "created_state" not in payload
+
+
+def test_task_init_response_accepts_missing_managed_top_objects():
+    context = make_context()
+    agent = HydroAgentInstance(
+        agent_code="TEST_AGENT",
+        agent_type="TEST_AGENT",
+        agent_name="Test Agent",
+        agent_configuration_url="",
+        agent_id="AGT_TEST",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        cluster_id="cluster-a",
+        node_id="node-a",
+        context=context,
+        agent_status=AgentStatus.ACTIVE,
+        drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
+    )
+    payload = {
+        "command_id": "CMD_INIT",
+        "command_type": "task_init_response",
+        "context": context.model_dump(mode="json"),
+        "command_status": CommandStatus.SUCCEED.value,
+        "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+        "created_agent_instances": [agent.model_dump(mode="json", by_alias=True)],
+    }
+
+    envelope = SimCommandEnvelope(command=payload)
+
+    assert isinstance(envelope.command, SimTaskInitResponse)
+    assert envelope.command.managed_top_objects == {}

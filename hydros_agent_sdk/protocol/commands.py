@@ -61,7 +61,7 @@ class SimTaskInitRequest(SimCoordinationRequest):
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
     created_agent_instances: List[HydroAgentInstance]
-    managed_top_objects: Dict[str, List[TopHydroObject]]
+    managed_top_objects: Dict[str, List[TopHydroObject]] = Field(default_factory=dict)
 
 class SimTaskTerminateRequest(SimCoordinationRequest):
     command_type: Literal["task_terminate_request"] = SIMCMD_TASK_TERMINATE_REQUEST
