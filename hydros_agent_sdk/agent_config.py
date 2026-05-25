@@ -19,8 +19,9 @@ Example usage:
 """
 
 import logging
+from datetime import date, datetime
 from typing import Optional, Any, Dict
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -88,6 +89,15 @@ class AgentConfiguration(HydroBaseModel):
     description: Optional[str] = None
     waterway: Optional[Waterway] = None
     properties: AgentProperties
+
+    @field_validator('release_at', mode='before')
+    @classmethod
+    def normalize_release_at(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat(sep=' ')
+        if isinstance(value, date):
+            return value.isoformat()
+        return value
 
     def get_agent_code(self) -> str:
         """
