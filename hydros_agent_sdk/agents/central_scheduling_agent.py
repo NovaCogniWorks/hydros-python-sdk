@@ -626,9 +626,25 @@ class CentralSchedulingAgent(TickableAgent):
             )
             return None
 
+        sensor_data = self.list_mpc_sensor_data(mpc_task_state)
+        logger.info(
+            "MPC sensorData prepared: bizSceneInstanceId=%s, step=%s, sensorDataCount=%s",
+            self.context.biz_scene_instance_id,
+            step,
+            len(sensor_data),
+        )
+        if not sensor_data:
+            logger.warning(
+                "MPC sensorData is empty before optimization: bizSceneInstanceId=%s, "
+                "step=%s, fieldMetricsCacheSize=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                len(self._field_metrics_cache),
+            )
+
         responses = mpc_client.execute_optimization(
             mpc_task_state,
-            self.list_mpc_sensor_data(mpc_task_state),
+            sensor_data,
             sensor_provider=lambda: self.list_mpc_sensor_data(mpc_task_state),
         )
         if not responses:

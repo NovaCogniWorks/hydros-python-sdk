@@ -20,7 +20,7 @@ from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.agents.central_scheduling_agent import MpcTaskState
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
-from hydros_agent_sdk.mpc.client import MpcPlanningClient
+from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.models import (
     DeviceOpening,
     HorizonControlStep,
@@ -793,6 +793,37 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn('"success": true', log_output)
         self.assertIn("MPC optimization parsed response", log_output)
         self.assertIn('"plan_type": "OPTIMAL"', log_output)
+
+    def test_mpc_planning_client_logs_empty_sensor_data_before_request(self):
+        context = SimulationContext(biz_scene_instance_id="scene-013-empty-sensor")
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=2,
+            mpc_config_url="http://config/mpc.yaml",
+            target_and_constrain_config_url="http://config/control.yaml",
+        )
+        opener = Mock()
+        client = MpcPlanningClient(
+            base_url="http://mpc.local",
+            opener=opener,
+            require_sensor_data=True,
+            empty_sensor_retry_delay_seconds=0,
+            empty_sensor_retry_count=1,
+        )
+
+        with self.assertLogs("hydros_agent_sdk.mpc.client", level="INFO") as logs:
+            with self.assertRaises(MpcPlanningError):
+                client.execute_optimization(state, [], sensor_provider=lambda: [])
+
+        log_output = "\n".join(logs.output)
+        self.assertIn("MPC optimization sensorData before request build", log_output)
+        self.assertIn("sensorDataCount=0", log_output)
+        self.assertIn("MPC sensorData is empty before retry", log_output)
+        self.assertIn("MPC sensorData after retry", log_output)
+        self.assertIn("MPC sensorData is empty; request will not be sent", log_output)
+        opener.assert_not_called()
 
     def test_mpc_result_reporter_builds_result_report_payload(self):
         context = SimulationContext(

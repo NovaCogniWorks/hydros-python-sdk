@@ -55,9 +55,17 @@ class MpcPlanningClient:
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> List[MpcOptimizeResponse]:
+        normalized_sensor_data = self._normalize_sensor_data(sensor_data)
+        logger.info(
+            "MPC optimization sensorData before request build: bizSceneInstanceId=%s, "
+            "step=%s, sensorDataCount=%s",
+            mpc_task_state.context.biz_scene_instance_id,
+            mpc_task_state.current_step,
+            len(normalized_sensor_data),
+        )
         request_model = self.build_optimize_request(
             mpc_task_state,
-            self._normalize_sensor_data(sensor_data),
+            normalized_sensor_data,
             sensor_provider=sensor_provider,
         )
         request_payload = request_model.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -117,8 +125,24 @@ class MpcPlanningClient:
     ) -> MpcOptimizeRequest:
         normalized_sensor_data = self._normalize_sensor_data(sensor_data)
         if self.require_sensor_data and not normalized_sensor_data:
+            logger.warning(
+                "MPC sensorData is empty before retry: bizSceneInstanceId=%s, step=%s",
+                mpc_task_state.context.biz_scene_instance_id,
+                mpc_task_state.current_step,
+            )
             normalized_sensor_data = self._retry_sensor_data(sensor_provider)
+            logger.info(
+                "MPC sensorData after retry: bizSceneInstanceId=%s, step=%s, sensorDataCount=%s",
+                mpc_task_state.context.biz_scene_instance_id,
+                mpc_task_state.current_step,
+                len(normalized_sensor_data),
+            )
         if self.require_sensor_data and not normalized_sensor_data:
+            logger.error(
+                "MPC sensorData is empty; request will not be sent: bizSceneInstanceId=%s, step=%s",
+                mpc_task_state.context.biz_scene_instance_id,
+                mpc_task_state.current_step,
+            )
             raise MpcPlanningError("MPC optimization requires non-empty sensor data")
 
         targets = self.build_targets(mpc_task_state.hydro_events)
