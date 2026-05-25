@@ -320,6 +320,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         1. Extracts agent_configuration_url from request.agent_list matching this agent's agent_code
         2. Loads the YAML configuration from the URL
         3. Validates that the agent_code in YAML matches this agent's agent_code
+           or agent_type, so specialized agent codes can share a typed config
         4. Sets the properties from YAML to self.properties
 
         Args:
@@ -361,15 +362,23 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             # Load configuration from URL
             agent_config = AgentConfigLoader.from_url(agent_config_url)
 
-            # Validate agent_code matches
-            if agent_config.agent_code != self.agent_code:
+            # Validate agent_code matches. Some deployments use a specialized
+            # runtime agent_code while sharing a generic agent_type config.
+            allowed_agent_codes = {self.agent_code, self.agent_type}
+            if getattr(matching_agent, 'agent_type', None):
+                allowed_agent_codes.add(matching_agent.agent_type)
+
+            if agent_config.agent_code not in allowed_agent_codes:
                 raise ValueError(
-                    f"Agent code mismatch: expected '{self.agent_code}', "
+                    f"Agent code mismatch: expected one of {sorted(allowed_agent_codes)}, "
                     f"but YAML contains '{agent_config.agent_code}'. "
                     f"Please check the agent_configuration_url: {agent_config_url}"
                 )
 
-            logger.info(f"Agent configuration validated successfully for '{self.agent_code}'")
+            logger.info(
+                f"Agent configuration validated successfully for '{self.agent_code}' "
+                f"(YAML agent_code: '{agent_config.agent_code}')"
+            )
 
             # Set properties from YAML
             if agent_config.properties:
