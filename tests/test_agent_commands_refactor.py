@@ -623,7 +623,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(agent.mpc_task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
-    def test_central_scheduling_agent_rolls_only_after_event_activation(self):
+    def test_central_scheduling_agent_auto_starts_mpc_on_tick_and_rolls(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -651,19 +651,55 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-before", context=context, step=0))
-        self.assertEqual(agent.optimization_steps, [])
+        self.assertEqual(agent.optimization_steps, [0])
+        self.assertTrue(agent.is_mpc_optimizing_on_the_loop())
+        self.assertEqual(agent.mpc_task_state.start_step, 0)
 
         agent.on_time_series_data_update(
             build_time_series_update_request(context, command_id="ts-update-012", auto_schedule_at_step=1)
         )
-        self.assertEqual(agent.optimization_steps, [1])
+        self.assertEqual(agent.optimization_steps, [0])
+        self.assertEqual(len(agent.mpc_task_state.hydro_events), 1)
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-2", context=context, step=2))
-        self.assertEqual(agent.optimization_steps, [1])
+        self.assertEqual(agent.optimization_steps, [0])
 
-        agent.on_tick_simulation(TickCmdRequest(command_id="tick-4", context=context, step=4))
-        self.assertEqual(agent.optimization_steps, [1, 4])
+        agent.on_tick_simulation(TickCmdRequest(command_id="tick-3", context=context, step=3))
+        self.assertEqual(agent.optimization_steps, [0, 3])
         self.assertEqual(agent.mpc_task_state.current_loop, 3)
+
+    def test_central_scheduling_agent_can_disable_tick_auto_start(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-012-disabled")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-012-disabled",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+        )
+        agent.properties["auto_start_mpc_on_tick"] = False
+
+        agent.on_tick_simulation(TickCmdRequest(command_id="tick-disabled", context=context, step=0))
+
+        self.assertEqual(agent.optimization_steps, [])
+        self.assertFalse(agent.is_mpc_optimizing_on_the_loop())
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")

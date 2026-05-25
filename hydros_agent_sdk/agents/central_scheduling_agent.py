@@ -340,6 +340,10 @@ class CentralSchedulingAgent(TickableAgent):
     def get_mpc_service_base_url(self) -> Optional[str]:
         return self._get_string_property("mpc_service_base_url", self._configured_mpc_service_base_url)
 
+    def should_auto_start_mpc_on_tick(self) -> bool:
+        """Whether ticks may activate MPC before a time-series update arrives."""
+        return self._get_bool_property("auto_start_mpc_on_tick", True)
+
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
         if self._mpc_planning_client is not None:
             return self._mpc_planning_client
@@ -369,6 +373,14 @@ class CentralSchedulingAgent(TickableAgent):
         if value is None:
             return None
         return str(value)
+
+    def _get_bool_property(self, name: str, default: bool) -> bool:
+        value = self.properties.get_property(name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "yes", "1", "on")
+        return bool(value)
 
     def subscribe_to_field_metrics(self, metrics_topic: str):
         """
@@ -467,7 +479,16 @@ class CentralSchedulingAgent(TickableAgent):
             with self._time_series_update_lock:
                 self._current_step = request.step
                 if not self.is_mpc_optimizing_on_the_loop():
-                    logger.debug("MPC rolling loop has not been activated yet; skip tick optimization")
+                    if not self.should_auto_start_mpc_on_tick():
+                        logger.info(
+                            "MPC rolling loop has not been activated yet and auto-start is disabled: "
+                            "bizSceneInstanceId=%s, step=%s",
+                            self.context.biz_scene_instance_id,
+                            request.step,
+                        )
+                        return None
+
+                    self._activate_mpc_from_tick(request.step)
                     return None
 
                 mpc_task_state = self._require_mpc_task_state()
@@ -585,6 +606,34 @@ class CentralSchedulingAgent(TickableAgent):
             mpc_task_state.current_step = current_step
             mpc_task_state.total_steps = total_steps
             mpc_task_state.register_hydro_event(event)
+
+    def _activate_mpc_from_tick(self, current_step: int) -> None:
+        rolling_interval_steps = self.get_roll_steps()
+        if rolling_interval_steps <= 0:
+            raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
+
+        mpc_task_state = MpcTaskState(
+            context=self.context,
+            rolling_interval_steps=rolling_interval_steps,
+            start_step=current_step,
+            current_step=current_step,
+            total_steps=self.get_total_steps(),
+            mpc_config_url=self.get_mpc_config_url(),
+            target_and_constrain_config_url=self.get_target_and_constrain_config_url(),
+        )
+        self._mpc_task_state = mpc_task_state
+
+        logger.info(
+            "MPC rolling loop auto-started by tick: bizSceneInstanceId=%s, "
+            "startStep=%s, rollStep=%s, totalSteps=%s",
+            self.context.biz_scene_instance_id,
+            mpc_task_state.start_step,
+            mpc_task_state.rolling_interval_steps,
+            mpc_task_state.total_steps,
+        )
+        self._do_rolling_optimal(mpc_task_state)
+        self._last_optimization_step = current_step
+        object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
 
     def _require_mpc_task_state(self) -> MpcTaskState:
         if self._mpc_task_state is None:
