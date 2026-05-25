@@ -119,6 +119,7 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     response = callback.on_sim_task_init(make_init_request(context))
 
     assert isinstance(response, SimTaskInitResponse)
+    assert response.command_id == "CMD_INIT"
     assert response.command_status == CommandStatus.SUCCEED
     assert response.created_agent_instances == [instance]
     assert client.enqueued == []

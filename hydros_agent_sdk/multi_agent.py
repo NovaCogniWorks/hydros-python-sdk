@@ -251,12 +251,8 @@ class MultiAgentCallback(SimCoordinationCallback):
             # (protocol limitation - should ideally support multiple sources)
             first_agent = created_agents[0]
 
-            # Generate a unique command_id for the response
-            import uuid
-            command_id = f"RESP_{context_id}_{uuid.uuid4().hex[:8]}"
-
             response = SimTaskInitResponse(
-                command_id=command_id,
+                command_id=request.command_id,
                 context=request.context,
                 command_status=CommandStatus.SUCCEED,
                 source_agent_instance=first_agent,
