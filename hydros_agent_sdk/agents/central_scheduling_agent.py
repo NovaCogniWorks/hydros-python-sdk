@@ -298,6 +298,8 @@ class CentralSchedulingAgent(TickableAgent):
                 broker_port=self.sim_coordination_client.broker_port,
                 hydros_cluster_id=self.hydros_cluster_id,
                 state_manager=self.state_manager,
+                mqtt_username=getattr(self.sim_coordination_client, "mqtt_username", None),
+                mqtt_password=getattr(self.sim_coordination_client, "mqtt_password", None),
             )
         return self._agent_command_client
 

@@ -146,6 +146,8 @@ class SimCoordinationClient:
         self.qos = qos
         self.max_retry_count = max_retry_count
         self.base_retry_delay_ms = base_retry_delay_ms
+        self.mqtt_username = mqtt_username
+        self.mqtt_password = mqtt_password
 
         # Generate client ID
         self.client_id = f"hydros_node_{int(time.time() * 1000)}"

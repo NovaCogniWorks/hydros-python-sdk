@@ -401,6 +401,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
             mqtt_client=Mock(),
+            mqtt_username="cmd-user",
+            mqtt_password="cmd-pass",
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-004")
@@ -439,6 +441,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 broker_port=1883,
                 hydros_cluster_id="demo-cluster",
                 state_manager=state_manager,
+                mqtt_username="cmd-user",
+                mqtt_password="cmd-pass",
             )
             mock_client.start.assert_called_once()
             mock_client.send_command.assert_called_once()
