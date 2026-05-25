@@ -74,6 +74,7 @@ from hydros_agent_sdk.agents import (
     TwinsSimulationAgent,
     ModelCalculationAgent,
     CentralSchedulingAgent,
+    SystemCentralSchedulingAgent,
     OutflowPlanAgent,
 )
 
@@ -317,5 +318,6 @@ __all__ = [
     "TwinsSimulationAgent",
     "ModelCalculationAgent",
     "CentralSchedulingAgent",
+    "SystemCentralSchedulingAgent",
     "OutflowPlanAgent",
 ]

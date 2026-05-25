@@ -22,6 +22,9 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE = "CENTRAL_SCHEDULING_AGENT"
+CENTRAL_SCHEDULING_AGENT_TYPE = "CENTRAL_SCHEDULING_AGENT"
+
 
 class MultiAgentCallback(SimCoordinationCallback):
     """
@@ -51,21 +54,92 @@ class MultiAgentCallback(SimCoordinationCallback):
         """
         self.node_id = node_id
         self.agent_factories: Dict[str, Any] = {}  # {agent_code: factory}
+        self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
         self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: agent}}
         self._client: Optional[Any] = None
 
         logger.info(f"MultiAgentCallback created for node: {node_id}")
 
-    def register_agent_factory(self, agent_code: str, factory: Any):
+    def register_agent_factory(self, agent_code: str, factory: Any, agent_type: Optional[str] = None):
         """
         Register an agent factory for a specific agent_code.
 
         Args:
             agent_code: Agent code (e.g., "TWINS_SIMULATION_AGENT")
             factory: Agent factory instance (HydroAgentFactory)
+            agent_type: Optional agent type. When omitted, it is inferred from
+                the factory config where possible.
         """
         self.agent_factories[agent_code] = factory
+        self.agent_factory_types[agent_code] = agent_type or self._infer_factory_agent_type(agent_code, factory)
         logger.info(f"Registered agent factory: {agent_code}")
+
+    def _infer_factory_agent_type(self, agent_code: str, factory: Any) -> str:
+        """尽量从 factory 配置里拿 agent_type，拿不到就退回 agent_code。"""
+        for attr_name in ("agent_type", "_agent_type"):
+            agent_type = getattr(factory, attr_name, None)
+            if agent_type:
+                return str(agent_type)
+
+        config_file = getattr(factory, "config_file", None)
+        load_config = getattr(factory, "_load_config", None)
+        if config_file and callable(load_config):
+            try:
+                config = load_config(config_file)
+                agent_type = config.get("agent_type")
+                if agent_type:
+                    return str(agent_type)
+            except Exception:
+                logger.debug("Could not infer agent_type for factory %s", agent_code, exc_info=True)
+
+        return agent_code
+
+    def _is_central_scheduling_agent_def(self, agent_def: Any) -> bool:
+        agent_code = getattr(agent_def, "agent_code", None)
+        agent_type = getattr(agent_def, "agent_type", None)
+        return (
+            agent_type == CENTRAL_SCHEDULING_AGENT_TYPE
+            or agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
+        )
+
+    def _is_central_scheduling_factory(self, agent_code: str, agent_type: Optional[str]) -> bool:
+        return (
+            agent_type == CENTRAL_SCHEDULING_AGENT_TYPE
+            or agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
+            or agent_code.startswith(f"{SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE}_")
+        )
+
+    def _has_custom_central_scheduling_factory(self) -> bool:
+        for agent_code, agent_type in self.agent_factory_types.items():
+            if agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE:
+                continue
+            if self._is_central_scheduling_factory(agent_code, agent_type):
+                return True
+        return False
+
+    def _resolve_agent_factory(self, agent_def: Any):
+        """解析 task init 中某个 agent 应该使用的 factory。"""
+        agent_code = agent_def.agent_code
+
+        factory = self.agent_factories.get(agent_code)
+        if factory is not None:
+            return agent_code, factory
+
+        if not self._is_central_scheduling_agent_def(agent_def):
+            return agent_code, None
+
+        system_factory = self.agent_factories.get(SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE)
+        if system_factory is None:
+            return agent_code, None
+
+        if self._has_custom_central_scheduling_factory():
+            logger.debug(
+                "Central scheduling custom route requires exact agent_code: requested=%s",
+                agent_code,
+            )
+            return agent_code, None
+
+        return SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE, system_factory
 
     def set_client(self, client: Any):
         """Set coordination client reference."""
@@ -110,19 +184,25 @@ class MultiAgentCallback(SimCoordinationCallback):
         # Track agents created in this task
         created_agents = []
         context_agents = {}
+        routed_agent_codes = set()
 
         # Process each agent in agent_list
         for agent_def in request.agent_list:
             agent_code = agent_def.agent_code
 
-            # Check if we have a factory for this agent_code
-            factory = self.agent_factories.get(agent_code)
+            # Check if we have a factory for this agent_code or the system default central agent.
+            routed_agent_code, factory = self._resolve_agent_factory(agent_def)
 
             if factory is None:
                 logger.debug(f"  No factory registered for {agent_code}, skipping")
                 continue
 
-            logger.info(f"  Creating agent: {agent_code}")
+            if routed_agent_code in routed_agent_codes:
+                logger.debug(f"  Agent route already handled for {routed_agent_code}, skipping duplicate")
+                continue
+            routed_agent_codes.add(routed_agent_code)
+
+            logger.info(f"  Creating agent: {routed_agent_code} (requested: {agent_code})")
 
             try:
                 # Create agent instance
@@ -139,12 +219,13 @@ class MultiAgentCallback(SimCoordinationCallback):
                     created_agents.append(response.source_agent_instance)
 
                 # Store agent
-                context_agents[agent_code] = agent
+                created_agent_code = getattr(agent, "agent_code", routed_agent_code)
+                context_agents[created_agent_code] = agent
 
-                logger.info(f"  ✓ Agent created and initialized: {agent_code}")
+                logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
 
             except Exception as e:
-                logger.error(f"  ✗ Failed to create agent {agent_code}: {e}", exc_info=True)
+                logger.error(f"  ✗ Failed to create agent {routed_agent_code}: {e}", exc_info=True)
                 # Continue with other agents
 
         # Store agents for this context

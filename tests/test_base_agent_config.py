@@ -110,6 +110,44 @@ class BaseAgentConfigurationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Agent code mismatch"):
                 agent.load_agent_configuration(request)
 
+    def test_system_default_central_agent_can_load_single_custom_central_config(self):
+        context = SimulationContext(biz_scene_instance_id="scene-002")
+        sim_client = SimpleNamespace(state_manager=SimpleNamespace())
+        agent = DummyAgent(
+            sim_coordination_client=sim_client,
+            agent_id="agent-002",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="System Central Scheduling Agent",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        request = SimTaskInitRequest(
+            command_id="init-002",
+            context=context,
+            agent_list=[
+                HydroAgent(
+                    agent_code="CENTRAL_SCHEDULING_AGENT_POWER01",
+                    agent_type="CENTRAL_SCHEDULING_AGENT",
+                    agent_name="Power Scheduling Agent",
+                    agent_configuration_url="https://example.test/power_config.yaml",
+                )
+            ],
+        )
+
+        with patch(
+            "hydros_agent_sdk.agent_config.AgentConfigLoader.from_url",
+            return_value=self.build_config("CENTRAL_SCHEDULING_AGENT_POWER01"),
+        ):
+            agent.load_agent_configuration(request)
+
+        self.assertTrue(agent.properties.get_property("driven_by_coordinator"))
+        self.assertEqual(
+            agent.agent_configuration_url,
+            "https://example.test/power_config.yaml",
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -344,6 +344,21 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
                 matching_agent = agent
                 break
 
+        # 系统默认中央调度智能体可以承接唯一一个中央调度定义的配置。
+        if matching_agent is None and self._is_system_default_central_scheduling_agent():
+            central_agents = [
+                agent
+                for agent in request.agent_list
+                if getattr(agent, "agent_type", None) == "CENTRAL_SCHEDULING_AGENT"
+            ]
+            if len(central_agents) == 1:
+                matching_agent = central_agents[0]
+                logger.info(
+                    "Using system default CENTRAL_SCHEDULING_AGENT to load configuration "
+                    "for requested central agent '%s'",
+                    matching_agent.agent_code,
+                )
+
         if matching_agent is None:
             logger.info(
                 f"Agent '{self.agent_code}' not found in SimTaskInitRequest.agent_list, "
@@ -365,6 +380,8 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             # Validate agent_code matches. Some deployments use a specialized
             # runtime agent_code while sharing a generic agent_type config.
             allowed_agent_codes = {self.agent_code, self.agent_type}
+            if getattr(matching_agent, 'agent_code', None):
+                allowed_agent_codes.add(matching_agent.agent_code)
             if getattr(matching_agent, 'agent_type', None):
                 allowed_agent_codes.add(matching_agent.agent_type)
 
@@ -394,3 +411,9 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         except Exception as e:
             logger.error(f"Failed to load agent configuration from {agent_config_url}: {e}")
             raise
+
+    def _is_system_default_central_scheduling_agent(self) -> bool:
+        return (
+            self.agent_code == "CENTRAL_SCHEDULING_AGENT"
+            and self.agent_type == "CENTRAL_SCHEDULING_AGENT"
+        )
