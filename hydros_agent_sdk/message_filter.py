@@ -156,14 +156,14 @@ class MessageFilter:
         """
         # First filter: check if active to task
         if not self.is_active_to_task_sim_command(sim_command):
-            logger.info(f"Message filtered (inactive context): {sim_command.command_type}, "
-                       f"command_id={sim_command.command_id}")
+            logger.debug(f"Message filtered (inactive context): {sim_command.command_type}, "
+                         f"command_id={sim_command.command_id}")
             return False
 
         # Second filter: check if should be received
         if not self.is_received(sim_command):
-            logger.info(f"Message filtered (local source): {sim_command.command_type}, "
-                       f"command_id={sim_command.command_id}")
+            logger.debug(f"Message filtered (local source): {sim_command.command_type}, "
+                         f"command_id={sim_command.command_id}")
             return False
 
         # Passed both filters
