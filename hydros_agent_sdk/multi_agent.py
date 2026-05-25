@@ -74,6 +74,19 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.agent_factory_types[agent_code] = agent_type or self._infer_factory_agent_type(agent_code, factory)
         logger.info(f"Registered agent factory: {agent_code}")
 
+    def register_system_default_central_scheduling_agent(self, env_config: Optional[Dict[str, str]] = None):
+        """注册系统默认中央调度智能体，已注册时不覆盖。"""
+        if SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE in self.agent_factories:
+            return
+
+        from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
+
+        self.register_agent_factory(
+            SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+            SystemCentralSchedulingAgentFactory(env_config=env_config),
+            agent_type=CENTRAL_SCHEDULING_AGENT_TYPE,
+        )
+
     def _infer_factory_agent_type(self, agent_code: str, factory: Any) -> str:
         """尽量从 factory 配置里拿 agent_type，拿不到就退回 agent_code。"""
         for attr_name in ("agent_type", "_agent_type"):

@@ -79,7 +79,7 @@ from hydros_agent_sdk.agents import (
 )
 
 # Import factory and multi-agent support
-from hydros_agent_sdk.factory import HydroAgentFactory
+from hydros_agent_sdk.factory import HydroAgentFactory, SystemCentralSchedulingAgentFactory
 from hydros_agent_sdk.multi_agent import (
     MultiAgentCallback,
 )
@@ -226,6 +226,7 @@ __all__ = [
     "generate_sse_session_id",
     "generate_user_id",
     "HydroAgentFactory",
+    "SystemCentralSchedulingAgentFactory",
     "MultiAgentCallback",
 
     # Error handling

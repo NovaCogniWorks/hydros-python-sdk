@@ -158,3 +158,53 @@ class HydroAgentFactory(Generic[AgentType]):
         except Exception as e:
             logger.error(f"Error loading config file: {e}")
             raise
+
+
+class SystemCentralSchedulingAgentFactory:
+    """Factory for the built-in CENTRAL_SCHEDULING_AGENT."""
+
+    agent_type = "CENTRAL_SCHEDULING_AGENT"
+
+    def __init__(self, env_config: Optional[Dict[str, str]] = None):
+        self.env_config = env_config
+
+    def create_agent(
+        self,
+        sim_coordination_client: 'SimCoordinationClient',
+        context: SimulationContext
+    ):
+        from hydros_agent_sdk.agents import SystemCentralSchedulingAgent
+        from hydros_agent_sdk.config_loader import load_env_config
+
+        env_config = self.env_config
+        if env_config is None:
+            env_config = load_env_config()
+            self.env_config = env_config
+
+        hydros_cluster_id = (
+            env_config.get("hydros_cluster_id")
+            or sim_coordination_client.state_manager.get_cluster_id()
+            or os.getenv("HYDROS_CLUSTER_ID", "default_cluster")
+        )
+        hydros_node_id = (
+            env_config.get("hydros_node_id")
+            or sim_coordination_client.state_manager.get_node_id()
+            or os.getenv("HYDROS_NODE_ID", "LOCAL")
+        )
+
+        agent_code = "CENTRAL_SCHEDULING_AGENT"
+        agent_id = generate_agent_instance_id(agent_code)
+
+        agent = SystemCentralSchedulingAgent(
+            sim_coordination_client=sim_coordination_client,
+            agent_id=agent_id,
+            agent_code=agent_code,
+            agent_type=self.agent_type,
+            agent_name="System Central Scheduling Agent",
+            context=context,
+            hydros_cluster_id=hydros_cluster_id,
+            hydros_node_id=hydros_node_id,
+        )
+
+        logger.info(f"Created system central scheduling agent: {agent_id}")
+        return agent

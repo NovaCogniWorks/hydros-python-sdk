@@ -436,6 +436,17 @@ class MultiAgentCoordinator:
             logger.error("No environment configuration loaded!")
             return False
 
+        self.callback.register_system_default_central_scheduling_agent(env_config)
+        if not any(agent['agent_code'] == 'CENTRAL_SCHEDULING_AGENT' for agent in registered_agents):
+            registered_agents.append({
+                'name': 'system-central-scheduling',
+                'agent_code': 'CENTRAL_SCHEDULING_AGENT',
+                'agent_type': 'CENTRAL_SCHEDULING_AGENT',
+                'agent_display_name': 'System Central Scheduling Agent',
+                'agent_class': 'SystemCentralSchedulingAgent',
+                'directory': '(sdk built-in)'
+            })
+
         # 3. 创建统一的 SimCoordinationClient
         logger.info("")
         logger.info("Creating SimCoordinationClient...")
