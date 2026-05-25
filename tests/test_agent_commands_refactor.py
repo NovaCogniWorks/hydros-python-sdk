@@ -729,6 +729,71 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["targets"], {3001: [3.0, 4.0]})
         self.assertTrue(payload["includeDiversion"])
 
+    def test_mpc_planning_client_logs_request_and_response_payloads(self):
+        context = SimulationContext(biz_scene_instance_id="scene-013-log")
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=2,
+            mpc_config_url="http://config/mpc.yaml",
+            target_and_constrain_config_url="http://config/control.yaml",
+        )
+        raw_response = {
+            "success": True,
+            "data": [
+                {
+                    "plan_type": "OPTIMAL",
+                    "loss": 0.5,
+                    "horizon_controls": [
+                        {
+                            "horizon_step": 1,
+                            "opening_list": [
+                                {
+                                    "device_type": "Gate",
+                                    "object_id": 501,
+                                    "value": 0.8,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        class FakeHttpResponse:
+            def read(self):
+                return json.dumps(raw_response).encode("utf-8")
+
+        def fake_opener(request, timeout_seconds):
+            self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
+            self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
+            self.assertEqual(timeout_seconds, 180.0)
+            return FakeHttpResponse()
+
+        client = MpcPlanningClient(
+            base_url="http://mpc.local",
+            opener=fake_opener,
+            require_sensor_data=True,
+        )
+
+        with self.assertLogs("hydros_agent_sdk.mpc.client", level="INFO") as logs:
+            responses = client.execute_optimization(
+                state,
+                [SensorData(object_id=9001, metrics_code="water_level", value=12.5, step_index=2)],
+            )
+
+        log_output = "\n".join(logs.output)
+        self.assertEqual(len(responses), 1)
+        self.assertEqual(responses[0].plan_type, "OPTIMAL")
+        self.assertIn("MPC optimization request payload", log_output)
+        self.assertIn('"biz_scene_instance_id": "scene-013-log"', log_output)
+        self.assertIn('"objectId": 9001', log_output)
+        self.assertIn("MPC optimization raw response", log_output)
+        self.assertIn('"success": true', log_output)
+        self.assertIn("MPC optimization parsed response", log_output)
+        self.assertIn('"plan_type": "OPTIMAL"', log_output)
+
     def test_mpc_result_reporter_builds_result_report_payload(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014",

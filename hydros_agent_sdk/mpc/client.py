@@ -60,7 +60,9 @@ class MpcPlanningClient:
             self._normalize_sensor_data(sensor_data),
             sensor_provider=sensor_provider,
         )
-        body = request_model.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8")
+        request_payload = request_model.model_dump(mode="json", by_alias=True, exclude_none=True)
+        request_payload_text = self._format_json_for_log(request_payload)
+        body = request_payload_text.encode("utf-8")
         request = Request(
             self.planning_start_url,
             data=body,
@@ -75,9 +77,17 @@ class MpcPlanningClient:
                 mpc_task_state.current_step,
                 self.planning_start_url,
             )
+            logger.info("MPC optimization request payload: %s", request_payload_text)
             response = self._opener(request, self.timeout_seconds)
             payload_bytes = response.read()
+            raw_payload_text = payload_bytes.decode("utf-8", errors="replace")
+            logger.info("MPC optimization raw response: %s", raw_payload_text)
         except HTTPError as exc:
+            logger.error(
+                "MPC planning service returned HTTP %s, response=%s",
+                exc.code,
+                self._read_http_error_body(exc),
+            )
             raise MpcPlanningError(f"MPC planning service returned HTTP {exc.code}") from exc
         except URLError as exc:
             raise MpcPlanningError(f"MPC planning service is unreachable: {exc.reason}") from exc
@@ -85,11 +95,19 @@ class MpcPlanningClient:
             raise MpcPlanningError(f"MPC planning request failed: {exc}") from exc
 
         try:
-            payload = json.loads(payload_bytes.decode("utf-8"))
+            payload = json.loads(raw_payload_text)
         except Exception as exc:
             raise MpcPlanningError("MPC planning service returned invalid JSON") from exc
 
-        return self.parse_optimize_response(payload)
+        responses = self.parse_optimize_response(payload)
+        logger.info(
+            "MPC optimization parsed response: %s",
+            self._format_json_for_log([
+                item.model_dump(mode="json", by_alias=True, exclude_none=True)
+                for item in responses
+            ]),
+        )
+        return responses
 
     def build_optimize_request(
         self,
@@ -273,3 +291,14 @@ class MpcPlanningClient:
     @staticmethod
     def _default_opener(request: Request, timeout_seconds: float) -> Any:
         return urlopen(request, timeout=timeout_seconds)
+
+    @staticmethod
+    def _format_json_for_log(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _read_http_error_body(exc: HTTPError) -> str:
+        try:
+            return exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            return ""
