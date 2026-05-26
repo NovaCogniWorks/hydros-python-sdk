@@ -280,7 +280,7 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # Use Pydantic's model_dump() to properly serialize nested models
-        logger.info(f"Enqueued command: {command.model_dump_json(indent=None)}")
+        logger.info(f"Enqueued command: {self._format_command_for_log(command)}")
 
     def send_command(self, command: SimCommand):
         """
@@ -696,7 +696,7 @@ class SimCoordinationClient:
                         "MPC result report sent to coordinator: topic=%s, command_id=%s, payload=%s",
                         self.topic,
                         command_id,
-                        payload,
+                        self._format_command_for_log(command),
                     )
                 return  # Success
 
@@ -712,3 +712,45 @@ class SimCoordinationClient:
                 delay_ms = self.base_retry_delay_ms * (2 ** attempt)
                 logger.info(f"Retrying after {delay_ms}ms... (attempt {attempt}/{self.max_retry_count})")
                 time.sleep(delay_ms / 1000.0)
+
+    @staticmethod
+    def _format_command_for_log(command: SimCommand) -> str:
+        if isinstance(command, MpcResultReport):
+            payload = command.model_dump(mode="json", by_alias=True, exclude_none=True)
+            SimCoordinationClient._truncate_mpc_result_report_payload_for_log(payload)
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return command.model_dump_json(indent=None)
+
+    @staticmethod
+    def _truncate_mpc_result_report_payload_for_log(payload: dict) -> None:
+        horizon_step_log_limit = 2
+        for result in payload.get("mpc_results") or []:
+            details = result.get("details")
+            if not isinstance(details, list):
+                continue
+
+            total_count = len(details)
+            kept_steps = SimCoordinationClient._first_horizon_steps(details, horizon_step_log_limit)
+            kept_step_set = set(kept_steps)
+            result["details"] = [
+                detail
+                for detail in details
+                if detail.get("horizon_step") in kept_step_set
+            ]
+            result["details_total_count"] = total_count
+            result["details_logged_count"] = len(result["details"])
+            result["horizon_steps_logged"] = kept_steps
+            result["horizon_steps_log_limit"] = horizon_step_log_limit
+            result["details_truncated"] = len(result["details"]) < total_count
+
+    @staticmethod
+    def _first_horizon_steps(details: list, limit: int) -> list:
+        steps = []
+        for detail in details:
+            step = detail.get("horizon_step")
+            if step is None or step in steps:
+                continue
+            steps.append(step)
+            if len(steps) >= limit:
+                break
+        return steps

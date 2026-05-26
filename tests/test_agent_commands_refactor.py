@@ -1203,6 +1203,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             value=0.45,
                         )
                     ],
+                ),
+                HorizonControlStep(
+                    horizon_step=2,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            object_id=502,
+                            value=0.55,
+                        )
+                    ],
+                ),
+                HorizonControlStep(
+                    horizon_step=3,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            object_id=503,
+                            value=0.65,
+                        )
+                    ],
                 )
             ],
         )
@@ -1219,6 +1239,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("scene-014-log", log_output)
         self.assertIn(report.command_id, log_output)
         self.assertIn('"command_type":"mpc_result_report"', log_output)
+        self.assertEqual(len(report.mpc_results[0].details), 3)
+        self.assertIn('"details_total_count":3', log_output)
+        self.assertIn('"details_logged_count":2', log_output)
+        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
+        self.assertIn('"details_truncated":true', log_output)
+        self.assertIn('"object_id":501', log_output)
+        self.assertIn('"object_id":502', log_output)
+        self.assertNotIn('"object_id":503', log_output)
 
     def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
         state_manager = AgentStateManager()
@@ -1341,12 +1369,33 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         publish_result = Mock()
         client.mqtt_client = Mock()
         client.mqtt_client.publish.return_value = publish_result
-        report = MpcResultReport(
-            command_id="report-016-log",
-            context=context,
-            source_agent_instance=source,
-            mpc_results=[],
-            broadcast=True,
+        report = MpcResultReporter().build_report(
+            source,
+            MpcTaskState(
+                context=context,
+                rolling_interval_steps=3,
+                start_step=1,
+                current_step=4,
+            ),
+            [
+                MpcOptimizeResponse(
+                    plan_type="OPTIMAL",
+                    horizon_controls=[
+                        HorizonControlStep(
+                            horizon_step=1,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=501, value=0.45)],
+                        ),
+                        HorizonControlStep(
+                            horizon_step=2,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=502, value=0.55)],
+                        ),
+                        HorizonControlStep(
+                            horizon_step=3,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=503, value=0.65)],
+                        ),
+                    ],
+                )
+            ],
         )
 
         with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
@@ -1356,8 +1405,71 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         publish_result.wait_for_publish.assert_called_once()
         log_output = "\n".join(logs.output)
         self.assertIn("MPC result report sent to coordinator", log_output)
-        self.assertIn("report-016-log", log_output)
+        self.assertIn(report.command_id, log_output)
         self.assertIn('"command_type":"mpc_result_report"', log_output)
+        self.assertIn('"details_total_count":3', log_output)
+        self.assertIn('"details_logged_count":2', log_output)
+        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
+        self.assertIn('"details_truncated":true', log_output)
+        self.assertIn('"object_id":501', log_output)
+        self.assertIn('"object_id":502', log_output)
+        self.assertNotIn('"object_id":503', log_output)
+
+    def test_coordination_client_truncates_mpc_result_report_when_enqueued(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        context = SimulationContext(biz_scene_instance_id="scene-016-enqueue-log")
+        source = build_agent_instance("agent-016-enqueue-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state_manager.add_local_agent(source)
+        client = SimCoordinationClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo-cluster",
+            sim_coordination_callback=TestSiblingCacheCallback(),
+            state_manager=state_manager,
+        )
+        report = MpcResultReporter().build_report(
+            source,
+            MpcTaskState(
+                context=context,
+                rolling_interval_steps=3,
+                start_step=1,
+                current_step=4,
+            ),
+            [
+                MpcOptimizeResponse(
+                    plan_type="OPTIMAL",
+                    horizon_controls=[
+                        HorizonControlStep(
+                            horizon_step=1,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=501, value=0.45)],
+                        ),
+                        HorizonControlStep(
+                            horizon_step=2,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=502, value=0.55)],
+                        ),
+                        HorizonControlStep(
+                            horizon_step=3,
+                            opening_list=[DeviceOpening(device_type="Gate", object_id=503, value=0.65)],
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
+            client.enqueue(report)
+
+        log_output = "\n".join(logs.output)
+        self.assertIn("Enqueued command", log_output)
+        self.assertIn('"details_total_count":3', log_output)
+        self.assertIn('"details_logged_count":2', log_output)
+        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
+        self.assertIn('"details_truncated":true', log_output)
+        self.assertIn('"object_id":501', log_output)
+        self.assertIn('"object_id":502', log_output)
+        self.assertNotIn('"object_id":503', log_output)
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \

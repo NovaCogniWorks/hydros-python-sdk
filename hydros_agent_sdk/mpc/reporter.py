@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 MPC_OPERATION_OPENING = "OPENING"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
+DEFAULT_REPORT_HORIZON_STEP_LOG_LIMIT = 2
 
 
 class MpcResultReporter:
@@ -164,7 +165,41 @@ class MpcResultReporter:
     def _context_waterway_id(context: SimulationContext) -> Optional[str]:
         return context.waterway.waterway_id if context.waterway else None
 
-    @staticmethod
-    def _format_report_for_log(report: MpcResultReport) -> str:
+    @classmethod
+    def _format_report_for_log(cls, report: MpcResultReport) -> str:
         payload = report.model_dump(mode="json", by_alias=True, exclude_none=True)
+        cls._truncate_report_payload_for_log(payload)
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    @classmethod
+    def _truncate_report_payload_for_log(cls, payload: dict) -> None:
+        for result in payload.get("mpc_results") or []:
+            details = result.get("details")
+            if not isinstance(details, list):
+                continue
+
+            total_count = len(details)
+            kept_steps = cls._first_horizon_steps(details, DEFAULT_REPORT_HORIZON_STEP_LOG_LIMIT)
+            kept_step_set = set(kept_steps)
+            result["details"] = [
+                detail
+                for detail in details
+                if detail.get("horizon_step") in kept_step_set
+            ]
+            result["details_total_count"] = total_count
+            result["details_logged_count"] = len(result["details"])
+            result["horizon_steps_logged"] = kept_steps
+            result["horizon_steps_log_limit"] = DEFAULT_REPORT_HORIZON_STEP_LOG_LIMIT
+            result["details_truncated"] = len(result["details"]) < total_count
+
+    @staticmethod
+    def _first_horizon_steps(details: List[dict], limit: int) -> List[int]:
+        steps: List[int] = []
+        for detail in details:
+            step = detail.get("horizon_step")
+            if step is None or step in steps:
+                continue
+            steps.append(step)
+            if len(steps) >= limit:
+                break
+        return steps
