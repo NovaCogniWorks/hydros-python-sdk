@@ -22,8 +22,6 @@ class ControlCommandDispatcher:
         self.build_station_target_value_request = build_station_target_value_request
 
     def dispatch(self, control_commands: List[Any]) -> None:
-        logger.info("Sending %s control commands to agents", len(control_commands))
-
         for command in control_commands:
             if isinstance(command, AgentCommand):
                 self.send_command(command)

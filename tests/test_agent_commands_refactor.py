@@ -737,7 +737,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             "http://config/control.yaml",
         )
 
-    def test_central_scheduling_agent_auto_starts_mpc_on_tick_and_rolls(self):
+    def test_central_scheduling_agent_can_opt_into_tick_auto_start_and_rolls(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -763,6 +763,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             optimization_horizon=3,
             total_steps=20,
         )
+        agent.properties["auto_start_mpc_on_tick"] = True
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-before", context=context, step=0))
         self.assertEqual(agent.optimization_steps, [0])
@@ -782,7 +783,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [0, 3])
         self.assertEqual(agent.mpc_task_state.current_loop, 3)
 
-    def test_central_scheduling_agent_can_disable_tick_auto_start(self):
+    def test_central_scheduling_agent_does_not_auto_start_mpc_on_tick_by_default(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -808,7 +809,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             optimization_horizon=3,
             total_steps=20,
         )
-        agent.properties["auto_start_mpc_on_tick"] = False
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-disabled", context=context, step=0))
 

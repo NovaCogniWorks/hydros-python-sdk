@@ -194,7 +194,6 @@ class AgentCommandClient:
                 payload = command.model_dump_json(by_alias=True)
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
-                logger.info("Agent command 已发送: type=%s id=%s attempt=%s", command.command_type, command.command_id, attempt)
                 return
             except Exception:
                 attempt += 1
