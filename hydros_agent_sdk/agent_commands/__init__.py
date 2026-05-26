@@ -39,8 +39,10 @@ from .runtime import (
     AgentCommandQueueService,
     AgentCommandRuntime,
 )
+from .dispatching import ControlCommandDispatcher
 from .transport import (
     AgentCommandClient,
+    AgentCommandGateway,
 )
 
 __all__ = [
@@ -76,4 +78,6 @@ __all__ = [
     "AgentCommandQueueService",
     "AgentCommandRuntime",
     "AgentCommandClient",
+    "AgentCommandGateway",
+    "ControlCommandDispatcher",
 ]

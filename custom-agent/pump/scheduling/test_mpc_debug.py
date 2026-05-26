@@ -221,8 +221,8 @@ def main():
         hydros_cluster_id="local", hydros_node_id="local"
     )
     # Override methods to avoid noisy SDK logs
-    agent.send_command = lambda cmd: None
-    agent._build_station_target_value_request = lambda **kwargs: "mock_request"
+    agent.control_command_dispatcher.send_command = lambda cmd: None
+    agent.control_command_dispatcher.build_station_target_value_request = lambda **kwargs: "mock_request"
     
     # Init logic
     agent._init_pump_system()

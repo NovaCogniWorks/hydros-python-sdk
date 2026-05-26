@@ -40,7 +40,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
 
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
-            self._start_agent_command_client()
+            self.agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
 
@@ -54,7 +54,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
                 broadcast=False,
             )
         except Exception:
-            self._shutdown_agent_command_client()
+            self.agent_command_gateway.shutdown()
             raise
 
     def _load_object_agent_code_map(self) -> None:
@@ -102,7 +102,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating system central scheduling agent: %s", self.agent_id)
 
-        self._shutdown_agent_command_client()
+        self.agent_command_gateway.shutdown()
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
         object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)

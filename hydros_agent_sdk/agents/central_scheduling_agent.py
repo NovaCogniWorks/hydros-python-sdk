@@ -10,25 +10,20 @@ from threading import RLock
 from typing import Optional, List, Dict, Any, Callable, Iterable
 from abc import abstractmethod
 
-from hydros_agent_sdk.agent_commands.models import (
-    AgentCommand,
-    DeviceValueTypeEnum,
-    DisturbanceNodeWaterFlowRequest,
-    HydroDirectGateOpeningRequest,
-    HydroStationTargetValueRequest,
-)
-from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
+from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
+from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
+from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
 from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
-from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
+from hydros_agent_sdk.mpc.models import SensorData
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
-from hydros_agent_sdk.utils import generate_agent_command_id
+from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
@@ -46,7 +41,6 @@ from hydros_agent_sdk.protocol.models import (
     CommandStatus,
     AgentStatus,
     AgentDriveMode,
-    HydroAgentInstance,
     ObjectTimeSeries,
 )
 
@@ -172,6 +166,27 @@ class CentralSchedulingAgent(TickableAgent):
             str(object_id): agent_code
             for object_id, agent_code in (configured_object_agent_code_map or {}).items()
         }
+        # agent command 客户端按需懒加载
+        self._agent_command_gateway = AgentCommandGateway(
+            sim_coordination_client=sim_coordination_client,
+            hydros_cluster_id=hydros_cluster_id,
+            state_manager=self.state_manager,
+            client_factory=lambda **kwargs: AgentCommandClient(**kwargs),
+        )
+        self._target_agent_resolver = TargetAgentResolver(
+            sim_coordination_client=sim_coordination_client,
+            context=context,
+            object_agent_code_map_getter=lambda: self._object_agent_code_map,
+        )
+        self._control_command_builder = MpcControlCommandBuilder(
+            source_agent=self,
+            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
+            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
+        )
+        self._control_command_dispatcher = ControlCommandDispatcher(
+            send_command=lambda command: self._agent_command_gateway.send_command(command),
+            build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
+        )
 
         # 优化模型与拓扑
         self._optimization_model = None
@@ -194,10 +209,6 @@ class CentralSchedulingAgent(TickableAgent):
             mpc_result_reporter=self._mpc_result_reporter,
             mpc_sensor_provider=self._mpc_sensor_provider,
         )
-
-        # agent command 客户端按需懒加载
-        self._agent_command_client: Optional[AgentCommandClient] = None
-        self._agent_command_client_started = False
 
         logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
         logger.info(f"Optimization horizon: {self._optimization_horizon} ticks")
@@ -223,85 +234,21 @@ class CentralSchedulingAgent(TickableAgent):
         """
         pass
 
-    def send_command(self, command: AgentCommand) -> None:
-        """将 agent command 交给专用客户端发送，客户端按需懒加载。"""
-        self._start_agent_command_client()
-        self._get_or_create_agent_command_client().send_command(command)
+    @property
+    def agent_command_gateway(self) -> AgentCommandGateway:
+        return self._agent_command_gateway
 
-    def get_sibling_agent_instance(self, agent_code: str) -> Optional[HydroAgentInstance]:
-        """按 agent_code 查找同任务下的兄弟智能体。"""
-        callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
-        if callback is None:
-            return None
+    @property
+    def target_agent_resolver(self) -> TargetAgentResolver:
+        return self._target_agent_resolver
 
-        getter = getattr(callback, "get_sibling_agent_instance", None)
-        if getter is None:
-            return None
+    @property
+    def control_command_builder(self) -> MpcControlCommandBuilder:
+        return self._control_command_builder
 
-        biz_scene_instance_id = self.context.biz_scene_instance_id if self.context else None
-        return getter(agent_code=agent_code, biz_scene_instance_id=biz_scene_instance_id)
-
-    def _build_station_target_value_request(
-        self,
-        target_agent_code: str,
-        target_command_type: str,
-        target_value: Any,
-        object_id: int,
-        object_type: str,
-    ) -> Optional[HydroStationTargetValueRequest]:
-        """把内部控制指令转换成站点目标值请求。"""
-        target_agent = self.get_sibling_agent_instance(target_agent_code)
-        if target_agent is None:
-            logger.warning(f"未找到兄弟智能体: {target_agent_code}")
-            return None
-
-        try:
-            value_type = DeviceValueTypeEnum.from_code(target_command_type)
-        except ValueError:
-            logger.warning(f"不支持的目标值类型: {target_command_type}")
-            return None
-
-        if target_value is None:
-            logger.warning(f"控制指令缺少有效目标值: target={target_agent_code}, type={target_command_type}")
-            return None
-
-        return HydroStationTargetValueRequest(
-            command_id=generate_agent_command_id(),
-            context=self.context,
-            source=self,
-            target=target_agent,
-            object_id=object_id,
-            object_type=object_type,
-            target_value_type=value_type.code,
-            target_value=target_value,
-            need_ack_reply=True,
-        )
-
-    def _get_or_create_agent_command_client(self) -> AgentCommandClient:
-        if self._agent_command_client is None:
-            self._agent_command_client = AgentCommandClient(
-                broker_url=self.sim_coordination_client.broker_url,
-                broker_port=self.sim_coordination_client.broker_port,
-                hydros_cluster_id=self.hydros_cluster_id,
-                state_manager=self.state_manager,
-                mqtt_username=getattr(self.sim_coordination_client, "mqtt_username", None),
-                mqtt_password=getattr(self.sim_coordination_client, "mqtt_password", None),
-            )
-        return self._agent_command_client
-
-    def _start_agent_command_client(self) -> None:
-        if self._agent_command_client_started:
-            return
-        self._get_or_create_agent_command_client().start()
-        self._agent_command_client_started = True
-
-    def _shutdown_agent_command_client(self) -> None:
-        if self._agent_command_client is None:
-            return
-        if not self._agent_command_client_started:
-            return
-        self._agent_command_client.stop()
-        self._agent_command_client_started = False
+    @property
+    def control_command_dispatcher(self) -> ControlCommandDispatcher:
+        return self._control_command_dispatcher
 
     def get_roll_steps(self) -> int:
         """Return the rolling interval, matching Java roll_steps fallback rules."""
@@ -543,7 +490,7 @@ class CentralSchedulingAgent(TickableAgent):
         control_commands = self.on_optimization(mpc_task_state.current_step)
         mpc_task_state.current_loop += 1
         if control_commands:
-            self._send_control_commands(control_commands)
+            self.control_command_dispatcher.dispatch(control_commands)
         logger.info("MPC optimization completed at step %s", mpc_task_state.current_step)
         return control_commands
 
@@ -569,177 +516,11 @@ class CentralSchedulingAgent(TickableAgent):
         if not responses:
             return None
 
-        return self._build_control_commands_from_mpc_responses(responses)
+        return self.control_command_builder.build_from_mpc_responses(responses)
 
     def list_mpc_sensor_data(self, mpc_task_state: Optional[MpcTaskState] = None) -> List[SensorData]:
         """Return field metrics in the SensorDTO shape required by the MPC service."""
         return self._mpc_optimization_service.list_sensor_data(self, mpc_task_state)
-
-    def _build_control_commands_from_mpc_responses(
-        self,
-        responses: List[MpcOptimizeResponse],
-    ) -> List[AgentCommand]:
-        control_commands: List[AgentCommand] = []
-        for response in responses:
-            if (response.plan_type or "").upper() != "OPTIMAL":
-                logger.debug(
-                    "Skip MPC response for control command build: plan_type=%s",
-                    response.plan_type,
-                )
-                continue
-            if not response.horizon_controls:
-                logger.debug(
-                    "Skip MPC response for control command build: empty horizon_controls, plan_type=%s",
-                    response.plan_type,
-                )
-                continue
-            first_control = response.horizon_controls[0]
-            for device_opening in first_control.opening_list or []:
-                if device_opening.value is None:
-                    logger.debug(
-                        "Skip MPC device opening without value: objectId=%s, deviceType=%s",
-                        device_opening.object_id,
-                        device_opening.device_type,
-                    )
-                    continue
-                target_agent = self.resolve_target_agent_for_object(
-                    object_id=device_opening.object_id,
-                    device_type=device_opening.device_type,
-                )
-                if target_agent is None:
-                    logger.warning(
-                        "Cannot resolve target agent for MPC control: objectId=%s, deviceType=%s",
-                        device_opening.object_id,
-                        device_opening.device_type,
-                    )
-                    continue
-
-                if device_opening.device_type == "Gate":
-                    control_commands.append(
-                        HydroDirectGateOpeningRequest(
-                            command_id=generate_agent_command_id(),
-                            source=self,
-                            target=target_agent,
-                            object_id=device_opening.object_id,
-                            object_name=device_opening.object_name,
-                            object_type=device_opening.device_type,
-                            gate_opening=device_opening.value,
-                            need_ack_reply=True,
-                        )
-                    )
-                else:
-                    control_commands.append(
-                        DisturbanceNodeWaterFlowRequest(
-                            command_id=generate_agent_command_id(),
-                            source=self,
-                            target=target_agent,
-                            object_id=device_opening.node_id,
-                            object_name=device_opening.node_name,
-                            object_type=device_opening.device_type,
-                            value=device_opening.value,
-                            need_ack_reply=True,
-                        )
-                    )
-        logger.info(
-            "Built %s control commands from %s MPC responses",
-            len(control_commands),
-            len(responses or []),
-        )
-        return control_commands
-
-    def resolve_target_agent_for_object(
-        self,
-        object_id: Optional[int],
-        device_type: Optional[str] = None,
-    ) -> Optional[HydroAgentInstance]:
-        """Resolve the edge agent that owns the hydro object receiving MPC control."""
-        if object_id is None:
-            return None
-
-        agent_code = self._resolve_configured_agent_code_for_object(object_id)
-        if agent_code:
-            target_agent = self.get_sibling_agent_instance(agent_code)
-            if target_agent is not None:
-                return target_agent
-            logger.warning(
-                "Configured object-agent mapping resolved agent_code but sibling agent is unavailable: "
-                "objectId=%s, deviceType=%s, agentCode=%s",
-                object_id,
-                device_type,
-                agent_code,
-            )
-
-        callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
-        if callback is None:
-            return None
-
-        resolver = getattr(callback, "get_agent_by_object_id", None)
-        if resolver is None:
-            return None
-
-        biz_scene_instance_id = self.context.biz_scene_instance_id if self.context else None
-        try:
-            return resolver(object_id=object_id, biz_scene_instance_id=biz_scene_instance_id)
-        except TypeError:
-            return resolver(object_id)
-
-    def _resolve_configured_agent_code_for_object(self, object_id: int) -> Optional[str]:
-        """Resolve configured agent code by object id, falling back to parent top object id."""
-        agent_code = self._object_agent_code_map.get(str(object_id))
-        if agent_code:
-            return agent_code
-
-        model_context = ContextManager.get_context(self.context)
-        topology = getattr(model_context, "topology", None) if model_context is not None else None
-        if topology is None:
-            return None
-
-        parent_id = topology.child_to_parent_map.get(int(object_id))
-        if parent_id is None:
-            return None
-        return self._object_agent_code_map.get(str(parent_id))
-
-    def _send_control_commands(self, control_commands: List[Any]):
-        """
-        向目标智能体发送控制指令。
-
-        这里统一把“控制指令描述”转换成真正的 agent command 并发送，
-        这样上层优化逻辑只负责产生命令意图。
-
-        参数:
-            control_commands: 控制指令列表
-        """
-        logger.info(f"Sending {len(control_commands)} control commands to agents")
-
-        for command in control_commands:
-            if isinstance(command, AgentCommand):
-                self.send_command(command)
-                continue
-
-            target_agent_code = command.get('target_agent_code')
-            target_command_type = command.get('target_command_type')
-            target_value = command.get('target_value')
-            object_id = command.get('object_id')
-            object_type = command.get('object_type')
-
-            logger.debug(
-                f"Control command: target={target_agent_code}, "
-                f"type={target_command_type}, value={target_value}, object_id={object_id}"
-            )
-
-            if not target_agent_code or not target_command_type:
-                logger.warning(f"控制指令缺少必要字段，已跳过: {command}")
-                continue
-
-            command_request = self._build_station_target_value_request(
-                target_agent_code=target_agent_code,
-                target_command_type=target_command_type,
-                target_value=target_value,
-                object_id=object_id,
-                object_type=object_type,
-            )
-            if command_request is not None:
-                self.send_command(command_request)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

@@ -117,7 +117,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.state_manager.add_local_agent(self)
 
             # 5. 启动 agent command 客户端，后面就能直接发指令
-            self._start_agent_command_client()
+            self.agent_command_gateway.start()
 
             logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
 
@@ -135,7 +135,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             )
         except Exception:
             # 初始化失败就把客户端收掉，别把半拉资源留住
-            self._shutdown_agent_command_client()
+            self.agent_command_gateway.shutdown()
             raise
 
 
@@ -540,7 +540,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
         # 清理资源
-        self._shutdown_agent_command_client()
+        self.agent_command_gateway.shutdown()
         self._optimization_model = None
         
         # 从状态管理器中注销

@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import conftest  # noqa: F401
@@ -24,6 +25,7 @@ class MockContext:
 class MockClient:
     def __init__(self):
         self.state_manager = self
+        self.mqtt_client = Mock()
 
 
 class PumpSchedulingPathTest(unittest.TestCase):

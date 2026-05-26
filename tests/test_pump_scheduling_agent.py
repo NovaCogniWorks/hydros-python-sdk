@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+from unittest.mock import Mock
 sys.path.insert(0, os.path.abspath('custom-agent/pump/scheduling'))
 from pump_scheduling_agent import PumpCentralSchedulingAgent
 
@@ -11,6 +12,7 @@ class MockContext:
 class MockClient:
     def __init__(self):
         self.state_manager = self
+        self.mqtt_client = Mock()
     def send_command(self, req): pass
     def subscribe(self, topic): pass
     def init_task(self, ctx, agents): pass
