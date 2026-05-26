@@ -25,6 +25,7 @@ from hydros_agent_sdk.protocol.commands import (
     MpcResultReport,
     OutflowTimeSeriesRequest,
 )
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,16 @@ class SimCoordinationCallback(ABC):
                 agent_instance,
                 top_object,
             )
-        return indexed_count
+
+        model_context = ContextManager.get_context(biz_scene_instance_id)
+        if model_context is None:
+            return indexed_count
+
+        context_indexed_count = model_context.on_agent_instance_sibling_created(
+            agent_instance,
+            managed_top_objects,
+        )
+        return max(indexed_count, context_indexed_count)
 
     def get_sibling_agent_instance(
         self,
@@ -244,23 +254,27 @@ class SimCoordinationCallback(ABC):
         cache = self._get_or_create_sibling_agent_cache()
         if biz_scene_instance_id:
             biz_scene_instance_cache = cache.get(biz_scene_instance_id)
-            if not biz_scene_instance_cache:
-                return None
-            return biz_scene_instance_cache.get("object_id", {}).get(object_id_key)
+            if biz_scene_instance_cache:
+                agent = biz_scene_instance_cache.get("object_id", {}).get(object_id_key)
+                if agent is not None:
+                    return agent
+            return ContextManager.get_agent_by_object_id(object_id, biz_scene_instance_id)
 
         for biz_scene_instance_cache in cache.values():
             agent = biz_scene_instance_cache.get("object_id", {}).get(object_id_key)
             if agent is not None:
                 return agent
-        return None
+        return ContextManager.get_agent_by_object_id(object_id)
 
     def clear_sibling_agent_instances(self, biz_scene_instance_id: Optional[str] = None) -> None:
         """清掉兄弟智能体缓存，避免上下文结束后一直占着内存。"""
         cache = self._get_or_create_sibling_agent_cache()
         if biz_scene_instance_id is None:
             cache.clear()
+            ContextManager.clear()
             return
         cache.pop(biz_scene_instance_id, None)
+        ContextManager.remove(biz_scene_instance_id)
 
     def on_agent_instance_sibling_created(self, response: SimTaskInitResponse):
         """

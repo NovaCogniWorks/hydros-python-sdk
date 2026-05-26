@@ -21,6 +21,7 @@ from hydros_agent_sdk.agent_commands.models import (
     HydroStationTargetValueRequest,
 )
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
@@ -1017,6 +1018,19 @@ class CentralSchedulingAgent(TickableAgent):
         """获取最后一次优化步长。"""
         return self._last_optimization_step
 
+    def _initialize_model_context(self) -> None:
+        """Initialize task-scoped hydro model context for object owner lookup."""
+        hydros_objects_modeling_url = self.properties.get_property("hydros_objects_modeling_url")
+        param_keys = self.properties.get_property("param_keys", None)
+        if isinstance(param_keys, (list, tuple, set)):
+            param_keys = set(param_keys)
+
+        ContextManager.create(
+            context=self.context,
+            hydros_objects_modeling_url=hydros_objects_modeling_url,
+            param_keys=param_keys,
+        )
+
 
 class SystemCentralSchedulingAgent(CentralSchedulingAgent):
     """
@@ -1033,6 +1047,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
 
         try:
             self.load_agent_configuration(request)
+            self._initialize_model_context()
             self._load_object_agent_code_map()
             self._subscribe_configured_field_metrics()
 
