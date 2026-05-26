@@ -55,8 +55,8 @@ class MpcPlanningClient:
     ) -> List[MpcOptimizeResponse]:
         normalized_sensor_data = self._normalize_sensor_data(sensor_data)
         logger.info(
-            "MPC optimization sensorData before request build: bizSceneInstanceId=%s, "
-            "step=%s, sensorDataCount=%s",
+            "MPC optimization sensor_data before request build: biz_scene_instance_id=%s, "
+            "step=%s, sensor_data_count=%s",
             mpc_task_state.context.biz_scene_instance_id,
             mpc_task_state.current_step,
             len(normalized_sensor_data),
@@ -78,7 +78,7 @@ class MpcPlanningClient:
 
         try:
             logger.info(
-                "Sending MPC optimization request: bizSceneInstanceId=%s, step=%s, url=%s",
+                "Sending MPC optimization request: biz_scene_instance_id=%s, step=%s, url=%s",
                 mpc_task_state.context.biz_scene_instance_id,
                 mpc_task_state.current_step,
                 self.planning_start_url,
@@ -124,20 +124,20 @@ class MpcPlanningClient:
         normalized_sensor_data = self._normalize_sensor_data(sensor_data)
         if self.require_sensor_data and not normalized_sensor_data:
             logger.warning(
-                "MPC sensorData is empty before retry: bizSceneInstanceId=%s, step=%s",
+                "MPC sensor_data is empty before retry: biz_scene_instance_id=%s, step=%s",
                 mpc_task_state.context.biz_scene_instance_id,
                 mpc_task_state.current_step,
             )
             normalized_sensor_data = self._retry_sensor_data(sensor_provider)
             logger.info(
-                "MPC sensorData after retry: bizSceneInstanceId=%s, step=%s, sensorDataCount=%s",
+                "MPC sensor_data after retry: biz_scene_instance_id=%s, step=%s, sensor_data_count=%s",
                 mpc_task_state.context.biz_scene_instance_id,
                 mpc_task_state.current_step,
                 len(normalized_sensor_data),
             )
         if self.require_sensor_data and not normalized_sensor_data:
             logger.error(
-                "MPC sensorData is empty; request will not be sent: bizSceneInstanceId=%s, step=%s",
+                "MPC sensor_data is empty; request will not be sent: biz_scene_instance_id=%s, step=%s",
                 mpc_task_state.context.biz_scene_instance_id,
                 mpc_task_state.current_step,
             )

@@ -16,12 +16,12 @@ def _payload_field(name: str, default: Any = None, default_factory: Any = None) 
 
 
 class SensorData(HydroBaseModel):
-    object_id: Optional[int] = _payload_field("objectId")
-    object_type: Optional[str] = _payload_field("objectType")
-    metrics_code: Optional[str] = _payload_field("metricsCode")
-    position_code: Optional[str] = _payload_field("positionCode")
+    object_id: Optional[int] = _payload_field("object_id")
+    object_type: Optional[str] = _payload_field("object_type")
+    metrics_code: Optional[str] = _payload_field("metrics_code")
+    position_code: Optional[str] = _payload_field("position_code")
     value: Optional[float] = None
-    step_index: Optional[int] = _payload_field("stepIndex")
+    step_index: Optional[int] = _payload_field("step_index")
 
 
 class DeviceOpening(HydroBaseModel):
@@ -52,16 +52,16 @@ class HorizonControlStep(HydroBaseModel):
 
 
 class MpcOptimizeRequest(HydroBaseModel):
-    biz_scene_instance_id: str = _payload_field("bizSceneInstanceId", default=...)
-    step_index: int = _payload_field("stepIndex", default=...)
-    mpc_config_url: Optional[str] = _payload_field("mpcConfigUrl")
-    control_config_url: Optional[str] = _payload_field("controlConfigUrl")
-    upstream_boundaries: Dict[str, List[float]] = _payload_field("upstreamBoundaries", default_factory=dict)
-    downstream_boundaries: Optional[Dict[str, Any]] = _payload_field("downstreamBoundaries")
-    sensor_data: List[SensorData] = _payload_field("sensorData", default_factory=list)
-    fixed_controls: Dict[str, float] = _payload_field("fixedControls", default_factory=dict)
-    multi_profile: bool = _payload_field("multiProfile", default=False)
-    include_diversion: bool = _payload_field("includeDiversion", default=False)
+    biz_scene_instance_id: str = _payload_field("biz_scene_instance_id", default=...)
+    step_index: int = _payload_field("step_index", default=...)
+    mpc_config_url: Optional[str] = _payload_field("mpc_config_url")
+    control_config_url: Optional[str] = _payload_field("control_config_url")
+    upstream_boundaries: Dict[str, List[float]] = _payload_field("upstream_boundaries", default_factory=dict)
+    downstream_boundaries: Optional[Dict[str, Any]] = _payload_field("downstream_boundaries")
+    sensor_data: List[SensorData] = _payload_field("sensor_data", default_factory=list)
+    fixed_controls: Dict[str, float] = _payload_field("fixed_controls", default_factory=dict)
+    multi_profile: bool = _payload_field("multi_profile", default=False)
+    include_diversion: bool = _payload_field("include_diversion", default=False)
 
 
 class MpcOptimizeResponse(HydroBaseModel):

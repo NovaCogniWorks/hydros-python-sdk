@@ -952,19 +952,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         payload = request.model_dump(by_alias=True, exclude_none=True)
 
-        self.assertEqual(payload["bizSceneInstanceId"], "scene-013")
-        self.assertEqual(payload["stepIndex"], 15)
-        self.assertEqual(payload["mpcConfigUrl"], "http://config/mpc.yaml")
-        self.assertEqual(payload["controlConfigUrl"], "http://config/control.yaml")
-        self.assertEqual(payload["upstreamBoundaries"]["1001"], [150.0, 200.0])
-        self.assertEqual(payload["sensorData"][0]["objectId"], 9001)
-        self.assertEqual(payload["sensorData"][0]["metricsCode"], "water_level")
-        self.assertEqual(payload["fixedControls"], {"2001": 0.0})
-        self.assertTrue(payload["includeDiversion"])
-        self.assertNotIn("biz_scene_instance_id", payload)
-        self.assertNotIn("upstream_boundaries", payload)
+        self.assertEqual(payload["biz_scene_instance_id"], "scene-013")
+        self.assertEqual(payload["step_index"], 15)
+        self.assertEqual(payload["mpc_config_url"], "http://config/mpc.yaml")
+        self.assertEqual(payload["control_config_url"], "http://config/control.yaml")
+        self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
+        self.assertEqual(payload["sensor_data"][0]["object_id"], 9001)
+        self.assertEqual(payload["sensor_data"][0]["metrics_code"], "water_level")
+        self.assertEqual(payload["fixed_controls"], {"2001": 0.0})
+        self.assertTrue(payload["include_diversion"])
+        self.assertNotIn("bizSceneInstanceId", payload)
+        self.assertNotIn("upstreamBoundaries", payload)
+        self.assertNotIn("sensorData", payload)
         self.assertNotIn("targets", payload)
-        self.assert_no_snake_case_keys(payload)
+        self.assert_snake_case_keys(payload)
 
     def test_mpc_planning_client_logs_request_and_response_payloads(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
@@ -1004,8 +1005,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         def fake_opener(request, timeout_seconds):
             self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
-            self.assertIn(b'"bizSceneInstanceId": "scene-013-log"', request.data)
-            self.assertNotIn(b'"biz_scene_instance_id"', request.data)
+            self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
+            self.assertIn(b'"sensor_data"', request.data)
+            self.assertIn(b'"object_id": 9001', request.data)
+            self.assertNotIn(b'"bizSceneInstanceId"', request.data)
+            self.assertNotIn(b'"sensorData"', request.data)
             self.assertNotIn(b'"targets"', request.data)
             self.assertEqual(timeout_seconds, 150.0)
             return FakeHttpResponse()
@@ -1026,24 +1030,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(responses), 1)
         self.assertEqual(responses[0].plan_type, "OPTIMAL")
         self.assertIn("MPC optimization request payload", log_output)
-        self.assertIn('"bizSceneInstanceId": "scene-013-log"', log_output)
-        self.assertNotIn('"biz_scene_instance_id"', log_output)
+        self.assertIn('"biz_scene_instance_id": "scene-013-log"', log_output)
+        self.assertIn('"sensor_data"', log_output)
+        self.assertIn('"object_id": 9001', log_output)
+        self.assertNotIn('"bizSceneInstanceId"', log_output)
+        self.assertNotIn('"sensorData"', log_output)
         self.assertNotIn('"targets"', log_output)
-        self.assertIn('"objectId": 9001', log_output)
         self.assertIn("MPC optimization raw response", log_output)
         self.assertIn('"success": true', log_output)
         self.assertIn("MPC optimization parsed response", log_output)
         self.assertIn('"plan_type": "OPTIMAL"', log_output)
 
-    def assert_no_snake_case_keys(self, value):
+    def assert_snake_case_keys(self, value):
         if isinstance(value, dict):
             for key, child in value.items():
-                self.assertNotIn("_", key)
-                self.assert_no_snake_case_keys(child)
+                self.assertEqual(key, key.lower())
+                self.assert_snake_case_keys(child)
             return
         if isinstance(value, list):
             for child in value:
-                self.assert_no_snake_case_keys(child)
+                self.assert_snake_case_keys(child)
 
     def test_mpc_planning_client_uses_configured_full_planning_start_url(self):
         client = MpcPlanningClient(base_url="http://mpc.local/hydros/api/v1/mpc/planning/start")
@@ -1077,11 +1083,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 client.execute_optimization(state, [], sensor_provider=lambda: [])
 
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC optimization sensorData before request build", log_output)
-        self.assertIn("sensorDataCount=0", log_output)
-        self.assertIn("MPC sensorData is empty before retry", log_output)
-        self.assertIn("MPC sensorData after retry", log_output)
-        self.assertIn("MPC sensorData is empty; request will not be sent", log_output)
+        self.assertIn("MPC optimization sensor_data before request build", log_output)
+        self.assertIn("sensor_data_count=0", log_output)
+        self.assertIn("MPC sensor_data is empty before retry", log_output)
+        self.assertIn("MPC sensor_data after retry", log_output)
+        self.assertIn("MPC sensor_data is empty; request will not be sent", log_output)
         opener.assert_not_called()
 
     def test_mpc_result_reporter_builds_result_report_payload(self):
