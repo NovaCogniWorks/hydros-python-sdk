@@ -12,6 +12,14 @@ from configparser import ConfigParser
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_ENV_FILE_NAME = "env.properties"
+
+
+def get_default_env_config_path() -> str:
+    """Return the SDK-level default env.properties path."""
+    sdk_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(sdk_dir, "agents", DEFAULT_ENV_FILE_NAME)
+
 
 def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     """
@@ -21,7 +29,8 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     The mqtt_topic is automatically constructed from hydros_cluster_id if not explicitly provided.
 
     Args:
-        env_file: Path to environment configuration file (default: ./env.properties)
+        env_file: Path to environment configuration file. Relative default
+            paths fall back to hydros_agent_sdk/agents/env.properties.
 
     Returns:
         Environment configuration dictionary
@@ -30,26 +39,23 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
         FileNotFoundError: If env.properties file does not exist
         ValueError: If required properties are missing
     """
-    # Determine the env.properties path
-    # Always use the shared env.properties in examples directory
     if not os.path.isabs(env_file):
-        # Get the examples directory
-        # This file is in hydros_agent_sdk, so we need to find examples directory
-        current_file = os.path.abspath(__file__)
-        sdk_dir = os.path.dirname(current_file)
-        project_root = os.path.dirname(sdk_dir)
-        examples_dir = os.path.join(project_root, "examples")
-        shared_env_file = os.path.join(examples_dir, "env.properties")
+        requested_env_file = os.path.abspath(env_file)
+        default_env_file = get_default_env_config_path()
+        is_default_request = os.path.normpath(env_file) == DEFAULT_ENV_FILE_NAME
 
-        # Use shared config if it exists
-        if os.path.exists(shared_env_file):
-            env_file = shared_env_file
+        if is_default_request and os.path.exists(default_env_file):
+            env_file = default_env_file
+        elif os.path.exists(requested_env_file):
+            env_file = requested_env_file
+        else:
+            env_file = default_env_file
 
     # Check if file exists
     if not os.path.exists(env_file):
         raise FileNotFoundError(
             f"Environment configuration file not found: {env_file}\n"
-            f"Please create env.properties with required MQTT and cluster configuration."
+            f"Please create hydros_agent_sdk/agents/env.properties or pass an absolute env.properties path."
         )
 
     logger.info(f"Loading environment config from: {env_file}")

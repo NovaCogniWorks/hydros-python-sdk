@@ -12,6 +12,7 @@ from configparser import ConfigParser
 
 from hydros_agent_sdk.utils import generate_agent_instance_id
 from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.runtime import RuntimeEnvSettings
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
@@ -181,16 +182,13 @@ class SystemCentralSchedulingAgentFactory:
             env_config = load_env_config()
             self.env_config = env_config
 
+        settings = RuntimeEnvSettings.from_config(env_config)
         hydros_cluster_id = (
-            env_config.get("hydros_cluster_id")
+            settings.hydros_cluster_id
             or sim_coordination_client.state_manager.get_cluster_id()
-            or os.getenv("HYDROS_CLUSTER_ID", "default_cluster")
+            or "default_cluster"
         )
-        hydros_node_id = (
-            env_config.get("hydros_node_id")
-            or sim_coordination_client.state_manager.get_node_id()
-            or os.getenv("HYDROS_NODE_ID", "LOCAL")
-        )
+        hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
 
         agent_code = "CENTRAL_SCHEDULING_AGENT"
         agent_id = generate_agent_instance_id(agent_code)
@@ -204,6 +202,7 @@ class SystemCentralSchedulingAgentFactory:
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
+            mpc_service_base_url=settings.mpc_service_base_url,
         )
 
         logger.info(f"Created system central scheduling agent: {agent_id}")

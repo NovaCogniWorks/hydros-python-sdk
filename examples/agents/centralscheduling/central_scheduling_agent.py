@@ -7,11 +7,10 @@ and agent-command dispatch.
 """
 
 import logging
-import os
 import json
 from typing import Optional
 
-from hydros_agent_sdk import ErrorCodes, handle_agent_errors, load_env_config
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors, load_runtime_env_settings
 from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -88,18 +87,13 @@ class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info("Loaded object-agent mapping entries: %s", len(self._object_agent_code_map))
 
     def _get_metrics_topic(self) -> Optional[str]:
-        metrics_topic = self._get_string_property("metrics_topic", None)
-        if not metrics_topic:
-            try:
-                metrics_topic = load_env_config().get("metrics_topic")
-            except Exception:
-                metrics_topic = None
-
+        settings = load_runtime_env_settings()
+        metrics_topic = self._get_string_property("metrics_topic", settings.metrics_topic)
         if not metrics_topic:
             return None
 
-        cluster_id = self.cluster_id or os.getenv("HYDROS_CLUSTER_ID", "")
-        return metrics_topic.replace("{hydros_cluster_id}", cluster_id)
+        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
+        return settings.render_topic(metrics_topic, cluster_id=cluster_id)
 
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:

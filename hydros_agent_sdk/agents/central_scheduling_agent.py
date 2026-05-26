@@ -6,7 +6,6 @@
 """
 
 import json
-import os
 import inspect
 import logging
 from dataclasses import dataclass, field
@@ -25,6 +24,7 @@ from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.runtime import load_runtime_env_settings
 from hydros_agent_sdk.utils import generate_agent_command_id
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -338,7 +338,14 @@ class CentralSchedulingAgent(TickableAgent):
         )
 
     def get_mpc_service_base_url(self) -> Optional[str]:
-        return self._get_string_property("mpc_service_base_url", self._configured_mpc_service_base_url)
+        configured_url = self._get_string_property(
+            "mpc_service_base_url",
+            self._configured_mpc_service_base_url,
+        )
+        if configured_url:
+            return configured_url
+
+        return load_runtime_env_settings().mpc_service_base_url
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """Whether ticks may activate MPC before a time-series update arrives."""
@@ -1021,19 +1028,13 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
         self.subscribe_to_field_metrics(full_topic)
 
     def _get_metrics_topic(self) -> Optional[str]:
-        metrics_topic = self._get_string_property("metrics_topic", None)
-        if not metrics_topic:
-            try:
-                from hydros_agent_sdk.config_loader import load_env_config
-                metrics_topic = load_env_config().get("metrics_topic")
-            except Exception:
-                metrics_topic = None
-
+        settings = load_runtime_env_settings()
+        metrics_topic = self._get_string_property("metrics_topic", settings.metrics_topic)
         if not metrics_topic:
             return None
 
-        cluster_id = self.cluster_id or os.getenv("HYDROS_CLUSTER_ID", "")
-        return str(metrics_topic).replace("{hydros_cluster_id}", cluster_id)
+        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
+        return settings.render_topic(str(metrics_topic), cluster_id=cluster_id)
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating system central scheduling agent: %s", self.agent_id)
