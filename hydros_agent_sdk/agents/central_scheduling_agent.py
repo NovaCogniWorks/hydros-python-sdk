@@ -844,7 +844,16 @@ class CentralSchedulingAgent(TickableAgent):
 
         agent_code = self._object_agent_code_map.get(str(object_id))
         if agent_code:
-            return self.get_sibling_agent_instance(agent_code)
+            target_agent = self.get_sibling_agent_instance(agent_code)
+            if target_agent is not None:
+                return target_agent
+            logger.warning(
+                "Configured object-agent mapping resolved agent_code but sibling agent is unavailable: "
+                "objectId=%s, deviceType=%s, agentCode=%s",
+                object_id,
+                device_type,
+                agent_code,
+            )
 
         callback = getattr(self.sim_coordination_client, "sim_coordination_callback", None)
         if callback is None:

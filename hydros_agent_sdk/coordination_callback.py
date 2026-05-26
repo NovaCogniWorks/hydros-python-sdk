@@ -10,7 +10,7 @@ allowing developers to focus on business logic while the SDK handles:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import logging
 
 from hydros_agent_sdk.protocol.commands import (
@@ -116,8 +116,12 @@ class SimCoordinationCallback(ABC):
         if biz_scene_instance_cache is None:
             biz_scene_instance_cache = {
                 "agent_code": {},
+                "object_id": {},
             }
             cache[biz_scene_instance_id] = biz_scene_instance_cache
+        else:
+            biz_scene_instance_cache.setdefault("agent_code", {})
+            biz_scene_instance_cache.setdefault("object_id", {})
         return biz_scene_instance_cache
 
     def _store_sibling_agent_instance(self, agent_instance: HydroAgentInstance) -> None:
@@ -125,6 +129,85 @@ class SimCoordinationCallback(ABC):
         biz_scene_instance_cache = self._get_biz_scene_instance_sibling_cache(biz_scene_instance_id)
 
         biz_scene_instance_cache["agent_code"][agent_instance.agent_code] = agent_instance
+
+    @staticmethod
+    def _extract_object_id(hydro_object: Any) -> Optional[int]:
+        if hydro_object is None:
+            return None
+
+        value = None
+        if isinstance(hydro_object, dict):
+            value = hydro_object.get("object_id")
+        else:
+            value = getattr(hydro_object, "object_id", None)
+
+        if value is None:
+            return None
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _get_child_hydro_objects(hydro_object: Any) -> List[Any]:
+        if hydro_object is None:
+            return []
+
+        children = None
+        if isinstance(hydro_object, dict):
+            children = hydro_object.get("children")
+        else:
+            children = getattr(hydro_object, "children", None)
+
+        if children is None:
+            return []
+        if isinstance(children, dict):
+            return list(children.values())
+        if isinstance(children, list):
+            return children
+        return []
+
+    def _index_hydro_object_owner(
+        self,
+        object_owner_cache: Dict[str, HydroAgentInstance],
+        agent_instance: HydroAgentInstance,
+        hydro_object: Any,
+    ) -> int:
+        indexed_count = 0
+        object_id = self._extract_object_id(hydro_object)
+        if object_id is not None:
+            object_owner_cache[str(object_id)] = agent_instance
+            indexed_count += 1
+
+        for child in self._get_child_hydro_objects(hydro_object):
+            indexed_count += self._index_hydro_object_owner(
+                object_owner_cache,
+                agent_instance,
+                child,
+            )
+        return indexed_count
+
+    def _store_agent_managed_top_objects(
+        self,
+        agent_instance: HydroAgentInstance,
+        managed_top_objects: Optional[List[Any]],
+    ) -> int:
+        if not managed_top_objects:
+            return 0
+
+        biz_scene_instance_id = agent_instance.context.biz_scene_instance_id
+        biz_scene_instance_cache = self._get_biz_scene_instance_sibling_cache(biz_scene_instance_id)
+        object_owner_cache = biz_scene_instance_cache["object_id"]
+
+        indexed_count = 0
+        for top_object in managed_top_objects:
+            indexed_count += self._index_hydro_object_owner(
+                object_owner_cache,
+                agent_instance,
+                top_object,
+            )
+        return indexed_count
 
     def get_sibling_agent_instance(
         self,
@@ -148,6 +231,29 @@ class SimCoordinationCallback(ABC):
                 return agent
         return None
 
+    def get_agent_by_object_id(
+        self,
+        object_id: int,
+        biz_scene_instance_id: Optional[str] = None,
+    ) -> Optional[HydroAgentInstance]:
+        """按水工对象 ID 找拥有该对象的兄弟智能体。"""
+        if object_id is None:
+            return None
+
+        object_id_key = str(object_id)
+        cache = self._get_or_create_sibling_agent_cache()
+        if biz_scene_instance_id:
+            biz_scene_instance_cache = cache.get(biz_scene_instance_id)
+            if not biz_scene_instance_cache:
+                return None
+            return biz_scene_instance_cache.get("object_id", {}).get(object_id_key)
+
+        for biz_scene_instance_cache in cache.values():
+            agent = biz_scene_instance_cache.get("object_id", {}).get(object_id_key)
+            if agent is not None:
+                return agent
+        return None
+
     def clear_sibling_agent_instances(self, biz_scene_instance_id: Optional[str] = None) -> None:
         """清掉兄弟智能体缓存，避免上下文结束后一直占着内存。"""
         cache = self._get_or_create_sibling_agent_cache()
@@ -167,6 +273,22 @@ class SimCoordinationCallback(ABC):
         """
         for agent_instance in response.created_agent_instances:
             self._store_sibling_agent_instance(agent_instance)
+            managed_top_objects = (
+                (response.managed_top_objects or {}).get(agent_instance.agent_id)
+                or (response.managed_top_objects or {}).get(agent_instance.agent_code)
+                or []
+            )
+            indexed_count = self._store_agent_managed_top_objects(
+                agent_instance,
+                managed_top_objects,
+            )
+            if indexed_count:
+                logger.info(
+                    "Indexed managed hydro objects for sibling agent: agentId=%s, agentCode=%s, count=%s",
+                    agent_instance.agent_id,
+                    agent_instance.agent_code,
+                    indexed_count,
+                )
         logger.info(f"Sibling agent created: {response.source_agent_instance.agent_id}")
 
     def on_agent_instance_sibling_status_updated(self, report: AgentInstanceStatusReport):
