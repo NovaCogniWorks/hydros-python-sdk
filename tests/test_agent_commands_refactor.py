@@ -767,7 +767,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(load_env_config(), load_env_config(default_env_path))
         self.assertEqual(
             load_env_config()["mpc_service_base_url"],
-            "http://192.168.20.52:2375/hydros/api/v1/mpc/planning/start",
+            "http://192.168.20.52:8020/hydros/api/v1/mpc/planning/start",
         )
 
     def test_system_central_factory_passes_mpc_service_base_url_from_env_config(self):
