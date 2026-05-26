@@ -843,7 +843,7 @@ class CentralSchedulingAgent(TickableAgent):
         if object_id is None:
             return None
 
-        agent_code = self._object_agent_code_map.get(str(object_id))
+        agent_code = self._resolve_configured_agent_code_for_object(object_id)
         if agent_code:
             target_agent = self.get_sibling_agent_instance(agent_code)
             if target_agent is not None:
@@ -869,6 +869,22 @@ class CentralSchedulingAgent(TickableAgent):
             return resolver(object_id=object_id, biz_scene_instance_id=biz_scene_instance_id)
         except TypeError:
             return resolver(object_id)
+
+    def _resolve_configured_agent_code_for_object(self, object_id: int) -> Optional[str]:
+        """Resolve configured agent code by object id, falling back to parent top object id."""
+        agent_code = self._object_agent_code_map.get(str(object_id))
+        if agent_code:
+            return agent_code
+
+        model_context = ContextManager.get_context(self.context)
+        topology = getattr(model_context, "topology", None) if model_context is not None else None
+        if topology is None:
+            return None
+
+        parent_id = topology.child_to_parent_map.get(int(object_id))
+        if parent_id is None:
+            return None
+        return self._object_agent_code_map.get(str(parent_id))
 
     def _send_control_commands(self, control_commands: List[Any]):
         """

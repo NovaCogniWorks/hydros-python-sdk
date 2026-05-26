@@ -1448,6 +1448,106 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(sent_commands[0].object_id, 20601)
         self.assertEqual(sent_commands[0].gate_opening, 1.68)
 
+    def test_central_scheduling_agent_resolves_mpc_target_from_parent_object_mapping(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+            sim_coordination_callback=callback,
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-015-parent-map")
+        target = build_agent_instance("gate-agent-015-parent", "GATE_AGENT_015_PARENT", "node-b", context)
+        callback._store_sibling_agent_instance(target)
+        ContextManager.create(
+            context=context,
+            topology=WaterwayTopology(
+                topObjects=[
+                    TopologyTopHydroObject(
+                        objectId=20600,
+                        objectName="Gate Station 20600",
+                        objectType="GateStation",
+                        children=[
+                            SimpleChildObject(
+                                objectId=20601,
+                                objectName="Gate 20601",
+                                objectType="Gate",
+                            )
+                        ],
+                    )
+                ],
+                childToParentMap={20601: 20600},
+            ),
+        )
+
+        mpc_response = MpcOptimizeResponse(
+            plan_type="optimal",
+            horizon_controls=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            object_id=20601,
+                            object_name="Gate 20601",
+                            value=1.68,
+                        )
+                    ],
+                )
+            ],
+        )
+        mpc_client = FakeMpcPlanningClient([mpc_response])
+        reporter = FakeMpcResultReporter()
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-015-parent-map",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+            mpc_planning_client=mpc_client,
+            mpc_result_reporter=reporter,
+            object_agent_code_map={20600: "GATE_AGENT_015_PARENT"},
+        )
+        agent._on_field_metrics_received(
+            "metrics/topic",
+            {
+                "object_id": 9001,
+                "object_type": "Sensor",
+                "metrics_code": "water_level",
+                "value": 12.5,
+                "step_index": 1,
+                "position_code": "none",
+            },
+        )
+        sent_commands = []
+
+        with patch.object(agent, "send_command", side_effect=sent_commands.append):
+            agent.on_time_series_data_update(
+                build_time_series_update_request(
+                    context,
+                    command_id="ts-update-015-parent-map",
+                    auto_schedule_at_step=1,
+                )
+            )
+
+        self.assertEqual(len(sent_commands), 1)
+        self.assertIsInstance(sent_commands[0], HydroDirectGateOpeningRequest)
+        self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015_PARENT")
+        self.assertEqual(sent_commands[0].object_id, 20601)
+        self.assertEqual(sent_commands[0].gate_opening, 1.68)
+
     def test_coordination_client_sends_local_mpc_result_report(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
