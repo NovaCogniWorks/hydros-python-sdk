@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from hydros_agent_sdk import HydroObjectType, generate_agent_command_id, get_default_env_config_path, load_env_config
+from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.agent_commands import (
     AgentCommandClient,
     AgentCommandEnvelope,
@@ -22,6 +23,7 @@ from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
+from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import (
     DeviceOpening,
     HorizonControlStep,
@@ -807,39 +809,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [])
         self.assertFalse(agent.is_mpc_optimizing_on_the_loop())
 
-    def test_central_scheduling_agent_reads_mpc_service_base_url_from_environment(self):
-        state_manager = AgentStateManager()
-        state_manager.set_node_id("node-a")
-        state_manager.set_cluster_id("demo-cluster")
-
-        sim_client = SimpleNamespace(
-            broker_url="127.0.0.1",
-            broker_port=1883,
-            topic="/hydros/commands/coordination/demo-cluster",
-            state_manager=state_manager,
-            mqtt_client=Mock(),
-        )
-
-        context = SimulationContext(biz_scene_instance_id="scene-012-env-url")
-        agent = CentralSchedulingAgentForTest(
-            sim_coordination_client=sim_client,
-            agent_id="agent-012-env-url",
-            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
-            agent_type="CENTRAL_SCHEDULING_AGENT",
-            agent_name="中央调度智能体",
-            context=context,
-            hydros_cluster_id="demo-cluster",
-            hydros_node_id="node-a",
-            optimization_horizon=3,
-        )
-
+    def test_mpc_config_resolver_reads_mpc_service_base_url_from_environment(self):
         with patch.dict(
             os.environ,
             {"HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.local/hydros/api/v1/mpc/planning/start"},
             clear=False,
         ):
             self.assertEqual(
-                agent.get_mpc_service_base_url(),
+                MpcConfigResolver.get_mpc_service_base_url(AgentProperties()),
                 "http://mpc.local/hydros/api/v1/mpc/planning/start",
             )
 
@@ -899,11 +876,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         agent = factory.create_agent(sim_client, context)
+        client = agent.get_or_create_mpc_planning_client()
 
-        self.assertEqual(
-            agent.get_mpc_service_base_url(),
-            "http://mpc.local/hydros/api/v1/mpc/planning/start",
-        )
+        self.assertIsNotNone(client)
+        self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")

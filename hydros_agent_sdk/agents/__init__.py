@@ -15,7 +15,8 @@ from .tickable_agent import TickableAgent
 from .ontology_simulation_agent import OntologySimulationAgent
 from .twins_simulation_agent import TwinsSimulationAgent
 from .model_calculation_agent import ModelCalculationAgent
-from .central_scheduling_agent import CentralSchedulingAgent, SystemCentralSchedulingAgent
+from .central_scheduling_agent import CentralSchedulingAgent
+from .system_central_scheduling_agent import SystemCentralSchedulingAgent
 from .outflow_plan_agent import OutflowPlanAgent
 
 __all__ = [

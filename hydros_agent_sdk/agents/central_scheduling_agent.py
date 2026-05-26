@@ -5,7 +5,6 @@
 增加了模型预测控制（MPC）优化功能。
 """
 
-import json
 import inspect
 import logging
 from dataclasses import dataclass, field
@@ -23,9 +22,10 @@ from hydros_agent_sdk.agent_commands.models import (
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
+from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
-from hydros_agent_sdk.runtime import load_runtime_env_settings
+from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from hydros_agent_sdk.utils import generate_agent_command_id
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -320,43 +320,27 @@ class CentralSchedulingAgent(TickableAgent):
 
     def get_roll_steps(self) -> int:
         """Return the rolling interval, matching Java roll_steps fallback rules."""
-        return self._get_int_property("roll_steps", self._optimization_horizon)
+        return PropertyParseUtils.get_int(self.properties, "roll_steps", self._optimization_horizon)
 
     def get_total_steps(self) -> int:
         """Return total task steps used to avoid rolling again at task end."""
         default_total_steps = self._configured_total_steps
         if default_total_steps is None:
             default_total_steps = 36
-        return self._get_int_property("total_steps", default_total_steps)
-
-    def get_mpc_config_url(self) -> Optional[str]:
-        return self._get_string_property("mpc_config_url", self._configured_mpc_config_url)
-
-    def get_target_and_constrain_config_url(self) -> Optional[str]:
-        return self._get_string_property(
-            "target_and_constrain_config_url",
-            self._configured_target_and_constrain_config_url,
-        )
-
-    def get_mpc_service_base_url(self) -> Optional[str]:
-        configured_url = self._get_string_property(
-            "mpc_service_base_url",
-            self._configured_mpc_service_base_url,
-        )
-        if configured_url:
-            return configured_url
-
-        return load_runtime_env_settings().mpc_service_base_url
+        return PropertyParseUtils.get_int(self.properties, "total_steps", default_total_steps)
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """Whether ticks may activate MPC before a time-series update arrives."""
-        return self._get_bool_property("auto_start_mpc_on_tick", True)
+        return PropertyParseUtils.get_bool(self.properties, "auto_start_mpc_on_tick", True)
 
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
         if self._mpc_planning_client is not None:
             return self._mpc_planning_client
 
-        base_url = self.get_mpc_service_base_url()
+        base_url = MpcConfigResolver.get_mpc_service_base_url(
+            self.properties,
+            self._configured_mpc_service_base_url,
+        )
         if not base_url:
             return None
         self._mpc_planning_client = MpcPlanningClient(base_url=base_url)
@@ -369,26 +353,6 @@ class CentralSchedulingAgent(TickableAgent):
     @property
     def mpc_task_state(self) -> Optional[MpcTaskState]:
         return self._mpc_task_state
-
-    def _get_int_property(self, name: str, default: Optional[int]) -> int:
-        value = self.properties.get_property(name, default)
-        if value is None:
-            raise ValueError(f"Missing integer property: {name}")
-        return int(value)
-
-    def _get_string_property(self, name: str, default: Optional[str]) -> Optional[str]:
-        value = self.properties.get_property(name, default)
-        if value is None:
-            return None
-        return str(value)
-
-    def _get_bool_property(self, name: str, default: bool) -> bool:
-        value = self.properties.get_property(name, default)
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in ("true", "yes", "1", "on")
-        return bool(value)
 
     def subscribe_to_field_metrics(self, metrics_topic: str):
         """
@@ -443,13 +407,6 @@ class CentralSchedulingAgent(TickableAgent):
             object_type = payload.get('object_type')
             position_code = payload.get('position_code')
             if position_code != "none":
-                logger.debug(
-                    "Skipped field metrics because position_code is not none: object_id=%s, "
-                    "metrics_code=%s, position_code=%s",
-                    object_id,
-                    metrics_code,
-                    position_code,
-                )
                 return
 
             if object_id is not None and metrics_code:
@@ -602,14 +559,18 @@ class CentralSchedulingAgent(TickableAgent):
             )
 
             if not self.is_mpc_optimizing_on_the_loop():
-                mpc_config_url = self.get_mpc_config_url()
-                target_and_constrain_config_url = self.get_target_and_constrain_config_url()
+                mpc_config = MpcConfigResolver.resolve(
+                    self.properties,
+                    configured_mpc_config_url=self._configured_mpc_config_url,
+                    configured_target_and_constrain_config_url=self._configured_target_and_constrain_config_url,
+                    configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+                )
                 logger.debug(
                     "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
                     "mpcConfigUrl=%s, controlConfigUrl=%s",
                     self.context.biz_scene_instance_id,
-                    mpc_config_url,
-                    target_and_constrain_config_url,
+                    mpc_config.mpc_config_url,
+                    mpc_config.target_and_constrain_config_url,
                 )
                 mpc_task_state = MpcTaskState(
                     context=self.context,
@@ -617,8 +578,8 @@ class CentralSchedulingAgent(TickableAgent):
                     start_step=current_step,
                     current_step=current_step,
                     total_steps=total_steps,
-                    mpc_config_url=mpc_config_url,
-                    target_and_constrain_config_url=target_and_constrain_config_url,
+                    mpc_config_url=mpc_config.mpc_config_url,
+                    target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
                 )
                 mpc_task_state.register_hydro_event(event)
                 self._mpc_task_state = mpc_task_state
@@ -638,14 +599,18 @@ class CentralSchedulingAgent(TickableAgent):
         if rolling_interval_steps <= 0:
             raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
 
-        mpc_config_url = self.get_mpc_config_url()
-        target_and_constrain_config_url = self.get_target_and_constrain_config_url()
+        mpc_config = MpcConfigResolver.resolve(
+            self.properties,
+            configured_mpc_config_url=self._configured_mpc_config_url,
+            configured_target_and_constrain_config_url=self._configured_target_and_constrain_config_url,
+            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+        )
         logger.debug(
             "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
             "mpcConfigUrl=%s, controlConfigUrl=%s",
             self.context.biz_scene_instance_id,
-            mpc_config_url,
-            target_and_constrain_config_url,
+            mpc_config.mpc_config_url,
+            mpc_config.target_and_constrain_config_url,
         )
 
         mpc_task_state = MpcTaskState(
@@ -654,8 +619,8 @@ class CentralSchedulingAgent(TickableAgent):
             start_step=current_step,
             current_step=current_step,
             total_steps=self.get_total_steps(),
-            mpc_config_url=mpc_config_url,
-            target_and_constrain_config_url=target_and_constrain_config_url,
+            mpc_config_url=mpc_config.mpc_config_url,
+            target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
         )
         self._mpc_task_state = mpc_task_state
 
@@ -1048,95 +1013,4 @@ class CentralSchedulingAgent(TickableAgent):
             context=self.context,
             hydros_objects_modeling_url=hydros_objects_modeling_url,
             param_keys=param_keys,
-        )
-
-
-class SystemCentralSchedulingAgent(CentralSchedulingAgent):
-    """
-    系统默认中央调度智能体。
-
-    该类固定服务于系统默认 agent_code：CENTRAL_SCHEDULING_AGENT。
-    它复用 CentralSchedulingAgent 的默认 MPC 路径，初始化时只做通用配置加载、
-    现地指标订阅和状态注册；如果业务需要自定义调度逻辑，仍然可以继续通过
-    独立的 agent_code 注册自定义 CentralSchedulingAgent 子类。
-    """
-
-    def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
-        logger.info("Initializing system central scheduling agent: %s", self.agent_id)
-
-        try:
-            self.load_agent_configuration(request)
-            self._initialize_model_context()
-            self._load_object_agent_code_map()
-            self._subscribe_configured_field_metrics()
-
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
-            self._start_agent_command_client()
-
-            object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
-
-            return SimTaskInitResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                created_agent_instances=[self],
-                managed_top_objects={},
-                broadcast=False,
-            )
-        except Exception:
-            self._shutdown_agent_command_client()
-            raise
-
-    def _load_object_agent_code_map(self) -> None:
-        raw_mapping = self.properties.get_property("object_agent_code_map", None)
-        if not raw_mapping:
-            return
-
-        if isinstance(raw_mapping, dict):
-            mapping = raw_mapping
-        else:
-            mapping = json.loads(str(raw_mapping))
-
-        self._object_agent_code_map = {
-            str(object_id): str(agent_code)
-            for object_id, agent_code in mapping.items()
-        }
-        logger.info("Loaded object-agent mapping entries: %s", len(self._object_agent_code_map))
-
-    def _subscribe_configured_field_metrics(self) -> None:
-        metrics_topic = self._get_metrics_topic()
-        if not metrics_topic:
-            logger.info("No metrics topic configured; MPC will rely on injected/provider sensor data")
-            return
-
-        task_id = self.context.biz_scene_instance_id
-        full_topic = f"{metrics_topic.rstrip('/')}/{task_id}"
-        logger.info("Subscribing system central field metrics topic: %s", full_topic)
-        self.subscribe_to_field_metrics(full_topic)
-
-    def _get_metrics_topic(self) -> Optional[str]:
-        settings = load_runtime_env_settings()
-        metrics_topic = self._get_string_property("metrics_topic", settings.metrics_topic)
-        if not metrics_topic:
-            return None
-
-        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
-        return settings.render_topic(str(metrics_topic), cluster_id=cluster_id)
-
-    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        logger.info("Terminating system central scheduling agent: %s", self.agent_id)
-
-        self._shutdown_agent_command_client()
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
-
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
         )

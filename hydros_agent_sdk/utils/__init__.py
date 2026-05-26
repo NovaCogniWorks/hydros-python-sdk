@@ -30,6 +30,7 @@ from .mqtt_metrics import (
     send_metrics_batch,
     create_mock_metrics,
 )
+from .property_parse_utils import PropertyParseUtils
 from .yaml_loader import YamlLoader
 
 __all__ = [
@@ -55,5 +56,6 @@ __all__ = [
     'send_metrics',
     'send_metrics_batch',
     'create_mock_metrics',
+    'PropertyParseUtils',
     'YamlLoader',
 ]
