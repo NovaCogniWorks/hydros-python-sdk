@@ -20,8 +20,8 @@ Example usage:
 
 import logging
 from datetime import date, datetime
-from typing import Optional, Any, Dict
-from pydantic import ConfigDict, field_validator
+from typing import Optional, Any, Dict, List
+from pydantic import ConfigDict, Field, field_validator
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -70,6 +70,16 @@ class AgentProperties(HydroBaseModel):
     hydros_objects_modeling_url: Optional[str] = None
 
 
+class AgentComponentConfiguration(HydroBaseModel):
+    """Component configuration nested under an agent configuration."""
+    model_config = ConfigDict(extra='allow')
+
+    component_id: Optional[str] = None
+    component_name: Optional[str] = None
+    enabled: bool = True
+    properties: Optional[AgentProperties] = None
+
+
 class AgentConfiguration(HydroBaseModel):
     """
     Complete agent configuration model.
@@ -89,6 +99,7 @@ class AgentConfiguration(HydroBaseModel):
     description: Optional[str] = None
     waterway: Optional[Waterway] = None
     properties: AgentProperties
+    components: List[AgentComponentConfiguration] = Field(default_factory=list)
 
     @field_validator('release_at', mode='before')
     @classmethod

@@ -99,6 +99,52 @@ class BaseAgentConfigurationTest(unittest.TestCase):
             "https://example.test/agent_config.yaml",
         )
 
+    def test_load_agent_configuration_merges_enabled_component_properties(self):
+        agent = self.build_agent()
+        request = self.build_request(agent)
+        config = AgentConfigLoader.from_dict(
+            {
+                "agent_code": "CENTRAL_SCHEDULING_AGENT",
+                "agent_type": "CENTRAL_SCHEDULING_AGENT",
+                "agent_name": "Central Scheduling Agent",
+                "properties": {
+                    "hydros_objects_modeling_url": "https://example.test/objects.yaml",
+                },
+                "components": [
+                    {
+                        "component_id": "HAC000000005",
+                        "component_name": "MPC调度算法",
+                        "enabled": True,
+                        "properties": {
+                            "roll_steps": 10,
+                            "mpc_config_url": "https://example.test/mpc_config.yaml",
+                            "target_and_constrain_config_url": "https://example.test/constrains_targets.yaml",
+                        },
+                    }
+                ],
+            }
+        )
+
+        with patch(
+            "hydros_agent_sdk.agent_config.AgentConfigLoader.from_url",
+            return_value=config,
+        ):
+            agent.load_agent_configuration(request)
+
+        self.assertEqual(
+            agent.properties.get_property("hydros_objects_modeling_url"),
+            "https://example.test/objects.yaml",
+        )
+        self.assertEqual(agent.properties.get_property("roll_steps"), 10)
+        self.assertEqual(
+            agent.properties.get_property("mpc_config_url"),
+            "https://example.test/mpc_config.yaml",
+        )
+        self.assertEqual(
+            agent.properties.get_property("target_and_constrain_config_url"),
+            "https://example.test/constrains_targets.yaml",
+        )
+
     def test_load_agent_configuration_rejects_unrelated_agent_code(self):
         agent = self.build_agent()
         request = self.build_request(agent)

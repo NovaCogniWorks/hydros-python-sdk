@@ -402,8 +402,15 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
                 # Convert Pydantic model to dict and update AgentProperties
                 properties_dict = agent_config.properties.model_dump(exclude_none=True)
                 self.properties.update(properties_dict)
-                logger.info(f"Loaded {len(self.properties)} properties from configuration")
-                logger.debug(f"Properties: {list(self.properties.keys())}")
+
+            for component in agent_config.components or []:
+                if not component.enabled or not component.properties:
+                    continue
+                component_properties = component.properties.model_dump(exclude_none=True)
+                self.properties.update(component_properties)
+
+            logger.info(f"Loaded {len(self.properties)} properties from configuration")
+            logger.debug(f"Properties: {list(self.properties.keys())}")
 
             # Update agent_configuration_url
             object.__setattr__(self, 'agent_configuration_url', agent_config_url)
