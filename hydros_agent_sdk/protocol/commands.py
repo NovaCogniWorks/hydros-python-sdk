@@ -23,6 +23,8 @@ SIMCMD_TIME_SERIES_CALCULATION_REQUEST = "calculation_request"
 SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "calculation_response"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "time_series_data_update_request"
 SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
+SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
+SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
 SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
@@ -80,6 +82,7 @@ class TickCmdResponse(SimCoordinationResponse):
 # --- Time Series Commands ---
 
 from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEvent, OutflowTimeSeriesDataChangedEvent
+from .events import HydroEventUnion
 from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
@@ -98,6 +101,14 @@ class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
 
 class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["time_series_data_update_response"] = SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE
+
+class HydroEventCommand(SimCoordinationRequest):
+    command_type: Literal["hydro_event_command"] = SIMCMD_HYDRO_EVENT_COMMAND
+    target_agent_instance: Optional[HydroAgentInstance] = None
+    payload: HydroEventUnion
+
+class HydroEventAckResponse(SimCoordinationResponse):
+    command_type: Literal["hydro_event_ack_response"] = SIMCMD_HYDRO_EVENT_ACK_RESPONSE
 
 class OutflowTimeSeriesRequest(SimCoordinationRequest):
     command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
@@ -182,6 +193,8 @@ CommandUnion = Union[
     TimeSeriesCalculationResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    HydroEventCommand,
+    HydroEventAckResponse,
     OutflowTimeSeriesRequest,
     OutflowTimeSeriesResponse,
     OutflowTimeSeriesDataUpdateRequest,

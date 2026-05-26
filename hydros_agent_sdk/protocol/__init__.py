@@ -5,6 +5,8 @@ Hydros 协议包导出。
 from .commands import (
     AgentInstanceStatusReport,
     CommandUnion,
+    HydroEventAckResponse,
+    HydroEventCommand,
     HydroAlertUpdatedReport,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,

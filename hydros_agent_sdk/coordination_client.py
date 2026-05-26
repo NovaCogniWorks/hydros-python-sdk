@@ -33,14 +33,19 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
+    TimeSeriesDataUpdateResponse,
     OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
+    HydroEventAckResponse,
+    HydroEventCommand,
     MpcResultReport,
+    OutflowTimeSeriesDataUpdateResponse,
     SimCoordinationRequest,
     SimCoordinationResponse,
     SimCommandEnvelope,
     OutflowTimeSeriesRequest,
+    OutflowTimeSeriesResponse,
 
     # Command type constants
     SIMCMD_TASK_INIT_REQUEST,
@@ -48,6 +53,7 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_TICK_CMD_REQUEST,
     SIMCMD_TASK_TERMINATE_REQUEST,
     SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
+    SIMCMD_HYDRO_EVENT_COMMAND,
     SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
     SIMCMD_MPC_RESULT_REPORT,
@@ -55,7 +61,12 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
 )
 from hydros_agent_sdk.error_codes import ErrorCodes
-from hydros_agent_sdk.protocol.models import HydroAgentInstance
+from hydros_agent_sdk.protocol.events import (
+    OutflowTimeSeriesDataChangedEvent,
+    OutflowTimeSeriesEvent,
+    TimeSeriesDataChangedEvent,
+)
+from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgentInstance
 from hydros_agent_sdk.runtime import ResponseFactory
 import json
 
@@ -203,6 +214,7 @@ class SimCoordinationClient:
             SIMCMD_TICK_CMD_REQUEST: self._handle_tick,
             SIMCMD_TASK_TERMINATE_REQUEST: self._handle_task_terminate,
             SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
+            SIMCMD_HYDRO_EVENT_COMMAND: self._handle_hydro_event_command,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
             SIMCMD_MPC_RESULT_REPORT: self._handle_mpc_result_report,
@@ -499,6 +511,17 @@ class SimCoordinationClient:
         elif isinstance(command, TimeSeriesDataUpdateRequest):
             error_code = ErrorCodes.TIME_SERIES_UPDATE_FAILURE
             factory_method = ResponseFactory.time_series_data_update_failed
+        elif isinstance(command, HydroEventCommand):
+            response = HydroEventAckResponse(
+                context=command.context,
+                command_id=command.command_id,
+                command_status=CommandStatus.FAILED,
+                source_agent_instance=source_agent,
+                broadcast=False,
+                error_code=ErrorCodes.SYSTEM_ERROR.code,
+                error_message=f"{error}\n{traceback.format_exc()}",
+            )
+            return response
         elif isinstance(command, TimeSeriesCalculationRequest):
             error_code = ErrorCodes.TIME_SERIES_CALCULATION_FAILURE
             factory_method = ResponseFactory.time_series_calculation_failed
@@ -577,11 +600,97 @@ class SimCoordinationClient:
         assert isinstance(request, TimeSeriesDataUpdateRequest)
         return self.sim_coordination_callback.on_time_series_data_update(request)
 
+    def _handle_hydro_event_command(self, command: SimCommand):
+        """Handle Java-compatible hydro_event_command payload routing."""
+        request = command
+        assert isinstance(request, HydroEventCommand)
+        payload = request.payload
+
+        if isinstance(payload, TimeSeriesDataChangedEvent):
+            update_request = TimeSeriesDataUpdateRequest(
+                command_id=request.command_id,
+                context=request.context,
+                broadcast=request.broadcast,
+                time_series_data_changed_event=payload,
+            )
+            result = self.sim_coordination_callback.on_time_series_data_update(update_request)
+            return self._to_hydro_event_ack_response(request, result)
+
+        if isinstance(payload, OutflowTimeSeriesDataChangedEvent):
+            update_request = OutflowTimeSeriesDataUpdateRequest(
+                command_id=request.command_id,
+                context=request.context,
+                broadcast=request.broadcast,
+                outflow_time_series_data_changed_event=payload,
+            )
+            result = self.sim_coordination_callback.on_outflow_time_series_data_update(update_request)
+            return self._to_hydro_event_ack_response(request, result)
+
+        if isinstance(payload, OutflowTimeSeriesEvent):
+            if request.target_agent_instance is None:
+                logger.warning(
+                    "Ignoring outflow hydro_event_command without target_agent_instance: id=%s",
+                    request.command_id,
+                )
+                return None
+            outflow_request = OutflowTimeSeriesRequest(
+                command_id=request.command_id,
+                context=request.context,
+                broadcast=request.broadcast,
+                target_agent_instance=request.target_agent_instance,
+                hydro_event=payload,
+            )
+            return self.sim_coordination_callback.on_outflow_time_series(outflow_request)
+
+        logger.warning(
+            "Ignoring unsupported hydro_event_command payload: id=%s, eventType=%s",
+            request.command_id,
+            getattr(payload, "hydro_event_type", None),
+        )
+        return None
+
+    def _to_hydro_event_ack_response(self, request: HydroEventCommand, result):
+        """Convert update responses into Java-compatible hydro_event_ack_response."""
+        if result is None:
+            return None
+
+        if isinstance(result, HydroEventAckResponse):
+            return result
+
+        if isinstance(result, (TimeSeriesDataUpdateResponse, OutflowTimeSeriesDataUpdateResponse)):
+            return self._build_hydro_event_ack_response(request, result)
+
+        if isinstance(result, list):
+            responses = []
+            for item in result:
+                if isinstance(item, HydroEventAckResponse):
+                    responses.append(item)
+                elif isinstance(item, (TimeSeriesDataUpdateResponse, OutflowTimeSeriesDataUpdateResponse)):
+                    responses.append(self._build_hydro_event_ack_response(request, item))
+            return responses
+
+        return None
+
+    @staticmethod
+    def _build_hydro_event_ack_response(
+        request: HydroEventCommand,
+        response: SimCoordinationResponse,
+    ) -> HydroEventAckResponse:
+        return HydroEventAckResponse(
+            context=request.context,
+            command_id=request.command_id,
+            command_status=response.command_status,
+            source_agent_instance=response.source_agent_instance,
+            broadcast=False,
+            error_code=response.error_code,
+            error_message=response.error_message,
+        )
+
     def _handle_outflow_time_series_data_update(self, command: SimCommand):
         """Handle outflow time series data update."""
         request = command
         assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
-        self.sim_coordination_callback.on_outflow_time_series_data_update(request)
+        return self.sim_coordination_callback.on_outflow_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
         """Handle time series calculation."""
