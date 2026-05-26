@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -16,6 +19,7 @@ from hydros_agent_sdk.protocol.models import (
     SimulationContext,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.utils import TopHydroObject as TopologyTopHydroObject, WaterwayTopology
 
 
 def make_context():
@@ -82,6 +86,16 @@ class FakeAgent:
         )
 
 
+class ContextAwareFakeAgent(FakeAgent):
+    def __init__(self, instance):
+        super().__init__(instance)
+        self.context_on_init = None
+
+    def on_init(self, request):
+        self.context_on_init = ContextManager.get_context(request.context)
+        return super().on_init(request)
+
+
 class FakeFactory:
     def __init__(self, agent, agent_type=None):
         self.agent = agent
@@ -105,6 +119,51 @@ def make_init_request(context, agent_code="TEST_AGENT", agent_type=None):
                 agent_configuration_url="",
             )
         ],
+    )
+
+
+def test_multi_agent_init_creates_context_from_scenario_config_before_agent_init():
+    ContextManager.clear()
+    context = make_context()
+    instance = make_instance(context)
+    agent = ContextAwareFakeAgent(instance)
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory("TEST_AGENT", FakeFactory(agent))
+    client = FakeClient()
+    callback.set_client(client)
+
+    topology = WaterwayTopology(
+        topObjects=[
+            TopologyTopHydroObject(
+                objectId=1001,
+                objectName="Gate Station 1001",
+                objectType="GateStation",
+            )
+        ]
+    )
+    request = make_init_request(context)
+    request.biz_scene_configuration_url = "https://example.test/scenario.yaml"
+
+    try:
+        with patch(
+            "hydros_agent_sdk.context_manager.YamlLoader.from_url",
+            return_value={"hydrosObjectsModelingUrl": "https://example.test/topology.yaml"},
+        ) as load_scenario_config, patch(
+            "hydros_agent_sdk.context_manager.HydroObjectUtilsV2.build_waterway_topology",
+            return_value=topology,
+        ) as build_topology:
+            response = callback.on_sim_task_init(request)
+    finally:
+        ContextManager.clear()
+
+    assert isinstance(response, SimTaskInitResponse)
+    assert agent.context_on_init is not None
+    assert agent.context_on_init.topology is topology
+    load_scenario_config.assert_called_once_with("https://example.test/scenario.yaml")
+    build_topology.assert_called_once_with(
+        modeling_yml_uri="https://example.test/topology.yaml",
+        param_keys=None,
+        with_metrics_code=True,
     )
 
 

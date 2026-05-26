@@ -8,6 +8,7 @@ in a single process.
 import logging
 from typing import Dict, Optional, Any
 
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -193,6 +194,15 @@ class MultiAgentCallback(SimCoordinationCallback):
         logger.debug("Task configuration URL: %s", request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
         logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
+
+        try:
+            ContextManager.create_from_init_request(request)
+        except Exception:
+            logger.warning(
+                "Failed to initialize hydro model context from scenario config: %s",
+                request.biz_scene_configuration_url,
+                exc_info=True,
+            )
 
         # Track agents created in this task
         created_agents = []

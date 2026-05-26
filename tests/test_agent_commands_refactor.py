@@ -18,6 +18,7 @@ from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.agents.central_scheduling_agent import MpcTaskState
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
@@ -55,6 +56,11 @@ from hydros_agent_sdk.protocol.models import (
 )
 from hydros_agent_sdk.runtime import RuntimeEnvSettings
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.utils import (
+    SimpleChildObject,
+    TopHydroObject as TopologyTopHydroObject,
+    WaterwayTopology,
+)
 
 
 def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: SimulationContext) -> HydroAgentInstance:
@@ -225,6 +231,7 @@ def build_time_series_update_request(
 
 class AgentCommandsRefactorTest(unittest.TestCase):
     def setUp(self):
+        ContextManager.clear()
         self._temp_dir = tempfile.TemporaryDirectory()
         self._cwd = os.getcwd()
         os.chdir(self._temp_dir.name)
@@ -232,6 +239,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def tearDown(self):
         os.chdir(self._cwd)
         self._temp_dir.cleanup()
+        ContextManager.clear()
 
     def test_agent_command_envelope_uses_registry_parser(self):
         context = SimulationContext(biz_scene_instance_id="scene-001")
@@ -1346,6 +1354,25 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         context = SimulationContext(biz_scene_instance_id="scene-015-managed")
         target = build_agent_instance("gate-agent-015-managed", "GATE_AGENT_015_MANAGED", "node-b", context)
+        ContextManager.create(
+            context=context,
+            topology=WaterwayTopology(
+                topObjects=[
+                    TopologyTopHydroObject(
+                        objectId=20600,
+                        objectName="Gate Station 20600",
+                        objectType="GateStation",
+                        children=[
+                            SimpleChildObject(
+                                objectId=20601,
+                                objectName="Gate 20601",
+                                objectType="Gate",
+                            )
+                        ],
+                    )
+                ]
+            ),
+        )
         callback.on_agent_instance_sibling_created(
             SimTaskInitResponse(
                 command_id="init-015-managed",
@@ -1359,9 +1386,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             object_id=20600,
                             object_name="Gate Station 20600",
                             object_type="GateStation",
-                            children=[
-                                {"object_id": 20601, "object_name": "Gate 20601", "object_type": "Gate"},
-                            ],
                         )
                     ]
                 },

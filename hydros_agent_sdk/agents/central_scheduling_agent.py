@@ -1020,6 +1020,9 @@ class CentralSchedulingAgent(TickableAgent):
 
     def _initialize_model_context(self) -> None:
         """Initialize task-scoped hydro model context for object owner lookup."""
+        if ContextManager.get_context(self.context) is not None:
+            return
+
         hydros_objects_modeling_url = self.properties.get_property("hydros_objects_modeling_url")
         param_keys = self.properties.get_property("param_keys", None)
         if isinstance(param_keys, (list, tuple, set)):
