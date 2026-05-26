@@ -17,8 +17,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MPC_PLANNING_START_PATH = f"/hydros/api/v1/mpc/planning/start"
-
 
 class MpcPlanningError(RuntimeError):
     """Raised when the MPC planning service cannot produce usable results."""
@@ -47,7 +45,7 @@ class MpcPlanningClient:
 
     @property
     def planning_start_url(self) -> str:
-        return f"{self.base_url}{MPC_PLANNING_START_PATH}"
+        return self.base_url
 
     def execute_optimization(
         self,

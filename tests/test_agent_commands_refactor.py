@@ -728,15 +728,22 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             optimization_horizon=3,
         )
 
-        with patch.dict(os.environ, {"HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.local"}, clear=False):
-            self.assertEqual(agent.get_mpc_service_base_url(), "http://mpc.local")
+        with patch.dict(
+            os.environ,
+            {"HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.local/hydros/api/v1/mpc/planning/start"},
+            clear=False,
+        ):
+            self.assertEqual(
+                agent.get_mpc_service_base_url(),
+                "http://mpc.local/hydros/api/v1/mpc/planning/start",
+            )
 
     def test_runtime_env_settings_centralizes_defaults_and_overrides(self):
         with patch.dict(
             os.environ,
             {
                 "HYDROS_CLUSTER_ID": "env-cluster",
-                "HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.env",
+                "HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.env/hydros/api/v1/mpc/planning/start",
             },
             clear=True,
         ):
@@ -744,12 +751,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 {
                     "hydros_cluster_id": "config-cluster",
                     "metrics_topic": "/hydros/data/edges/{hydros_cluster_id}",
-                    "mpc_service_base_url": "http://mpc.config",
+                    "mpc_service_base_url": "http://mpc.config/hydros/api/v1/mpc/planning/start",
                 }
             )
 
         self.assertEqual(settings.hydros_cluster_id, "env-cluster")
-        self.assertEqual(settings.mpc_service_base_url, "http://mpc.env")
+        self.assertEqual(settings.mpc_service_base_url, "http://mpc.env/hydros/api/v1/mpc/planning/start")
         self.assertEqual(settings.rendered_metrics_topic(), "/hydros/data/edges/env-cluster")
 
     def test_load_env_config_defaults_to_sdk_agents_env_properties(self):
@@ -758,6 +765,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertTrue(default_env_path.endswith("hydros_agent_sdk/agents/env.properties"))
         self.assertTrue(os.path.exists(default_env_path))
         self.assertEqual(load_env_config(), load_env_config(default_env_path))
+        self.assertEqual(
+            load_env_config()["mpc_service_base_url"],
+            "http://192.168.20.52:2375/hydros/api/v1/mpc/planning/start",
+        )
 
     def test_system_central_factory_passes_mpc_service_base_url_from_env_config(self):
         from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
@@ -778,13 +789,16 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             env_config={
                 "hydros_cluster_id": "demo-cluster",
                 "hydros_node_id": "node-a",
-                "mpc_service_base_url": "http://mpc.local",
+                "mpc_service_base_url": "http://mpc.local/hydros/api/v1/mpc/planning/start",
             }
         )
 
         agent = factory.create_agent(sim_client, context)
 
-        self.assertEqual(agent.get_mpc_service_base_url(), "http://mpc.local")
+        self.assertEqual(
+            agent.get_mpc_service_base_url(),
+            "http://mpc.local/hydros/api/v1/mpc/planning/start",
+        )
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")
@@ -831,7 +845,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 ],
             )
         )
-        client = MpcPlanningClient(base_url="http://mpc.local", require_sensor_data=True)
+        client = MpcPlanningClient(
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
+            require_sensor_data=True,
+        )
 
         request = client.build_optimize_request(
             state,
@@ -893,7 +910,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             return FakeHttpResponse()
 
         client = MpcPlanningClient(
-            base_url="http://mpc.local",
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
             opener=fake_opener,
             require_sensor_data=True,
         )
@@ -915,6 +932,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("MPC optimization parsed response", log_output)
         self.assertIn('"plan_type": "OPTIMAL"', log_output)
 
+    def test_mpc_planning_client_uses_configured_full_planning_start_url(self):
+        client = MpcPlanningClient(base_url="http://mpc.local/hydros/api/v1/mpc/planning/start")
+
+        self.assertEqual(
+            client.planning_start_url,
+            "http://mpc.local/hydros/api/v1/mpc/planning/start",
+        )
+
     def test_mpc_planning_client_logs_empty_sensor_data_before_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-empty-sensor")
         state = MpcTaskState(
@@ -927,7 +952,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         opener = Mock()
         client = MpcPlanningClient(
-            base_url="http://mpc.local",
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
             opener=opener,
             require_sensor_data=True,
             empty_sensor_retry_delay_seconds=0,
