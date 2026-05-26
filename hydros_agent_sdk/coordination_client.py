@@ -368,6 +368,8 @@ class SimCoordinationClient:
 
     def _on_message(self, client, userdata, msg):
         """MQTT message received callback."""
+        payload_str = None
+        data = None
         try:
             # Parse message
             payload_str = msg.payload.decode("utf-8")
@@ -375,19 +377,77 @@ class SimCoordinationClient:
 
             # Parse JSON
             data = json.loads(payload_str)
+            logger.info(
+                "MQTT command received: topic=%s, rawType=%s, commandId=%s, context=%s",
+                msg.topic,
+                data.get("command_type") if isinstance(data, dict) else None,
+                data.get("command_id") if isinstance(data, dict) else None,
+                self._raw_context_id(data),
+            )
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
+            logger.info(
+                "MQTT command parsed: type=%s, id=%s, context=%s, broadcast=%s, eventType=%s",
+                command.command_type,
+                command.command_id,
+                self._command_context_id(command),
+                getattr(command, "broadcast", None),
+                self._command_event_type(command),
+            )
 
             # Apply message filters
             if not self.message_filter.should_process_message(command):
-                logger.debug(f"Message filtered out: {command.command_type}, id={command.command_id}")
+                logger.info(
+                    "MQTT command filtered: type=%s, id=%s, context=%s, eventType=%s",
+                    command.command_type,
+                    command.command_id,
+                    self._command_context_id(command),
+                    self._command_event_type(command),
+                )
                 return
 
             # Route to handler
             self._handle_incoming_message(command)
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
+            logger.error(
+                "Error processing MQTT message: rawType=%s, commandId=%s, context=%s, error=%s, payloadPrefix=%s",
+                data.get("command_type") if isinstance(data, dict) else None,
+                data.get("command_id") if isinstance(data, dict) else None,
+                self._raw_context_id(data),
+                e,
+                payload_str[:500] if payload_str else None,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _raw_context_id(data):
+        if not isinstance(data, dict):
+            return None
+        context = data.get("context")
+        if isinstance(context, dict):
+            return context.get("biz_scene_instance_id") or context.get("bizSceneInstanceId")
+        return None
+
+    @staticmethod
+    def _command_context_id(command: SimCommand):
+        context = getattr(command, "context", None)
+        return getattr(context, "biz_scene_instance_id", None)
+
+    @staticmethod
+    def _command_event_type(command: SimCommand):
+        if isinstance(command, HydroEventCommand):
+            return getattr(command.payload, "hydro_event_type", None)
+        event = getattr(command, "time_series_data_changed_event", None)
+        if event is not None:
+            return getattr(event, "hydro_event_type", None)
+        event = getattr(command, "outflow_time_series_data_changed_event", None)
+        if event is not None:
+            return getattr(event, "hydro_event_type", None)
+        event = getattr(command, "hydro_event", None)
+        if event is not None:
+            return getattr(event, "hydro_event_type", None)
+        return None
 
     # ========================================================================
     # Message Handling
@@ -447,7 +507,14 @@ class SimCoordinationClient:
         handler = self.handlers.get(command.command_type)
         if handler:
             try:
-                logger.debug(f"Handling command: {command.command_type}, id={command.command_id}")
+                logger.info(
+                    "MQTT command accepted: type=%s, id=%s, context=%s, eventType=%s, handler=%s",
+                    command.command_type,
+                    command.command_id,
+                    self._command_context_id(command),
+                    self._command_event_type(command),
+                    getattr(handler, "__name__", str(handler)),
+                )
                 result = handler(command)
                 self._handle_callback_result(result)
             except Exception as e:
