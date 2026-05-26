@@ -33,6 +33,7 @@ class MpcPlanningClient:
         require_sensor_data: bool = True,
         empty_sensor_retry_delay_seconds: float = 2.0,
         empty_sensor_retry_count: int = 1,
+        horizon_controls_log_limit: int = 2,
     ):
         if not base_url:
             raise ValueError("base_url is required")
@@ -42,6 +43,7 @@ class MpcPlanningClient:
         self.require_sensor_data = require_sensor_data
         self.empty_sensor_retry_delay_seconds = empty_sensor_retry_delay_seconds
         self.empty_sensor_retry_count = empty_sensor_retry_count
+        self.horizon_controls_log_limit = max(int(horizon_controls_log_limit), 0)
 
     @property
     def planning_start_url(self) -> str:
@@ -87,7 +89,7 @@ class MpcPlanningClient:
             response = self._opener(request, self.timeout_seconds)
             payload_bytes = response.read()
             raw_payload_text = payload_bytes.decode("utf-8", errors="replace")
-            logger.info("MPC optimization raw response: %s", raw_payload_text)
+            logger.info("MPC optimization raw response received: bytes=%s", len(payload_bytes))
         except HTTPError as exc:
             logger.error(
                 "MPC planning service returned HTTP %s, response=%s",
@@ -108,10 +110,7 @@ class MpcPlanningClient:
         responses = self.parse_optimize_response(payload)
         logger.info(
             "MPC optimization parsed response: %s",
-            self._format_json_for_log([
-                item.model_dump(mode="json", by_alias=True, exclude_none=True)
-                for item in responses
-            ]),
+            self._format_responses_for_log(responses),
         )
         return responses
 
@@ -310,6 +309,26 @@ class MpcPlanningClient:
     @staticmethod
     def _format_json_for_log(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def _format_responses_for_log(self, responses: Iterable[MpcOptimizeResponse]) -> str:
+        return self._format_json_for_log([
+            self._truncate_response_for_log(response)
+            for response in responses
+        ])
+
+    def _truncate_response_for_log(self, response: MpcOptimizeResponse) -> Dict[str, Any]:
+        payload = response.model_dump(mode="json", by_alias=True, exclude_none=True)
+        horizon_controls = payload.get("horizon_controls")
+        if not isinstance(horizon_controls, list):
+            return payload
+
+        total_count = len(horizon_controls)
+        limit = self.horizon_controls_log_limit
+        payload["horizon_controls_total_count"] = total_count
+        payload["horizon_controls_log_limit"] = limit
+        payload["horizon_controls_truncated"] = total_count > limit
+        payload["horizon_controls"] = horizon_controls[:limit]
+        return payload
 
     @staticmethod
     def _read_http_error_body(exc: HTTPError) -> str:

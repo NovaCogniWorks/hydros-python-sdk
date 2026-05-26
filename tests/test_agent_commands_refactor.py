@@ -993,6 +993,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     "value": 0.8,
                                 }
                             ],
+                        },
+                        {
+                            "horizon_step": 2,
+                            "opening_list": [
+                                {
+                                    "device_type": "Gate",
+                                    "object_id": 502,
+                                    "value": 0.7,
+                                }
+                            ],
+                        },
+                        {
+                            "horizon_step": 3,
+                            "opening_list": [
+                                {
+                                    "device_type": "Gate",
+                                    "object_id": 503,
+                                    "value": 0.6,
+                                }
+                            ],
                         }
                     ],
                 }
@@ -1029,6 +1049,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         log_output = "\n".join(logs.output)
         self.assertEqual(len(responses), 1)
         self.assertEqual(responses[0].plan_type, "OPTIMAL")
+        self.assertEqual(len(responses[0].horizon_controls), 3)
         self.assertIn("MPC optimization request payload", log_output)
         self.assertIn('"biz_scene_instance_id": "scene-013-log"', log_output)
         self.assertIn('"sensor_data"', log_output)
@@ -1036,10 +1057,19 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn('"bizSceneInstanceId"', log_output)
         self.assertNotIn('"sensorData"', log_output)
         self.assertNotIn('"targets"', log_output)
-        self.assertIn("MPC optimization raw response", log_output)
-        self.assertIn('"success": true', log_output)
+        self.assertIn("MPC optimization raw response received", log_output)
         self.assertIn("MPC optimization parsed response", log_output)
         self.assertIn('"plan_type": "OPTIMAL"', log_output)
+        parsed_log = "\n".join(
+            line for line in logs.output
+            if "MPC optimization parsed response" in line
+        )
+        self.assertIn('"horizon_controls_total_count": 3', parsed_log)
+        self.assertIn('"horizon_controls_log_limit": 2', parsed_log)
+        self.assertIn('"horizon_controls_truncated": true', parsed_log)
+        self.assertIn('"object_id": 501', parsed_log)
+        self.assertIn('"object_id": 502', parsed_log)
+        self.assertNotIn('"object_id": 503', parsed_log)
 
     def assert_snake_case_keys(self, value):
         if isinstance(value, dict):
