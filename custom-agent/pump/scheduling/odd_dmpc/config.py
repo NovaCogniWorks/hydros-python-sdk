@@ -343,6 +343,16 @@ def load_runtime_context(
 ) -> Dict[str, object]:
     path = Path(config_path)
     payload = _load_config(path)
+    return _runtime_context_from_payload(payload, path, demand_path)
+
+def load_runtime_context_from_payload(payload: Dict[str, object]) -> Dict[str, object]:
+    return _runtime_context_from_payload(payload, Path("agent_config_memory"), None)
+
+def _runtime_context_from_payload(
+    payload: Dict[str, object], 
+    path: Path,
+    demand_path: Optional[str] = None
+) -> Dict[str, object]:
     system_config = _system_config_from_payload(payload, path)
     runtime = _runtime_from_payload(payload)
     demand_plan = load_demand_plan(

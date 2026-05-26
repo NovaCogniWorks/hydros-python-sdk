@@ -18,6 +18,7 @@ from .types import StationConfig, SystemConfig
 @dataclass
 class FlowDepartService:
     system_config: SystemConfig
+    config_dict: Optional[Dict] = None
     config_path: Optional[str] = None
     _cache: Dict[Tuple[int, Tuple[int, ...]], pd.DataFrame] = field(default_factory=dict)
     _model_cache: Dict[Tuple[int, Tuple[int, ...]], PumpStationModel] = field(default_factory=dict)
@@ -108,7 +109,8 @@ class FlowDepartService:
             table = generate_flow_depart(
                 station_id=station_id,
                 target_unit_names=self._unit_names(station, key[1]),
-                config_path=self.config_path or self.system_config.source_config_path,
+                config_path=self.config_path if self.config_path and self.config_path != "agent_config_memory" else None,
+                config_dict=self.config_dict
             )
         if table is None or table.empty:
             raise ValueError(f"Unable to generate flow depart table for station {station_id} and units {key[1]}")

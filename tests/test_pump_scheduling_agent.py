@@ -2,7 +2,7 @@ import unittest
 import sys
 import os
 sys.path.insert(0, os.path.abspath('custom-agent/pump/scheduling'))
-from pump_scheduling_agent import PumpCentralSchedulingAgent, PumpStation, CanalPool
+from pump_scheduling_agent import PumpCentralSchedulingAgent
 
 class MockContext:
     def __init__(self):
@@ -18,7 +18,6 @@ class MockClient:
 
 class TestPumpSchedulingAgent(unittest.TestCase):
     def setUp(self):
-        # Move back to root because data/config.json is assumed to be there in the older system
         self.agent = PumpCentralSchedulingAgent(
             sim_coordination_client=MockClient(),
             agent_id="agent1",
@@ -29,19 +28,23 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             hydros_cluster_id="cluster",
             hydros_node_id="node"
         )
-        self.agent._init_pump_system()
+        import yaml
+        with open("data/config_xhh.yaml", "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f)
+        self.agent.properties.update(payload)
+        self.agent._lazy_init_odd_mpc()
 
     def test_rolling_optimization(self):
         print("\n--- Starting Rolling Optimization Test ---")
         steps = 3
         # Override initial station states
         z1, z2, z3 = 13.26, 23.1, 28.0
-        self.agent.stations[0].current_up = z1
-        self.agent.stations[0].current_down = 10.5
-        self.agent.stations[1].current_up = z2
-        self.agent.stations[1].current_down = z1
-        self.agent.stations[2].current_up = z3
-        self.agent.stations[2].current_down = z2
+        self.agent.current_up_levels[1] = z1
+        self.agent.current_down_levels[1] = 10.5
+        self.agent.current_up_levels[2] = z2
+        self.agent.current_down_levels[2] = z1
+        self.agent.current_up_levels[3] = z3
+        self.agent.current_down_levels[3] = z2
 
         for t in range(steps):
             print(f"\nStep {t}:")
@@ -66,11 +69,11 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             # Note: For this unit test, we just assume ideal tracking and move forward
             z1 += 0.01 * (lower_res[1]['total_q'][0] - lower_res[2]['total_q'][0])
             z2 += 0.01 * (lower_res[2]['total_q'][0] - lower_res[3]['total_q'][0])
-            self.agent.stations[0].current_up = z1
-            self.agent.stations[1].current_up = z2
-            self.agent.stations[2].current_up = z3
-            self.agent.stations[1].current_down = z1
-            self.agent.stations[2].current_down = z2
+            self.agent.current_up_levels[1] = z1
+            self.agent.current_up_levels[2] = z2
+            self.agent.current_up_levels[3] = z3
+            self.agent.current_down_levels[2] = z1
+            self.agent.current_down_levels[3] = z2
             
         self.assertTrue(True)
 

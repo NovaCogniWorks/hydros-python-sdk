@@ -136,29 +136,25 @@ def load_specific_station_data(station_config, data_dir, target_unit_names):
     return units
 
 
-def generate_flow_depart(station_id, target_unit_names, config_path="data/config.json"):
+def generate_flow_depart(station_id, target_unit_names, config_path=None, config_dict=None):
     """
-    Main callable function to calculate flow distribution.
-    
-    Args:
-        station_id (int): ID of the station to optimize.
-        target_unit_names (list of str): List of unit names (sheet names) to include in calculation.
-        config_path (str): Path to config.json.
-        
-    Returns:
-        pd.DataFrame: A DataFrame containing the flow distribution operating conditions.
+    Generate flow depart table dynamically based on station configuration.
+    Uses either a provided configuration dictionary or loads from a file path.
     """
     print(f"\n{'='*10} Starting Flow Depart Calculation {'='*10}")
     
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            if config_path.endswith('.yaml') or config_path.endswith('.yml'):
-                config = yaml.safe_load(f)
-            else:
-                config = json.load(f)
-    except Exception as e:
-        print(f"Error reading config: {e}")
-        return None
+    if config_dict is not None:
+        config = config_dict
+    else:
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                if config_path.endswith('.yaml') or config_path.endswith('.yml'):
+                    config = yaml.safe_load(f)
+                else:
+                    config = json.load(f)
+        except Exception as e:
+            print(f"Error reading config: {e}")
+            return None
 
     # Find the specific station configuration
     station_config = next((s for s in config["stations"] if s["id"] == station_id), None)

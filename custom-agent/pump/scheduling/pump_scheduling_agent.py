@@ -29,200 +29,6 @@ from hydros_agent_sdk.protocol.models import *
 
 from flow_depart import generate_flow_depart
 
-class PumpStation:
-    def __init__(self, id, name):
-        self.id = id; self.name = name; self.units = []
-        self.init_up = 0.0; self.init_down = 0.0
-        self.current_up = 0.0; self.current_down = 0.0
-        self.current_flow = 0.0
-
-class CanalPool:
-    def __init__(self, id, area):
-        self.id = id; self.area = area
-    def predict_level(self, z0, q_in, q_out, q_disturb, dt):
-        return z0 + (q_in - q_out + q_disturb) * dt / self.area
-
-class DisturbanceObserver:
-    def __init__(self, gain=0.35, smoothing=0.7):
-        self.gain = gain; self.smoothing = smoothing
-        self.d_hat = 0.0
-    def update(self, q_actual, q_planned):
-        self.d_hat = self.smoothing * self.d_hat + self.gain * (q_actual - q_planned)
-
-class UnitMemory:
-    def __init__(self, size, init_status=None, init_openings=None, config=None):
-        init_age = 999
-        if config and 'runtime' in config:
-            init_age = config['runtime']['lower_controller'].get('station_memory_init_age', 999)
-        self.last_act = [-init_age] * size
-        self.last_switch = [-init_age] * size
-        self.status = init_status if init_status else [1]*size
-        self.openings = init_openings if init_openings else [0.0]*size
-        
-    def update(self, idx, current_step, switch=False, adjust=False, status=None, opening=None):
-        if switch: self.last_switch[idx] = current_step
-        if adjust: self.last_act[idx] = current_step
-        if status is not None: self.status[idx] = status
-        if opening is not None: self.openings[idx] = opening
-
-class UpperMPC:
-    def __init__(self, pools, tables, config):
-        self.pools = pools; self.tables = tables
-        self.target_q = config.get("scheduling", {}).get("target_avg_flow_last_station", 80)
-        self.horizon = config.get("scheduling", {}).get("horizon_hours", 72)
-        self.integral_error = 0.0
-        
-    def solve(self, cur_levels, demand_plan=None, observers=None, dt=3600):
-        out = {"q_planned": {1:[], 2:[], 3:[]}, "z_planned": {1:[], 2:[]}}
-        z = list(cur_levels)
-        eff_q = {1: np.array(self.tables[1]['总流量(m³/s)'].dropna().unique()) if not self.tables[1].empty else np.array([0]),
-                 2: np.array(self.tables[2]['总流量(m³/s)'].dropna().unique()) if not self.tables[2].empty else np.array([0]),
-                 3: np.array(self.tables[3]['总流量(m³/s)'].dropna().unique()) if not self.tables[3].empty else np.array([0])}
-        
-        eff_target = self.target_q + self.integral_error
-        last_q3 = min(eff_q[3], key=lambda x:abs(x-eff_target)) if len(eff_q[3]) else eff_target
-        
-        for t in range(self.horizon):
-            d1 = demand_plan['station1-station2'].iloc[t] if demand_plan is not None and t < len(demand_plan) else 0
-            d2 = demand_plan['station2-station3'].iloc[t] if demand_plan is not None and t < len(demand_plan) else 0
-            
-            q3 = last_q3
-            q2 = min(eff_q[2], key=lambda x:abs(x-(q3+d2))) if len(eff_q[2]) else q3+d2
-            q1 = min(eff_q[1], key=lambda x:abs(x-(q2+d1))) if len(eff_q[1]) else q2+d1
-            
-            d_hat1 = observers[1].d_hat if observers else 0
-            d_hat2 = observers[2].d_hat if observers else 0
-            
-            z[0] = self.pools[0].predict_level(z[0], q1, q2, -d1 + d_hat1, dt)
-            z[1] = self.pools[1].predict_level(z[1], q2, q3, -d2 + d_hat2, dt)
-            
-            out["q_planned"][1].append(q1); out["q_planned"][2].append(q2); out["q_planned"][3].append(q3)
-            out["z_planned"][1].append(z[0]); out["z_planned"][2].append(z[1])
-        return out
-
-class LowerMPC:
-    def __init__(self, st_id, units, config):
-        self.st_id = st_id
-        self.units = units
-        self.config = config
-        
-        st_config = next((s for s in config['stations'] if s['id'] == st_id), None)
-        init_status = [1] * len(units)
-        # 默认开度取各机组物理角度中值，避免从 0.0 启动造成插值越界
-        init_openings = [(u.angle_min + u.angle_max) / 2.0 for u in units]
-        if st_config:
-            init_status = [u.get('init_status', 1) for u in st_config['units']]
-            cfg_openings = [u.get('init_opening', None) for u in st_config['units']]
-            init_openings = [
-                cfg_openings[i] if cfg_openings[i] is not None
-                else (units[i].angle_min + units[i].angle_max) / 2.0
-                for i in range(len(units))
-            ]
-            
-        self.memory = UnitMemory(len(units), init_status, init_openings, config)
-        
-    def solve(self, ref_q_seq, ref_h_seq, step):
-        horizon = len(ref_q_seq)
-        N = len(self.units)
-        
-        # 1. 预计算在离散叶片角上的预测流量，对于相同的H只算一次以提升速度
-        unit_angles = []
-        for u in self.units:
-            unit_angles.append(np.linspace(u.angle_min, u.angle_max, 25))
-            
-        pre_flows = np.zeros((horizon, N, 25))
-        unique_h = np.unique(ref_h_seq)
-        h_to_flow = {}
-        for h in unique_h:
-            fm_h = []
-            for i, u in enumerate(self.units):
-                fm_h.append([u.predict_flow(a, h) for a in unit_angles[i]])
-            h_to_flow[h] = fm_h
-            
-        for t in range(horizon):
-            h_val = ref_h_seq[t]
-            for i in range(N):
-                pre_flows[t, i, :] = h_to_flow[h_val][i]
-                    
-        # 2. 从配置获取惩罚权重
-        W_q = self.config['runtime']['lower_controller'].get('lower_flow_weight', 3.0)
-        W_sw = self.config['runtime']['lower_controller'].get('lower_switch_weight', 50.0)
-        W_adj = self.config['runtime']['lower_controller'].get('lower_adjust_count_weight', 10.0)
-        
-        sim_status = list(self.memory.status)
-        sim_openings = list(self.memory.openings)
-        sim_last_act = list(self.memory.last_act)
-        sim_last_switch = list(self.memory.last_switch)
-        
-        out_status = []; out_openings = []; out_effs = []; out_total = []
-        
-        for t in range(horizon):
-            c_st = step + t
-            ref_q = ref_q_seq[t]
-            h_val = ref_h_seq[t]
-            
-            def obj_t(x):
-                s_t = np.round(x[:N]).astype(int)
-                a_t = x[N:]
-                cost = 0.0
-                q_total = 0.0
-                
-                for i in range(N):
-                    # 启停惩罚衰减：反比惩罚，上次动作越远惩罚越轻
-                    if s_t[i] != sim_status[i]:
-                        dt = max(1, c_st - sim_last_switch[i])
-                        cost += W_sw / dt
-                        
-                    if s_t[i] == 1:
-                        # 叶片角调节惩罚衰减：只有调整幅度超过阈值0.5视作换挡
-                        if abs(a_t[i] - sim_openings[i]) > 0.5:
-                            dt = max(1, c_st - sim_last_act[i])
-                            cost += W_adj / dt
-                            
-                        # 在预计算的特征表面快速内插插值获取流量
-                        q_total += np.interp(a_t[i], unit_angles[i], pre_flows[t, i, :])
-                        
-                cost += W_q * (q_total - ref_q)**2
-                return cost
-                
-            # 缩小搜寻空间到单步的 N 个变量，实现极速贪心解，根据各机组实际物理范围裁减边界
-            bounds_t = [(0, 1)] * N + [(u.angle_min, u.angle_max) for u in self.units]
-            res_t = differential_evolution(obj_t, bounds_t, maxiter=15, popsize=4, mutation=(0.5, 1.0), recombination=0.7)
-            
-            best_s = np.round(res_t.x[:N]).astype(int)
-            best_a = res_t.x[N:]
-            
-            # 单步解确定后，立即坍缩（坍塌）并更新仿真记忆，作为下一步的基础状态
-            q_tot = 0.0
-            eff_t = []
-            for i in range(N):
-                if best_s[i] != sim_status[i]:
-                    sim_last_switch[i] = c_st
-                    sim_status[i] = best_s[i]
-                    
-                if best_s[i] == 1:
-                    # 惩罚判断：幅度超过阈值才记录为一次"换挡"
-                    if abs(best_a[i] - sim_openings[i]) > 0.5:
-                        sim_last_act[i] = c_st
-                    # 【修复】坍缩时无条件跟踪实际角度，不受幅度门槛约束
-                    # 否则初始 0.0 永远不更新，优化器陷入假稳定态导致 0 流量
-                    sim_openings[i] = best_a[i]
-                    # 记录真实流量和效率
-                    q = np.interp(best_a[i], unit_angles[i], pre_flows[t, i, :])
-                    q_tot += q
-                    e = self.units[i].predict_efficiency(q, h_val)
-                    eff_t.append(float(e))
-                else:
-                    best_a[i] = 0.0
-                    sim_openings[i] = 0.0
-                    eff_t.append(0.0)
-                    
-            out_status.append(best_s.tolist())
-            out_openings.append(best_a.tolist())
-            out_effs.append(eff_t)
-            out_total.append(q_tot)
-            
-        return {"status": out_status, "openings": out_openings, "effs": out_effs, "total_q": out_total}
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +76,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             optimization_horizon=optimization_horizon,
             **kwargs
         )
-
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
@@ -285,14 +90,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.load_agent_configuration(request)
 
             # 2. 初始化梯级泵站和优化模型 (模拟)
-            self._init_pump_system()
+            self._lazy_init_odd_mpc()
 
             # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
             env_config = load_env_config()
             base_metrics_topic = env_config.get('metrics_topic')
             if base_metrics_topic:
                 # 手动替换 {hydros_cluster_id} 变量
-                cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
+                cluster_id = env_config.get('hydros_cluster_id')
+                if not cluster_id:
+                    cluster_id = 'default_cluster_25'
+                    logger.warning("在 env_config 中未找到 'hydros_cluster_id' 参数，默认使用 'default_cluster_25'。")
                 base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
 
                 # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
@@ -330,59 +138,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self._shutdown_agent_command_client()
             raise
 
-    def _init_pump_system(self):
-        logger.info("初始化梯级泵站、外生变量、MPC调度器...")
-        with open('data/config.json', 'r') as f:
-            self._db_config = json.load(f)
-            
-        self.stations = []
-        for s in self._db_config['stations']:
-            st = PumpStation(s['id'], s['name'])
-            st.init_up = s['init_level_up']
-            st.init_down = s['init_level_down']
-            st.current_up = st.init_up
-            st.current_down = st.init_down
-            st.units = [u['name'] for u in s['units']]
-            self.stations.append(st)
-            
-        self.pools = [CanalPool(p['id'], p['area']) for p in self._db_config['canal_pools']]
-        
-        self.tables = {}
-        for s in self.stations:
-            df = generate_flow_depart(s.id, s.units, 'data/config.json')
-            self.tables[s.id] = df
-            
-        try:
-            self.demand_plan = pd.read_excel('data/inflow-demand-plan.xlsx', sheet_name=0)
-        except Exception as e:
-            logger.warning(f"未能加载需求计划，将被忽略: {e}")
-            self.demand_plan = None
-        
-        # 扰动观察器对象
-        self.observers = {
-            1: DisturbanceObserver(self._db_config['runtime']['observer']['observer_gain'], self._db_config['runtime']['observer']['observer_smoothing']),
-            2: DisturbanceObserver(self._db_config['runtime']['observer']['observer_gain'], self._db_config['runtime']['observer']['observer_smoothing'])
-        }
-        
-        self.unit_objs = {}
-        for s in self._db_config['stations']:
-            from flow_depart import load_specific_station_data
-            self.unit_objs[s['id']] = load_specific_station_data(s, 'data', [u['name'] for u in s['units']])
-        
-        # 上层和下层MPC对象
-        self.upper_mpc = UpperMPC(self.pools, self.tables, self._db_config)
-        self.lower_mpcs = {}
-        for s in self.stations:
-            self.lower_mpcs[s.id] = LowerMPC(s.id, self.unit_objs[s.id], self._db_config)
-            
-        self.mpc_output = {}
 
     def _lazy_init_odd_mpc(self):
         if hasattr(self, 'odd_initialized') and self.odd_initialized:
             return
             
         import os
-        from odd_dmpc.config import load_runtime_context
+        from odd_dmpc.config import load_runtime_context_from_payload
         from odd_dmpc.flow_service import FlowDepartService
         from odd_dmpc.local_controller import LocalController
         from odd_dmpc.observers import DisturbanceObserverBank
@@ -392,18 +154,24 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         import pandas as pd
         
-        # Determine the data directory
-        config_path = "data/config_odd.yaml"
-        if not os.path.exists(config_path):
-            config_path = "../../../data/config_odd.yaml"
-            
-        context = load_runtime_context(config_path)
+        # 从 agent_config（被加载到了 self.properties 中）获取载荷
+        payload = dict(self.properties) if self.properties else {}
+        if not payload or 'project' not in payload:
+            logger.warning("Agent properties 似乎未正确加载或缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
+            import yaml
+            import os
+            fallback_path = 'data/config_xhh.yaml'
+            if not os.path.exists(fallback_path):
+                fallback_path = '../../../data/config_xhh.yaml'
+            with open(fallback_path, 'r', encoding='utf-8') as f:
+                payload = yaml.safe_load(f)
+        context = load_runtime_context_from_payload(payload)
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
         self.odd_demand_plan = context["demand_plan"]
         
-        self.flow_service = FlowDepartService(self.system_config, config_path=config_path)
+        self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
         self.supervisor = ODDSupervisor(self.runtime)
         self.observers = DisturbanceObserverBank(self.system_config, self.runtime)
@@ -429,6 +197,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.cumulative_last_station_flow = 0.0
         self.station_memories = {}
         
+        self.current_up_levels = {station.id: float(station.level_back_min) for station in self.system_config.stations}
+        self.current_down_levels = {station.id: float(station.level_front_min) for station in self.system_config.stations}
+        
         self.odd_initialized = True
         self.upper_scheduler = UpperScheduler(
             self.system_config,
@@ -447,13 +218,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.local_controller import StationControlContext
         import pandas as pd
         
-        from odd_dmpc.environment import _level_keys, _ordered_station_ids
+        from odd_dmpc.environment import _level_keys, _ordered_station_ids, resolve_pool_areas
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
-        station_back_levels = {s.id: s.current_up for s in self.stations}
-        station_front_levels = {s.id: s.current_down for s in self.stations}
-        station_heads = {s.id: s.current_up - s.current_down for s in self.stations}
+        station_back_levels = self.current_up_levels
+        station_front_levels = self.current_down_levels
+        station_heads = {sid: self.current_up_levels[sid] - self.current_down_levels[sid] for sid in self.current_up_levels}
         
         basin_levels = {}
         if station_ids and level_keys:
@@ -463,11 +234,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     basin_levels[level_keys[i + 1]] = station_back_levels.get(sid, 0.0)
         
         station_flows = {
-            s.id: (self.station_flow_history[s.id][-1] if self.station_flow_history[s.id] else 0.0)
-            for s in self.stations
+            sid: (self.station_flow_history[sid][-1] if self.station_flow_history[sid] else 0.0)
+            for sid in self.system_config.station_ids
         }
         
-        pool_areas = {p.id: p.area for p in self.pools}
+        pool_areas = resolve_pool_areas(self.system_config)
         pool_levels = {}
         if self.system_config.pool_ids:
             for i, pool_id in enumerate(self.system_config.pool_ids):
@@ -497,13 +268,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # Init or update memories from our own self tracked state
         if not self.station_memories:
-            for s in self.stations:
-                self.station_memories[s.id] = StationMemory(
+            for sid in self.system_config.station_ids:
+                self.station_memories[sid] = StationMemory(
                     active_unit_ids=[],
-                    unit_openings={u: 0.0 for u in self.available_units_map[s.id]},
-                    unit_status={u: 0 for u in self.available_units_map[s.id]},
-                    time_since_adjust={u: 999 for u in self.available_units_map[s.id]},
-                    time_since_switch={u: 999 for u in self.available_units_map[s.id]},
+                    unit_openings={u: 0.0 for u in self.available_units_map[sid]},
+                    unit_status={u: 0 for u in self.available_units_map[sid]},
+                    time_since_adjust={u: 999 for u in self.available_units_map[sid]},
+                    time_since_switch={u: 999 for u in self.available_units_map[sid]},
                     last_selected_flow=0.0,
                     mode="ODD1"
                 )
@@ -668,12 +439,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         # map to previous output format for test_mpc
         lower_res = {}
-        for s in self.stations:
-            action = actions[s.id]
-            st_list = [action.unit_status.get(u, 0) for u in self.available_units_map[s.id]]
-            op_list = [action.unit_openings.get(u, 0.0) for u in self.available_units_map[s.id]]
+        for sid in self.system_config.station_ids:
+            action = actions[sid]
+            st_list = [action.unit_status.get(u, 0) for u in self.available_units_map[sid]]
+            op_list = [action.unit_openings.get(u, 0.0) for u in self.available_units_map[sid]]
             eff_list = [0.0] * len(st_list) # mock effs
-            lower_res[s.id] = {
+            lower_res[sid] = {
                 "status": [st_list],
                 "openings": [op_list],
                 "effs": [eff_list],
@@ -691,36 +462,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         commands = []
         return self.mpc_output
 
-    def on_next(self, actual_levels, actual_flows, step):
-        """
-        接收环境/仿真器真实数据反馈。更新智能体内部观察期和上层积分器。
-        """
-        logger.info(f"第 {step} 步收到真实量测数据。通过闭环反馈校核模型状态...")
-        
-        # 1. 更新当前状态
-        for i, s in enumerate(self.stations):
-            s.current_flow = actual_flows[i]
-            
-        self.stations[1].current_up = actual_levels[0]
-        self.stations[2].current_up = actual_levels[1]
-        
-        # 2. 估计渠道扰动 d_k = (z_k - z_{k-1})*S/dt - (q_{in} - q_{out})
-        if "upper" in self.mpc_output:
-            q_plan = self.mpc_output["upper"]["q_planned"]
-            d1_plan = self.demand_plan['station1-station2'].iloc[step] if self.demand_plan is not None and step < len(self.demand_plan) else 0
-            d2_plan = self.demand_plan['station2-station3'].iloc[step] if self.demand_plan is not None and step < len(self.demand_plan) else 0
-            
-            q1_actual = actual_flows[0]; q2_actual = actual_flows[1]; q3_actual = actual_flows[2]
-            
-            # 真实渠道流量差额计算
-            actual_d1 = (actual_levels[0] - cur_levels_prev[0]) * self.pools[0].area / 3600 - (q1_actual - q2_actual) if 'cur_levels_prev' in locals() else 0
-            actual_d2 = (actual_levels[1] - cur_levels_prev[1]) * self.pools[1].area / 3600 - (q2_actual - q3_actual) if 'cur_levels_prev' in locals() else 0
-            
-            self.observers[1].update(actual_d1, -d1_plan)
-            self.observers[2].update(actual_d2, -d2_plan)
-        
-        # 3. 稳态补偿积分 (上层末站目标零静差)
-        self.upper_mpc.integral_error += (actual_flows[2] - self.upper_mpc.target_q) * 0.1
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
