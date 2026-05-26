@@ -571,6 +571,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     "value": value,
                     "timestamp": f"ts-{step_index}",
                     "step_index": step_index,
+                    "position_code": "none",
                 },
             )
 
@@ -578,6 +579,57 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(set(agent.get_field_metrics_history().keys()), {2, 3, 4})
         self.assertNotIn(1, agent.get_field_metrics_history())
         self.assertEqual(agent.get_field_metrics_by_step(4)["1001_flow"]["value"], 4.0)
+
+    def test_central_scheduling_agent_filters_field_metrics_by_position_code(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-007-position")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-007-position",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+        )
+
+        agent._on_field_metrics_received(
+            "metrics/topic",
+            {
+                "object_id": 1001,
+                "metrics_code": "flow",
+                "value": 1.0,
+                "step_index": 1,
+                "position_code": "upstream",
+            },
+        )
+        agent._on_field_metrics_received(
+            "metrics/topic",
+            {
+                "object_id": 1001,
+                "metrics_code": "flow",
+                "value": 2.0,
+                "step_index": 2,
+                "positionCode": "none",
+            },
+        )
+
+        self.assertEqual(agent.get_field_metrics_value(1001, "flow"), 2.0)
+        self.assertEqual(agent.get_field_metrics_by_step(1), {})
+        self.assertEqual(agent.get_field_metrics_by_step(2)["1001_flow"]["position_code"], "none")
 
     def test_central_scheduling_agent_activates_mpc_on_time_series_update(self):
         state_manager = AgentStateManager()
@@ -1092,6 +1144,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "metrics_code": "water_level",
                 "value": 12.5,
                 "step_index": 1,
+                "position_code": "none",
             },
         )
         sent_commands = []

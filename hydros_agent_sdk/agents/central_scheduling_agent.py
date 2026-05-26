@@ -441,6 +441,15 @@ class CentralSchedulingAgent(TickableAgent):
             step_index = payload.get('step_index', payload.get('step'))
             object_type = payload.get('object_type', payload.get('objectType'))
             position_code = payload.get('position_code', payload.get('positionCode'))
+            if position_code != "none":
+                logger.debug(
+                    "Skipped field metrics because position_code is not none: object_id=%s, "
+                    "metrics_code=%s, position_code=%s",
+                    object_id,
+                    metrics_code,
+                    position_code,
+                )
+                return
 
             if object_id is not None and metrics_code:
                 cache_key = f"{object_id}_{metrics_code}"
