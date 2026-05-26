@@ -303,7 +303,8 @@ class HydroObjectUtilsV2:
     @staticmethod
     def parse_objects(
         topology_model_config_url: str,
-        param_keys: Optional[Set[str]] = None
+        param_keys: Optional[Set[str]] = None,
+        yaml_data: Optional[Dict[str, Any]] = None,
     ) -> List[TopHydroObject]:
         """
         Parse hydro objects from YAML configuration.
@@ -315,14 +316,20 @@ class HydroObjectUtilsV2:
         Returns:
             List of parsed TopHydroObject instances
         """
-        yaml_data = HydroObjectUtilsV2.load_remote_yaml(topology_model_config_url)
+        if yaml_data is None:
+            yaml_data = HydroObjectUtilsV2.load_remote_yaml(topology_model_config_url)
 
         # Extract objects and cross_sections
         objects_list = yaml_data.get('objects', [])
         cross_sections_list = yaml_data.get('cross_sections', [])
 
         # Build cross_sections map for efficient lookup
-        cross_sections_map = {cs['id']: cs for cs in cross_sections_list}
+        cross_sections_map = {}
+        for cs in cross_sections_list:
+            cs_id = cs.get('id')
+            if cs_id is None:
+                continue
+            cross_sections_map[cs_id] = cs
 
         logger.info(f"Parsing {len(objects_list)} objects from YAML")
 
@@ -350,14 +357,23 @@ class HydroObjectUtilsV2:
             # Process cross_section_children
             cross_section_children = obj_data.get('cross_section_children', [])
             for cs_child in cross_section_children:
-                child_id = cs_child.get('id')
-                child_type = cs_child.get('type', 'CrossSection')
-                child_name = cs_child.get('name', '')
+                section_ref = cs_child.get('section_ref', {})
+                child_id = section_ref.get('id')
+                if child_id is None:
+                    logger.warning(
+                        "Skip cross section child without id: parentObjectId=%s, child=%s",
+                        object_id,
+                        cs_child,
+                    )
+                    continue
+
+                child_type = 'CrossSection'
+                child_name = section_ref.get('name', '')
 
                 # Get parameters from cross_sections map
                 child_params = {}
-                if child_id in cross_sections_map:
-                    cs_data = cross_sections_map[child_id]
+                cs_data = cross_sections_map.get(child_id)
+                if cs_data is not None:
                     if 'parameters' in cs_data:
                         cs_params = cs_data['parameters']
                         if param_keys:
@@ -378,6 +394,14 @@ class HydroObjectUtilsV2:
             device_children = obj_data.get('device_children', [])
             for dev_child in device_children:
                 child_id = dev_child.get('id')
+                if child_id is None:
+                    logger.warning(
+                        "Skip device child without id: parentObjectId=%s, child=%s",
+                        object_id,
+                        dev_child,
+                    )
+                    continue
+
                 child_type = dev_child.get('type', 'Device')
                 child_name = dev_child.get('name', '')
 
@@ -535,7 +559,11 @@ class HydroObjectUtilsV2:
         yaml_data = HydroObjectUtilsV2.load_remote_yaml(modeling_yml_uri)
 
         # Parse objects
-        top_objects = HydroObjectUtilsV2.parse_objects(modeling_yml_uri, param_keys)
+        top_objects = HydroObjectUtilsV2.parse_objects(
+            modeling_yml_uri,
+            param_keys,
+            yaml_data=yaml_data,
+        )
 
         # Append metrics codes if requested
         HydroObjectUtilsV2.append_with_metrics_codes(top_objects, with_metrics_code)
