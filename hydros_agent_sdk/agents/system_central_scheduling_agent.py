@@ -82,7 +82,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
         task_id = self.context.biz_scene_instance_id
         full_topic = f"{metrics_topic.rstrip('/')}/{task_id}"
         logger.info("Subscribing system central field metrics topic: %s", full_topic)
-        self.subscribe_to_field_metrics(full_topic)
+        self._metrics_subscriber.subscribe(full_topic)
 
     def _get_metrics_topic(self) -> Optional[str]:
         from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings

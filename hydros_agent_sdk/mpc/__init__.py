@@ -1,5 +1,6 @@
 from .client import MpcPlanningClient, MpcPlanningError
 from .config import MpcConfigResolver, MpcRuntimeConfig
+from .metrics_data_cache import MetricsDataCache
 from .models import (
     DeviceOpening,
     HorizonControlStep,
@@ -17,6 +18,7 @@ __all__ = [
     "MpcOptimizeRequest",
     "MpcOptimizeResponse",
     "MpcConfigResolver",
+    "MetricsDataCache",
     "MpcPlanningClient",
     "MpcPlanningError",
     "MpcRuntimeConfig",

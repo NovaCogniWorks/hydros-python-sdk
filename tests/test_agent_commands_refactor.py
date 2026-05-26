@@ -18,7 +18,6 @@ from hydros_agent_sdk.agent_commands import (
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
-from hydros_agent_sdk.agents.central_scheduling_agent import MpcTaskState
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
@@ -32,6 +31,7 @@ from hydros_agent_sdk.mpc.models import (
     TargetNode,
 )
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
     MpcResultReport,
     SimTaskInitRequest,
@@ -574,7 +574,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         for step_index, value in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0)]:
-            agent._on_field_metrics_received(
+            agent._metrics_subscriber.handle_payload(
                 "metrics/topic",
                 {
                     "object_id": 1001,
@@ -586,10 +586,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(agent.get_field_metrics_value(1001, "flow"), 4.0)
-        self.assertEqual(set(agent.get_field_metrics_history().keys()), {2, 3, 4})
-        self.assertNotIn(1, agent.get_field_metrics_history())
-        self.assertEqual(agent.get_field_metrics_by_step(4)["1001_flow"]["value"], 4.0)
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 4.0)
+        self.assertEqual(set(agent._metrics_data_cache.history().keys()), {2, 3, 4})
+        self.assertNotIn(1, agent._metrics_data_cache.history())
+        self.assertEqual(agent._metrics_data_cache.by_step(4)["1001_flow"]["value"], 4.0)
 
     def test_central_scheduling_agent_filters_field_metrics_by_position_code(self):
         state_manager = AgentStateManager()
@@ -617,7 +617,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             optimization_horizon=3,
         )
 
-        agent._on_field_metrics_received(
+        agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 1001,
@@ -627,7 +627,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "position_code": "upstream",
             },
         )
-        agent._on_field_metrics_received(
+        agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 1001,
@@ -638,9 +638,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(agent.get_field_metrics_value(1001, "flow"), 2.0)
-        self.assertEqual(agent.get_field_metrics_by_step(1), {})
-        self.assertEqual(agent.get_field_metrics_by_step(2)["1001_flow"]["position_code"], "none")
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 2.0)
+        self.assertEqual(agent._metrics_data_cache.by_step(1), {})
+        self.assertEqual(agent._metrics_data_cache.by_step(2)["1001_flow"]["position_code"], "none")
 
     def test_central_scheduling_agent_activates_mpc_on_time_series_update(self):
         state_manager = AgentStateManager()
@@ -1272,7 +1272,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             mpc_result_reporter=reporter,
             object_agent_code_map={501: "GATE_AGENT_015"},
         )
-        agent._on_field_metrics_received(
+        agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 9001,
@@ -1388,7 +1388,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             mpc_planning_client=mpc_client,
             mpc_result_reporter=reporter,
         )
-        agent._on_field_metrics_received(
+        agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 9001,
@@ -1484,7 +1484,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             mpc_result_reporter=reporter,
             object_agent_code_map={20600: "GATE_AGENT_015_PARENT"},
         )
-        agent._on_field_metrics_received(
+        agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 9001,

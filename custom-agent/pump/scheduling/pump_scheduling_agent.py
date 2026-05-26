@@ -110,7 +110,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
 
                 logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
-                self.subscribe_to_field_metrics(full_metrics_topic)
+                self._metrics_subscriber.subscribe(full_metrics_topic)
 
             # 4. 在状态管理器中注册
             self.state_manager.init_task(self.context, [self])

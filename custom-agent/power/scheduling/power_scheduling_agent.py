@@ -120,7 +120,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
 
                 logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
-                self.subscribe_to_field_metrics(full_metrics_topic)
+                self._metrics_subscriber.subscribe(full_metrics_topic)
 
             # 4. 在状态管理器中注册
             self.state_manager.init_task(self.context, [self])
@@ -172,7 +172,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"--- 第 {step} 步：开始执行 MPC 滚动优化 ---")
 
         # 1. 获取输入数据（例如：从缓存中读取订阅到的水位数据）
-        # water_level = self.get_field_metrics_value(101, "water_level")
+        # water_level = self._metrics_data_cache.get_value(101, "water_level")
         
         # 2. 调用优化算法（模拟运行）
         logger.info("求解器正在运行中...")

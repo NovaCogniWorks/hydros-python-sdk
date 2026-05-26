@@ -213,7 +213,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         )
 
         try:
-            self.subscribe_to_field_metrics(metrics_topic)
+            self._metrics_subscriber.subscribe(metrics_topic)
             logger.info(f"Subscribed to field metrics: {metrics_topic}")
         except Exception as e:
             logger.warning(f"Failed to subscribe to metrics topic: {e}")

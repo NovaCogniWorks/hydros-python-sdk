@@ -17,7 +17,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk.agents.central_scheduling_agent import MpcTaskState
+    from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger(__name__)
 

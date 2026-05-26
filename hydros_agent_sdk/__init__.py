@@ -99,12 +99,14 @@ from hydros_agent_sdk.runtime import (
 )
 from hydros_agent_sdk.transport import (
     InMemoryTransport,
+    MqttMetricsSubscriber,
     PublishRecord,
     Transport,
 )
 from hydros_agent_sdk.mpc import (
     DeviceOpening,
     HorizonControlStep,
+    MetricsDataCache,
     MpcConfigResolver,
     MpcOptimizeRequest,
     MpcOptimizeResponse,
@@ -214,10 +216,14 @@ __all__ = [
     "Transport",
     "DeviceOpening",
     "HorizonControlStep",
+    "MetricsDataCache",
+    "MqttMetricsSubscriber",
+    "MpcConfigResolver",
     "MpcOptimizeRequest",
     "MpcOptimizeResponse",
     "MpcPlanningClient",
     "MpcPlanningError",
+    "MpcRuntimeConfig",
     "MpcResult",
     "MpcResultDetail",
     "MpcResultReporter",

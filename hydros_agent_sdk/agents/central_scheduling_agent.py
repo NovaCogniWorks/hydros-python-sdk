@@ -5,9 +5,7 @@
 增加了模型预测控制（MPC）优化功能。
 """
 
-import inspect
 import logging
-from dataclasses import dataclass, field
 from threading import RLock
 from typing import Optional, List, Dict, Any, Callable, Iterable
 from abc import abstractmethod
@@ -23,8 +21,12 @@ from hydros_agent_sdk.agent_commands.transport import AgentCommandClient
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
+from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
+from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from hydros_agent_sdk.utils import generate_agent_command_id
 from .tickable_agent import TickableAgent
@@ -49,34 +51,6 @@ from hydros_agent_sdk.protocol.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class MpcTaskState:
-    """Runtime state for one Java-compatible rolling MPC loop."""
-
-    context: SimulationContext
-    rolling_interval_steps: int
-    start_step: int
-    current_step: int = -1
-    total_steps: int = 36
-    current_loop: int = 1
-    mpc_config_url: Optional[str] = None
-    target_and_constrain_config_url: Optional[str] = None
-    hydro_events: List[TimeSeriesDataChangedEvent] = field(default_factory=list)
-
-    def register_hydro_event(self, event: TimeSeriesDataChangedEvent) -> None:
-        self.hydro_events.append(event)
-
-    def active_new_rolling(self, current_step: int) -> bool:
-        if self.rolling_interval_steps <= 0:
-            return False
-        step_delta = current_step - self.start_step
-        return (
-            step_delta % self.rolling_interval_steps == 0
-            and step_delta != 0
-            and current_step - self.total_steps != 0
-        )
 
 
 class CentralSchedulingAgent(TickableAgent):
@@ -204,11 +178,22 @@ class CentralSchedulingAgent(TickableAgent):
         self._topology = None
 
         # 现地设备实时指标缓存
-        self._field_metrics_cache: Dict[str, Any] = {}
-        self._field_metrics_step_cache: Dict[int, Dict[str, Any]] = {}
+        self._metrics_data_cache = MetricsDataCache(max_steps=optimization_horizon)
+        self._field_metrics_cache = self._metrics_data_cache.latest_metrics
+        self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
+        self._metrics_subscriber = MqttMetricsSubscriber(
+            mqtt_client=sim_coordination_client.mqtt_client,
+            metrics_data_cache=self._metrics_data_cache,
+        )
 
-        # 现地指标订阅主题
-        self._metrics_subscription_topic = None
+        self._mpc_optimization_service = MpcOptimizationService(
+            properties=self.properties,
+            metrics_data_cache=self._metrics_data_cache,
+            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+            mpc_planning_client=self._mpc_planning_client,
+            mpc_result_reporter=self._mpc_result_reporter,
+            mpc_sensor_provider=self._mpc_sensor_provider,
+        )
 
         # agent command 客户端按需懒加载
         self._agent_command_client: Optional[AgentCommandClient] = None
@@ -334,16 +319,7 @@ class CentralSchedulingAgent(TickableAgent):
         return PropertyParseUtils.get_bool(self.properties, "auto_start_mpc_on_tick", True)
 
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
-        if self._mpc_planning_client is not None:
-            return self._mpc_planning_client
-
-        base_url = MpcConfigResolver.get_mpc_service_base_url(
-            self.properties,
-            self._configured_mpc_service_base_url,
-        )
-        if not base_url:
-            return None
-        self._mpc_planning_client = MpcPlanningClient(base_url=base_url)
+        self._mpc_planning_client = self._mpc_optimization_service.get_or_create_mpc_planning_client()
         return self._mpc_planning_client
 
     def is_mpc_optimizing_on_the_loop(self) -> bool:
@@ -353,89 +329,6 @@ class CentralSchedulingAgent(TickableAgent):
     @property
     def mpc_task_state(self) -> Optional[MpcTaskState]:
         return self._mpc_task_state
-
-    def subscribe_to_field_metrics(self, metrics_topic: str):
-        """
-        订阅 MQTT 主题以获取实时现地指标。
-
-        该方法订阅现地设备发布其实时指标数据的主题。
-
-        参数:
-            metrics_topic: 现地指标的 MQTT 主题
-        """
-        logger.info(f"Subscribing to field metrics topic: {metrics_topic}")
-
-        self._metrics_subscription_topic = metrics_topic
-
-        # 用 paho-mqtt 的主题级回调把消息路由到现地指标处理函数
-        self.sim_coordination_client.mqtt_client.message_callback_add(
-            metrics_topic,
-            lambda client, userdata, msg: self._on_field_metrics_received_wrapper(msg)
-        )
-        self.sim_coordination_client.mqtt_client.subscribe(metrics_topic)
-
-        logger.info(f"Subscribed to field metrics: {metrics_topic}")
-
-    def _on_field_metrics_received_wrapper(self, msg):
-        """先解析 MQTT 消息负载，再进入业务逻辑处理。"""
-        try:
-            import json
-            payload = json.loads(msg.payload.decode("utf-8"))
-            self._on_field_metrics_received(msg.topic, payload)
-        except Exception as e:
-            logger.error(f"Error parsing field metrics payload on {msg.topic}: {e}")
-
-    def _on_field_metrics_received(self, topic: str, payload: Dict[str, Any]):
-        """
-        通过 MQTT 接收现地指标的回调。
-
-        当接收到现地指标时调用此方法。
-        它更新内部缓存以用于优化。
-
-        参数:
-            topic: MQTT 主题
-            payload: 指标负载
-        """
-        logger.debug(f"Received field metrics from topic: {topic}")
-
-        try:
-            # 解析指标字段
-            object_id = payload.get('object_id')
-            metrics_code = payload.get('metrics_code')
-            value = payload.get('value')
-            step_index = payload.get('step_index')
-            object_type = payload.get('object_type')
-            position_code = payload.get('position_code')
-            if position_code != "none":
-                return
-
-            if object_id is not None and metrics_code:
-                cache_key = f"{object_id}_{metrics_code}"
-                self._field_metrics_cache[cache_key] = {
-                    'object_id': object_id,
-                    'object_type': object_type,
-                    'metrics_code': metrics_code,
-                    'position_code': position_code,
-                    'value': value,
-                    'step_index': step_index,
-                }
-
-                if step_index is not None:
-                    self._field_metrics_step_cache.setdefault(int(step_index), {})
-                    self._field_metrics_step_cache[int(step_index)][cache_key] = {
-                        'object_id': object_id,
-                        'object_type': object_type,
-                        'metrics_code': metrics_code,
-                        'position_code': position_code,
-                        'value': value,
-                        'step_index': int(step_index),
-                    }
-                    self._trim_field_metrics_step_cache()
-
-                logger.debug(f"Cached field metrics: {cache_key} = {value}")
-
-        except Exception as e:
-            logger.error(f"Error processing field metrics: {e}", exc_info=True)
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
@@ -668,64 +561,19 @@ class CentralSchedulingAgent(TickableAgent):
             需要发送给边缘智能体的控制指令列表，或 None
         """
         mpc_task_state = self._require_mpc_task_state()
-        mpc_client = self.get_or_create_mpc_planning_client()
-        if mpc_client is None:
-            logger.warning(
-                "MPC planning client is not configured; skip default optimization at step %s",
-                step,
-            )
-            return None
-
-        sensor_data = self.list_mpc_sensor_data(mpc_task_state)
-        logger.debug(
-            "MPC sensorData prepared: bizSceneInstanceId=%s, step=%s, sensorDataCount=%s",
-            self.context.biz_scene_instance_id,
-            step,
-            len(sensor_data),
-        )
-        if not sensor_data:
-            logger.warning(
-                "MPC sensorData is empty before optimization: bizSceneInstanceId=%s, "
-                "step=%s, fieldMetricsCacheSize=%s",
-                self.context.biz_scene_instance_id,
-                step,
-                len(self._field_metrics_cache),
-            )
-
-        responses = mpc_client.execute_optimization(
+        responses = self._mpc_optimization_service.optimize(
+            self,
             mpc_task_state,
-            sensor_data,
-            sensor_provider=lambda: self.list_mpc_sensor_data(mpc_task_state),
+            step,
         )
         if not responses:
             return None
 
-        self._mpc_result_reporter.publish(self, mpc_task_state, responses)
         return self._build_control_commands_from_mpc_responses(responses)
 
     def list_mpc_sensor_data(self, mpc_task_state: Optional[MpcTaskState] = None) -> List[SensorData]:
         """Return field metrics in the SensorDTO shape required by the MPC service."""
-        if self._mpc_sensor_provider is not None:
-            provider = self._mpc_sensor_provider
-            try:
-                signature = inspect.signature(provider)
-                if len(signature.parameters) >= 2:
-                    provided = provider(self, mpc_task_state)
-                elif len(signature.parameters) == 1:
-                    provided = provider(mpc_task_state)
-                else:
-                    provided = provider()
-            except (TypeError, ValueError):
-                provided = provider()
-            return [
-                item if isinstance(item, SensorData) else SensorData.model_validate(item)
-                for item in (provided or [])
-            ]
-
-        return [
-            SensorData.model_validate(value)
-            for value in self._field_metrics_cache.values()
-        ]
+        return self._mpc_optimization_service.list_sensor_data(self, mpc_task_state)
 
     def _build_control_commands_from_mpc_responses(
         self,
@@ -892,64 +740,6 @@ class CentralSchedulingAgent(TickableAgent):
             )
             if command_request is not None:
                 self.send_command(command_request)
-
-    def get_field_metrics_value(
-        self,
-        object_id: int,
-        metrics_code: str
-    ) -> Optional[float]:
-        """
-        从缓存中获取现地指标值。
-
-        参数:
-            object_id: 对象 ID
-            metrics_code: 指标代码
-
-        返回:
-            现地指标值，如果未找到则返回 None
-        """
-        cache_key = f"{object_id}_{metrics_code}"
-        metrics_data = self._field_metrics_cache.get(cache_key)
-
-        if metrics_data:
-            return metrics_data.get('value')
-
-        return None
-
-    def get_field_metrics_by_step(self, step_index: int) -> Dict[str, Dict[str, Any]]:
-        """
-        获取指定步长的现地指标缓存。
-
-        参数:
-            step_index: 仿真步长
-
-        返回:
-            该步长下的指标快照
-        """
-        return dict(self._field_metrics_step_cache.get(int(step_index), {}))
-
-    def get_field_metrics_history(self) -> Dict[int, Dict[str, Dict[str, Any]]]:
-        """
-        获取最近缓存的步长指标历史。
-
-        返回:
-            按步长分组的指标缓存
-        """
-        return {step: dict(metrics) for step, metrics in self._field_metrics_step_cache.items()}
-
-    def _trim_field_metrics_step_cache(self) -> None:
-        """只保留 optimization_horizon 范围内的步长缓存。"""
-        if self._optimization_horizon <= 0:
-            self._field_metrics_step_cache.clear()
-            return
-
-        step_indexes = sorted(self._field_metrics_step_cache.keys())
-        excess_count = len(step_indexes) - self._optimization_horizon
-        if excess_count <= 0:
-            return
-
-        for step_index in step_indexes[:excess_count]:
-            self._field_metrics_step_cache.pop(step_index, None)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

@@ -68,7 +68,7 @@ class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
         task_id = self.context.biz_scene_instance_id
         full_topic = f"{metrics_topic.rstrip('/')}/{task_id}"
         logger.info("Subscribing central field metrics topic: %s", full_topic)
-        self.subscribe_to_field_metrics(full_topic)
+        self._metrics_subscriber.subscribe(full_topic)
 
     def _load_object_agent_code_map(self) -> None:
         raw_mapping = self.properties.get_property("object_agent_code_map", None)
