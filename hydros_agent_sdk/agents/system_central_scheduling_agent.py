@@ -4,7 +4,6 @@ System default central scheduling agent implementation.
 
 import json
 import logging
-from typing import Optional
 
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
@@ -14,6 +13,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus
+from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,34 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
         try:
             self.load_agent_configuration(request)
             self._initialize_model_context()
-            self._load_object_agent_code_map()
-            self._subscribe_configured_field_metrics()
+
+            raw_mapping = self.properties.get_property("object_agent_code_map", None)
+            if raw_mapping:
+                if isinstance(raw_mapping, dict):
+                    mapping = raw_mapping
+                else:
+                    mapping = json.loads(str(raw_mapping))
+                self._object_agent_code_map = {
+                    str(object_id): str(agent_code)
+                    for object_id, agent_code in mapping.items()
+                }
+                logger.info("Loaded object-agent mapping entries: %s", len(self._object_agent_code_map))
+
+            settings = load_runtime_env_settings()
+            metrics_topic = PropertyParseUtils.get_string(
+                self.properties,
+                "metrics_topic",
+                settings.metrics_topic,
+            )
+            if metrics_topic:
+                cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
+                rendered_topic = settings.render_topic(str(metrics_topic), cluster_id=cluster_id)
+                task_id = self.context.biz_scene_instance_id
+                full_topic = f"{rendered_topic.rstrip('/')}/{task_id}"
+                logger.info("Subscribing system central field metrics topic: %s", full_topic)
+                self._metrics_subscriber.subscribe(full_topic)
+            else:
+                logger.info("No metrics topic configured; MPC will rely on injected/provider sensor data")
 
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
@@ -56,48 +82,6 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
         except Exception:
             self.agent_command_gateway.shutdown()
             raise
-
-    def _load_object_agent_code_map(self) -> None:
-        raw_mapping = self.properties.get_property("object_agent_code_map", None)
-        if not raw_mapping:
-            return
-
-        if isinstance(raw_mapping, dict):
-            mapping = raw_mapping
-        else:
-            mapping = json.loads(str(raw_mapping))
-
-        self._object_agent_code_map = {
-            str(object_id): str(agent_code)
-            for object_id, agent_code in mapping.items()
-        }
-        logger.info("Loaded object-agent mapping entries: %s", len(self._object_agent_code_map))
-
-    def _subscribe_configured_field_metrics(self) -> None:
-        metrics_topic = self._get_metrics_topic()
-        if not metrics_topic:
-            logger.info("No metrics topic configured; MPC will rely on injected/provider sensor data")
-            return
-
-        task_id = self.context.biz_scene_instance_id
-        full_topic = f"{metrics_topic.rstrip('/')}/{task_id}"
-        logger.info("Subscribing system central field metrics topic: %s", full_topic)
-        self._metrics_subscriber.subscribe(full_topic)
-
-    def _get_metrics_topic(self) -> Optional[str]:
-        from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
-
-        settings = load_runtime_env_settings()
-        metrics_topic = PropertyParseUtils.get_string(
-            self.properties,
-            "metrics_topic",
-            settings.metrics_topic,
-        )
-        if not metrics_topic:
-            return None
-
-        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
-        return settings.render_topic(str(metrics_topic), cluster_id=cluster_id)
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating system central scheduling agent: %s", self.agent_id)
