@@ -767,13 +767,26 @@ class CentralSchedulingAgent(TickableAgent):
     ) -> List[AgentCommand]:
         control_commands: List[AgentCommand] = []
         for response in responses:
-            if response.plan_type != "OPTIMAL":
+            if (response.plan_type or "").upper() != "OPTIMAL":
+                logger.info(
+                    "Skip MPC response for control command build: plan_type=%s",
+                    response.plan_type,
+                )
                 continue
             if not response.horizon_controls:
+                logger.info(
+                    "Skip MPC response for control command build: empty horizon_controls, plan_type=%s",
+                    response.plan_type,
+                )
                 continue
             first_control = response.horizon_controls[0]
             for device_opening in first_control.opening_list or []:
                 if device_opening.value is None:
+                    logger.info(
+                        "Skip MPC device opening without value: objectId=%s, deviceType=%s",
+                        device_opening.object_id,
+                        device_opening.device_type,
+                    )
                     continue
                 target_agent = self.resolve_target_agent_for_object(
                     object_id=device_opening.object_id,
@@ -813,6 +826,11 @@ class CentralSchedulingAgent(TickableAgent):
                             need_ack_reply=True,
                         )
                     )
+        logger.info(
+            "Built %s control commands from %s MPC responses",
+            len(control_commands),
+            len(responses or []),
+        )
         return control_commands
 
     def resolve_target_agent_for_object(

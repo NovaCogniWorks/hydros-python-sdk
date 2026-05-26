@@ -1267,7 +1267,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         target = build_agent_instance("gate-agent-015", "GATE_AGENT_015", "node-b", context)
         callback._store_sibling_agent_instance(target)
         mpc_response = MpcOptimizeResponse(
-            plan_type="OPTIMAL",
+            plan_type="optimal",
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
