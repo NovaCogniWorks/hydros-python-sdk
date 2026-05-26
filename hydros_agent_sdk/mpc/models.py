@@ -52,16 +52,15 @@ class HorizonControlStep(HydroBaseModel):
 
 
 class MpcOptimizeRequest(HydroBaseModel):
-    biz_scene_instance_id: str
+    biz_scene_instance_id: str = _payload_field("bizSceneInstanceId", default=...)
     step_index: int = _payload_field("stepIndex", default=...)
     mpc_config_url: Optional[str] = _payload_field("mpcConfigUrl")
     control_config_url: Optional[str] = _payload_field("controlConfigUrl")
-    upstream_boundaries: Dict[str, List[float]] = Field(default_factory=dict)
-    downstream_boundaries: Optional[Dict[str, Any]] = None
+    upstream_boundaries: Dict[str, List[float]] = _payload_field("upstreamBoundaries", default_factory=dict)
+    downstream_boundaries: Optional[Dict[str, Any]] = _payload_field("downstreamBoundaries")
     sensor_data: List[SensorData] = _payload_field("sensorData", default_factory=list)
     fixed_controls: Dict[str, float] = _payload_field("fixedControls", default_factory=dict)
     multi_profile: bool = _payload_field("multiProfile", default=False)
-    targets: Dict[int, List[float]] = Field(default_factory=dict)
     include_diversion: bool = _payload_field("includeDiversion", default=False)
 
 

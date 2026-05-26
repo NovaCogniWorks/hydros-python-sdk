@@ -143,7 +143,7 @@ class MpcPlanningClient:
             )
             raise MpcPlanningError("MPC optimization requires non-empty sensor data")
 
-        targets = self.build_targets(mpc_task_state.hydro_events)
+        include_diversion = self.has_diversion_request(mpc_task_state.hydro_events)
         return MpcOptimizeRequest(
             biz_scene_instance_id=mpc_task_state.context.biz_scene_instance_id,
             step_index=mpc_task_state.current_step,
@@ -155,8 +155,7 @@ class MpcPlanningClient:
             ),
             sensor_data=normalized_sensor_data,
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
-            targets=targets,
-            include_diversion=bool(targets),
+            include_diversion=include_diversion,
         )
 
     @staticmethod
@@ -248,22 +247,16 @@ class MpcPlanningClient:
         return fixed_controls
 
     @staticmethod
-    def build_targets(events: Iterable[TimeSeriesDataChangedEvent]) -> Dict[int, List[float]]:
-        targets: Dict[int, List[float]] = {}
+    def has_diversion_request(events: Iterable[TimeSeriesDataChangedEvent]) -> bool:
         for event in events or []:
             if event.hydro_event_source_type != "WATER_USE":
                 continue
             for object_time_series in event.object_time_series or []:
                 if object_time_series.object_id is None:
                     continue
-                values = [
-                    float(item.value)
-                    for item in object_time_series.time_series
-                    if item.value is not None
-                ]
-                if values:
-                    targets[int(object_time_series.object_id)] = values
-        return targets
+                if any(item.value is not None for item in object_time_series.time_series):
+                    return True
+        return False
 
     @staticmethod
     def _find_prev_value(
