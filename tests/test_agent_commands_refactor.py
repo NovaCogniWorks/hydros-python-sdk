@@ -1152,6 +1152,44 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
 
+    def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
+        context = SimulationContext(biz_scene_instance_id="scene-014-log")
+        source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    opening_list=[
+                        DeviceOpening(
+                            device_type="Gate",
+                            object_id=501,
+                            value=0.45,
+                        )
+                    ],
+                )
+            ],
+        )
+        enqueued = []
+        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+
+        with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
+            report = reporter.publish(source, state, [response])
+
+        self.assertIs(enqueued[0], report)
+        log_output = "\n".join(logs.output)
+        self.assertIn("MPC result report prepared for coordinator", log_output)
+        self.assertIn("MPC result report enqueued to coordinator", log_output)
+        self.assertIn("scene-014-log", log_output)
+        self.assertIn(report.command_id, log_output)
+        self.assertIn('"command_type":"mpc_result_report"', log_output)
+
     def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
@@ -1255,6 +1293,41 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertTrue(client._should_send(report))
+
+    def test_coordination_client_logs_mpc_result_report_payload_when_sent(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        context = SimulationContext(biz_scene_instance_id="scene-016-log")
+        source = build_agent_instance("agent-016-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state_manager.add_local_agent(source)
+        client = SimCoordinationClient(
+            broker_url="tcp://127.0.0.1",
+            broker_port=1883,
+            hydros_cluster_id="demo-cluster",
+            sim_coordination_callback=TestSiblingCacheCallback(),
+            state_manager=state_manager,
+        )
+        publish_result = Mock()
+        client.mqtt_client = Mock()
+        client.mqtt_client.publish.return_value = publish_result
+        report = MpcResultReport(
+            command_id="report-016-log",
+            context=context,
+            source_agent_instance=source,
+            mpc_results=[],
+            broadcast=True,
+        )
+
+        with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
+            client._send_with_retry(report)
+
+        client.mqtt_client.publish.assert_called_once()
+        publish_result.wait_for_publish.assert_called_once()
+        log_output = "\n".join(logs.output)
+        self.assertIn("MPC result report sent to coordinator", log_output)
+        self.assertIn("report-016-log", log_output)
+        self.assertIn('"command_type":"mpc_result_report"', log_output)
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \

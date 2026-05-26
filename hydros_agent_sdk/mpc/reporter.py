@@ -57,11 +57,32 @@ class MpcResultReporter:
         report = self.build_report(source_agent_instance, mpc_task_state, responses)
         if report is None:
             return None
+        payload = self._format_report_for_log(report)
+        logger.info(
+            "MPC result report prepared for coordinator: biz_scene_instance_id=%s, "
+            "step=%s, command_id=%s, result_count=%s, payload=%s",
+            mpc_task_state.context.biz_scene_instance_id,
+            mpc_task_state.current_step,
+            report.command_id,
+            len(report.mpc_results),
+            payload,
+        )
         client = self.sim_coordination_client or getattr(source_agent_instance, "sim_coordination_client", None)
         if client is None:
-            logger.warning("MPC result report built but no coordination client is available")
+            logger.warning(
+                "MPC result report built but no coordination client is available: "
+                "command_id=%s, payload=%s",
+                report.command_id,
+                payload,
+            )
             return report
         client.enqueue(report)
+        logger.info(
+            "MPC result report enqueued to coordinator: command_id=%s, result_count=%s, payload=%s",
+            report.command_id,
+            len(report.mpc_results),
+            payload,
+        )
         return report
 
     @classmethod
@@ -142,3 +163,8 @@ class MpcResultReporter:
     @staticmethod
     def _context_waterway_id(context: SimulationContext) -> Optional[str]:
         return context.waterway.waterway_id if context.waterway else None
+
+    @staticmethod
+    def _format_report_for_log(report: MpcResultReport) -> str:
+        payload = report.model_dump(mode="json", by_alias=True, exclude_none=True)
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

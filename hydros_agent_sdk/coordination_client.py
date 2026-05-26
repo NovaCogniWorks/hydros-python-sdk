@@ -691,6 +691,13 @@ class SimCoordinationClient:
                 result.wait_for_publish()
 
                 logger.info(f"Command sent: type={command.command_type}, id={command_id}, attempt={attempt}")
+                if isinstance(command, MpcResultReport):
+                    logger.info(
+                        "MPC result report sent to coordinator: topic=%s, command_id=%s, payload=%s",
+                        self.topic,
+                        command_id,
+                        payload,
+                    )
                 return  # Success
 
             except Exception as e:
