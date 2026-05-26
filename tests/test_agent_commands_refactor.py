@@ -1002,7 +1002,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         def fake_opener(request, timeout_seconds):
             self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
             self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
-            self.assertEqual(timeout_seconds, 180.0)
+            self.assertEqual(timeout_seconds, 150.0)
             return FakeHttpResponse()
 
         client = MpcPlanningClient(

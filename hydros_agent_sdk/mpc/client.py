@@ -28,7 +28,7 @@ class MpcPlanningClient:
     def __init__(
         self,
         base_url: str,
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float = 150.0,
         opener: Optional[Callable[[Request, float], Any]] = None,
         require_sensor_data: bool = True,
         empty_sensor_retry_delay_seconds: float = 2.0,

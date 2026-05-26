@@ -601,14 +601,23 @@ class CentralSchedulingAgent(TickableAgent):
             )
 
             if not self.is_mpc_optimizing_on_the_loop():
+                mpc_config_url = self.get_mpc_config_url()
+                target_and_constrain_config_url = self.get_target_and_constrain_config_url()
+                logger.info(
+                    "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
+                    "mpcConfigUrl=%s, controlConfigUrl=%s",
+                    self.context.biz_scene_instance_id,
+                    mpc_config_url,
+                    target_and_constrain_config_url,
+                )
                 mpc_task_state = MpcTaskState(
                     context=self.context,
                     rolling_interval_steps=rolling_interval_steps,
                     start_step=current_step,
                     current_step=current_step,
                     total_steps=total_steps,
-                    mpc_config_url=self.get_mpc_config_url(),
-                    target_and_constrain_config_url=self.get_target_and_constrain_config_url(),
+                    mpc_config_url=mpc_config_url,
+                    target_and_constrain_config_url=target_and_constrain_config_url,
                 )
                 mpc_task_state.register_hydro_event(event)
                 self._mpc_task_state = mpc_task_state
@@ -628,14 +637,24 @@ class CentralSchedulingAgent(TickableAgent):
         if rolling_interval_steps <= 0:
             raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
 
+        mpc_config_url = self.get_mpc_config_url()
+        target_and_constrain_config_url = self.get_target_and_constrain_config_url()
+        logger.info(
+            "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
+            "mpcConfigUrl=%s, controlConfigUrl=%s",
+            self.context.biz_scene_instance_id,
+            mpc_config_url,
+            target_and_constrain_config_url,
+        )
+
         mpc_task_state = MpcTaskState(
             context=self.context,
             rolling_interval_steps=rolling_interval_steps,
             start_step=current_step,
             current_step=current_step,
             total_steps=self.get_total_steps(),
-            mpc_config_url=self.get_mpc_config_url(),
-            target_and_constrain_config_url=self.get_target_and_constrain_config_url(),
+            mpc_config_url=mpc_config_url,
+            target_and_constrain_config_url=target_and_constrain_config_url,
         )
         self._mpc_task_state = mpc_task_state
 
