@@ -7,6 +7,7 @@ coordination and MQTT protocol support.
 
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
+from hydros_agent_sdk.context_manager import ContextManager, HydroModelContext
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.mqtt import HydrosMqttClient
@@ -175,6 +176,8 @@ __all__ = [
     # Core client and callback
     "SimCoordinationClient",
     "SimCoordinationCallback",
+    "ContextManager",
+    "HydroModelContext",
     "BaseHydroAgent",
     "HydrosTopics",
 
