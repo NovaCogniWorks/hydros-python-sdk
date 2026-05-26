@@ -56,13 +56,6 @@ class MpcPlanningClient:
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> List[MpcOptimizeResponse]:
         normalized_sensor_data = self._normalize_sensor_data(sensor_data)
-        logger.info(
-            "MPC optimization sensor_data before request build: biz_scene_instance_id=%s, "
-            "step=%s, sensor_data_count=%s",
-            mpc_task_state.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
-            len(normalized_sensor_data),
-        )
         request_model = self.build_optimize_request(
             mpc_task_state,
             normalized_sensor_data,
@@ -80,12 +73,13 @@ class MpcPlanningClient:
 
         try:
             logger.info(
-                "Sending MPC optimization request: biz_scene_instance_id=%s, step=%s, url=%s",
+                "Sending MPC optimization request: biz_scene_instance_id=%s, step=%s, "
+                "url=%s, sensor_data_count=%s",
                 mpc_task_state.context.biz_scene_instance_id,
                 mpc_task_state.current_step,
                 self.planning_start_url,
+                len(request_model.sensor_data),
             )
-            logger.info("MPC optimization request payload: %s", request_payload_text)
             response = self._opener(request, self.timeout_seconds)
             payload_bytes = response.read()
             raw_payload_text = payload_bytes.decode("utf-8", errors="replace")
@@ -109,8 +103,13 @@ class MpcPlanningClient:
 
         responses = self.parse_optimize_response(payload)
         logger.info(
-            "MPC optimization parsed response: %s",
-            self._format_responses_for_log(responses),
+            "MPC optimization response parsed: biz_scene_instance_id=%s, step=%s, "
+            "response_count=%s, horizon_control_count=%s, plan_types=%s",
+            mpc_task_state.context.biz_scene_instance_id,
+            mpc_task_state.current_step,
+            len(responses),
+            self._count_horizon_controls(responses),
+            self._format_plan_types(responses),
         )
         return responses
 
@@ -128,12 +127,14 @@ class MpcPlanningClient:
                 mpc_task_state.current_step,
             )
             normalized_sensor_data = self._retry_sensor_data(sensor_provider)
-            logger.info(
-                "MPC sensor_data after retry: biz_scene_instance_id=%s, step=%s, sensor_data_count=%s",
-                mpc_task_state.context.biz_scene_instance_id,
-                mpc_task_state.current_step,
-                len(normalized_sensor_data),
-            )
+            if normalized_sensor_data:
+                logger.info(
+                    "MPC sensor_data recovered after retry: biz_scene_instance_id=%s, "
+                    "step=%s, sensor_data_count=%s",
+                    mpc_task_state.context.biz_scene_instance_id,
+                    mpc_task_state.current_step,
+                    len(normalized_sensor_data),
+                )
         if self.require_sensor_data and not normalized_sensor_data:
             logger.error(
                 "MPC sensor_data is empty; request will not be sent: biz_scene_instance_id=%s, step=%s",
@@ -310,25 +311,14 @@ class MpcPlanningClient:
     def _format_json_for_log(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
-    def _format_responses_for_log(self, responses: Iterable[MpcOptimizeResponse]) -> str:
-        return self._format_json_for_log([
-            self._truncate_response_for_log(response)
-            for response in responses
-        ])
+    @staticmethod
+    def _count_horizon_controls(responses: Iterable[MpcOptimizeResponse]) -> int:
+        return sum(len(response.horizon_controls or []) for response in responses or [])
 
-    def _truncate_response_for_log(self, response: MpcOptimizeResponse) -> Dict[str, Any]:
-        payload = response.model_dump(mode="json", by_alias=True, exclude_none=True)
-        horizon_controls = payload.get("horizon_controls")
-        if not isinstance(horizon_controls, list):
-            return payload
-
-        total_count = len(horizon_controls)
-        limit = self.horizon_controls_log_limit
-        payload["horizon_controls_total_count"] = total_count
-        payload["horizon_controls_log_limit"] = limit
-        payload["horizon_controls_truncated"] = total_count > limit
-        payload["horizon_controls"] = horizon_controls[:limit]
-        return payload
+    @staticmethod
+    def _format_plan_types(responses: Iterable[MpcOptimizeResponse]) -> str:
+        plan_types = sorted({response.plan_type for response in responses or [] if response.plan_type})
+        return ",".join(plan_types) if plan_types else "-"
 
     @staticmethod
     def _read_http_error_body(exc: HTTPError) -> str:

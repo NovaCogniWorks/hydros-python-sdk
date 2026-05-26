@@ -976,7 +976,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("targets", payload)
         self.assert_snake_case_keys(payload)
 
-    def test_mpc_planning_client_logs_request_and_response_payloads(self):
+    def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
         state = MpcTaskState(
             context=context,
@@ -1059,26 +1059,19 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(responses), 1)
         self.assertEqual(responses[0].plan_type, "OPTIMAL")
         self.assertEqual(len(responses[0].horizon_controls), 3)
-        self.assertIn("MPC optimization request payload", log_output)
-        self.assertIn('"biz_scene_instance_id": "scene-013-log"', log_output)
-        self.assertIn('"sensor_data"', log_output)
-        self.assertIn('"object_id": 9001', log_output)
-        self.assertNotIn('"bizSceneInstanceId"', log_output)
-        self.assertNotIn('"sensorData"', log_output)
-        self.assertNotIn('"targets"', log_output)
+        self.assertIn("Sending MPC optimization request", log_output)
+        self.assertIn("biz_scene_instance_id=scene-013-log", log_output)
+        self.assertIn("sensor_data_count=1", log_output)
         self.assertIn("MPC optimization raw response received", log_output)
-        self.assertIn("MPC optimization parsed response", log_output)
-        self.assertIn('"plan_type": "OPTIMAL"', log_output)
-        parsed_log = "\n".join(
-            line for line in logs.output
-            if "MPC optimization parsed response" in line
-        )
-        self.assertIn('"horizon_controls_total_count": 3', parsed_log)
-        self.assertIn('"horizon_controls_log_limit": 2', parsed_log)
-        self.assertIn('"horizon_controls_truncated": true', parsed_log)
-        self.assertIn('"object_id": 501', parsed_log)
-        self.assertIn('"object_id": 502', parsed_log)
-        self.assertNotIn('"object_id": 503', parsed_log)
+        self.assertIn("MPC optimization response parsed", log_output)
+        self.assertIn("response_count=1", log_output)
+        self.assertIn("horizon_control_count=3", log_output)
+        self.assertIn("plan_types=OPTIMAL", log_output)
+        self.assertNotIn('"sensor_data"', log_output)
+        self.assertNotIn('"object_id": 9001', log_output)
+        self.assertNotIn('"object_id": 501', log_output)
+        self.assertNotIn('"object_id": 502', log_output)
+        self.assertNotIn('"object_id": 503', log_output)
 
     def assert_snake_case_keys(self, value):
         if isinstance(value, dict):
@@ -1122,10 +1115,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 client.execute_optimization(state, [], sensor_provider=lambda: [])
 
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC optimization sensor_data before request build", log_output)
-        self.assertIn("sensor_data_count=0", log_output)
         self.assertIn("MPC sensor_data is empty before retry", log_output)
-        self.assertIn("MPC sensor_data after retry", log_output)
         self.assertIn("MPC sensor_data is empty; request will not be sent", log_output)
         opener.assert_not_called()
 
@@ -1247,14 +1237,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("MPC result report enqueued to coordinator", log_output)
         self.assertIn("scene-014-log", log_output)
         self.assertIn(report.command_id, log_output)
-        self.assertIn('"command_type":"mpc_result_report"', log_output)
         self.assertEqual(len(report.mpc_results[0].details), 3)
-        self.assertIn('"details_total_count":3', log_output)
-        self.assertIn('"details_logged_count":2', log_output)
-        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
-        self.assertIn('"details_truncated":true', log_output)
-        self.assertIn('"object_id":501', log_output)
-        self.assertIn('"object_id":502', log_output)
+        self.assertIn("result_count=1", log_output)
+        self.assertIn("detail_count=3", log_output)
+        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"object_id":501', log_output)
+        self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
     def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
@@ -1626,13 +1614,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         log_output = "\n".join(logs.output)
         self.assertIn("MPC result report sent to coordinator", log_output)
         self.assertIn(report.command_id, log_output)
-        self.assertIn('"command_type":"mpc_result_report"', log_output)
-        self.assertIn('"details_total_count":3', log_output)
-        self.assertIn('"details_logged_count":2', log_output)
-        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
-        self.assertIn('"details_truncated":true', log_output)
-        self.assertIn('"object_id":501', log_output)
-        self.assertIn('"object_id":502', log_output)
+        self.assertIn("result_count=1", log_output)
+        self.assertIn("detail_count=3", log_output)
+        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"object_id":501', log_output)
+        self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
     def test_coordination_client_truncates_mpc_result_report_when_enqueued(self):
@@ -1683,12 +1669,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         log_output = "\n".join(logs.output)
         self.assertIn("Enqueued command", log_output)
-        self.assertIn('"details_total_count":3', log_output)
-        self.assertIn('"details_logged_count":2', log_output)
-        self.assertIn('"horizon_steps_logged":[1,2]', log_output)
-        self.assertIn('"details_truncated":true', log_output)
-        self.assertIn('"object_id":501', log_output)
-        self.assertIn('"object_id":502', log_output)
+        self.assertIn('"command_type":"mpc_result_report"', log_output)
+        self.assertIn('"result_count":1', log_output)
+        self.assertIn('"detail_count":3', log_output)
+        self.assertNotIn('"object_id":501', log_output)
+        self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):

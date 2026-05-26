@@ -693,10 +693,12 @@ class SimCoordinationClient:
                 logger.info(f"Command sent: type={command.command_type}, id={command_id}, attempt={attempt}")
                 if isinstance(command, MpcResultReport):
                     logger.info(
-                        "MPC result report sent to coordinator: topic=%s, command_id=%s, payload=%s",
+                        "MPC result report sent to coordinator: topic=%s, command_id=%s, "
+                        "result_count=%s, detail_count=%s",
                         self.topic,
                         command_id,
-                        self._format_command_for_log(command),
+                        len(command.mpc_results or []),
+                        self._count_mpc_result_details(command),
                     )
                 return  # Success
 
@@ -716,41 +718,20 @@ class SimCoordinationClient:
     @staticmethod
     def _format_command_for_log(command: SimCommand) -> str:
         if isinstance(command, MpcResultReport):
-            payload = command.model_dump(mode="json", by_alias=True, exclude_none=True)
-            SimCoordinationClient._truncate_mpc_result_report_payload_for_log(payload)
-            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            summary = {
+                "command_type": command.command_type,
+                "command_id": command.command_id,
+                "biz_scene_instance_id": (
+                    command.context.biz_scene_instance_id
+                    if command.context is not None
+                    else None
+                ),
+                "result_count": len(command.mpc_results or []),
+                "detail_count": SimCoordinationClient._count_mpc_result_details(command),
+            }
+            return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
         return command.model_dump_json(indent=None)
 
     @staticmethod
-    def _truncate_mpc_result_report_payload_for_log(payload: dict) -> None:
-        horizon_step_log_limit = 2
-        for result in payload.get("mpc_results") or []:
-            details = result.get("details")
-            if not isinstance(details, list):
-                continue
-
-            total_count = len(details)
-            kept_steps = SimCoordinationClient._first_horizon_steps(details, horizon_step_log_limit)
-            kept_step_set = set(kept_steps)
-            result["details"] = [
-                detail
-                for detail in details
-                if detail.get("horizon_step") in kept_step_set
-            ]
-            result["details_total_count"] = total_count
-            result["details_logged_count"] = len(result["details"])
-            result["horizon_steps_logged"] = kept_steps
-            result["horizon_steps_log_limit"] = horizon_step_log_limit
-            result["details_truncated"] = len(result["details"]) < total_count
-
-    @staticmethod
-    def _first_horizon_steps(details: list, limit: int) -> list:
-        steps = []
-        for detail in details:
-            step = detail.get("horizon_step")
-            if step is None or step in steps:
-                continue
-            steps.append(step)
-            if len(steps) >= limit:
-                break
-        return steps
+    def _count_mpc_result_details(command: MpcResultReport) -> int:
+        return sum(len(result.details or []) for result in command.mpc_results or [])

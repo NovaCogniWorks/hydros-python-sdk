@@ -490,14 +490,14 @@ class CentralSchedulingAgent(TickableAgent):
         返回:
             需要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
         """
-        logger.info(f"Central scheduling step {request.step}")
+        logger.debug(f"Central scheduling step {request.step}")
 
         try:
             with self._time_series_update_lock:
                 self._current_step = request.step
                 if not self.is_mpc_optimizing_on_the_loop():
                     if not self.should_auto_start_mpc_on_tick():
-                        logger.info(
+                        logger.debug(
                             "MPC rolling loop has not been activated yet and auto-start is disabled: "
                             "bizSceneInstanceId=%s, step=%s",
                             self.context.biz_scene_instance_id,
@@ -513,7 +513,7 @@ class CentralSchedulingAgent(TickableAgent):
                 mpc_task_state.total_steps = self.get_total_steps()
                 should_roll = mpc_task_state.active_new_rolling(request.step)
 
-                logger.info(
+                logger.debug(
                     "MPC rolling check: bizSceneInstanceId=%s, startStep=%s, "
                     "currentStep=%s, rollStep=%s, shouldRoll=%s",
                     self.context.biz_scene_instance_id,
@@ -545,7 +545,7 @@ class CentralSchedulingAgent(TickableAgent):
         after this activation point.
         """
         self._set_agent_logging_context()
-        logger.info("Received central scheduling time series update: commandId=%s", request.command_id)
+        logger.debug("Received central scheduling time series update: commandId=%s", request.command_id)
 
         try:
             event = request.time_series_data_changed_event
@@ -604,7 +604,7 @@ class CentralSchedulingAgent(TickableAgent):
             if not self.is_mpc_optimizing_on_the_loop():
                 mpc_config_url = self.get_mpc_config_url()
                 target_and_constrain_config_url = self.get_target_and_constrain_config_url()
-                logger.info(
+                logger.debug(
                     "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
                     "mpcConfigUrl=%s, controlConfigUrl=%s",
                     self.context.biz_scene_instance_id,
@@ -640,7 +640,7 @@ class CentralSchedulingAgent(TickableAgent):
 
         mpc_config_url = self.get_mpc_config_url()
         target_and_constrain_config_url = self.get_target_and_constrain_config_url()
-        logger.info(
+        logger.debug(
             "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
             "mpcConfigUrl=%s, controlConfigUrl=%s",
             self.context.biz_scene_instance_id,
@@ -712,7 +712,7 @@ class CentralSchedulingAgent(TickableAgent):
             return None
 
         sensor_data = self.list_mpc_sensor_data(mpc_task_state)
-        logger.info(
+        logger.debug(
             "MPC sensorData prepared: bizSceneInstanceId=%s, step=%s, sensorDataCount=%s",
             self.context.biz_scene_instance_id,
             step,
@@ -769,13 +769,13 @@ class CentralSchedulingAgent(TickableAgent):
         control_commands: List[AgentCommand] = []
         for response in responses:
             if (response.plan_type or "").upper() != "OPTIMAL":
-                logger.info(
+                logger.debug(
                     "Skip MPC response for control command build: plan_type=%s",
                     response.plan_type,
                 )
                 continue
             if not response.horizon_controls:
-                logger.info(
+                logger.debug(
                     "Skip MPC response for control command build: empty horizon_controls, plan_type=%s",
                     response.plan_type,
                 )
@@ -783,7 +783,7 @@ class CentralSchedulingAgent(TickableAgent):
             first_control = response.horizon_controls[0]
             for device_opening in first_control.opening_list or []:
                 if device_opening.value is None:
-                    logger.info(
+                    logger.debug(
                         "Skip MPC device opening without value: objectId=%s, deviceType=%s",
                         device_opening.object_id,
                         device_opening.device_type,
@@ -909,7 +909,7 @@ class CentralSchedulingAgent(TickableAgent):
             object_id = command.get('object_id')
             object_type = command.get('object_type')
 
-            logger.info(
+            logger.debug(
                 f"Control command: target={target_agent_code}, "
                 f"type={target_command_type}, value={target_value}, object_id={object_id}"
             )
