@@ -623,7 +623,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "metrics_code": "flow",
                 "value": 2.0,
                 "step_index": 2,
-                "positionCode": "none",
+                "position_code": "none",
             },
         )
 
@@ -675,6 +675,50 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.mpc_task_state.target_and_constrain_config_url, "http://config/control.yaml")
         self.assertEqual(len(agent.mpc_task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
+
+    def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011-config-alias")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011-config-alias",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            optimization_horizon=3,
+            total_steps=20,
+        )
+        agent.properties.update(
+            {
+                "mpc_config_url": "http://config/mpc.yaml",
+                "target_and_constrain_config_url": "http://config/control.yaml",
+            }
+        )
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        self.assertEqual(agent.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
+        self.assertEqual(
+            agent.mpc_task_state.target_and_constrain_config_url,
+            "http://config/control.yaml",
+        )
 
     def test_central_scheduling_agent_auto_starts_mpc_on_tick_and_rolls(self):
         state_manager = AgentStateManager()

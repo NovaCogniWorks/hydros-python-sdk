@@ -438,9 +438,9 @@ class CentralSchedulingAgent(TickableAgent):
             object_id = payload.get('object_id')
             metrics_code = payload.get('metrics_code')
             value = payload.get('value')
-            step_index = payload.get('step_index', payload.get('step'))
-            object_type = payload.get('object_type', payload.get('objectType'))
-            position_code = payload.get('position_code', payload.get('positionCode'))
+            step_index = payload.get('step_index')
+            object_type = payload.get('object_type')
+            position_code = payload.get('position_code')
             if position_code != "none":
                 logger.debug(
                     "Skipped field metrics because position_code is not none: object_id=%s, "

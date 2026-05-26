@@ -2,27 +2,26 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 
 
-def _camel_field(*names: str, default: Any = None, default_factory: Any = None) -> Any:
+def _payload_field(name: str, default: Any = None, default_factory: Any = None) -> Any:
     kwargs = {"default": default} if default_factory is None else {"default_factory": default_factory}
     return Field(
         **kwargs,
-        validation_alias=AliasChoices(*names),
-        serialization_alias=names[0],
+        serialization_alias=name,
     )
 
 
 class SensorData(HydroBaseModel):
-    object_id: Optional[int] = _camel_field("objectId", "object_id")
-    object_type: Optional[str] = _camel_field("objectType", "object_type")
-    metrics_code: Optional[str] = _camel_field("metricsCode", "metrics_code")
-    position_code: Optional[str] = _camel_field("positionCode", "position_code")
+    object_id: Optional[int] = _payload_field("objectId")
+    object_type: Optional[str] = _payload_field("objectType")
+    metrics_code: Optional[str] = _payload_field("metricsCode")
+    position_code: Optional[str] = _payload_field("positionCode")
     value: Optional[float] = None
-    step_index: Optional[int] = _camel_field("stepIndex", "step_index", "step")
+    step_index: Optional[int] = _payload_field("stepIndex")
 
 
 class DeviceOpening(HydroBaseModel):
@@ -40,11 +39,7 @@ class TargetNode(HydroBaseModel):
     node_id: Optional[int] = None
     node_name: Optional[str] = None
     water_level: Optional[float] = None
-    target_water_level: Optional[float] = Field(
-        None,
-        validation_alias=AliasChoices("target_water_value", "target_water_level"),
-        serialization_alias="target_water_value",
-    )
+    target_water_level: Optional[float] = None
     out_water_level: Optional[float] = None
     total_flow: Optional[float] = None
     inflow: Optional[float] = None
@@ -58,16 +53,16 @@ class HorizonControlStep(HydroBaseModel):
 
 class MpcOptimizeRequest(HydroBaseModel):
     biz_scene_instance_id: str
-    step_index: int = _camel_field("stepIndex", "step_index", default=...)
-    mpc_config_url: Optional[str] = _camel_field("mpcConfigUrl", "mpc_config_url")
-    control_config_url: Optional[str] = _camel_field("controlConfigUrl", "control_config_url")
+    step_index: int = _payload_field("stepIndex", default=...)
+    mpc_config_url: Optional[str] = _payload_field("mpcConfigUrl")
+    control_config_url: Optional[str] = _payload_field("controlConfigUrl")
     upstream_boundaries: Dict[str, List[float]] = Field(default_factory=dict)
     downstream_boundaries: Optional[Dict[str, Any]] = None
-    sensor_data: List[SensorData] = _camel_field("sensorData", "sensor_data", default_factory=list)
-    fixed_controls: Dict[str, float] = _camel_field("fixedControls", "fixed_controls", default_factory=dict)
-    multi_profile: bool = _camel_field("multiProfile", "multi_profile", default=False)
+    sensor_data: List[SensorData] = _payload_field("sensorData", default_factory=list)
+    fixed_controls: Dict[str, float] = _payload_field("fixedControls", default_factory=dict)
+    multi_profile: bool = _payload_field("multiProfile", default=False)
     targets: Dict[int, List[float]] = Field(default_factory=dict)
-    include_diversion: bool = _camel_field("includeDiversion", "include_diversion", default=False)
+    include_diversion: bool = _payload_field("includeDiversion", default=False)
 
 
 class MpcOptimizeResponse(HydroBaseModel):
