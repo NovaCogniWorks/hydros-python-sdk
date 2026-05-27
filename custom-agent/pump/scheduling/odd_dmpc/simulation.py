@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -1477,6 +1476,11 @@ class ClosedLoopSimulation:
         decisions,
         hist_unit_status,
     ) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self._log("未安装 matplotlib，跳过绘图步骤。")
+            return
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
         n_stations = len(station_ids)
@@ -1691,6 +1695,12 @@ class ClosedLoopSimulation:
         plt.close(fig)
 
     def _plot_results(self, history: pd.DataFrame) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self._log("未安装 matplotlib，跳过总结绘图。")
+            return
+
         time_col = "time_hours" if "time_hours" in history.columns else "hour"
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
