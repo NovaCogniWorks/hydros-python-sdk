@@ -55,3 +55,4 @@ Thumbs.db
 *.bak
 *.tmp
 /data/agent_data.db
+/output/

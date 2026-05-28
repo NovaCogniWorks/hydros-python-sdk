@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogEntry
 from hydros_agent_sdk.agent_commands.runtime import HydroCommandLogReportScheduler
-from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.protocol.system_commands import HydroCommandLogReportRequest
 

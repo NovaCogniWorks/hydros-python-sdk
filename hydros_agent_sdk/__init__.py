@@ -132,7 +132,7 @@ from hydros_agent_sdk.error_handling import (
     AgentErrorContext,
     validate_request,
 )
-from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 from hydros_agent_sdk.protocol.system_commands import (
     HydroCommandLogReportRequest,
     SystemCmd,

@@ -12,7 +12,7 @@ from hydros_agent_sdk.utils import generate_system_command_id
 
 from .base import HydroBaseModel
 from .models import CommandStatus
-from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 
 
 class SystemCmd(HydroBaseModel):

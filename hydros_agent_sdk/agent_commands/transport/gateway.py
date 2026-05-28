@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
 from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -36,7 +37,7 @@ class AgentCommandGateway:
 
     def get_or_create_agent_command_client(self) -> AgentCommandClient:
         if self._agent_command_client is None:
-            self._agent_command_client = self.client_factory(
+            client = self.client_factory(
                 broker_url=self.sim_coordination_client.broker_url,
                 broker_port=self.sim_coordination_client.broker_port,
                 hydros_cluster_id=self.hydros_cluster_id,
@@ -44,6 +45,12 @@ class AgentCommandGateway:
                 mqtt_username=getattr(self.sim_coordination_client, "mqtt_username", None),
                 mqtt_password=getattr(self.sim_coordination_client, "mqtt_password", None),
             )
+            runtime = AgentCommandRuntime(
+                state_manager=self.state_manager,
+                sender=client.publish_command,
+            )
+            client.bind_runtime(runtime)
+            self._agent_command_client = client
         return self._agent_command_client
 
     def start(self) -> None:

@@ -847,15 +847,34 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(settings.mpc_service_base_url, "http://mpc.env/hydros/api/v1/mpc/planning/start")
         self.assertEqual(settings.rendered_metrics_topic(), "/hydros/data/edges/env-cluster")
 
-    def test_load_env_config_defaults_to_sdk_agents_env_properties(self):
-        default_env_path = get_default_env_config_path()
+    def test_load_env_config_defaults_to_nearest_application_env_properties(self):
+        app_dir = os.path.join(self._temp_dir.name, "app")
+        child_dir = os.path.join(app_dir, "agents", "pump")
+        os.makedirs(child_dir, exist_ok=True)
+        env_path = os.path.join(app_dir, "env.properties")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(
+                "\n".join(
+                    [
+                        "mqtt_broker_url=tcp://127.0.0.1",
+                        "mqtt_broker_port=1883",
+                        "hydros_cluster_id=test-cluster",
+                        "hydros_node_id=test-node",
+                        "mpc_service_base_url=http://mpc.local/hydros/api/v1/mpc/planning/start",
+                    ]
+                )
+            )
 
-        self.assertTrue(default_env_path.endswith("hydros_agent_sdk/agents/env.properties"))
-        self.assertTrue(os.path.exists(default_env_path))
-        self.assertEqual(load_env_config(), load_env_config(default_env_path))
+        os.chdir(child_dir)
+
+        self.assertEqual(
+            os.path.realpath(get_default_env_config_path()),
+            os.path.realpath(os.path.join(child_dir, "env.properties")),
+        )
+        self.assertEqual(load_env_config(), load_env_config(env_path))
         self.assertEqual(
             load_env_config()["mpc_service_base_url"],
-            "http://192.168.20.52:8020/hydros/api/v1/mpc/planning/start",
+            "http://mpc.local/hydros/api/v1/mpc/planning/start",
         )
 
     def test_system_central_factory_passes_mpc_service_base_url_from_env_config(self):

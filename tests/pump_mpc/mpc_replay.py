@@ -1,9 +1,16 @@
 import json
 import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PUMP_SCHEDULING_DIR = REPO_ROOT / "custom-agent" / "pump" / "scheduling"
+sys.path.insert(0, str(PUMP_SCHEDULING_DIR))
 
 from pump_scheduling_agent import PumpCentralSchedulingAgent, PumpStation, CanalPool
 from flow_depart import load_specific_station_data
@@ -211,6 +218,7 @@ def plot_step(step, steps, results_hist, predictions, db_config):
     plt.close(fig)
 
 def main():
+    os.chdir(PUMP_SCHEDULING_DIR)
     with open('data/config.json') as f: db_config = json.load(f)
     print("Initializing test MPC...")
     

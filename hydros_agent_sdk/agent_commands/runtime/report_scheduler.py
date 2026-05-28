@@ -10,7 +10,7 @@ from threading import Event, Thread
 from typing import Callable, Optional, Sequence
 
 from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogEntry
-from hydros_agent_sdk.dto_model import CommandLogDTO
+from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 from hydros_agent_sdk.protocol.system_commands import HydroCommandLogReportRequest
 
 logger = logging.getLogger(__name__)

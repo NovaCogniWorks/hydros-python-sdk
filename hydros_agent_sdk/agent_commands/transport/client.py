@@ -7,8 +7,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+import warnings
 from threading import Event
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
 
@@ -17,7 +18,9 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.topics import HydrosTopics
 
 from hydros_agent_sdk.agent_commands.models import AgentCommand, AgentCommandEnvelope
-from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
+
+if TYPE_CHECKING:
+    from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ class AgentCommandClient:
         pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
         pending_retry_delay_ms: int = 50,
         max_workers: int = 8,
+        runtime: Optional["AgentCommandRuntime"] = None,
     ):
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
@@ -60,7 +64,7 @@ class AgentCommandClient:
         self._pending_command_predicate = pending_command_predicate
         self._pending_retry_delay_ms = pending_retry_delay_ms
         self._max_workers = max_workers
-        self._runtime: Optional[AgentCommandRuntime] = None
+        self._runtime: Optional["AgentCommandRuntime"] = runtime
 
         self.mqtt_client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -158,8 +162,18 @@ class AgentCommandClient:
         )
 
     @property
-    def runtime(self) -> AgentCommandRuntime:
+    def runtime(self) -> "AgentCommandRuntime":
         return self._get_runtime()
+
+    def bind_runtime(self, runtime: "AgentCommandRuntime") -> None:
+        """绑定外部装配好的运行时。"""
+        if self._runtime is not None and self._runtime is not runtime:
+            raise RuntimeError("AgentCommandClient runtime already bound")
+        self._runtime = runtime
+
+    def publish_command(self, command: AgentCommand) -> None:
+        """传输层只负责把命令发布到 MQTT。"""
+        self._send_with_retry(command)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         rc = reason_code.value
@@ -209,11 +223,19 @@ class AgentCommandClient:
                     raise
                 time.sleep((self.base_retry_delay_ms * (2 ** attempt)) / 1000.0)
 
-    def _get_runtime(self) -> AgentCommandRuntime:
+    def _get_runtime(self) -> "AgentCommandRuntime":
         if self._runtime is None:
+            warnings.warn(
+                "AgentCommandClient lazy runtime creation is deprecated; "
+                "assemble AgentCommandRuntime outside transport and pass it with bind_runtime().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
+
             self._runtime = AgentCommandRuntime(
                 state_manager=self.state_manager,
-                sender=self._send_with_retry,
+                sender=self.publish_command,
                 pending_command_predicate=self._pending_command_predicate,
                 pending_retry_delay_ms=self._pending_retry_delay_ms,
                 max_workers=self._max_workers,

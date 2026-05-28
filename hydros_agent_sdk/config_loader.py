@@ -16,9 +16,21 @@ DEFAULT_ENV_FILE_NAME = "env.properties"
 
 
 def get_default_env_config_path() -> str:
-    """Return the SDK-level default env.properties path."""
-    sdk_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(sdk_dir, "agents", DEFAULT_ENV_FILE_NAME)
+    """Return the default env.properties path for the current working directory."""
+    return os.path.abspath(DEFAULT_ENV_FILE_NAME)
+
+
+def _find_nearest_env_config(start_dir: str) -> Optional[str]:
+    current_dir = os.path.abspath(start_dir)
+    while True:
+        candidate = os.path.join(current_dir, DEFAULT_ENV_FILE_NAME)
+        if os.path.exists(candidate):
+            return candidate
+
+        parent_dir = os.path.dirname(current_dir)
+        if parent_dir == current_dir:
+            return None
+        current_dir = parent_dir
 
 
 def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
@@ -30,7 +42,7 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
 
     Args:
         env_file: Path to environment configuration file. Relative default
-            paths fall back to hydros_agent_sdk/agents/env.properties.
+            paths search the current directory and its parents.
 
     Returns:
         Environment configuration dictionary
@@ -41,21 +53,21 @@ def load_env_config(env_file: str = "./env.properties") -> Dict[str, str]:
     """
     if not os.path.isabs(env_file):
         requested_env_file = os.path.abspath(env_file)
-        default_env_file = get_default_env_config_path()
         is_default_request = os.path.normpath(env_file) == DEFAULT_ENV_FILE_NAME
 
-        if is_default_request and os.path.exists(default_env_file):
-            env_file = default_env_file
-        elif os.path.exists(requested_env_file):
+        if os.path.exists(requested_env_file):
             env_file = requested_env_file
+        elif is_default_request:
+            nearest_env_file = _find_nearest_env_config(os.getcwd())
+            env_file = nearest_env_file or requested_env_file
         else:
-            env_file = default_env_file
+            env_file = requested_env_file
 
     # Check if file exists
     if not os.path.exists(env_file):
         raise FileNotFoundError(
             f"Environment configuration file not found: {env_file}\n"
-            f"Please create hydros_agent_sdk/agents/env.properties or pass an absolute env.properties path."
+            f"Please create env.properties in the current application directory or pass an absolute path."
         )
 
     logger.info(f"Loading environment config from: {env_file}")
