@@ -263,7 +263,7 @@ class CentralSchedulingAgent(TickableAgent):
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """Whether ticks may activate MPC before a time-series update arrives."""
-        return PropertyParseUtils.get_bool(self.properties, "auto_start_mpc_on_tick", False)
+        return PropertyParseUtils.get_bool(self.properties, "auto_start_mpc_on_tick", True)
 
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
         self._mpc_planning_client = self._mpc_optimization_service.get_or_create_mpc_planning_client()
