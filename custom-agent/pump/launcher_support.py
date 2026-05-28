@@ -11,9 +11,11 @@ import os
 import signal
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
+from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.multi_agent import MultiAgentCallback
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,40 @@ class LauncherOptions:
     list_only: bool = False
     show_help: bool = False
     all_requested: bool = False
+
+
+@dataclass(frozen=True)
+class RegisteredAgentInfo:
+    """已注册到 MultiAgentCallback 的 Agent 摘要。"""
+
+    name: str
+    agent_code: str
+    agent_type: str
+    agent_display_name: str
+    agent_class: str
+    directory: str
+
+    @classmethod
+    def from_module(cls, agent_info: AgentModuleInfo) -> "RegisteredAgentInfo":
+        return cls(
+            name=agent_info.name,
+            agent_code=agent_info.agent_code,
+            agent_type=agent_info.agent_type or agent_info.agent_code.replace("_demo001", ""),
+            agent_display_name=agent_info.agent_display_name,
+            agent_class=agent_info.agent_class.__name__,
+            directory=os.path.basename(agent_info.script_dir),
+        )
+
+    @classmethod
+    def system_central_scheduling(cls) -> "RegisteredAgentInfo":
+        return cls(
+            name="system-central-scheduling",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_display_name="System Central Scheduling Agent",
+            agent_class="SystemCentralSchedulingAgent",
+            directory="(sdk built-in)",
+        )
 
 
 class PropertiesFileLoader:
@@ -259,6 +295,123 @@ class AgentModuleLoader:
             agent_type=agent_type,
             agent_display_name=agent_display_name,
         )
+
+
+class AgentFactoryRegistrationService:
+    """把发现到的 Agent 模块注册为可由 callback 创建的 factory。"""
+
+    def __init__(
+        self,
+        module_loader: AgentModuleLoader,
+        env_file: str,
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.module_loader = module_loader
+        self.env_file = env_file
+        self.logger = logger or logging.getLogger(__name__)
+
+    def register_agents(
+        self,
+        callback: MultiAgentCallback,
+        agent_names: List[str],
+    ) -> Tuple[Dict[str, str], List[RegisteredAgentInfo]]:
+        env_config: Optional[Dict[str, str]] = None
+        registered_agents: List[RegisteredAgentInfo] = []
+
+        for agent_name in agent_names:
+            self.logger.info("Registering %s agent...", agent_name.upper())
+            agent_info = self.module_loader.load(agent_name)
+
+            if env_config is None:
+                env_config = load_env_config(self.env_file)
+                self.logger.info("  Cluster ID: %s", env_config["hydros_cluster_id"])
+                self.logger.info("  Node ID: %s", env_config["hydros_node_id"])
+
+            config_file = os.path.join(agent_info.script_dir, "agent.properties")
+            agent_factory = HydroAgentFactory(
+                agent_class=agent_info.agent_class,
+                config_file=config_file,
+                env_config=env_config,
+            )
+            callback.register_agent_factory(agent_info.agent_code, agent_factory)
+
+            registered_agent = RegisteredAgentInfo.from_module(agent_info)
+            registered_agents.append(registered_agent)
+            self._log_registered_agent(agent_name, registered_agent)
+
+        if env_config is None:
+            raise RuntimeError("No environment configuration loaded!")
+
+        callback.register_system_default_central_scheduling_agent(env_config)
+        if not any(agent.agent_code == "CENTRAL_SCHEDULING_AGENT" for agent in registered_agents):
+            registered_agents.append(RegisteredAgentInfo.system_central_scheduling())
+
+        return env_config, registered_agents
+
+    def _log_registered_agent(self, agent_name: str, agent: RegisteredAgentInfo) -> None:
+        self.logger.info("  ✓ %s agent registered", agent_name.upper())
+        self.logger.info("    Display Name: %s", agent.agent_display_name)
+        self.logger.info("    Agent Code: %s", agent.agent_code)
+        self.logger.info("    Agent Class: %s", agent.agent_class)
+
+
+class CoordinationClientFactory:
+    """根据共享环境配置创建统一的 SimCoordinationClient。"""
+
+    def create(
+        self,
+        env_config: Dict[str, str],
+        callback: MultiAgentCallback,
+    ) -> SimCoordinationClient:
+        return SimCoordinationClient(
+            broker_url=env_config["mqtt_broker_url"],
+            broker_port=int(env_config["mqtt_broker_port"]),
+            topic=env_config["mqtt_topic"],
+            sim_coordination_callback=callback,
+            mqtt_username=env_config.get("mqtt_username"),
+            mqtt_password=env_config.get("mqtt_password"),
+        )
+
+
+class LauncherStartupReporter:
+    """集中输出 multi-agent launcher 启动摘要。"""
+
+    def __init__(self, log_file: str, logger: Optional[logging.Logger] = None):
+        self.log_file = log_file
+        self.logger = logger or logging.getLogger(__name__)
+
+    def log_starting(self, agent_names: List[str]) -> None:
+        self.logger.info("=" * 70)
+        self.logger.info("Multi-Agent Launcher")
+        self.logger.info("=" * 70)
+        self.logger.info("Starting %s agent types: %s", len(agent_names), ", ".join(agent_names))
+        self.logger.info("Log file: %s", self.log_file)
+        self.logger.info("=" * 70)
+        self.logger.info("")
+
+    def log_started(
+        self,
+        env_config: Dict[str, str],
+        registered_agents: List[RegisteredAgentInfo],
+    ) -> None:
+        self.logger.info("")
+        self.logger.info("=" * 70)
+        self.logger.info("Multi-Agent System Started!")
+        self.logger.info("=" * 70)
+        self.logger.info("  MQTT Broker: %s:%s", env_config["mqtt_broker_url"], int(env_config["mqtt_broker_port"]))
+        self.logger.info("  MQTT Topic: %s", env_config["mqtt_topic"])
+        self.logger.info("")
+        self.logger.info("Registered agent types:")
+        for agent in registered_agents:
+            self.logger.info("  • %s", agent.name.upper())
+            self.logger.info("      Agent Code:   %s", agent.agent_code)
+            self.logger.info("      Agent Type:   %s", agent.agent_type)
+            self.logger.info("      Display Name: %s", agent.agent_display_name)
+            self.logger.info("      Class Name:   %s", agent.agent_class)
+            self.logger.info("      Directory:    agents/%s/", agent.directory)
+        self.logger.info("")
+        self.logger.info("Press Ctrl+C to stop all agents...")
+        self.logger.info("")
 
 
 class LauncherCli:

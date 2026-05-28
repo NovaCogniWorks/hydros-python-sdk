@@ -26,7 +26,6 @@ ENV_FILE = os.path.join(EXAMPLES_DIR, "env.properties")
 from hydros_agent_sdk import (
     setup_logging,
     SimCoordinationClient,
-    HydroAgentFactory,
     MultiAgentCallback,
     load_env_config,
 )
@@ -34,10 +33,13 @@ from launcher_support import (
     AgentClassResolver,
     AgentDirectoryResolver,
     AgentDiscoveryService,
+    AgentFactoryRegistrationService,
     AgentModuleInfo,
     AgentModuleLoader,
+    CoordinationClientFactory,
     LauncherCli,
     LauncherRuntime,
+    LauncherStartupReporter,
     PropertiesFileLoader,
 )
 
@@ -141,12 +143,28 @@ def setup_debugpy(port: int = 5678, wait_for_client: bool = True):
 class MultiAgentCoordinator:
     """多 Agent 协调器 - 在单个进程中管理多个 agents"""
 
-    def __init__(self, module_loader: Optional[AgentModuleLoader] = None):
+    def __init__(
+        self,
+        module_loader: Optional[AgentModuleLoader] = None,
+        registration_service: Optional[AgentFactoryRegistrationService] = None,
+        client_factory: Optional[CoordinationClientFactory] = None,
+        startup_reporter: Optional[LauncherStartupReporter] = None,
+    ):
         self.callback: Optional[MultiAgentCallback] = None
         self.client: Optional[SimCoordinationClient] = None
         if module_loader is None:
             _, module_loader = create_launcher_services()
         self.module_loader = module_loader
+        self.registration_service = registration_service or AgentFactoryRegistrationService(
+            module_loader=module_loader,
+            env_file=ENV_FILE,
+            logger=logger,
+        )
+        self.client_factory = client_factory or CoordinationClientFactory()
+        self.startup_reporter = startup_reporter or LauncherStartupReporter(
+            log_file=os.path.join(LOG_DIR, "hydros.log"),
+            logger=logger,
+        )
         self.running = False
 
     def load_agent_module(self, agent_name: str) -> AgentModuleInfo:
@@ -155,128 +173,30 @@ class MultiAgentCoordinator:
 
     def start_all(self, agent_names: List[str]):
         """启动所有指定的 agents"""
-        logger.info("=" * 70)
-        logger.info("Multi-Agent Launcher")
-        logger.info("=" * 70)
-        logger.info(f"Starting {len(agent_names)} agent types: {', '.join(agent_names)}")
-        logger.info(f"Log file: {os.path.join(LOG_DIR, 'hydros.log')}")
-        logger.info("=" * 70)
-        logger.info("")
+        self.startup_reporter.log_starting(agent_names)
 
-        # 1. 创建统一的 MultiAgentCallback
         logger.info("Creating unified MultiAgentCallback...")
         self.callback = MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
 
-        # 2. 加载环境配置（所有 agent 共享）
-        env_config = None
-        registered_agents = []  # 存储已注册的 agent 信息
-        for agent_name in agent_names:
-            try:
-                logger.info(f"Registering {agent_name.upper()} agent...")
-
-                # 加载 agent 模块
-                agent_info = self.load_agent_module(agent_name)
-
-                # 加载环境配置（所有 agent 共享，只加载一次）
-                if env_config is None:
-                    # 使用当前 launcher 目录下的 env.properties
-                    env_config = load_env_config(ENV_FILE)
-                    logger.info(f"  Cluster ID: {env_config['hydros_cluster_id']}")
-                    logger.info(f"  Node ID: {env_config['hydros_node_id']}")
-
-                # Agent 配置文件
-                config_file = os.path.join(agent_info.script_dir, 'agent.properties')
-
-                # 创建 agent factory（使用泛型 HydroAgentFactory，传递 env_config）
-                agent_factory = HydroAgentFactory(
-                    agent_class=agent_info.agent_class,
-                    config_file=config_file,
-                    env_config=env_config
-                )
-
-                # 注册到 callback
-                self.callback.register_agent_factory(agent_info.agent_code, agent_factory)
-
-                logger.info(f"  ✓ {agent_name.upper()} agent registered")
-                logger.info(f"    Display Name: {agent_info.agent_display_name}")
-                logger.info(f"    Agent Code: {agent_info.agent_code}")
-                logger.info(f"    Agent Class: {agent_info.agent_class.__name__}")
-
-                # 保存 agent 信息用于后续显示
-                registered_agents.append({
-                    'name': agent_info.name,
-                    'agent_code': agent_info.agent_code,
-                    'agent_type': agent_info.agent_type or agent_info.agent_code.replace('_demo001', ''),
-                    'agent_display_name': agent_info.agent_display_name,
-                    'agent_class': agent_info.agent_class.__name__,
-                    'directory': os.path.basename(agent_info.script_dir)
-                })
-
-            except Exception as e:
-                logger.error(f"Failed to register {agent_name}: {e}", exc_info=True)
-                return False
-
-        if env_config is None:
-            logger.error("No environment configuration loaded!")
+        try:
+            env_config, registered_agents = self.registration_service.register_agents(
+                self.callback,
+                agent_names,
+            )
+        except Exception as e:
+            logger.error(f"Failed to register agents: {e}", exc_info=True)
             return False
 
-        self.callback.register_system_default_central_scheduling_agent(env_config)
-        if not any(agent['agent_code'] == 'CENTRAL_SCHEDULING_AGENT' for agent in registered_agents):
-            registered_agents.append({
-                'name': 'system-central-scheduling',
-                'agent_code': 'CENTRAL_SCHEDULING_AGENT',
-                'agent_type': 'CENTRAL_SCHEDULING_AGENT',
-                'agent_display_name': 'System Central Scheduling Agent',
-                'agent_class': 'SystemCentralSchedulingAgent',
-                'directory': '(sdk built-in)'
-            })
-
-        # 3. 创建统一的 SimCoordinationClient
         logger.info("")
         logger.info("Creating SimCoordinationClient...")
-
-        broker_url = env_config['mqtt_broker_url']
-        broker_port = int(env_config['mqtt_broker_port'])
-        topic = env_config['mqtt_topic']
-        mqtt_username = env_config.get('mqtt_username')
-        mqtt_password = env_config.get('mqtt_password')
-
-        self.client = SimCoordinationClient(
-            broker_url=broker_url,
-            broker_port=broker_port,
-            topic=topic,
-            sim_coordination_callback=self.callback,
-            mqtt_username=mqtt_username,
-            mqtt_password=mqtt_password
-        )
-
-        # 设置 client 引用
+        self.client = self.client_factory.create(env_config, self.callback)
         self.callback.set_client(self.client)
 
-        # 4. 启动 client
         logger.info("")
         logger.info("Starting coordination client...")
         self.client.start()
 
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info(f"Multi-Agent System Started!")
-        logger.info("=" * 70)
-        logger.info(f"  MQTT Broker: {broker_url}:{broker_port}")
-        logger.info(f"  MQTT Topic: {topic}")
-        logger.info("")
-        logger.info("Registered agent types:")
-        for agent in registered_agents:
-            logger.info(f"  • {agent['name'].upper()}")
-            logger.info(f"      Agent Code:   {agent['agent_code']}")
-            logger.info(f"      Agent Type:   {agent['agent_type']}")
-            logger.info(f"      Display Name: {agent['agent_display_name']}")
-            logger.info(f"      Class Name:   {agent['agent_class']}")
-            logger.info(f"      Directory:    agents/{agent['directory']}/")
-        logger.info("")
-        logger.info("Press Ctrl+C to stop all agents...")
-        logger.info("")
-
+        self.startup_reporter.log_started(env_config, registered_agents)
         self.running = True
         return True
 
