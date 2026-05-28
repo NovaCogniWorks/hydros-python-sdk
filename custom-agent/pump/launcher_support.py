@@ -1,0 +1,453 @@
+"""
+Launcher support objects for pump custom agents.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import inspect
+import logging
+import os
+import signal
+import sys
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Type
+
+from hydros_agent_sdk.base_agent import BaseHydroAgent
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AgentModuleInfo:
+    """启动器发现到的 Agent 模块信息。"""
+
+    name: str
+    agent_class: Type[BaseHydroAgent]
+    script_dir: str
+    agent_code: str
+    agent_type: str
+    agent_display_name: str
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "agent_class": self.agent_class,
+            "script_dir": self.script_dir,
+            "agent_code": self.agent_code,
+            "agent_type": self.agent_type,
+            "agent_display_name": self.agent_display_name,
+        }
+
+
+@dataclass(frozen=True)
+class LauncherOptions:
+    """命令行解析后的启动选项。"""
+
+    agent_names: List[str]
+    debug_enabled: bool = False
+    debug_wait: bool = True
+    debug_port: int = 5678
+    list_only: bool = False
+    show_help: bool = False
+    all_requested: bool = False
+
+
+class PropertiesFileLoader:
+    """读取 Java 风格 .properties 文件。"""
+
+    def load(self, properties_file: str) -> Dict[str, str]:
+        properties: Dict[str, str] = {}
+
+        if not os.path.exists(properties_file):
+            raise FileNotFoundError(f"Properties file not found: {properties_file}")
+
+        with open(properties_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    properties[key.strip()] = value.strip()
+
+        return properties
+
+
+class AgentDirectoryResolver:
+    """解析 launcher 下的 Agent 根目录和别名。"""
+
+    def __init__(self, launcher_dir: str, aliases: Optional[Dict[str, str]] = None):
+        self.launcher_dir = launcher_dir
+        self.aliases = aliases or {"power": "outflowplan", "pump": "outflowplan"}
+
+    def agents_root(self) -> str:
+        agents_dir = os.path.join(self.launcher_dir, "agents")
+        if os.path.exists(agents_dir) and os.path.isdir(agents_dir):
+            return agents_dir
+        return self.launcher_dir
+
+    def normalize_agent_name(self, agent_name: str) -> str:
+        return self.aliases.get(agent_name, agent_name)
+
+    def resolve_agent_dir(self, agent_name: str) -> str:
+        normalized_name = self.normalize_agent_name(agent_name)
+        return os.path.join(self.agents_root(), normalized_name)
+
+
+class AgentClassResolver:
+    """从 Agent 目录中寻找 BaseHydroAgent 子类。"""
+
+    def find_agent_class(self, agent_dir: str) -> Optional[Type[BaseHydroAgent]]:
+        py_files = [
+            f for f in os.listdir(agent_dir)
+            if f.endswith(".py") and not f.startswith("__") and not f.startswith("test_")
+        ]
+
+        if not py_files:
+            logger.warning("No Python files found in %s", agent_dir)
+            return None
+
+        preferred = self._scan_classes(agent_dir, py_files, preferred_only=True)
+        if preferred is not None:
+            return preferred
+
+        return self._scan_classes(agent_dir, py_files, preferred_only=False)
+
+    def _scan_classes(
+        self,
+        agent_dir: str,
+        py_files: List[str],
+        preferred_only: bool,
+    ) -> Optional[Type[BaseHydroAgent]]:
+        for py_file in py_files:
+            module_name = py_file[:-3]
+            try:
+                module = self._load_module(module_name, os.path.join(agent_dir, py_file))
+            except Exception as exc:
+                logger.debug("Failed to import %s: %s", py_file, exc)
+                continue
+
+            for name, obj in inspect.getmembers(module, inspect.isclass):
+                if not self._is_agent_class(obj, module_name):
+                    continue
+                if preferred_only and any(marker in name for marker in ["With", "Test", "Mock", "Demo"]):
+                    continue
+                logger.debug("Found agent class: %s in %s", name, py_file)
+                return obj
+
+        return None
+
+    @staticmethod
+    def _load_module(module_name: str, file_path: str):
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load module spec: {file_path}")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _is_agent_class(obj, module_name: str) -> bool:
+        return (
+            obj != BaseHydroAgent
+            and issubclass(obj, BaseHydroAgent)
+            and obj.__module__ == module_name
+        )
+
+
+class AgentDiscoveryService:
+    """发现 launcher 可启动的 Agent 目录。"""
+
+    def __init__(
+        self,
+        directory_resolver: AgentDirectoryResolver,
+        properties_loader: PropertiesFileLoader,
+    ):
+        self.directory_resolver = directory_resolver
+        self.properties_loader = properties_loader
+
+    def discover_all(self) -> List[str]:
+        agents_dir = self.directory_resolver.agents_root()
+        if not os.path.exists(agents_dir):
+            logger.warning("Agents directory not found: %s", agents_dir)
+            return []
+
+        available_agents: List[str] = []
+        for item in os.listdir(agents_dir):
+            item_path = os.path.join(agents_dir, item)
+            if not os.path.isdir(item_path) or item.startswith("__"):
+                continue
+
+            props_file = os.path.join(item_path, "agent.properties")
+            if not os.path.exists(props_file):
+                logger.debug("Skipping %s: no agent.properties found", item)
+                continue
+
+            py_files = [f for f in os.listdir(item_path) if f.endswith(".py") and not f.startswith("__")]
+            if not py_files:
+                logger.debug("Skipping %s: no Python implementation found", item)
+                continue
+
+            available_agents.append(item)
+            logger.debug("Discovered agent: %s", item)
+
+        return sorted(available_agents)
+
+    def describe(self, agent_name: str) -> Dict[str, str]:
+        agent_dir = self.directory_resolver.resolve_agent_dir(agent_name)
+        props_file = os.path.join(agent_dir, "agent.properties")
+        return self.properties_loader.load(props_file)
+
+
+class AgentModuleLoader:
+    """加载 Agent 配置和实现类。"""
+
+    def __init__(
+        self,
+        directory_resolver: AgentDirectoryResolver,
+        properties_loader: PropertiesFileLoader,
+        class_resolver: AgentClassResolver,
+    ):
+        self.directory_resolver = directory_resolver
+        self.properties_loader = properties_loader
+        self.class_resolver = class_resolver
+
+    def load(self, agent_name: str) -> AgentModuleInfo:
+        normalized_name = self.directory_resolver.normalize_agent_name(agent_name)
+        agent_dir = self.directory_resolver.resolve_agent_dir(agent_name)
+
+        if not os.path.exists(agent_dir):
+            raise ValueError(f"Agent directory not found: {agent_dir}")
+        if not os.path.isdir(agent_dir):
+            raise ValueError(f"Not a directory: {agent_dir}")
+
+        props_file = os.path.join(agent_dir, "agent.properties")
+        try:
+            properties = self.properties_loader.load(props_file)
+        except FileNotFoundError:
+            raise ValueError(f"agent.properties not found in {agent_dir}")
+        except Exception as exc:
+            raise ValueError(f"Failed to parse agent.properties: {exc}")
+
+        agent_code = properties.get("agent_code")
+        agent_type = properties.get("agent_type", "")
+        agent_display_name = properties.get("agent_name", normalized_name)
+        if not agent_code:
+            raise ValueError(f"agent_code not found in {props_file}")
+
+        logger.debug("Loaded properties for %s:", normalized_name)
+        logger.debug("  agent_code: %s", agent_code)
+        logger.debug("  agent_type: %s", agent_type)
+        logger.debug("  agent_name: %s", agent_display_name)
+
+        agent_class = self.class_resolver.find_agent_class(agent_dir)
+        if agent_class is None:
+            raise ValueError(
+                f"No BaseHydroAgent subclass found in {agent_dir}. "
+                f"Please ensure there is a Python file with a class that inherits from BaseHydroAgent."
+            )
+
+        logger.debug("Found agent class: %s", agent_class.__name__)
+
+        return AgentModuleInfo(
+            name=normalized_name,
+            agent_class=agent_class,
+            script_dir=agent_dir,
+            agent_code=agent_code,
+            agent_type=agent_type,
+            agent_display_name=agent_display_name,
+        )
+
+
+class LauncherCli:
+    """解析和展示 multi-agent launcher 命令行。"""
+
+    def __init__(
+        self,
+        discovery_service: AgentDiscoveryService,
+        default_debug_port: int = 5678,
+    ):
+        self.discovery_service = discovery_service
+        self.default_debug_port = default_debug_port
+
+    def parse(self, argv: List[str]) -> LauncherOptions:
+        if len(argv) < 2 or "--help" in argv or "-h" in argv:
+            return LauncherOptions(agent_names=[], show_help=True)
+
+        debug_enabled = "--debug" in argv
+        debug_wait = "--debug-nowait" not in argv
+        debug_port = self._parse_debug_port(argv)
+
+        if "--list" in argv:
+            return LauncherOptions(
+                agent_names=[],
+                debug_enabled=debug_enabled,
+                debug_wait=debug_wait,
+                debug_port=debug_port,
+                list_only=True,
+            )
+
+        all_requested = "--all" in argv
+        if all_requested:
+            agent_names = self.discovery_service.discover_all()
+        else:
+            agent_names = [
+                arg for arg in argv[1:]
+                if not arg.startswith("--") and arg != str(debug_port)
+            ]
+
+        return LauncherOptions(
+            agent_names=agent_names,
+            debug_enabled=debug_enabled,
+            debug_wait=debug_wait,
+            debug_port=debug_port,
+            all_requested=all_requested,
+        )
+
+    def print_help(self) -> None:
+        available_agents = self.discovery_service.discover_all()
+        agents_list = "\n".join(
+            [f"    {agent:15} - Auto-discovered from agents/{agent}/" for agent in available_agents]
+        )
+        if not agents_list:
+            agents_list = "    (No agents found in examples/agents/)"
+
+        print(f"""
+Multi-Agent Launcher - 在单个进程中运行多个 agents
+
+用法:
+    python multi_agent_launcher.py [选项] [agent1] [agent2] ...
+    python multi_agent_launcher.py --all
+    python multi_agent_launcher.py --list
+
+可用的 agents (自动发现):
+{agents_list}
+
+选项:
+    --all              - 启动所有可用的 agents
+    --list             - 列出所有可用的 agents
+    --debug            - 启用远程调试模式 (debugpy)
+    --debug-port PORT  - 指定调试端口 (默认: 5678)
+    --debug-nowait     - 不等待调试器连接，直接启动
+    --full-log         - 使用完整日志格式（生产环境），默认使用简化格式
+    --help             - 显示帮助信息
+
+示例:
+    # 列出所有可用的 agents
+    python multi_agent_launcher.py --list
+
+    # 启动单个 agent
+    python multi_agent_launcher.py twins
+
+    # 启动多个 agents（在同一个进程中）
+    python multi_agent_launcher.py twins ontology
+
+    # 启动所有 agents
+    python multi_agent_launcher.py --all
+
+    # 启用调试模式（等待调试器连接）
+    python multi_agent_launcher.py --debug twins ontology
+
+    # 启用调试模式（不等待，直接启动）
+    python multi_agent_launcher.py --debug --debug-nowait twins
+
+    # 使用自定义调试端口
+    python multi_agent_launcher.py --debug --debug-port 5679 twins
+
+调试模式:
+    • 使用 debugpy 进行远程调试
+    • 默认监听端口: 5678
+    • 支持 VS Code、PyCharm 等 IDE
+    • 可以设置断点、单步调试、查看变量等
+
+特性:
+    • 自动发现 examples/agents/ 下的所有 agent 实现
+    • 从 agent.properties 读取配置（agent_code, agent_name）
+    • 自动扫描并加载 BaseHydroAgent 子类
+    • 无需硬编码 agent 列表，每个目录一个 agent 实现
+    • 所有 agents 在同一个进程中运行
+    • 前台运行，可以在控制台看到日志
+    • 所有日志保存到 examples/logs/agent.log
+    • 日志内容中包含 agent 标识，可以区分不同的 agent
+    • 使用 Ctrl+C 优雅停止所有 agents
+
+添加新 Agent:
+    1. 在 examples/agents/ 下创建新目录（如 myagent/）
+    2. 创建 agent.properties 文件，包含 agent_code 和 agent_name
+    3. 创建 Python 文件，实现 BaseHydroAgent 的子类
+    4. 运行 python multi_agent_launcher.py myagent
+""")
+
+    def print_agent_list(self) -> int:
+        print("\n" + "=" * 70)
+        print("Available Agents (auto-discovered)")
+        print("=" * 70)
+        available_agents = self.discovery_service.discover_all()
+
+        if not available_agents:
+            print("No agents found in examples/agents/")
+            print("\nTo add a new agent:")
+            print("  1. Create a directory in examples/agents/")
+            print("  2. Add agent.properties with agent_code and agent_name")
+            print("  3. Implement a BaseHydroAgent subclass")
+        else:
+            for agent_name in available_agents:
+                try:
+                    properties = self.discovery_service.describe(agent_name)
+                    agent_code = properties.get("agent_code", "N/A")
+                    agent_display_name = properties.get("agent_name", "N/A")
+
+                    print(f"\n  {agent_name}")
+                    print(f"    Display Name: {agent_display_name}")
+                    print(f"    Agent Code:   {agent_code}")
+                    print(f"    Directory:    agents/{agent_name}/")
+                except Exception as exc:
+                    print(f"\n  {agent_name}")
+                    print(f"    Error: {exc}")
+
+        print("\n" + "=" * 70)
+        print(f"Total: {len(available_agents)} agent(s)")
+        print("=" * 70 + "\n")
+        return len(available_agents)
+
+    def _parse_debug_port(self, argv: List[str]) -> int:
+        if "--debug-port" not in argv:
+            return self.default_debug_port
+
+        try:
+            port_idx = argv.index("--debug-port")
+            if port_idx + 1 < len(argv):
+                return int(argv[port_idx + 1])
+        except (ValueError, IndexError):
+            pass
+
+        raise ValueError("Invalid --debug-port value")
+
+
+class LauncherRuntime:
+    """运行 multi-agent coordinator 并管理进程信号。"""
+
+    def __init__(self, coordinator, logger: Optional[logging.Logger] = None):
+        self.coordinator = coordinator
+        self.logger = logger or logging.getLogger(__name__)
+
+    def install_signal_handlers(self) -> None:
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+    def run(self, agent_names: List[str]) -> int:
+        self.install_signal_handlers()
+        if self.coordinator.start_all(agent_names):
+            self.coordinator.run()
+            return 0
+
+        self.logger.error("Failed to start agents")
+        return 1
+
+    def _signal_handler(self, _signum, _frame) -> None:
+        self.logger.info("")
+        self.logger.info("Received signal, stopping...")
+        self.coordinator.stop_all()
+        sys.exit(0)

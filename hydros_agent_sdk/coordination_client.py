@@ -386,24 +386,8 @@ class SimCoordinationClient:
             )
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
-            logger.info(
-                "MQTT command parsed: type=%s, id=%s, context=%s, broadcast=%s, eventType=%s",
-                command.command_type,
-                command.command_id,
-                self._command_context_id(command),
-                getattr(command, "broadcast", None),
-                self._command_event_type(command),
-            )
-
             # Apply message filters
             if not self.message_filter.should_process_message(command):
-                logger.info(
-                    "MQTT command filtered: type=%s, id=%s, context=%s, eventType=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    self._command_event_type(command),
-                )
                 return
 
             # Route to handler
@@ -866,7 +850,6 @@ class SimCoordinationClient:
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
 
-                logger.info(f"Command sent: type={command.command_type}, id={command_id}, attempt={attempt}")
                 if isinstance(command, MpcResultReport):
                     logger.info(
                         "MPC result report sent to coordinator: topic=%s, command_id=%s, "
