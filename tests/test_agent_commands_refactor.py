@@ -906,6 +906,29 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIsNotNone(client)
         self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
 
+    def test_system_central_factory_can_create_agent_without_env_properties_file(self):
+        from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
+
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+        context = SimulationContext(biz_scene_instance_id="scene-012-no-env")
+        factory = SystemCentralSchedulingAgentFactory()
+
+        agent = factory.create_agent(sim_client, context)
+
+        self.assertEqual(agent.cluster_id, "demo-cluster")
+        self.assertEqual(agent.node_id, "node-a")
+        self.assertEqual(agent.agent_code, "CENTRAL_SCHEDULING_AGENT")
+
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")
         state = MpcTaskState(

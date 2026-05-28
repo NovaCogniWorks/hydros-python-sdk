@@ -12,7 +12,6 @@ from configparser import ConfigParser
 
 from hydros_agent_sdk.utils import generate_agent_instance_id
 from hydros_agent_sdk.protocol.models import SimulationContext
-from hydros_agent_sdk.runtime import RuntimeEnvSettings
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
@@ -175,14 +174,11 @@ class SystemCentralSchedulingAgentFactory:
         context: SimulationContext
     ):
         from hydros_agent_sdk.agents import SystemCentralSchedulingAgent
-        from hydros_agent_sdk.config_loader import load_env_config
+        from hydros_agent_sdk.runtime import load_runtime_env_settings
 
-        env_config = self.env_config
-        if env_config is None:
-            env_config = load_env_config()
-            self.env_config = env_config
-
-        settings = RuntimeEnvSettings.from_config(env_config)
+        settings = load_runtime_env_settings(env_config=self.env_config)
+        if self.env_config is None:
+            self.env_config = settings.raw
         hydros_cluster_id = (
             settings.hydros_cluster_id
             or sim_coordination_client.state_manager.get_cluster_id()
