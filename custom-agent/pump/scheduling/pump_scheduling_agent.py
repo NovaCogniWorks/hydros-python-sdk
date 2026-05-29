@@ -162,7 +162,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             import os
             fallback_path = 'data/config_xhh.yaml'
             if not os.path.exists(fallback_path):
-                fallback_path = '../../../data/config_xhh.yaml'
+                fallback_path = './data/config_xhh.yaml'
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
