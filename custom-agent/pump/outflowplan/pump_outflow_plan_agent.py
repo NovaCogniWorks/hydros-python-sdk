@@ -169,17 +169,17 @@ class PumpOutflowPlanAgent(OutflowPlanAgent):
         outflow_plans = []
 
         # 从配置中获取计划时界（预测时长）
-        planning_horizon = self.properties.get_property('planning_horizon', 24)
+        planning_horizon = self.properties.get_property('planning_horizon', 72)
 
         # 为每个相关对象生成流量计划
         if self._topology:
-            for top_obj in self._topology.top_objects[:3]:  # 示例：仅取前3个对象
+            for top_obj in self._topology.top_objects[:-1]:  # 示例：仅取前3个对象
                 time_series_values = []
 
                 for step in range(planning_horizon):
                     # 在此处编写具体的计划逻辑
                     # 例如：优化算法、预测模型、基于规则的计划等
-                    planned_outflow = self._calculate_planned_outflow(top_obj, step, hydro_event)
+                    planned_outflow = 50
 
                     time_series_values.append(
                         TimeSeriesValue(
