@@ -154,27 +154,29 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         import pandas as pd
         
+        from hydros_agent_sdk.mpc.config import MpcConfigResolver
+        from hydros_agent_sdk.utils.yaml_loader import YamlLoader
         import os
         import yaml
 
+        mpc_config = MpcConfigResolver.resolve(
+            self.properties,
+            configured_mpc_config_url=getattr(self, '_configured_mpc_config_url', None)
+        )
+        logger.info(f"解析得到的 mpc_config 对象内容: {mpc_config}")
+        
+        mpc_config_url = mpc_config.mpc_config_url
         payload = {}
-        if self.mpc_task_state and self.mpc_task_state.mpc_config_url:
-            mpc_config_value = self.mpc_task_state.mpc_config_url
+
+        if mpc_config_url:
+            logger.info(f"正在从 mpc_config_url 载入配置: {mpc_config_url}")
             try:
-                # 尝试将 mpc_config_url 的内容直接作为 JSON/YAML 字符串解析
-                parsed = yaml.safe_load(mpc_config_value)
-                if isinstance(parsed, dict) and 'project' in parsed:
-                    logger.info("成功从 mpc_task_state.mpc_config_url 解析出配置内容。")
-                    payload = parsed
-                elif isinstance(mpc_config_value, str) and os.path.exists(mpc_config_value):
-                    # 如果不是字典结构，说明可能是一个本地文件路径（兼容本地测试）
-                    logger.info(f"mpc_config_url 指向本地文件，准备读取: {mpc_config_value}")
-                    with open(mpc_config_value, 'r', encoding='utf-8') as f:
-                        payload = yaml.safe_load(f)
+                if mpc_config_url.startswith("http://") or mpc_config_url.startswith("https://"):
+                    payload = YamlLoader.from_url(mpc_config_url)
                 else:
-                    logger.warning("mpc_task_state.mpc_config_url 既不是有效的配置字典，也不是存在的文件路径。")
+                    payload = YamlLoader.from_file(mpc_config_url)
             except Exception as e:
-                logger.error(f"无法解析 mpc_task_state 中的 mpc_config: {e}")
+                logger.error(f"无法从 mpc_config_url 加载配置: {e}")
 
         if not payload or 'project' not in payload:
             logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
