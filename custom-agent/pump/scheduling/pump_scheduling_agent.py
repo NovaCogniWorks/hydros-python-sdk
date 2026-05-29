@@ -179,10 +179,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 logger.error(f"无法从 mpc_config_url 加载配置: {e}")
 
         if not payload or 'project' not in payload:
-            logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
-            fallback_path = 'data/config_xhh.yaml'
+            logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'custom-agent/pump/data/config_xhh.yaml'。")
+            fallback_path = 'custom-agent/pump/data/config_xhh.yaml'
             if not os.path.exists(fallback_path):
-                fallback_path = './data/config_xhh.yaml'
+                fallback_path = './custom-agent/pump/data/config_xhh.yaml'
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
@@ -232,6 +232,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
+        logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
@@ -335,6 +336,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
         
+        logger.info(f"准备调用 Upper Scheduler: step={step}, horizon={horizon}, station_flows={station_flows}, basin_levels={basin_levels}, current_heads={station_heads}")
+        
         upper_plan = self.upper_scheduler.solve(
             now=step,
             env_snapshot=observation,
@@ -343,6 +346,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             disturbance_forecast=disturbance_forecast,
             lower_feedback=self.lower_feedback,
         )
+        
+        logger.info(f"Upper Scheduler 优化完成，返回结果: q_planned={upper_plan.flow_refs}, z_planned={upper_plan.station_back_levels}")
         
         # Lower Controllers
         actions = {}
@@ -380,6 +385,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             reference_back_level = transfer_bundle.reference_back_level
             reference_front_level = transfer_bundle.reference_front_level
             reference_head = transfer_bundle.reference_head
+            
+            logger.info(f"开始执行下层 Lower Controller 优化: 泵站 S{station_id}, 参考目标流量={reference_flow[0]:.2f}, 参考目标后池水位={reference_back_level[0]:.2f}")
             
             decision = self.supervisor.select_mode(
                 station_id=station_id,
@@ -422,6 +429,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 transfer_bundle=transfer_bundle,
                 station_memory=station_memory,
             )
+            
+            logger.info(f"下层执行结果 S{station_id}: 模式={action.mode}, 开机状态={action.unit_status}, 叶片角={action.unit_openings}, 预测总流量={action.selected_flow:.2f}")
             
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)

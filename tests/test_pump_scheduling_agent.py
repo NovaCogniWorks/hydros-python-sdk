@@ -30,7 +30,7 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             hydros_cluster_id="cluster",
             hydros_node_id="node"
         )
-        self.agent.properties["mpc_config_url"] = "data/config_xhh.yaml"
+        self.agent.properties["mpc_config_url"] = "custom-agent/pump/data/config_xhh.yaml"
         self.agent._lazy_init_odd_mpc()
 
     def test_rolling_optimization(self):
