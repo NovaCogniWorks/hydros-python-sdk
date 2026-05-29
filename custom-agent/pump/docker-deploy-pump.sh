@@ -16,6 +16,7 @@ MQTT_USERNAME="${MQTT_USERNAME:-}"
 MQTT_PASSWORD="${MQTT_PASSWORD:-}"
 START_ARGS="${START_ARGS:-outflowplan scheduling}"
 PORT="${PORT:-8015}"
+DEBUG_PORT="${DEBUG_PORT:-}"
 LOG_VOLUME="${LOG_VOLUME:-${CONTAINER_NAME}-logs}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +25,9 @@ PUMP_DIR="${REPO_ROOT}/custom-agent/pump"
 
 echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
 echo "Container start args: ${START_ARGS}"
+if [ -n "${DEBUG_PORT}" ]; then
+    echo "Debug port: ${DEBUG_PORT}"
+fi
 docker build \
     -f "${PUMP_DIR}/Dockerfile" \
     --build-arg BASE_IMAGE="${BASE_IMAGE}" \
@@ -35,8 +39,13 @@ docker tag "${IMAGE_NAME}:${VERSION}" "${IMAGE_NAME}:latest"
 docker rm -f "${CONTAINER_NAME}" || true
 docker volume create "${LOG_VOLUME}" >/dev/null
 
+PORT_ARGS=(-p "${PORT}:${PORT}")
+if [ -n "${DEBUG_PORT}" ] && [ "${DEBUG_PORT}" != "${PORT}" ]; then
+    PORT_ARGS+=(-p "${DEBUG_PORT}:${DEBUG_PORT}")
+fi
+
 docker run -d \
-    -p "${PORT}:${PORT}" \
+    "${PORT_ARGS[@]}" \
     --name "${CONTAINER_NAME}" \
     --restart=always \
     -e HYDROS_NODE_ID="${HYDROS_NODE_ID}" \
