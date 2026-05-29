@@ -154,12 +154,30 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         import pandas as pd
         
-        # 从 agent_config（被加载到了 self.properties 中）获取载荷
-        payload = dict(self.properties) if self.properties else {}
+        import os
+        import yaml
+
+        payload = {}
+        if self.mpc_task_state and self.mpc_task_state.mpc_config_url:
+            mpc_config_value = self.mpc_task_state.mpc_config_url
+            try:
+                # 尝试将 mpc_config_url 的内容直接作为 JSON/YAML 字符串解析
+                parsed = yaml.safe_load(mpc_config_value)
+                if isinstance(parsed, dict) and 'project' in parsed:
+                    logger.info("成功从 mpc_task_state.mpc_config_url 解析出配置内容。")
+                    payload = parsed
+                elif isinstance(mpc_config_value, str) and os.path.exists(mpc_config_value):
+                    # 如果不是字典结构，说明可能是一个本地文件路径（兼容本地测试）
+                    logger.info(f"mpc_config_url 指向本地文件，准备读取: {mpc_config_value}")
+                    with open(mpc_config_value, 'r', encoding='utf-8') as f:
+                        payload = yaml.safe_load(f)
+                else:
+                    logger.warning("mpc_task_state.mpc_config_url 既不是有效的配置字典，也不是存在的文件路径。")
+            except Exception as e:
+                logger.error(f"无法解析 mpc_task_state 中的 mpc_config: {e}")
+
         if not payload or 'project' not in payload:
-            logger.warning("Agent properties 似乎未正确加载或缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
-            import yaml
-            import os
+            logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
             fallback_path = 'data/config_xhh.yaml'
             if not os.path.exists(fallback_path):
                 fallback_path = './data/config_xhh.yaml'
