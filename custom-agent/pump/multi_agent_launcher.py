@@ -24,120 +24,28 @@ sys.path.insert(0, EXAMPLES_DIR)
 ENV_FILE = os.path.join(EXAMPLES_DIR, "env.properties")
 
 from hydros_agent_sdk import (
-    setup_logging,
     SimCoordinationClient,
     MultiAgentCallback,
-    load_env_config,
 )
 from launcher_support import (
-    AgentClassResolver,
-    AgentDirectoryResolver,
-    AgentDiscoveryService,
     AgentFactoryRegistrationService,
     AgentModuleInfo,
     AgentModuleLoader,
     CoordinationClientFactory,
+    LauncherDebugSupport,
     LauncherCli,
+    LauncherLoggingConfigurator,
     LauncherRuntime,
+    LauncherServiceFactory,
     LauncherStartupReporter,
-    PropertiesFileLoader,
 )
 
 DEBUG_PORT = 5678
 
 LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
+LOG_FILE = os.path.join(LOG_DIR, "hydros.log")
 
 logger = logging.getLogger(__name__)
-
-
-def configure_launcher_logging(argv: List[str]) -> None:
-    """根据启动参数和 env.properties 配置 launcher 日志。"""
-    os.makedirs(LOG_DIR, exist_ok=True)
-    try:
-        env_config = load_env_config(ENV_FILE)
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-    except Exception:
-        hydros_cluster_id = 'default_cluster'
-        hydros_node_id = os.getenv("HYDROS_NODE_ID", "LOCAL")
-
-    setup_logging(
-        level=logging.DEBUG if '--debug' in argv else logging.INFO,
-        hydros_cluster_id=hydros_cluster_id,
-        hydros_node_id=hydros_node_id,
-        console=True,
-        log_file=os.path.join(LOG_DIR, "hydros.log"),
-        simple='--full-log' not in argv,
-        use_rolling=True
-    )
-
-
-def create_launcher_services():
-    properties_loader = PropertiesFileLoader()
-    directory_resolver = AgentDirectoryResolver(EXAMPLES_DIR)
-    discovery_service = AgentDiscoveryService(directory_resolver, properties_loader)
-    module_loader = AgentModuleLoader(
-        directory_resolver=directory_resolver,
-        properties_loader=properties_loader,
-        class_resolver=AgentClassResolver(),
-    )
-    return discovery_service, module_loader
-
-
-def setup_debugpy(port: int = 5678, wait_for_client: bool = True):
-    """
-    设置 debugpy 远程调试
-
-    Args:
-        port: 调试端口
-        wait_for_client: 是否等待调试器连接
-    """
-    try:
-        import debugpy
-
-        # 配置 debugpy
-        debugpy.listen(("0.0.0.0", port))
-
-        logger.info("=" * 70)
-        logger.info("🐛 DEBUG MODE ENABLED")
-        logger.info("=" * 70)
-        logger.info(f"Debugpy listening on port {port}")
-        logger.info("Connect your debugger to: localhost:{port}")
-        logger.info("")
-        logger.info("VS Code launch.json configuration:")
-        logger.info("{")
-        logger.info('  "name": "Attach to Hydros Agent",')
-        logger.info('  "type": "python",')
-        logger.info('  "request": "attach",')
-        logger.info(f'  "connect": {{"host": "localhost", "port": {port}}},')
-        logger.info('  "pathMappings": [')
-        logger.info('    {')
-        logger.info(f'      "localRoot": "${{workspaceFolder}}",')
-        logger.info(f'      "remoteRoot": "{PROJECT_ROOT}"')
-        logger.info('    }')
-        logger.info('  ]')
-        logger.info("}")
-        logger.info("=" * 70)
-
-        if wait_for_client:
-            logger.info("⏳ Waiting for debugger to attach...")
-            logger.info("   (Press Ctrl+C to skip and continue)")
-            try:
-                debugpy.wait_for_client()
-                logger.info("✓ Debugger attached!")
-            except KeyboardInterrupt:
-                logger.info("⚠ Skipped waiting for debugger")
-
-        logger.info("")
-
-    except ImportError:
-        logger.error("=" * 70)
-        logger.error("❌ debugpy not installed!")
-        logger.error("=" * 70)
-        logger.error("Install debugpy to enable debug mode:")
-        logger.error("  pip install debugpy")
-        logger.error("=" * 70)
-        sys.exit(1)
 
 
 class MultiAgentCoordinator:
@@ -153,7 +61,7 @@ class MultiAgentCoordinator:
         self.callback: Optional[MultiAgentCallback] = None
         self.client: Optional[SimCoordinationClient] = None
         if module_loader is None:
-            _, module_loader = create_launcher_services()
+            module_loader = LauncherServiceFactory(EXAMPLES_DIR).create().module_loader
         self.module_loader = module_loader
         self.registration_service = registration_service or AgentFactoryRegistrationService(
             module_loader=module_loader,
@@ -162,7 +70,7 @@ class MultiAgentCoordinator:
         )
         self.client_factory = client_factory or CoordinationClientFactory()
         self.startup_reporter = startup_reporter or LauncherStartupReporter(
-            log_file=os.path.join(LOG_DIR, "hydros.log"),
+            log_file=LOG_FILE,
             logger=logger,
         )
         self.running = False
@@ -240,9 +148,13 @@ def main():
     """主函数"""
     global DEBUG_PORT
 
-    configure_launcher_logging(sys.argv)
-    discovery_service, module_loader = create_launcher_services()
-    cli = LauncherCli(discovery_service, default_debug_port=DEBUG_PORT)
+    LauncherLoggingConfigurator(
+        env_file=ENV_FILE,
+        log_file=LOG_FILE,
+        log_dir=LOG_DIR,
+    ).configure(sys.argv)
+    services = LauncherServiceFactory(EXAMPLES_DIR).create()
+    cli = LauncherCli(services.discovery_service, default_debug_port=DEBUG_PORT)
     try:
         options = cli.parse(sys.argv)
     except ValueError as exc:
@@ -269,10 +181,13 @@ def main():
     # 启用调试模式
     if options.debug_enabled:
         DEBUG_PORT = options.debug_port
-        setup_debugpy(port=options.debug_port, wait_for_client=options.debug_wait)
+        LauncherDebugSupport(PROJECT_ROOT, logger=logger).setup(
+            port=options.debug_port,
+            wait_for_client=options.debug_wait,
+        )
 
     # 创建协调器
-    coordinator = MultiAgentCoordinator(module_loader=module_loader)
+    coordinator = MultiAgentCoordinator(module_loader=services.module_loader)
     runtime = LauncherRuntime(coordinator, logger=logger)
 
     sys.exit(runtime.run(agent_names))

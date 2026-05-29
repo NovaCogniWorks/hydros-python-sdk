@@ -107,11 +107,26 @@ class HydroModelContext:
         return self._object_owner_by_id.get(str(object_id))
 
 
-class ContextManager:
-    """Task-scoped hydro model context registry."""
+class ContextKeyResolver:
+    """Resolve supported context key inputs into biz_scene_instance_id."""
 
-    _contexts: Dict[str, HydroModelContext] = {}
-    _lock = RLock()
+    @staticmethod
+    def resolve(context_or_biz_scene_instance_id: Union[SimulationContext, str, None]) -> Optional[str]:
+        if context_or_biz_scene_instance_id is None:
+            return None
+
+        if isinstance(context_or_biz_scene_instance_id, SimulationContext):
+            return context_or_biz_scene_instance_id.biz_scene_instance_id
+
+        return str(context_or_biz_scene_instance_id)
+
+
+class HydroModelContextRepository:
+    """Instance-owned task-scoped hydro model context registry."""
+
+    def __init__(self) -> None:
+        self._contexts: Dict[str, HydroModelContext] = {}
+        self._lock = RLock()
 
     @staticmethod
     def _get_config_value(config: Dict[str, Any], *keys: str) -> Any:
@@ -126,8 +141,7 @@ class ContextManager:
                     return properties[key]
         return None
 
-    @classmethod
-    def create_from_init_request(cls, request: Any) -> Optional[HydroModelContext]:
+    def create_from_init_request(self, request: Any) -> Optional[HydroModelContext]:
         """
         Create model context from SimTaskInitRequest scenario configuration.
 
@@ -139,7 +153,7 @@ class ContextManager:
         if context is None:
             return None
 
-        existing = cls.get_context(context)
+        existing = self.get_context(context)
         if existing is not None:
             return existing
 
@@ -148,7 +162,7 @@ class ContextManager:
             return None
 
         config = YamlLoader.from_url(config_url)
-        modeling_url = cls._get_config_value(
+        modeling_url = self._get_config_value(
             config,
             "hydros_objects_modeling_url",
             "hydrosObjectsModelingUrl",
@@ -160,14 +174,13 @@ class ContextManager:
             )
             return None
 
-        return cls.create(
+        return self.create(
             context=context,
             hydros_objects_modeling_url=str(modeling_url),
         )
 
-    @classmethod
     def create(
-        cls,
+        self,
         context: SimulationContext,
         hydros_objects_modeling_url: Optional[str] = None,
         topology: Optional[WaterwayTopology] = None,
@@ -182,8 +195,8 @@ class ContextManager:
             )
 
         model_context = HydroModelContext(context=context, topology=loaded_topology)
-        with cls._lock:
-            cls._contexts[context.biz_scene_instance_id] = model_context
+        with self._lock:
+            self._contexts[context.biz_scene_instance_id] = model_context
 
         if loaded_topology is None:
             logger.info(
@@ -198,21 +211,90 @@ class ContextManager:
             )
         return model_context
 
+    def get_context(
+        self,
+        context_or_biz_scene_instance_id: Union[SimulationContext, str, None],
+    ) -> Optional[HydroModelContext]:
+        biz_scene_instance_id = ContextKeyResolver.resolve(context_or_biz_scene_instance_id)
+        if biz_scene_instance_id is None:
+            return None
+
+        with self._lock:
+            return self._contexts.get(biz_scene_instance_id)
+
+    def get_agent_by_object_id(
+        self,
+        object_id: Union[int, str],
+        biz_scene_instance_id: Optional[str] = None,
+    ) -> Optional[HydroAgentInstance]:
+        with self._lock:
+            if biz_scene_instance_id:
+                model_context = self._contexts.get(biz_scene_instance_id)
+                if model_context is None:
+                    return None
+                return model_context.get_owner_agent_instance(object_id)
+
+            for model_context in self._contexts.values():
+                owner = model_context.get_owner_agent_instance(object_id)
+                if owner is not None:
+                    return owner
+        return None
+
+    def remove(self, context_or_biz_scene_instance_id: Union[SimulationContext, str, None]) -> None:
+        biz_scene_instance_id = ContextKeyResolver.resolve(context_or_biz_scene_instance_id)
+        if biz_scene_instance_id is None:
+            return
+
+        with self._lock:
+            self._contexts.pop(biz_scene_instance_id, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._contexts.clear()
+
+
+class ContextManager:
+    """Compatibility facade for the default hydro model context repository."""
+
+    _default_repository = HydroModelContextRepository()
+
+    @classmethod
+    def repository(cls) -> HydroModelContextRepository:
+        return cls._default_repository
+
+    @classmethod
+    def set_repository(cls, repository: HydroModelContextRepository) -> None:
+        cls._default_repository = repository
+
+    @staticmethod
+    def _get_config_value(config: Dict[str, Any], *keys: str) -> Any:
+        return HydroModelContextRepository._get_config_value(config, *keys)
+
+    @classmethod
+    def create_from_init_request(cls, request: Any) -> Optional[HydroModelContext]:
+        return cls.repository().create_from_init_request(request)
+
+    @classmethod
+    def create(
+        cls,
+        context: SimulationContext,
+        hydros_objects_modeling_url: Optional[str] = None,
+        topology: Optional[WaterwayTopology] = None,
+        param_keys: Optional[set[str]] = None,
+    ) -> HydroModelContext:
+        return cls.repository().create(
+            context=context,
+            hydros_objects_modeling_url=hydros_objects_modeling_url,
+            topology=topology,
+            param_keys=param_keys,
+        )
+
     @classmethod
     def get_context(
         cls,
         context_or_biz_scene_instance_id: Union[SimulationContext, str, None],
     ) -> Optional[HydroModelContext]:
-        if context_or_biz_scene_instance_id is None:
-            return None
-
-        if isinstance(context_or_biz_scene_instance_id, SimulationContext):
-            biz_scene_instance_id = context_or_biz_scene_instance_id.biz_scene_instance_id
-        else:
-            biz_scene_instance_id = str(context_or_biz_scene_instance_id)
-
-        with cls._lock:
-            return cls._contexts.get(biz_scene_instance_id)
+        return cls.repository().get_context(context_or_biz_scene_instance_id)
 
     @classmethod
     def get_agent_by_object_id(
@@ -220,33 +302,12 @@ class ContextManager:
         object_id: Union[int, str],
         biz_scene_instance_id: Optional[str] = None,
     ) -> Optional[HydroAgentInstance]:
-        with cls._lock:
-            if biz_scene_instance_id:
-                model_context = cls._contexts.get(biz_scene_instance_id)
-                if model_context is None:
-                    return None
-                return model_context.get_owner_agent_instance(object_id)
-
-            for model_context in cls._contexts.values():
-                owner = model_context.get_owner_agent_instance(object_id)
-                if owner is not None:
-                    return owner
-        return None
+        return cls.repository().get_agent_by_object_id(object_id, biz_scene_instance_id)
 
     @classmethod
     def remove(cls, context_or_biz_scene_instance_id: Union[SimulationContext, str, None]) -> None:
-        if context_or_biz_scene_instance_id is None:
-            return
-
-        if isinstance(context_or_biz_scene_instance_id, SimulationContext):
-            biz_scene_instance_id = context_or_biz_scene_instance_id.biz_scene_instance_id
-        else:
-            biz_scene_instance_id = str(context_or_biz_scene_instance_id)
-
-        with cls._lock:
-            cls._contexts.pop(biz_scene_instance_id, None)
+        cls.repository().remove(context_or_biz_scene_instance_id)
 
     @classmethod
     def clear(cls) -> None:
-        with cls._lock:
-            cls._contexts.clear()
+        cls.repository().clear()

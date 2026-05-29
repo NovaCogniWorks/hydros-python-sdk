@@ -18,7 +18,7 @@ from hydros_agent_sdk.agent_commands import (
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
-from hydros_agent_sdk.context_manager import ContextManager
+from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
@@ -261,6 +261,30 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIsInstance(envelope.command, HydroDirectGateOpeningRequest)
         self.assertEqual(envelope.command.command_id, "cmd-001")
         self.assertAlmostEqual(envelope.command.gate_opening, 0.75)
+
+    def test_context_repository_keeps_instance_state_isolated(self):
+        context = SimulationContext(biz_scene_instance_id="scene-repository")
+        repository_a = HydroModelContextRepository()
+        repository_b = HydroModelContextRepository()
+
+        model_context = repository_a.create(context=context)
+
+        self.assertIs(repository_a.get_context(context), model_context)
+        self.assertIsNone(repository_b.get_context(context))
+
+    def test_context_manager_delegates_to_injected_repository(self):
+        original_repository = ContextManager.repository()
+        injected_repository = HydroModelContextRepository()
+        context = SimulationContext(biz_scene_instance_id="scene-injected-repository")
+        try:
+            ContextManager.set_repository(injected_repository)
+            model_context = ContextManager.create(context=context)
+
+            self.assertIs(injected_repository.get_context(context), model_context)
+            self.assertIs(ContextManager.get_context(context), model_context)
+            self.assertIsNone(original_repository.get_context(context))
+        finally:
+            ContextManager.set_repository(original_repository)
 
     def test_client_on_message_no_longer_filters_remote_target_early(self):
         client = AgentCommandClient(

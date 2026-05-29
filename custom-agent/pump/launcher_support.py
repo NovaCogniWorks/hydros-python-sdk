@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config
+from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config, setup_logging
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 
@@ -53,6 +53,14 @@ class LauncherOptions:
     list_only: bool = False
     show_help: bool = False
     all_requested: bool = False
+
+
+@dataclass(frozen=True)
+class LauncherServices:
+    """launcher 启动过程需要的服务对象。"""
+
+    discovery_service: "AgentDiscoveryService"
+    module_loader: "AgentModuleLoader"
 
 
 @dataclass(frozen=True)
@@ -297,6 +305,27 @@ class AgentModuleLoader:
         )
 
 
+class LauncherServiceFactory:
+    """组装 launcher 的发现、解析和模块加载服务。"""
+
+    def __init__(self, launcher_dir: str):
+        self.launcher_dir = launcher_dir
+
+    def create(self) -> LauncherServices:
+        properties_loader = PropertiesFileLoader()
+        directory_resolver = AgentDirectoryResolver(self.launcher_dir)
+        discovery_service = AgentDiscoveryService(directory_resolver, properties_loader)
+        module_loader = AgentModuleLoader(
+            directory_resolver=directory_resolver,
+            properties_loader=properties_loader,
+            class_resolver=AgentClassResolver(),
+        )
+        return LauncherServices(
+            discovery_service=discovery_service,
+            module_loader=module_loader,
+        )
+
+
 class AgentFactoryRegistrationService:
     """把发现到的 Agent 模块注册为可由 callback 创建的 factory。"""
 
@@ -412,6 +441,102 @@ class LauncherStartupReporter:
         self.logger.info("")
         self.logger.info("Press Ctrl+C to stop all agents...")
         self.logger.info("")
+
+
+class LauncherLoggingConfigurator:
+    """根据启动参数和 env.properties 配置 launcher 日志。"""
+
+    def __init__(
+        self,
+        env_file: str,
+        log_file: str,
+        log_dir: str,
+    ):
+        self.env_file = env_file
+        self.log_file = log_file
+        self.log_dir = log_dir
+
+    def configure(self, argv: List[str]) -> None:
+        os.makedirs(self.log_dir, exist_ok=True)
+        hydros_cluster_id, hydros_node_id = self._resolve_logging_context()
+        setup_logging(
+            level=logging.DEBUG if "--debug" in argv else logging.INFO,
+            hydros_cluster_id=hydros_cluster_id,
+            hydros_node_id=hydros_node_id,
+            console=True,
+            log_file=self.log_file,
+            simple="--full-log" not in argv,
+            use_rolling=True,
+        )
+
+    def _resolve_logging_context(self) -> Tuple[str, str]:
+        try:
+            env_config = load_env_config(self.env_file)
+            return (
+                env_config.get("hydros_cluster_id", "default_cluster"),
+                env_config.get("hydros_node_id", "LOCAL"),
+            )
+        except Exception:
+            return "default_cluster", os.getenv("HYDROS_NODE_ID", "LOCAL")
+
+
+class LauncherDebugSupport:
+    """配置 debugpy 远程调试。"""
+
+    def __init__(self, project_root: str, logger: Optional[logging.Logger] = None):
+        self.project_root = project_root
+        self.logger = logger or logging.getLogger(__name__)
+
+    def setup(self, port: int = 5678, wait_for_client: bool = True) -> None:
+        try:
+            import debugpy
+        except ImportError:
+            self._log_debugpy_missing()
+            sys.exit(1)
+
+        debugpy.listen(("0.0.0.0", port))
+        self._log_debug_configuration(port)
+
+        if wait_for_client:
+            self.logger.info("⏳ Waiting for debugger to attach...")
+            self.logger.info("   (Press Ctrl+C to skip and continue)")
+            try:
+                debugpy.wait_for_client()
+                self.logger.info("✓ Debugger attached!")
+            except KeyboardInterrupt:
+                self.logger.info("⚠ Skipped waiting for debugger")
+
+        self.logger.info("")
+
+    def _log_debug_configuration(self, port: int) -> None:
+        self.logger.info("=" * 70)
+        self.logger.info("🐛 DEBUG MODE ENABLED")
+        self.logger.info("=" * 70)
+        self.logger.info("Debugpy listening on port %s", port)
+        self.logger.info("Connect your debugger to: localhost:%s", port)
+        self.logger.info("")
+        self.logger.info("VS Code launch.json configuration:")
+        self.logger.info("{")
+        self.logger.info('  "name": "Attach to Hydros Agent",')
+        self.logger.info('  "type": "python",')
+        self.logger.info('  "request": "attach",')
+        self.logger.info('  "connect": {"host": "localhost", "port": %s},', port)
+        self.logger.info('  "pathMappings": [')
+        self.logger.info('    {')
+        self.logger.info('      "localRoot": "${workspaceFolder}",')
+        self.logger.info('      "remoteRoot": "%s"', self.project_root)
+        self.logger.info('    }')
+        self.logger.info('  ]')
+        self.logger.info("}")
+        self.logger.info("=" * 70)
+
+    def _log_debugpy_missing(self) -> None:
+        self.logger.error("=" * 70)
+        self.logger.error("❌ debugpy not installed!")
+        self.logger.error("=" * 70)
+        self.logger.error("Install debugpy to enable debug mode:")
+        self.logger.error("  pip install debugpy")
+        self.logger.error("=" * 70)
 
 
 class LauncherCli:
