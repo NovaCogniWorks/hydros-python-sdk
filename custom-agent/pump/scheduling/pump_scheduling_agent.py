@@ -154,33 +154,35 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         import pandas as pd
         
+        from hydros_agent_sdk.mpc.config import MpcConfigResolver
+        from hydros_agent_sdk.utils.yaml_loader import YamlLoader
         import os
         import yaml
 
+        mpc_config = MpcConfigResolver.resolve(
+            self.properties,
+            configured_mpc_config_url=getattr(self, '_configured_mpc_config_url', None)
+        )
+        logger.info(f"解析得到的 mpc_config 对象内容: {mpc_config}")
+        
+        mpc_config_url = mpc_config.mpc_config_url
         payload = {}
-        if self.mpc_task_state and self.mpc_task_state.mpc_config_url:
-            mpc_config_value = self.mpc_task_state.mpc_config_url
+
+        if mpc_config_url:
+            logger.info(f"正在从 mpc_config_url 载入配置: {mpc_config_url}")
             try:
-                # 尝试将 mpc_config_url 的内容直接作为 JSON/YAML 字符串解析
-                parsed = yaml.safe_load(mpc_config_value)
-                if isinstance(parsed, dict) and 'project' in parsed:
-                    logger.info("成功从 mpc_task_state.mpc_config_url 解析出配置内容。")
-                    payload = parsed
-                elif isinstance(mpc_config_value, str) and os.path.exists(mpc_config_value):
-                    # 如果不是字典结构，说明可能是一个本地文件路径（兼容本地测试）
-                    logger.info(f"mpc_config_url 指向本地文件，准备读取: {mpc_config_value}")
-                    with open(mpc_config_value, 'r', encoding='utf-8') as f:
-                        payload = yaml.safe_load(f)
+                if mpc_config_url.startswith("http://") or mpc_config_url.startswith("https://"):
+                    payload = YamlLoader.from_url(mpc_config_url)
                 else:
-                    logger.warning("mpc_task_state.mpc_config_url 既不是有效的配置字典，也不是存在的文件路径。")
+                    payload = YamlLoader.from_file(mpc_config_url)
             except Exception as e:
-                logger.error(f"无法解析 mpc_task_state 中的 mpc_config: {e}")
+                logger.error(f"无法从 mpc_config_url 加载配置: {e}")
 
         if not payload or 'project' not in payload:
-            logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'data/config_xhh.yaml'。")
-            fallback_path = 'data/config_xhh.yaml'
+            logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'custom-agent/pump/data/config_xhh.yaml'。")
+            fallback_path = 'custom-agent/pump/data/config_xhh.yaml'
             if not os.path.exists(fallback_path):
-                fallback_path = './data/config_xhh.yaml'
+                fallback_path = './custom-agent/pump/data/config_xhh.yaml'
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
@@ -230,6 +232,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
+        logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
@@ -333,6 +336,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
         
+        logger.info(f"准备调用 Upper Scheduler: step={step}, horizon={horizon}, station_flows={station_flows}, basin_levels={basin_levels}, current_heads={station_heads}")
+        
         upper_plan = self.upper_scheduler.solve(
             now=step,
             env_snapshot=observation,
@@ -341,6 +346,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             disturbance_forecast=disturbance_forecast,
             lower_feedback=self.lower_feedback,
         )
+        
+        logger.info(f"Upper Scheduler 优化完成，返回结果: q_planned={upper_plan.flow_refs}, z_planned={upper_plan.station_back_levels}")
         
         # Lower Controllers
         actions = {}
@@ -378,6 +385,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             reference_back_level = transfer_bundle.reference_back_level
             reference_front_level = transfer_bundle.reference_front_level
             reference_head = transfer_bundle.reference_head
+            
+            logger.info(f"开始执行下层 Lower Controller 优化: 泵站 S{station_id}, 参考目标流量={reference_flow[0]:.2f}, 参考目标后池水位={reference_back_level[0]:.2f}")
             
             decision = self.supervisor.select_mode(
                 station_id=station_id,
@@ -420,6 +429,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 transfer_bundle=transfer_bundle,
                 station_memory=station_memory,
             )
+            
+            logger.info(f"下层执行结果 S{station_id}: 模式={action.mode}, 开机状态={action.unit_status}, 叶片角={action.unit_openings}, 预测总流量={action.selected_flow:.2f}")
             
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)
