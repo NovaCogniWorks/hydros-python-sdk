@@ -29,7 +29,8 @@ class OutflowTimeSeriesDataChangedEvent(HydroEvent):
 
 class OutflowTimeSeriesEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
-    event_content_url: str = Field(
+    event_content_url: Optional[str] = Field(
+        default=None,
         validation_alias=AliasChoices("event_content_url", "eventContentUrl")
     )
     priority: Optional[str] = None
