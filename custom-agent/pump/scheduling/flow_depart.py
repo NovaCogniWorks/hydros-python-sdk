@@ -15,6 +15,10 @@ from sklearn.linear_model import LinearRegression
 # Suppress warnings
 warnings.filterwarnings('ignore')
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from pump_unit import PumpUnit
 
 
@@ -132,15 +136,15 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     import numpy as np
     import pandas as pd
     
-    print(f"\n{'='*10} Starting Flow Depart Calculation {'='*10}")
-    print(f"Station ID: {station_id}")
+    logger.info(f"========== 开始机组流量分配离线计算 ==========")
+    logger.info(f"泵站 ID: {station_id}")
     
     if not units:
-        print("Error: No valid units provided. Aborting process.")
+        logger.error("错误: 未提供有效的机组数据，计算终止。")
         return None
         
     target_unit_names = [u.name for u in units]
-    print(f"Target Units: {', '.join(target_unit_names)}")
+    logger.info(f"目标机组: {', '.join(target_unit_names)}")
     
     # Calculate Range specifically for the loaded units
     global_h_min = min([u.h_min for u in units])
@@ -157,10 +161,8 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     h_vals = np.arange(calc_h_min, calc_h_max + 1e-5, step_h)
     
     total_cases = len(q_vals) * len(h_vals)
-    print(f"\nCalculated Grid Range:")
-    print(f"  Q Range [{calc_q_min}, {calc_q_max}] step {step_q}")
-    print(f"  H Range [{calc_h_min}, {calc_h_max}] step {step_h}")
-    print(f"  Total conditions to evaluate: {total_cases}")
+    logger.info(f"计算网格范围: Q [{calc_q_min}, {calc_q_max}] 步长 {step_q} | H [{calc_h_min}, {calc_h_max}] 步长 {step_h}")
+    logger.info(f"总计需要评估的工况数: {total_cases}")
     
     # Batch calculation
     results = []
@@ -169,8 +171,8 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     for h in h_vals:
         for q in q_vals:
             count += 1
-            if count % 100 == 0: 
-                print(f"Progress: {count}/{total_cases}...", end='\r')
+            if count % 2000 == 0: 
+                logger.info(f"分配计算进度: {count}/{total_cases} ...")
             
             avg_eff, details = optimize_single_case(q, h, units, rho, g)
             
@@ -209,7 +211,7 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
             results.append(row)
             
     df_res = pd.DataFrame(results)
-    print("\nFlow depart completed.")
+    logger.info("机组流量分配计算完成。")
     
     return df_res
 

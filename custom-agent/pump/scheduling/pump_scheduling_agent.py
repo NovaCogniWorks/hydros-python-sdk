@@ -228,6 +228,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.flow_service,
             pd.DataFrame() # this will be updated in on_optimization
         )
+        
+        # 预先计算所有泵站的流量分配表，避免在首次 rolling optimization 时产生卡顿
+        logger.info("========== 开始预先计算所有泵站机组的离线流量分配表 ==========")
+        for station in self.system_config.stations:
+            available_ids = self.available_units_map.get(station.id, [])
+            if available_ids:
+                logger.info(f"正在预先计算 Station ID: {station.id} 的流量分配组合 ...")
+                self.flow_service.get_optimal_table(station.id, available_ids)
+        logger.info("========== 所有泵站流量分配表预计算完成 ==========")
 
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
