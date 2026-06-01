@@ -241,6 +241,38 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     assert response.command_status == CommandStatus.SUCCEED
 
 
+def test_hydro_event_command_routes_outflow_event_without_content_url():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(context, [agent])
+    state_manager.add_local_agent(agent)
+    callback = HydroEventCallback(agent)
+    client = make_client(callback, state_manager)
+
+    event = OutflowTimeSeriesEvent(hydro_event_type="OUTFLOW_TIME_SERIES")
+    request = HydroEventCommand(
+        command_id="CMD_OUTFLOW_NO_URL",
+        context=context,
+        broadcast=False,
+        target_agent_instance=agent,
+        payload=event,
+    )
+
+    client._handle_incoming_message(request)
+
+    assert len(callback.outflow_requests) == 1
+    forwarded = callback.outflow_requests[0]
+    assert forwarded.command_id == "CMD_OUTFLOW_NO_URL"
+    assert forwarded.hydro_event.event_content_url is None
+
+    response = client.out_message_queue.get_nowait()
+    assert isinstance(response, OutflowTimeSeriesResponse)
+    assert response.command_id == "CMD_OUTFLOW_NO_URL"
+    assert response.command_status == CommandStatus.SUCCEED
+
+
 def test_hydro_event_command_can_be_deserialized_from_java_payload_shape():
     context = make_context()
     envelope = SimCommandEnvelope(
@@ -289,3 +321,26 @@ def test_hydro_event_command_can_be_deserialized_from_java_outflow_payload_shape
     assert isinstance(envelope.command, HydroEventCommand)
     assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
     assert envelope.command.payload.event_content_url == "https://example.test/outflow.yaml"
+
+
+def test_hydro_event_command_can_deserialize_java_outflow_payload_without_content_url():
+    context = make_context()
+    agent = make_agent(context)
+    envelope = SimCommandEnvelope(
+        command={
+            "command_id": "CMD_OUTFLOW_JSON_NO_URL",
+            "command_type": "hydro_event_command",
+            "context": context.model_dump(mode="json"),
+            "broadcast": False,
+            "target_agent_instance": agent.model_dump(mode="json"),
+            "payload": {
+                "hydro_event_type": "OUTFLOW_TIME_SERIES",
+                "hydro_event_id": "EVENT_OUTFLOW",
+                "hydro_event_name": "出流规划事件",
+            },
+        }
+    )
+
+    assert isinstance(envelope.command, HydroEventCommand)
+    assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
+    assert envelope.command.payload.event_content_url is None
