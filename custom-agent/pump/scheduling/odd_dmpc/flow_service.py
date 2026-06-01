@@ -105,12 +105,24 @@ class FlowDepartService:
             return self._cache[key].copy()
 
         station = self.system_config.station_by_id[station_id]
+        
+        # Load the pump units we need
+        units = [self.get_unit_model(station_id, uid) for uid in key[1]]
+        
+        # Get parameters from system config or use defaults
+        step_q = getattr(self.system_config, 'flow_depart_step_q', 1.0)
+        step_h = getattr(self.system_config, 'flow_depart_step_h', 0.1)
+        rho = getattr(self.system_config, 'global_rho', 1000.0)
+        g = getattr(self.system_config, 'global_g', 9.81)
+        
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             table = generate_flow_depart(
                 station_id=station_id,
-                target_unit_names=self._unit_names(station, key[1]),
-                config_path=self.config_path if self.config_path and self.config_path != "agent_config_memory" else None,
-                config_dict=self.config_dict
+                units=units,
+                step_q=step_q,
+                step_h=step_h,
+                rho=rho,
+                g=g
             )
         if table is None or table.empty:
             raise ValueError(f"Unable to generate flow depart table for station {station_id} and units {key[1]}")

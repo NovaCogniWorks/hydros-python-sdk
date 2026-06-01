@@ -87,113 +87,61 @@ def load_specific_station_data(station_config, data_dir, target_unit_names):
     Supports optional q_min/q_max override from config.
     """
     station_name = station_config["name"]
-    table_e_file = station_config["units_file"]["tableE"]
-    table_r_file = station_config["units_file"]["tableR"]
-    
-    path_e = os.path.join(data_dir, table_e_file)
-    path_r = os.path.join(data_dir, table_r_file)
-    
-    # Build a lookup dict for unit config overrides
-    unit_config_map = {}
-    for u_cfg in station_config.get("units", []):
-        unit_config_map[u_cfg["name"]] = u_cfg
     
     units = []
     
-    try:
-        xl_e = pd.ExcelFile(path_e)
-        xl_r = pd.ExcelFile(path_r)
+    # Build a lookup dict for unit config
+    unit_config_map = {}
+    for u_cfg in station_config.get("units", []):
+        unit_config_map[u_cfg["name"]] = u_cfg
         
-        for sheet in target_unit_names:
-            if sheet not in xl_e.sheet_names:
-                print(f"  [!] Warning: Sheet '{sheet}' missing in {table_e_file}, skipping.")
-                continue
-            if sheet not in xl_r.sheet_names:
-                print(f"  [!] Warning: Sheet '{sheet}' missing in {table_r_file}, skipping.")
-                continue
-                
-            df_e = pd.read_excel(path_e, sheet_name=sheet)
-            df_r = pd.read_excel(path_r, sheet_name=sheet)
-            u = PumpUnit(sheet, df_e, df_r)
+    import pandas as pd
+    for sheet in target_unit_names:
+        if sheet not in unit_config_map:
+            print(f"  [!] Warning: Unit '{sheet}' missing in station config, skipping.")
+            continue
             
-            # Override q_min/q_max from config if provided
-            u_cfg = unit_config_map.get(sheet, {})
-            if "q_min" in u_cfg:
-                u.q_min = u_cfg["q_min"]
-            if "q_max" in u_cfg:
-                u.q_max = u_cfg["q_max"]
+        u_cfg = unit_config_map[sheet]
+        
+        if "table_e" not in u_cfg or "table_r" not in u_cfg:
+            print(f"  [!] Warning: Unit '{sheet}' missing table_e or table_r in config, skipping.")
+            continue
             
-            units.append(u)
-            print(f"  [√] Loaded Unit '{sheet}' -> Q range: [{u.q_min:.2f}, {u.q_max:.2f}], H range: [{u.h_min:.2f}, {u.h_max:.2f}]")
-                
-    except FileNotFoundError as e:
-        print(f"Error: Could not find files: {e}")
-        return []
-    except Exception as e:
-        print(f"Failed to load data: {e}")
-        return []
+        df_e = pd.DataFrame(u_cfg["table_e"]["rows"], columns=u_cfg["table_e"]["columns"])
+        df_r = pd.DataFrame(u_cfg["table_r"]["rows"], columns=u_cfg["table_r"]["columns"])
+        
+        u = PumpUnit(sheet, df_e, df_r)
+        
+        # Override q_min/q_max from config if provided
+        if "q_min" in u_cfg:
+            u.q_min = u_cfg["q_min"]
+        if "q_max" in u_cfg:
+            u.q_max = u_cfg["q_max"]
+            
+        units.append(u)
+        print(f"  [√] Loaded Unit '{sheet}' -> Q range: [{u.q_min:.2f}, {u.q_max:.2f}], H range: [{u.h_min:.2f}, {u.h_max:.2f}]")
         
     return units
 
 
-def generate_flow_depart(station_id, target_unit_names, config_path=None, config_dict=None):
+def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=9.81):
     """
-    Generate flow depart table dynamically based on station configuration.
-    Uses either a provided configuration dictionary or loads from a file path.
+    Generate flow depart table dynamically based on station configuration and memory PumpUnit objects.
     """
+    import math
+    import numpy as np
+    import pandas as pd
+    
     print(f"\n{'='*10} Starting Flow Depart Calculation {'='*10}")
+    print(f"Station ID: {station_id}")
     
-    if config_dict is not None:
-        config = config_dict
-    else:
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                if config_path.endswith('.yaml') or config_path.endswith('.yml'):
-                    config = yaml.safe_load(f)
-                else:
-                    config = json.load(f)
-        except Exception as e:
-            print(f"Error reading config: {e}")
-            return None
-
-    # Find the specific station configuration
-    station_config = next((s for s in config["stations"] if s["id"] == station_id), None)
-    if not station_config:
-        print(f"Error: Station ID {station_id} not found in config.")
-        return None
-
-    global_params = config.get("global_params", {})
-    rho = global_params.get("rho", 1000)
-    g = global_params.get("g", 9.81)
-
-    opt_params = config.get("flow_depart", {})
-    step_q = opt_params.get("step_q", 1.0)
-    step_h = opt_params.get("step_h", 0.1)
-    data_dir = opt_params.get("data_dir", "data")
-    output_dir = opt_params.get("output_dir", "output")
-    
-    # Ensure output directory exists
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    units_suffix = "_".join(target_unit_names)
-    excel_name = f"{station_config['name']}_{units_suffix}_flow_depart.xlsx"
-    out_path = os.path.join(output_dir, excel_name)
-    
-    if os.path.exists(out_path):
-        print(f"Loading cached flow depart table from {out_path}...")
-        df_cached = pd.read_excel(out_path)
-        return df_cached
-
-    print(f"Station: {station_config['name']} (ID: {station_id})")
-    print(f"Target Units: {', '.join(target_unit_names)}")
-    
-    # Load Data
-    units = load_specific_station_data(station_config, data_dir, target_unit_names)
     if not units:
-        print("Error: No valid units loaded. Aborting process.")
+        print("Error: No valid units provided. Aborting process.")
         return None
         
+    target_unit_names = [u.name for u in units]
+    print(f"Target Units: {', '.join(target_unit_names)}")
+    
     # Calculate Range specifically for the loaded units
     global_h_min = min([u.h_min for u in units])
     global_h_max = max([u.h_max for u in units])
@@ -260,19 +208,8 @@ def generate_flow_depart(station_id, target_unit_names, config_path=None, config
             
             results.append(row)
             
-    # Save output
     df_res = pd.DataFrame(results)
-    
-    units_suffix = "_".join(target_unit_names)
-    excel_name = f"{station_config['name']}_{units_suffix}_flow_depart.xlsx"
-    out_path = os.path.join(output_dir, excel_name)
-    
-    df_res.to_excel(out_path, index=False)
-    print(f"\nFlow depart completed. Results saved to: {out_path}")
+    print("\nFlow depart completed.")
     
     return df_res
 
-if __name__ == "__main__":
-    # Example test run
-    # generate_flow_depart(station_id=2, target_unit_names=["Pump1", "Pump2"])
-    pass
