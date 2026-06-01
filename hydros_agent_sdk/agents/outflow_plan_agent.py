@@ -6,10 +6,10 @@
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from abc import abstractmethod
 
-from .tickable_agent import TickableAgent, MqttMetrics
+from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -33,7 +33,7 @@ from hydros_agent_sdk.utils import HydroObjectUtilsV2
 logger = logging.getLogger(__name__)
 
 
-class OutflowPlanAgent(TickableAgent):
+class OutflowPlanAgent(BaseHydroAgent):
     """
     事件驱动型的外发流量计划智能体。
 
@@ -190,17 +190,29 @@ class OutflowPlanAgent(TickableAgent):
 
         logger.info("Planning models initialized")
 
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
+    def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
-        执行基于本体的仿真步骤。由于该智能体是事件驱动的，通常返回 None。
+        事件驱动智能体不参与仿真步进。
 
         参数:
-            request: 步进指令请求
+            request: 步进指令请求。
 
         返回:
-            要通过 MQTT 发送的 MqttMetrics 对象列表
+            成功响应；正常多 Agent 分发会通过 supports_tick_command() 跳过本智能体。
         """
-        return None
+        self._set_agent_logging_context()
+        logger.debug(
+            "Ignoring tick for event-driven outflow plan agent: step=%s, commandId=%s",
+            request.step,
+            request.command_id,
+        )
+        return TickCmdResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False,
+        )
 
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):

@@ -6,22 +6,9 @@
 """
 
 import logging
-import os
-import sys
 from typing import Optional, List
 
-# 将当前目录添加到 Python 路径中
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
-
 from hydros_agent_sdk import (
-    setup_logging,
-    SimCoordinationClient,
-    HydroAgentFactory,
-    MultiAgentCallback,
-    load_env_config,
-    load_agent_config,
     ErrorCodes,
     handle_agent_errors,
 )
@@ -40,29 +27,6 @@ from hydros_agent_sdk.protocol.models import (
     ObjectTimeSeries,
     TimeSeriesValue,
 )
-
-# 配置日志（仅在直接作为脚本运行时）
-if __name__ == "__main__":
-    EXAMPLES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
-    os.makedirs(LOG_DIR, exist_ok=True)
-
-    try:
-        env_config = load_env_config()
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-    except Exception:
-        hydros_cluster_id = 'default_cluster'
-        hydros_node_id = os.getenv("HYDROS_NODE_ID", "LOCAL")
-
-    setup_logging(
-        level=logging.INFO,
-        hydros_cluster_id=hydros_cluster_id,
-        hydros_node_id=hydros_node_id,
-        console=True,
-        log_file=os.path.join(LOG_DIR, "hydros.log"),
-        use_rolling=True
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -244,103 +208,3 @@ class PumpOutflowPlanAgent(OutflowPlanAgent):
             source_agent_instance=self,
             broadcast=False
         )
-
-
-# ============================================================================
-# 智能体工厂类
-# ============================================================================
-
-class OutflowPlanAgentFactory(HydroAgentFactory):
-    """用于创建外发流量计划智能体实例的工厂。"""
-
-    def create_agent(
-        self,
-        sim_coordination_client: SimCoordinationClient,
-        agent_id: str,
-        agent_code: str,
-        agent_type: str,
-        agent_name: str,
-        context: SimulationContext,
-        hydros_cluster_id: str,
-        hydros_node_id: str,
-        **kwargs
-    ):
-        """创建一个新的外发流量计划智能体实例。"""
-        return PumpOutflowPlanAgent(
-            sim_coordination_client=sim_coordination_client,
-            agent_id=agent_id,
-            agent_code=agent_code,
-            agent_type=agent_type,
-            agent_name=agent_name,
-            context=context,
-            hydros_cluster_id=hydros_cluster_id,
-            hydros_node_id=hydros_node_id,
-            **kwargs
-        )
-
-
-# ============================================================================
-# 主入口
-# ============================================================================
-
-def main():
-    """外发流量计划智能体的主入口函数。"""
-    logger.info("=" * 80)
-    logger.info("Starting Outflow Plan Agent")
-    logger.info("=" * 80)
-
-    try:
-        # 加载配置
-        env_config = load_env_config()
-        agent_config = load_agent_config()
-
-        # 提取配置参数
-        mqtt_broker_url = env_config['mqtt_broker_url']
-        mqtt_broker_port = env_config['mqtt_broker_port']
-        mqtt_topic = env_config['mqtt_topic']
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-
-        agent_code = agent_config['agent_code']
-        agent_type = agent_config['agent_type']
-        agent_name = agent_config['agent_name']
-
-        logger.info(f"Agent Code: {agent_code}")
-        logger.info(f"Agent Type: {agent_type}")
-        logger.info(f"MQTT Broker: {mqtt_broker_url}:{mqtt_broker_port}")
-        logger.info(f"MQTT Topic: {mqtt_topic}")
-
-        # 创建工厂和回调
-        factory = OutflowPlanAgentFactory()
-        callback = MultiAgentCallback(factory)
-
-        # 创建协调客户端
-        client = SimCoordinationClient(
-            broker_url=mqtt_broker_url,
-            broker_port=mqtt_broker_port,
-            topic=mqtt_topic,
-            callback=callback,
-            hydros_cluster_id=hydros_cluster_id,
-            hydros_node_id=hydros_node_id
-        )
-
-        # 启动连接
-        client.connect()
-        logger.info("Outflow plan agent connected and ready")
-
-        # 保持运行状态
-        try:
-            while True:
-                import time
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
-            client.disconnect()
-
-    except Exception as e:
-        logger.error(f"Failed to start outflow plan agent: {e}", exc_info=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
