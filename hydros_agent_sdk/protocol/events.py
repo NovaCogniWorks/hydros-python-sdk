@@ -25,7 +25,14 @@ class TimeSeriesDataChangedEvent(HydroEvent):
 
 class OutflowTimeSeriesDataChangedEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES_DATA_UPDATED"] = "OUTFLOW_TIME_SERIES_DATA_UPDATED"
-    object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
+    object_type: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("object_type", "objectType")
+    )
+    object_time_series: List[ObjectTimeSeries] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("object_time_series", "objectTimeSeries")
+    )
 
 class OutflowTimeSeriesEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
@@ -38,6 +45,7 @@ class OutflowTimeSeriesEvent(HydroEvent):
 # Union for polymorphic events if needed later
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
+    OutflowTimeSeriesDataChangedEvent,
     OutflowTimeSeriesEvent,
     # Add generic HydroEvent as fallback?
     HydroEvent

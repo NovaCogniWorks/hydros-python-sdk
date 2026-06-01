@@ -4,13 +4,18 @@ from hydros_agent_sdk.protocol.commands import (
     HydroEventAckResponse,
     HydroEventCommand,
     OutflowTimeSeriesResponse,
+    OutflowTimeSeriesDataUpdateResponse,
     SimTaskTerminateResponse,
     SimCommandEnvelope,
     TickCmdRequest,
     TickCmdResponse,
     TimeSeriesDataUpdateResponse,
 )
-from hydros_agent_sdk.protocol.events import OutflowTimeSeriesEvent, TimeSeriesDataChangedEvent
+from hydros_agent_sdk.protocol.events import (
+    OutflowTimeSeriesDataChangedEvent,
+    OutflowTimeSeriesEvent,
+    TimeSeriesDataChangedEvent,
+)
 from hydros_agent_sdk.protocol.models import (
     AgentStatus,
     AgentDriveMode,
@@ -72,11 +77,22 @@ class HydroEventCallback(ReturningCallback):
     def __init__(self, agent):
         super().__init__(agent)
         self.time_series_updates = []
+        self.outflow_data_updates = []
         self.outflow_requests = []
 
     def on_time_series_data_update(self, request):
         self.time_series_updates.append(request)
         return TimeSeriesDataUpdateResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self.agent,
+            broadcast=False,
+        )
+
+    def on_outflow_time_series_data_update(self, request):
+        self.outflow_data_updates.append(request)
+        return OutflowTimeSeriesDataUpdateResponse(
             command_id=request.command_id,
             context=request.context,
             command_status=CommandStatus.SUCCEED,
@@ -273,6 +289,50 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
     assert response.command_status == CommandStatus.SUCCEED
 
 
+def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(context, [agent])
+    state_manager.add_local_agent(agent)
+    callback = HydroEventCallback(agent)
+    client = make_client(callback, state_manager)
+
+    event = OutflowTimeSeriesDataChangedEvent(
+        hydro_event_type="OUTFLOW_TIME_SERIES_DATA_UPDATED",
+        object_type="GateStation",
+        object_time_series=[
+            ObjectTimeSeries(
+                object_id=20000,
+                object_type="GateStation",
+                metrics_code="planned_outflow",
+                time_series=[TimeSeriesValue(step=1, value=100.0)],
+            )
+        ],
+    )
+    request = HydroEventCommand(
+        command_id="CMD_OUTFLOW_UPDATED",
+        context=context,
+        broadcast=False,
+        target_agent_instance=agent,
+        payload=event,
+    )
+
+    client._handle_incoming_message(request)
+
+    assert len(callback.outflow_data_updates) == 1
+    forwarded = callback.outflow_data_updates[0]
+    assert forwarded.command_id == "CMD_OUTFLOW_UPDATED"
+    assert forwarded.outflow_time_series_data_changed_event.object_type == "GateStation"
+    assert forwarded.outflow_time_series_data_changed_event.object_time_series[0].object_id == 20000
+
+    response = client.out_message_queue.get_nowait()
+    assert isinstance(response, HydroEventAckResponse)
+    assert response.command_id == "CMD_OUTFLOW_UPDATED"
+    assert response.command_status == CommandStatus.SUCCEED
+
+
 def test_hydro_event_command_can_be_deserialized_from_java_payload_shape():
     context = make_context()
     envelope = SimCommandEnvelope(
@@ -344,3 +404,34 @@ def test_hydro_event_command_can_deserialize_java_outflow_payload_without_conten
     assert isinstance(envelope.command, HydroEventCommand)
     assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
     assert envelope.command.payload.event_content_url is None
+
+
+def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_shape():
+    context = make_context()
+    agent = make_agent(context)
+    envelope = SimCommandEnvelope(
+        command={
+            "command_id": "CMD_OUTFLOW_UPDATED_JSON",
+            "command_type": "hydro_event_command",
+            "context": context.model_dump(mode="json"),
+            "broadcast": False,
+            "target_agent_instance": agent.model_dump(mode="json"),
+            "payload": {
+                "hydro_event_type": "OUTFLOW_TIME_SERIES_DATA_UPDATED",
+                "objectType": "GateStation",
+                "objectTimeSeries": [
+                    {
+                        "object_id": 20000,
+                        "object_type": "GateStation",
+                        "metrics_code": "planned_outflow",
+                        "time_series": [{"step": 1, "value": 100.0}],
+                    }
+                ],
+            },
+        }
+    )
+
+    assert isinstance(envelope.command, HydroEventCommand)
+    assert isinstance(envelope.command.payload, OutflowTimeSeriesDataChangedEvent)
+    assert envelope.command.payload.object_type == "GateStation"
+    assert envelope.command.payload.object_time_series[0].object_id == 20000
