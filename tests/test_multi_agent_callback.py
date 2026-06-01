@@ -55,6 +55,7 @@ class FakeAgent:
     def __init__(self, instance):
         self.instance = instance
         self.agent_code = instance.agent_code
+        self.tick_count = 0
 
     def on_init(self, request):
         return SimTaskInitResponse(
@@ -68,6 +69,7 @@ class FakeAgent:
         )
 
     def on_tick(self, request):
+        self.tick_count += 1
         return TickCmdResponse(
             command_id=request.command_id,
             context=request.context,
@@ -84,6 +86,11 @@ class FakeAgent:
             source_agent_instance=self.instance,
             broadcast=False,
         )
+
+
+class EventOnlyFakeAgent(FakeAgent):
+    def supports_tick_command(self):
+        return False
 
 
 class ContextAwareFakeAgent(FakeAgent):
@@ -257,3 +264,25 @@ def test_multi_agent_tick_and_terminate_return_response_lists():
     assert len(terminate_responses) == 1
     assert isinstance(terminate_responses[0], SimTaskTerminateResponse)
     assert context.biz_scene_instance_id not in callback.agents
+
+
+def test_multi_agent_tick_skips_agents_without_tick_capability():
+    context = make_context()
+    tick_instance = make_instance(context, "TICK_AGENT")
+    event_instance = make_instance(context, "EVENT_AGENT")
+    tick_agent = FakeAgent(tick_instance)
+    event_agent = EventOnlyFakeAgent(event_instance)
+    callback = MultiAgentCallback(node_id="node")
+    callback.agents[context.biz_scene_instance_id] = {
+        "TICK_AGENT": tick_agent,
+        "EVENT_AGENT": event_agent,
+    }
+
+    tick_responses = callback.on_tick(
+        TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
+    )
+
+    assert len(tick_responses) == 1
+    assert tick_responses[0].source_agent_instance.agent_code == "TICK_AGENT"
+    assert tick_agent.tick_count == 1
+    assert event_agent.tick_count == 0

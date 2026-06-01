@@ -123,6 +123,10 @@ class OutflowPlanAgent(TickableAgent):
 
         logger.info(f"OutflowPlanAgent initialized: {self.agent_id}")
 
+    def supports_tick_command(self) -> bool:
+        """Outflow planning is triggered by hydro events, not simulation ticks."""
+        return False
+
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
         初始化外发流量计划智能体。

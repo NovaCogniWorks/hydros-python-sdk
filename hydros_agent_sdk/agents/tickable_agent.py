@@ -117,6 +117,10 @@ class TickableAgent(BaseHydroAgent):
 
         logger.info(f"TickableAgent initialized: {self.agent_id}")
 
+    def supports_tick_command(self) -> bool:
+        """Return whether this agent participates in simulation tick dispatch."""
+        return True
+
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """

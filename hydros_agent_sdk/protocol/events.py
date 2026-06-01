@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional, Any, Literal, Union
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from .models import SimulationContext, ObjectTimeSeries
 from .base import HydroBaseModel
 
@@ -29,7 +29,9 @@ class OutflowTimeSeriesDataChangedEvent(HydroEvent):
 
 class OutflowTimeSeriesEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = "OUTFLOW_TIME_SERIES"
-    event_content_url: str
+    event_content_url: str = Field(
+        validation_alias=AliasChoices("event_content_url", "eventContentUrl")
+    )
     priority: Optional[str] = None
 
 # Union for polymorphic events if needed later

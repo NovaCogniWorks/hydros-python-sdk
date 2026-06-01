@@ -267,3 +267,25 @@ def test_hydro_event_command_can_be_deserialized_from_java_payload_shape():
     assert isinstance(envelope.command, HydroEventCommand)
     assert isinstance(envelope.command.payload, TimeSeriesDataChangedEvent)
     assert envelope.command.payload.object_time_series[0].object_id == 1001
+
+
+def test_hydro_event_command_can_be_deserialized_from_java_outflow_payload_shape():
+    context = make_context()
+    agent = make_agent(context)
+    envelope = SimCommandEnvelope(
+        command={
+            "command_id": "CMD_OUTFLOW_JSON",
+            "command_type": "hydro_event_command",
+            "context": context.model_dump(mode="json"),
+            "broadcast": False,
+            "target_agent_instance": agent.model_dump(mode="json"),
+            "payload": {
+                "hydro_event_type": "OUTFLOW_TIME_SERIES",
+                "eventContentUrl": "https://example.test/outflow.yaml",
+            },
+        }
+    )
+
+    assert isinstance(envelope.command, HydroEventCommand)
+    assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
+    assert envelope.command.payload.event_content_url == "https://example.test/outflow.yaml"

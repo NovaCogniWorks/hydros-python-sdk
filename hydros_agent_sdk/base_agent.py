@@ -191,6 +191,10 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         if self.context and self.context.biz_scene_instance_id:
             set_biz_scene_instance_id(self.context.biz_scene_instance_id)
 
+    def supports_tick_command(self) -> bool:
+        """Return whether this agent participates in simulation tick dispatch."""
+        return False
+
     @abstractmethod
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """

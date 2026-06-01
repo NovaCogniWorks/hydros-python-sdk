@@ -288,6 +288,9 @@ class MultiAgentCallback(SimCoordinationCallback):
         # Forward tick to all agents in this context
         responses = []
         for agent_code, agent in context_agents.items():
+            if not self._supports_tick_command(agent):
+                logger.debug("Skipping tick for agent without tick capability: %s", agent_code)
+                continue
             try:
                 response = agent.on_tick(request)
                 if response:
@@ -295,6 +298,13 @@ class MultiAgentCallback(SimCoordinationCallback):
             except Exception as e:
                 logger.error(f"Error in tick for {agent_code}: {e}", exc_info=True)
         return responses
+
+    @staticmethod
+    def _supports_tick_command(agent: Any) -> bool:
+        supports_tick_command = getattr(agent, "supports_tick_command", None)
+        if supports_tick_command is None:
+            return True
+        return bool(supports_tick_command())
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """Handle task termination for all agents in the context."""
