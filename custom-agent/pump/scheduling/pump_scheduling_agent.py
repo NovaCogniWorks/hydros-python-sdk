@@ -192,6 +192,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
+        self.response_metadata = payload.get("service_mapping", {}).get("response_metadata", {})
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
@@ -507,46 +508,47 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         commands = []
 
 
+        from hydros_agent_sdk.agent_commands.models.device_value_types import DeviceValueTypeEnum
+
+        # 提取 response_metadata 中的机组 object_id 映射
+        units_metadata = self.response_metadata.get("units", []) if hasattr(self, 'response_metadata') else []
+        unit_object_ids = {}
+        for u in units_metadata:
+            unit_object_ids[(u.get("station_id"), u.get("unit_id"))] = u.get("object_id")
+
         for sid in self.system_config.station_ids:
-            station_config = self.system_config.station_by_id[sid]
-            station_code = getattr(station_config, "code", f"station_{sid}")
             action = actions[sid]
             
-            # 下发机组启停状态
-            for uid, st in action.unit_status.items():
-                commands.append({
-                    "target_agent_code": station_code,
-                    "target_command_type": "UNIT_STATUS",
-                    "target_value": str(st),
-                    "object_id": str(uid),
-                    "object_type": "PUMP_UNIT"
-                })
-            
-            # 下发机组开度 / 叶片角
+            # 下发机组开度 / 叶片角，去掉机组启停状态
             for uid, op in action.unit_openings.items():
+                st = action.unit_status.get(uid, 0)
+                # target_value是叶片角（100是关机）
+                target_value = 100.0 if st == 0 else float(op)
+
+                # object_id从station_config的response_metadata.units.object_id中获取
+                unit_object_id = unit_object_ids.get((sid, uid))
+
+                # target_agent_code从TargetAgentResolver获取
+                target_agent_code = None
+                if unit_object_id is not None:
+                    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                    if agent_instance:
+                        target_agent_code = agent_instance.agent_code
+
+                if unit_object_id is None or target_agent_code is None:
+                    raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
+
                 commands.append({
-                    "target_agent_code": station_code,
-                    "target_command_type": "UNIT_OPENING",
-                    "target_value": str(round(op, 2)),
-                    "object_id": str(uid),
+                    "target_agent_code": target_agent_code,
+                    "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
+                    "target_value": str(round(target_value, 2)),
+                    "object_id": str(unit_object_id),
                     "object_type": "PUMP_UNIT"
                 })
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
         return commands
 
-    def _run_pump_rolling_optimization(self, mpc_task_state):
-        logger.info(
-            "Executing pump MPC optimization: bizSceneInstanceId=%s, step=%s",
-            self.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
-        )
-        control_commands = self.on_optimization(mpc_task_state.current_step)
-        mpc_task_state.current_loop += 1
-        if control_commands:
-            self.control_command_dispatcher.dispatch(control_commands)
-        logger.info("Pump MPC optimization completed at step %s", mpc_task_state.current_step)
-        return control_commands
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
@@ -607,7 +609,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
             # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
             self.on_boundary_condition_update(event.object_time_series)
-            self.mpc_rolling_runtime.handle_time_series_changed(event)
+            self._handle_time_series_changed(event)
 
         # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(
