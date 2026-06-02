@@ -186,6 +186,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
+        self.response_metadata = payload.get("response_metadata", {})
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
@@ -511,7 +512,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     "target_command_type": "UNIT_STATUS",
                     "target_value": str(st),
                     "object_id": str(uid),
-                    "object_type": "PUMP_UNIT"
+                    "object_type": "PUMP"
                 })
             
             # 下发机组开度 / 叶片角
@@ -521,7 +522,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     "target_command_type": "UNIT_OPENING",
                     "target_value": str(round(op, 2)),
                     "object_id": str(uid),
-                    "object_type": "PUMP_UNIT"
+                    "object_type": "PUMP"
                 })
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
