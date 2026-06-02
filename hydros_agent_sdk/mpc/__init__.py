@@ -12,6 +12,7 @@ from .models import (
     SensorData,
     TargetNode,
 )
+from .rolling_runtime import MpcRollingRuntime
 
 __all__ = [
     "DeviceOpening",
@@ -26,6 +27,7 @@ __all__ = [
     "MpcRuntimeConfig",
     "MpcResult",
     "MpcResultDetail",
+    "MpcRollingRuntime",
     "SensorData",
     "TargetNode",
 ]

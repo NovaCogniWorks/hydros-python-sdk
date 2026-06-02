@@ -76,6 +76,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             optimization_horizon=optimization_horizon,
             **kwargs
         )
+        self.mpc_rolling_runtime.set_rolling_cycle_runner(
+            self._run_pump_rolling_optimization
+        )
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
@@ -500,7 +503,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         commands = []
         return self.mpc_output
 
-    def _do_rolling_optimal(self, mpc_task_state):
+    def _run_pump_rolling_optimization(self, mpc_task_state):
         logger.info(
             "Executing pump MPC optimization: bizSceneInstanceId=%s, step=%s",
             self.context.biz_scene_instance_id,
@@ -571,7 +574,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
             # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
             self.on_boundary_condition_update(event.object_time_series)
-            self._handle_time_series_changed(event)
+            self.mpc_rolling_runtime.handle_time_series_changed(event)
 
         # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(

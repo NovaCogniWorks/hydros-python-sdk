@@ -6,7 +6,6 @@
 """
 
 import logging
-from threading import RLock
 from typing import Optional, List, Dict, Any, Callable, Iterable
 from abc import abstractmethod
 
@@ -14,15 +13,14 @@ from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
-from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
 from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
 from hydros_agent_sdk.mpc.models import SensorData
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
-from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -35,7 +33,6 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
 )
-from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     CommandStatus,
@@ -148,13 +145,7 @@ class CentralSchedulingAgent(TickableAgent):
 
         # MPC 相关配置
         self._optimization_horizon = optimization_horizon
-        self._last_optimization_step = 0
-        self._configured_total_steps = configured_total_steps
-        self._configured_mpc_config_url = configured_mpc_config_url
-        self._configured_target_and_constrain_config_url = configured_target_and_constrain_config_url
         self._configured_mpc_service_base_url = configured_mpc_service_base_url
-        self._mpc_task_state: Optional[MpcTaskState] = None
-        self._time_series_update_lock = RLock()
         self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
             configured_mpc_sensor_provider
         )
@@ -209,6 +200,20 @@ class CentralSchedulingAgent(TickableAgent):
             mpc_result_reporter=self._mpc_result_reporter,
             mpc_sensor_provider=self._mpc_sensor_provider,
         )
+        self._mpc_rolling_runtime = MpcRollingRuntime(
+            context=context,
+            properties=self.properties,
+            optimization_horizon=optimization_horizon,
+            optimize_step=self.on_optimization,
+            dispatch_control_commands=self._control_command_dispatcher.dispatch,
+            set_current_step=lambda step: setattr(self, "_current_step", step),
+            get_current_step=lambda: self._current_step,
+            set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
+            configured_total_steps=configured_total_steps,
+            configured_mpc_config_url=configured_mpc_config_url,
+            configured_target_and_constrain_config_url=configured_target_and_constrain_config_url,
+            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+        )
 
         logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
         logger.info(f"Optimization horizon: {self._optimization_horizon} ticks")
@@ -250,32 +255,13 @@ class CentralSchedulingAgent(TickableAgent):
     def control_command_dispatcher(self) -> ControlCommandDispatcher:
         return self._control_command_dispatcher
 
-    def get_roll_steps(self) -> int:
-        """Return the rolling interval, matching Java roll_steps fallback rules."""
-        return PropertyParseUtils.get_int(self.properties, "roll_steps", self._optimization_horizon)
-
-    def get_total_steps(self) -> int:
-        """Return total task steps used to avoid rolling again at task end."""
-        default_total_steps = self._configured_total_steps
-        if default_total_steps is None:
-            default_total_steps = 36
-        return PropertyParseUtils.get_int(self.properties, "total_steps", default_total_steps)
-
-    def should_auto_start_mpc_on_tick(self) -> bool:
-        """Whether ticks may activate MPC before a time-series update arrives."""
-        return PropertyParseUtils.get_bool(self.properties, "auto_start_mpc_on_tick", False)
+    @property
+    def mpc_rolling_runtime(self) -> MpcRollingRuntime:
+        return self._mpc_rolling_runtime
 
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
         self._mpc_planning_client = self._mpc_optimization_service.get_or_create_mpc_planning_client()
         return self._mpc_planning_client
-
-    def is_mpc_optimizing_on_the_loop(self) -> bool:
-        """Whether the task has already activated its rolling MPC loop."""
-        return self._mpc_task_state is not None
-
-    @property
-    def mpc_task_state(self) -> Optional[MpcTaskState]:
-        return self._mpc_task_state
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
@@ -290,41 +276,7 @@ class CentralSchedulingAgent(TickableAgent):
         logger.debug(f"Central scheduling step {request.step}")
 
         try:
-            with self._time_series_update_lock:
-                self._current_step = request.step
-                if not self.is_mpc_optimizing_on_the_loop():
-                    if not self.should_auto_start_mpc_on_tick():
-                        logger.debug(
-                            "MPC rolling loop has not been activated yet and auto-start is disabled: "
-                            "bizSceneInstanceId=%s, step=%s",
-                            self.context.biz_scene_instance_id,
-                            request.step,
-                        )
-                        return None
-
-                    self._activate_mpc_from_tick(request.step)
-                    return None
-
-                mpc_task_state = self._require_mpc_task_state()
-                mpc_task_state.current_step = request.step
-                mpc_task_state.total_steps = self.get_total_steps()
-                should_roll = mpc_task_state.active_new_rolling(request.step)
-
-                logger.debug(
-                    "MPC rolling check: bizSceneInstanceId=%s, startStep=%s, "
-                    "currentStep=%s, rollStep=%s, shouldRoll=%s",
-                    self.context.biz_scene_instance_id,
-                    mpc_task_state.start_step,
-                    request.step,
-                    mpc_task_state.rolling_interval_steps,
-                    should_roll,
-                )
-
-                if should_roll:
-                    self._do_rolling_optimal(mpc_task_state)
-                    self._last_optimization_step = request.step
-
-                object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
+            self._mpc_rolling_runtime.on_tick(request.step)
 
             # 返回可选指标
             return None
@@ -352,7 +304,7 @@ class CentralSchedulingAgent(TickableAgent):
                     self._time_series_cache[cache_key] = time_series
                 self.on_boundary_condition_update(event.object_time_series)
 
-            self._handle_time_series_changed(event)
+            self._mpc_rolling_runtime.handle_time_series_changed(event)
 
             return TimeSeriesDataUpdateResponse(
                 context=self.context,
@@ -371,129 +323,6 @@ class CentralSchedulingAgent(TickableAgent):
                 broadcast=False,
             )
 
-    def _handle_time_series_changed(self, event: Optional[TimeSeriesDataChangedEvent]) -> None:
-        if event is None or not event.object_time_series:
-            raise ValueError("time series update event has no object_time_series")
-
-        with self._time_series_update_lock:
-            rolling_interval_steps = self.get_roll_steps()
-            if rolling_interval_steps <= 0:
-                raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
-
-            if event.auto_schedule_at_step is not None and event.auto_schedule_at_step > self._current_step:
-                self._current_step = event.auto_schedule_at_step
-
-            current_step = self._current_step
-            total_steps = self.get_total_steps()
-
-            logger.info(
-                "MPC time series event: bizSceneInstanceId=%s, currentStep=%s, "
-                "isOnTheLoop=%s, rollingIntervalSteps=%s, eventType=%s, eventSource=%s, timeSeriesCount=%s",
-                self.context.biz_scene_instance_id,
-                current_step,
-                self.is_mpc_optimizing_on_the_loop(),
-                rolling_interval_steps,
-                event.hydro_event_type,
-                event.hydro_event_source_type,
-                len(event.object_time_series),
-            )
-
-            if not self.is_mpc_optimizing_on_the_loop():
-                mpc_config = MpcConfigResolver.resolve(
-                    self.properties,
-                    configured_mpc_config_url=self._configured_mpc_config_url,
-                    configured_target_and_constrain_config_url=self._configured_target_and_constrain_config_url,
-                    configured_mpc_service_base_url=self._configured_mpc_service_base_url,
-                )
-                logger.debug(
-                    "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
-                    "mpcConfigUrl=%s, controlConfigUrl=%s",
-                    self.context.biz_scene_instance_id,
-                    mpc_config.mpc_config_url,
-                    mpc_config.target_and_constrain_config_url,
-                )
-                mpc_task_state = MpcTaskState(
-                    context=self.context,
-                    rolling_interval_steps=rolling_interval_steps,
-                    start_step=current_step,
-                    current_step=current_step,
-                    total_steps=total_steps,
-                    mpc_config_url=mpc_config.mpc_config_url,
-                    target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
-                )
-                mpc_task_state.register_hydro_event(event)
-                self._mpc_task_state = mpc_task_state
-                self._do_rolling_optimal(mpc_task_state)
-                self._last_optimization_step = current_step
-                object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
-                return
-
-            mpc_task_state = self._require_mpc_task_state()
-            mpc_task_state.rolling_interval_steps = rolling_interval_steps
-            mpc_task_state.current_step = current_step
-            mpc_task_state.total_steps = total_steps
-            mpc_task_state.register_hydro_event(event)
-
-    def _activate_mpc_from_tick(self, current_step: int) -> None:
-        rolling_interval_steps = self.get_roll_steps()
-        if rolling_interval_steps <= 0:
-            raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
-
-        mpc_config = MpcConfigResolver.resolve(
-            self.properties,
-            configured_mpc_config_url=self._configured_mpc_config_url,
-            configured_target_and_constrain_config_url=self._configured_target_and_constrain_config_url,
-            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
-        )
-        logger.debug(
-            "MPC config URLs resolved from agent properties: bizSceneInstanceId=%s, "
-            "mpcConfigUrl=%s, controlConfigUrl=%s",
-            self.context.biz_scene_instance_id,
-            mpc_config.mpc_config_url,
-            mpc_config.target_and_constrain_config_url,
-        )
-
-        mpc_task_state = MpcTaskState(
-            context=self.context,
-            rolling_interval_steps=rolling_interval_steps,
-            start_step=current_step,
-            current_step=current_step,
-            total_steps=self.get_total_steps(),
-            mpc_config_url=mpc_config.mpc_config_url,
-            target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
-        )
-        self._mpc_task_state = mpc_task_state
-
-        logger.info(
-            "MPC rolling loop auto-started by tick: bizSceneInstanceId=%s, "
-            "startStep=%s, rollStep=%s, totalSteps=%s",
-            self.context.biz_scene_instance_id,
-            mpc_task_state.start_step,
-            mpc_task_state.rolling_interval_steps,
-            mpc_task_state.total_steps,
-        )
-        self._do_rolling_optimal(mpc_task_state)
-        self._last_optimization_step = current_step
-        object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
-
-    def _require_mpc_task_state(self) -> MpcTaskState:
-        if self._mpc_task_state is None:
-            raise RuntimeError("mpc_task_state is not initialized")
-        return self._mpc_task_state
-
-    def _do_rolling_optimal(self, mpc_task_state: MpcTaskState) -> Optional[List[Any]]:
-        logger.info(
-            "Executing MPC optimization: bizSceneInstanceId=%s, step=%s",
-            self.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
-        )
-        control_commands = self.on_optimization(mpc_task_state.current_step)
-        mpc_task_state.current_loop += 1
-        if control_commands:
-            self.control_command_dispatcher.dispatch(control_commands)
-        logger.info("MPC optimization completed at step %s", mpc_task_state.current_step)
-        return control_commands
-
     def on_optimization(self, step: int) -> Optional[List[Any]]:
         """
         执行 MPC 优化逻辑。
@@ -507,7 +336,7 @@ class CentralSchedulingAgent(TickableAgent):
         返回:
             需要发送给边缘智能体的控制指令列表，或 None
         """
-        mpc_task_state = self._require_mpc_task_state()
+        mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
         responses = self._mpc_optimization_service.optimize(
             self,
             mpc_task_state,
@@ -559,16 +388,6 @@ class CentralSchedulingAgent(TickableAgent):
             任务终止响应
         """
         pass
-
-    @property
-    def optimization_horizon(self) -> int:
-        """获取优化时界（tick 数）。"""
-        return self._optimization_horizon
-
-    @property
-    def last_optimization_step(self) -> int:
-        """获取最后一次优化步长。"""
-        return self._last_optimization_step
 
     def _initialize_model_context(self) -> None:
         """Initialize task-scoped hydro model context for object owner lookup."""
