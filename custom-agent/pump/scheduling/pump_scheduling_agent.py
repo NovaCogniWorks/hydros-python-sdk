@@ -186,7 +186,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
-        self.response_metadata = payload.get("response_metadata", {})
+        self.response_metadata = payload.get("service_mapping", {}).get("response_metadata", {})
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
@@ -527,16 +527,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     if agent_instance:
                         target_agent_code = agent_instance.agent_code
                 
-                if not target_agent_code:
-                    station_config = self.system_config.station_by_id[sid]
-                    target_agent_code = getattr(station_config, "code", f"station_{sid}")
+                if unit_object_id is None or target_agent_code is None:
+                    raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
                 
                 commands.append({
                     "target_agent_code": target_agent_code,
                     "target_command_type": AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST,
                     "target_value": str(round(target_value, 2)),
-                    "object_id": str(unit_object_id) if unit_object_id else str(uid),
-                    "object_type": "PUMP"
+                    "object_id": str(unit_object_id),
+                    "object_type": "PUMP_UNIT"
                 })
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
