@@ -35,7 +35,9 @@ class PumpUnit:
 
     def _build_interpolation(self):
         points = self.data_r[['Q', 'H']].values
-        values = self.data_r.iloc[:, 2].values 
+        # The angle column might be 'R', 'Alpha', or something else, but it's the one that is not Q and not H
+        angle_col = [c for c in self.data_r.columns if c not in ['Q', 'H']][0]
+        values = self.data_r[angle_col].values 
         self.angle_min = float(np.nanmin(values))
         self.angle_max = float(np.nanmax(values))
         self.interp_r = LinearNDInterpolator(points, values)

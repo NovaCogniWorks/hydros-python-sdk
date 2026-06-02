@@ -81,6 +81,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         )
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
 
+    def _resolve_config_path(self) -> str:
+        return os.path.abspath(
+            os.path.join(_SCRIPT_DIR, "..", "data", "config_xhh.yaml")
+        )
+
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
@@ -183,9 +188,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         if not payload or 'project' not in payload:
             logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'custom-agent/pump/data/config_xhh.yaml'。")
-            fallback_path = 'custom-agent/pump/data/config_xhh.yaml'
-            if not os.path.exists(fallback_path):
-                fallback_path = './custom-agent/pump/data/config_xhh.yaml'
+            fallback_path = self._resolve_config_path()
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
@@ -233,13 +236,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         )
         
         # 预先计算所有泵站的流量分配表，避免在首次 rolling optimization 时产生卡顿
-        logger.info("========== 开始预先计算所有泵站机组的离线流量分配表 ==========")
+        logger.info("========== 开始初始化所有泵站机组的离线流量分配表 ==========")
         for station in self.system_config.stations:
             available_ids = self.available_units_map.get(station.id, [])
             if available_ids:
-                logger.info(f"正在预先计算 Station ID: {station.id} 的流量分配组合 ...")
+                logger.info(f"正在初始化 Station ID: {station.id} 的流量分配组合 ...")
                 self.flow_service.get_optimal_table(station.id, available_ids)
-        logger.info("========== 所有泵站流量分配表预计算完成 ==========")
+        logger.info("========== 所有泵站流量分配表初始化完成 ==========")
 
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
@@ -500,8 +503,37 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
         self.mpc_output = {"upper": upper_res, "lower": lower_res}
         
+        # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
-        return self.mpc_output
+
+
+        for sid in self.system_config.station_ids:
+            station_config = self.system_config.station_by_id[sid]
+            station_code = getattr(station_config, "code", f"station_{sid}")
+            action = actions[sid]
+            
+            # 下发机组启停状态
+            for uid, st in action.unit_status.items():
+                commands.append({
+                    "target_agent_code": station_code,
+                    "target_command_type": "UNIT_STATUS",
+                    "target_value": str(st),
+                    "object_id": str(uid),
+                    "object_type": "PUMP_UNIT"
+                })
+            
+            # 下发机组开度 / 叶片角
+            for uid, op in action.unit_openings.items():
+                commands.append({
+                    "target_agent_code": station_code,
+                    "target_command_type": "UNIT_OPENING",
+                    "target_value": str(round(op, 2)),
+                    "object_id": str(uid),
+                    "object_type": "PUMP_UNIT"
+                })
+                
+        logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
+        return commands
 
     def _run_pump_rolling_optimization(self, mpc_task_state):
         logger.info(
@@ -509,11 +541,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.context.biz_scene_instance_id,
             mpc_task_state.current_step,
         )
-        self.on_optimization(mpc_task_state.current_step)
+        control_commands = self.on_optimization(mpc_task_state.current_step)
         mpc_task_state.current_loop += 1
+        if control_commands:
+            self.control_command_dispatcher.dispatch(control_commands)
         logger.info("Pump MPC optimization completed at step %s", mpc_task_state.current_step)
-        return []
-
+        return control_commands
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:

@@ -53,7 +53,7 @@ class PumpSchedulingPathTest(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
-        self.assertTrue(config_path.endswith(os.path.join("data", "config.json")))
+        self.assertTrue(config_path.endswith(os.path.join("data", "config_xhh.yaml")))
         self.assertTrue(os.path.exists(config_path))
 
 

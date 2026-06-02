@@ -14,6 +14,8 @@ class DeviceValueTypeEnum(Enum):
     GATE_OPENING = ("gate_opening", "闸门开度", float)
     BLADE_ANGLE = ("blade_angle", "叶片角度", float)
     OUTPUT_POWER = ("output_power", "输出功率", float)
+    UNIT_STATUS = ("UNIT_STATUS", "机组启停状态", int)
+    UNIT_OPENING = ("UNIT_OPENING", "机组开度", float)
 
     def __init__(self, code: str, label: str, value_type: type):
         self.code = code

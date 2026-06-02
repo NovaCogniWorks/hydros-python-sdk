@@ -59,6 +59,17 @@ class MpcControlCommandBuilder:
             )
             return None
 
+        try:
+            typed_target_value = value_type.value_type(target_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "控制指令目标值类型转换失败: target=%s, type=%s, value=%s",
+                target_agent_code,
+                target_command_type,
+                target_value,
+            )
+            return None
+
         return HydroStationTargetValueRequest(
             command_id=generate_agent_command_id(),
             context=self.source_agent.context,
@@ -67,7 +78,7 @@ class MpcControlCommandBuilder:
             object_id=object_id,
             object_type=object_type,
             target_value_type=value_type.code,
-            target_value=target_value,
+            target_value=typed_target_value,
             need_ack_reply=True,
         )
 

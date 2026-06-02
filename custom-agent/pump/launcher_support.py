@@ -91,7 +91,7 @@ class RegisteredAgentInfo:
             name="system-central-scheduling",
             agent_code="CENTRAL_SCHEDULING_AGENT",
             agent_type="CENTRAL_SCHEDULING_AGENT",
-            agent_display_name="System Central Scheduling Agent",
+            agent_display_name="中央调度智能体",
             agent_class="SystemCentralSchedulingAgent",
             directory="(sdk built-in)",
         )

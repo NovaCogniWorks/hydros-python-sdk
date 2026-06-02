@@ -33,8 +33,8 @@ class ControlCommandDispatcher:
             object_id = command.get("object_id")
             object_type = command.get("object_type")
 
-            logger.debug(
-                "Control command: target=%s, type=%s, value=%s, object_id=%s",
+            logger.info(
+                "准备下发控制指令: 目标机组[%s], 控制类型[%s], 下发数值[%s], 对象ID[%s]",
                 target_agent_code,
                 target_command_type,
                 target_value,

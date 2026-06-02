@@ -47,7 +47,8 @@ class TestPumpSchedulingAgent(unittest.TestCase):
 
         for t in range(steps):
             print(f"\nStep {t}:")
-            agent_res = self.agent.on_optimization(t)
+            commands = self.agent.on_optimization(t)
+            agent_res = self.agent.mpc_output
             lower_res = agent_res['lower']
             upper_res = agent_res['upper']
             
