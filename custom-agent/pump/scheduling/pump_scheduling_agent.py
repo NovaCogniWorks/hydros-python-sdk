@@ -500,28 +500,42 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
+        from hydros_agent_sdk.agent_commands.models.types import AgentCommandTypes
+        
+        # 提取 response_metadata 中的机组 object_id 映射
+        units_metadata = self.response_metadata.get("units", []) if hasattr(self, 'response_metadata') else []
+        unit_object_ids = {}
+        for u in units_metadata:
+            unit_object_ids[(u.get("station_id"), u.get("unit_id"))] = u.get("object_id")
+
         for sid in self.system_config.station_ids:
-            station_config = self.system_config.station_by_id[sid]
-            station_code = getattr(station_config, "code", f"station_{sid}")
             action = actions[sid]
             
-            # 下发机组启停状态
-            for uid, st in action.unit_status.items():
-                commands.append({
-                    "target_agent_code": station_code,
-                    "target_command_type": "UNIT_STATUS",
-                    "target_value": str(st),
-                    "object_id": str(uid),
-                    "object_type": "PUMP"
-                })
-            
-            # 下发机组开度 / 叶片角
+            # 下发机组开度 / 叶片角，去掉机组启停状态
             for uid, op in action.unit_openings.items():
+                st = action.unit_status.get(uid, 0)
+                # target_value是叶片角（100是关机）
+                target_value = 100.0 if st == 0 else float(op)
+                
+                # object_id从station_config的response_metadata.units.object_id中获取
+                unit_object_id = unit_object_ids.get((sid, uid))
+                
+                # target_agent_code从TargetAgentResolver获取
+                target_agent_code = None
+                if unit_object_id is not None:
+                    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                    if agent_instance:
+                        target_agent_code = agent_instance.agent_code
+                
+                if not target_agent_code:
+                    station_config = self.system_config.station_by_id[sid]
+                    target_agent_code = getattr(station_config, "code", f"station_{sid}")
+                
                 commands.append({
-                    "target_agent_code": station_code,
-                    "target_command_type": "UNIT_OPENING",
-                    "target_value": str(round(op, 2)),
-                    "object_id": str(uid),
+                    "target_agent_code": target_agent_code,
+                    "target_command_type": AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST,
+                    "target_value": str(round(target_value, 2)),
+                    "object_id": str(unit_object_id) if unit_object_id else str(uid),
                     "object_type": "PUMP"
                 })
                 
