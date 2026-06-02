@@ -500,7 +500,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
-        from hydros_agent_sdk.agent_commands.models.types import AgentCommandTypes
+        from hydros_agent_sdk.agent_commands.models.device_value_types import DeviceValueTypeEnum
         
         # 提取 response_metadata 中的机组 object_id 映射
         units_metadata = self.response_metadata.get("units", []) if hasattr(self, 'response_metadata') else []
@@ -532,7 +532,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 
                 commands.append({
                     "target_agent_code": target_agent_code,
-                    "target_command_type": AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST,
+                    "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
                     "target_value": str(round(target_value, 2)),
                     "object_id": str(unit_object_id),
                     "object_type": "PUMP_UNIT"
