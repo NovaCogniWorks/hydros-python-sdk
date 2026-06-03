@@ -1,3 +1,6 @@
+import json
+from types import SimpleNamespace
+
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.protocol.commands import (
@@ -158,6 +161,51 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     assert response.command_status == CommandStatus.FAILED
     assert response.error_code == "AGENT_TICK_FAILURE"
     assert "boom" in response.error_message
+
+
+def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(context, [agent])
+    state_manager.add_local_agent(agent)
+    client = make_client(ReturningCallback(agent), state_manager)
+    client._handle_incoming_message = _fail_if_called
+
+    for command_type, agent_field in (
+        ("update_monitor_rule_request", "target_agent_instance"),
+        ("update_monitor_rule_response", "source_agent_instance"),
+    ):
+        payload = {
+            "command_id": "CMD_MONITOR_RULE",
+            "command_type": command_type,
+            "context": context.model_dump(mode="json"),
+            agent_field: agent.model_dump(mode="json", by_alias=True),
+            "monitoring_rules": [
+                {
+                    "ruleId": "MRULE_001",
+                    "ruleName": "Water level warning",
+                    "bizStatus": "NORMAL",
+                    "triggerConditions": {},
+                }
+            ],
+        }
+
+        client._on_message(
+            None,
+            None,
+            SimpleNamespace(
+                topic="/hydros/commands/coordination/test",
+                payload=json.dumps(payload).encode("utf-8"),
+            ),
+        )
+
+    assert client.out_message_queue.empty()
+
+
+def _fail_if_called(command):
+    raise AssertionError(f"ignored command reached handler: {command.command_type}")
 
 
 def test_terminate_response_from_same_node_is_sendable_after_local_agent_removed():

@@ -72,6 +72,11 @@ import json
 
 logger = logging.getLogger(__name__)
 
+IGNORED_COORDINATION_COMMAND_TYPES = {
+    "update_monitor_rule_request",
+    "update_monitor_rule_response",
+}
+
 
 class SimCoordinationClient:
     """
@@ -384,6 +389,15 @@ class SimCoordinationClient:
                 data.get("command_id") if isinstance(data, dict) else None,
                 self._raw_context_id(data),
             )
+            if self._should_ignore_raw_command(data):
+                logger.info(
+                    "MQTT command ignored: type=%s, id=%s, context=%s, reason=disabled_command_type",
+                    data.get("command_type"),
+                    data.get("command_id"),
+                    self._raw_context_id(data),
+                )
+                return
+
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
             # Apply message filters
@@ -412,6 +426,12 @@ class SimCoordinationClient:
         if isinstance(context, dict):
             return context.get("biz_scene_instance_id") or context.get("bizSceneInstanceId")
         return None
+
+    @staticmethod
+    def _should_ignore_raw_command(data) -> bool:
+        if not isinstance(data, dict):
+            return False
+        return data.get("command_type") in IGNORED_COORDINATION_COMMAND_TYPES
 
     @staticmethod
     def _command_context_id(command: SimCommand):
