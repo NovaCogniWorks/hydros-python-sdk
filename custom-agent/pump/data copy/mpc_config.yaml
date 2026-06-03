@@ -407,7 +407,7 @@ stations:
   remote_name: 泗洪站
   front_level_key: b0
   back_level_key: b1
-  hydro_front_node: 20701
+  hydro_front_node: 0-洪泽湖
   hydro_back_node: 1-泗洪站下游
   level_back_min: 12.75
   level_back_max: 16.8

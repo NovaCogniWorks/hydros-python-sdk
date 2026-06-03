@@ -338,7 +338,7 @@ global_params:
   rho: 1000
   g: 9.81
 flow_depart:
-  step_q: 4.0
+  step_q: 3.0
   step_h: 0.5
   data_dir: data
   output_dir: output
@@ -407,7 +407,7 @@ stations:
   remote_name: 泗洪站
   front_level_key: b0
   back_level_key: b1
-  hydro_front_node: 20701
+  hydro_front_node: 0-洪泽湖
   hydro_back_node: 1-泗洪站下游
   level_back_min: 12.75
   level_back_max: 16.8
