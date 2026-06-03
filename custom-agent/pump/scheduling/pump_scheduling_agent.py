@@ -247,15 +247,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         self._lazy_init_odd_mpc()
         
-        # 打印 metrics_data_cache 中所有对象的最新状态
-        logger.info("--- 当前 metrics_data_cache 内容 ---")
-        if hasattr(self._metrics_data_cache, "latest_metrics"):
-            for cache_key, cache_val in self._metrics_data_cache.latest_metrics.items():
-                logger.info(f"  {cache_key}: {cache_val}")
-        else:
-            logger.info("  (缓存为空或不包含 latest_metrics 属性)")
-        logger.info("------------------------------------")
-
         from odd_dmpc.types import EnvironmentObservation, StationMemory
         from odd_dmpc.local_controller import StationControlContext
         import pandas as pd
@@ -271,14 +262,30 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         station_heads = {}
         station_flows = {}
         
+        # 用户要求写死的 object_id 映射
+        # 泗洪站(1) - 前:20701, 后:20101, 流量:20101
+        # 睢宁站(2) - 前:20117, 后:20501, 流量:20501
+        # 邳州站(3) - 前:20513, 后:20801, 流量:20801
+        HARDCODED_SENSORS = {
+            1: {"front": 20701, "back": 20101, "flow": 20101},
+            2: {"front": 20117, "back": 20501, "flow": 20501},
+            3: {"front": 20513, "back": 20801, "flow": 20801},
+        }
+        
         for sid in self.system_config.station_ids:
-            front_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "front_level"), None)
-            back_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "back_level"), None)
-            flow_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "total_flow"), None)
+            sensors = HARDCODED_SENSORS.get(sid)
+            if not sensors:
+                continue
             
-            f_val = self._metrics_data_cache.get_value(front_sensor["object_id"], MetricsCodes.WATER_LEVEL.value) if front_sensor else None
-            b_val = self._metrics_data_cache.get_value(back_sensor["object_id"], MetricsCodes.WATER_LEVEL.value) if back_sensor else None
-            q_val = self._metrics_data_cache.get_value(flow_sensor["object_id"], MetricsCodes.WATER_FLOW.value) if flow_sensor else None
+            f_val = self._metrics_data_cache.get_value(sensors["front"], MetricsCodes.WATER_LEVEL.value)
+            b_val = self._metrics_data_cache.get_value(sensors["back"], MetricsCodes.WATER_LEVEL.value)
+            q_val = self._metrics_data_cache.get_value(sensors["flow"], MetricsCodes.WATER_FLOW.value)
+            
+            # 仿真模块异常，临时写死边界水位
+            if sensors["front"] == 20701:
+                f_val = 13.26
+            if sensors["back"] == 20801:
+                b_val = 23.093
             
             if f_val is None or b_val is None:
                 raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水位数据")
