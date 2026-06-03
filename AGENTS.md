@@ -138,7 +138,7 @@
 ### P0：职责过重的核心类
 
 - `hydros_agent_sdk/coordination_client.py` 当前同时承担 MQTT 连接、订阅、消息解析、过滤、路由、callback 调用、错误响应构造、发送队列、重试和日志上下文职责。后续新增能力不能继续塞进这个类，应逐步拆成 transport adapter、message parser、command router、callback invoker、outbox publisher、error response factory 等对象。
-- `custom-agent/pump/multi_agent_launcher.py` 已完成阶段性拆分：properties 读取、Agent 目录解析、Agent 发现、动态导入、Agent 类解析、CLI 参数解析、`--list` 展示和 signal/runtime 运行封装已迁移到 `custom-agent/pump/launcher_support.py`。launcher 里仍保留 debugpy 设置、日志配置函数和 `MultiAgentCoordinator` 注册/启动流程，后续可继续抽 `LauncherLogging` 与 agent 注册编排对象。
+- `custom-agent/pump/multi_agent_launcher.py` 已收敛为应用薄入口：通用 properties 读取、Agent 目录解析、Agent 发现、动态导入、Agent 类解析、CLI 参数解析、`--list` 展示、日志/debug 配置、`MultiAgentCoordinator` 注册/启动流程和 signal/runtime 运行封装已迁移到 `hydros_agent_sdk/launcher/`。泵站入口只保留目录、env、日志和调试端口等部署配置，后续其他自定义 Agent 独立部署应复用 SDK launcher，而不是重新复制启动逻辑。
 - `hydros_agent_sdk/base_agent.py` 当前同时继承协议模型并承载行为基类，还维护动态运行时属性、配置加载和多个生命周期默认入口。新增 Agent 能力要优先放到服务类或组合对象中，不要继续膨胀基类。
 
 ### P0：方向反转的对象关系
