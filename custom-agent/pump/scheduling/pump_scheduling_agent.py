@@ -221,8 +221,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.cumulative_last_station_flow = 0.0
         self.station_memories = {}
         
-        self.current_up_levels = {station.id: float(station.level_back_min) for station in self.system_config.stations}
-        self.current_down_levels = {station.id: float(station.level_front_min) for station in self.system_config.stations}
+        self.station_sensors = payload.get("service_mapping", {}).get("station_sensors", [])
         
         self.odd_initialized = True
         self.upper_scheduler = UpperScheduler(
@@ -256,21 +255,38 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
-        station_back_levels = self.current_up_levels
-        station_front_levels = self.current_down_levels
-        station_heads = {sid: self.current_up_levels[sid] - self.current_down_levels[sid] for sid in self.current_up_levels}
+        station_back_levels = {}
+        station_front_levels = {}
+        station_heads = {}
+        station_flows = {}
         
+        for sid in self.system_config.station_ids:
+            front_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "front_level"), None)
+            back_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "back_level"), None)
+            flow_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "total_flow"), None)
+            
+            f_val = self._metrics_data_cache.get_value(front_sensor["object_id"], front_sensor["metrics_code"]) if front_sensor else None
+            b_val = self._metrics_data_cache.get_value(back_sensor["object_id"], back_sensor["metrics_code"]) if back_sensor else None
+            q_val = self._metrics_data_cache.get_value(flow_sensor["object_id"], flow_sensor["metrics_code"]) if flow_sensor else None
+            
+            if f_val is None or b_val is None:
+                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水位数据")
+                
+            station_front_levels[sid] = float(f_val)
+            station_back_levels[sid] = float(b_val)
+            station_heads[sid] = float(b_val) - float(f_val)
+            
+            if q_val is not None:
+                station_flows[sid] = float(q_val)
+            else:
+                station_flows[sid] = self.station_flow_history[sid][-1] if self.station_flow_history.get(sid) else 0.0
+                
         basin_levels = {}
         if station_ids and level_keys:
             basin_levels[level_keys[0]] = station_front_levels.get(station_ids[0], 0.0)
             for i, sid in enumerate(station_ids):
                 if i + 1 < len(level_keys):
                     basin_levels[level_keys[i + 1]] = station_back_levels.get(sid, 0.0)
-        
-        station_flows = {
-            sid: (self.station_flow_history[sid][-1] if self.station_flow_history[sid] else 0.0)
-            for sid in self.system_config.station_ids
-        }
         
         pool_areas = resolve_pool_areas(self.system_config)
         pool_levels = {}
