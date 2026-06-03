@@ -247,6 +247,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         self._lazy_init_odd_mpc()
         
+        # 打印 metrics_data_cache 中所有对象的最新状态
+        self.logger.info("--- 当前 metrics_data_cache 内容 ---")
+        if hasattr(self._metrics_data_cache, "latest_metrics"):
+            for cache_key, cache_val in self._metrics_data_cache.latest_metrics.items():
+                self.logger.info(f"  {cache_key}: {cache_val}")
+        else:
+            self.logger.info("  (缓存为空或不包含 latest_metrics 属性)")
+        self.logger.info("------------------------------------")
+
         from odd_dmpc.types import EnvironmentObservation, StationMemory
         from odd_dmpc.local_controller import StationControlContext
         import pandas as pd
