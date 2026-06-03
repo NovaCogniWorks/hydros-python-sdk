@@ -76,9 +76,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             optimization_horizon=optimization_horizon,
             **kwargs
         )
-        self.mpc_rolling_runtime.set_rolling_cycle_runner(
-            self._run_pump_rolling_optimization
-        )
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
 
     def _resolve_config_path(self) -> str:
@@ -543,7 +540,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
                     "target_value": str(round(target_value, 2)),
                     "object_id": str(unit_object_id),
-                    "object_type": "PUMP_UNIT"
+                    "object_type": HydroObjectType.PUMP
                 })
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
