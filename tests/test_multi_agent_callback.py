@@ -192,6 +192,35 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     assert "TEST_AGENT" in callback.agents[context.biz_scene_instance_id]
 
 
+def test_multi_agent_init_uses_requested_agent_identity_in_response():
+    context = make_context()
+    instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
+    instance.agent_name = "本地旧名称"
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory(
+        "CENTRAL_SCHEDULING_AGENT_PUMP",
+        FakeFactory(FakeAgent(instance)),
+    )
+    client = FakeClient()
+    callback.set_client(client)
+
+    request = make_init_request(
+        context,
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+    )
+    request.agent_list[0].agent_name = "梯级泵站调度智能体"
+    request.agent_list[0].agent_configuration_url = "https://example.test/agent_config.yaml"
+
+    response = callback.on_sim_task_init(request)
+
+    created = response.created_agent_instances[0]
+    assert created.agent_code == "CENTRAL_SCHEDULING_AGENT_PUMP"
+    assert created.agent_type == "CENTRAL_SCHEDULING_AGENT"
+    assert created.agent_name == "梯级泵站调度智能体"
+    assert created.agent_configuration_url == "https://example.test/agent_config.yaml"
+
+
 def test_default_central_scheduling_route_uses_system_factory_without_custom_factory():
     context = make_context()
     system_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT")

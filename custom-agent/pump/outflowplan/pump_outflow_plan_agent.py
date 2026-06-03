@@ -87,8 +87,12 @@ class PumpOutflowPlanAgent(OutflowPlanAgent):
         logger.info(f"Event: {request.hydro_event}")
 
         try:
+            hydro_event = request.hydro_event.model_copy(
+                update={"source_agent_code": self.agent_code}
+            )
+
             # 执行下泄计划计算
-            outflow_plans = self._execute_outflow_planning(request.hydro_event)
+            outflow_plans = self._execute_outflow_planning(hydro_event)
 
             logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
 
@@ -98,7 +102,7 @@ class PumpOutflowPlanAgent(OutflowPlanAgent):
                 command_id=request.command_id,
                 command_status=CommandStatus.SUCCEED,
                 source_agent_instance=self,
-                hydro_event=request.hydro_event,
+                hydro_event=hydro_event,
                 outflow_time_series_map={"Gate": outflow_plans},
                 broadcast=False
             )

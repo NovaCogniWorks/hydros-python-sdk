@@ -77,6 +77,8 @@ class TestPumpOutflowPlanAgent(unittest.TestCase):
         self.assertEqual(sent_response.command_type, "outflow_time_series_response")
         self.assertEqual(sent_response.command_id, "cmd_123")
         self.assertEqual(sent_response.command_status, "SUCCEED")
+        self.assertEqual(sent_response.hydro_event.source_agent_code, "test_code")
+        self.assertIn('"sourceAgentCode":"test_code"', sent_response.model_dump_json(by_alias=True))
         
         # 验证计算出的计划
         self.assertIn("Gate", sent_response.outflow_time_series_map)

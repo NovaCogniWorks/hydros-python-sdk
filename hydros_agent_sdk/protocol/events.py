@@ -12,6 +12,11 @@ class BaseHydroEvent(HydroBaseModel):
     context: Optional[SimulationContext] = None
     created_time: Optional[Any] = None
     auto_schedule_at_step: int = -1
+    source_agent_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("source_agent_code", "sourceAgentCode"),
+        serialization_alias="sourceAgentCode",
+    )
     hydro_event_source_type: Optional[str] = None
     hydro_event_source: Optional[str] = None
     hydro_event_description: Optional[str] = None
