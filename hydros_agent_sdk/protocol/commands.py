@@ -33,6 +33,7 @@ SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
 SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE = "outflow_time_series_response"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_update_request"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
+SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
 
 class HydroCmd(HydroBaseModel):
     command_id: str
@@ -129,6 +130,13 @@ class OutflowTimeSeriesDataUpdateRequest(SimCoordinationRequest):
 class OutflowTimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["outflow_time_series_data_update_response"] = SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE
 
+class DeviceStatusChangeResponse(SimCoordinationResponse):
+    command_type: Literal["device_status_change_response"] = SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE
+    object_time_series: List[ObjectTimeSeries] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("object_time_series", "objectTimeSeries"),
+    )
+
 # --- Report Commands ---
 
 class AgentInstanceStatusReport(SimCommand):
@@ -199,6 +207,7 @@ CommandUnion = Union[
     OutflowTimeSeriesResponse,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
+    DeviceStatusChangeResponse,
     AgentInstanceStatusReport,
     MpcResultReport,
     ParameterIdentifiedReport,

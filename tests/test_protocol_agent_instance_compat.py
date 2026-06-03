@@ -1,5 +1,6 @@
 from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
+    DeviceStatusChangeResponse,
     SimCommandEnvelope,
     SimTaskInitResponse,
 )
@@ -133,3 +134,34 @@ def test_task_init_response_accepts_missing_managed_top_objects():
 
     assert isinstance(envelope.command, SimTaskInitResponse)
     assert envelope.command.managed_top_objects == {}
+
+
+def test_device_status_change_response_envelope_matches_java_command_type():
+    context = make_context()
+    agent = HydroAgentInstance(
+        agent_code="GATE_STATION_AGENT",
+        agent_type="GATE_STATION_AGENT",
+        agent_name="Gate Station Agent",
+        agent_configuration_url="",
+        agent_id="AGT_GATE_STATION",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        cluster_id="cluster-a",
+        node_id="node-a",
+        context=context,
+        agent_status=AgentStatus.ACTIVE,
+        drive_mode=AgentDriveMode.PROACTIVE,
+    )
+    payload = {
+        "command_id": "CMD_DEVICE_STATUS",
+        "command_type": "device_status_change_response",
+        "context": context.model_dump(mode="json"),
+        "command_status": CommandStatus.SUCCEED.value,
+        "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+        "objectTimeSeries": [],
+    }
+
+    envelope = SimCommandEnvelope(command=payload)
+
+    assert isinstance(envelope.command, DeviceStatusChangeResponse)
+    assert envelope.command.command_id == "CMD_DEVICE_STATUS"
+    assert envelope.command.object_time_series == []
