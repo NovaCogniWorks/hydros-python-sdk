@@ -255,20 +255,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
-        stations_meta = self.response_metadata.get("stations", [])
-        station_object_ids = {s.get("station_id"): s.get("object_id") for s in stations_meta}
-
+        from hydros_agent_sdk.utils.hydro_object_utils import MetricsCodes
+        
         station_back_levels = {}
         station_front_levels = {}
         station_heads = {}
         station_flows = {}
         
         for sid in self.system_config.station_ids:
-            station_obj_id = station_object_ids.get(sid)
+            front_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "front_level"), None)
+            back_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "back_level"), None)
+            flow_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "total_flow"), None)
             
-            f_val = self._metrics_data_cache.get_value(station_obj_id, "up_water_level") if station_obj_id else None
-            b_val = self._metrics_data_cache.get_value(station_obj_id, "down_water_level") if station_obj_id else None
-            q_val = self._metrics_data_cache.get_value(station_obj_id, "water_flow") if station_obj_id else None
+            f_val = self._metrics_data_cache.get_value(front_sensor["object_id"], MetricsCodes.WATER_LEVEL.value) if front_sensor else None
+            b_val = self._metrics_data_cache.get_value(back_sensor["object_id"], MetricsCodes.WATER_LEVEL.value) if back_sensor else None
+            q_val = self._metrics_data_cache.get_value(flow_sensor["object_id"], MetricsCodes.WATER_FLOW.value) if flow_sensor else None
             
             if f_val is None or b_val is None:
                 raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水位数据")
