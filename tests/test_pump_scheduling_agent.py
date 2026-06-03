@@ -41,12 +41,18 @@ class TestPumpSchedulingAgent(unittest.TestCase):
         steps = 3
         # Override initial station states
         z1, z2, z3 = 13.26, 23.1, 28.0
-        self.agent.current_up_levels[1] = z1
-        self.agent.current_down_levels[1] = 10.5
-        self.agent.current_up_levels[2] = z2
-        self.agent.current_down_levels[2] = z1
-        self.agent.current_up_levels[3] = z3
-        self.agent.current_down_levels[3] = z2
+        
+        # S1
+        self.agent._metrics_data_cache.update({"object_id": 20701, "metrics_code": "water_level", "value": 10.5, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20101, "metrics_code": "water_level", "value": z1, "position_code": "none"})
+        
+        # S2
+        self.agent._metrics_data_cache.update({"object_id": 20117, "metrics_code": "water_level", "value": z1, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20501, "metrics_code": "water_level", "value": z2, "position_code": "none"})
+        
+        # S3
+        self.agent._metrics_data_cache.update({"object_id": 20513, "metrics_code": "water_level", "value": z2, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20801, "metrics_code": "water_level", "value": z3, "position_code": "none"})
 
         for t in range(steps):
             print(f"\nStep {t}:")
@@ -72,11 +78,12 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             # Note: For this unit test, we just assume ideal tracking and move forward
             z1 += 0.01 * (lower_res[1]['total_q'][0] - lower_res[2]['total_q'][0])
             z2 += 0.01 * (lower_res[2]['total_q'][0] - lower_res[3]['total_q'][0])
-            self.agent.current_up_levels[1] = z1
-            self.agent.current_up_levels[2] = z2
-            self.agent.current_up_levels[3] = z3
-            self.agent.current_down_levels[2] = z1
-            self.agent.current_down_levels[3] = z2
+            self.agent._metrics_data_cache.update({"object_id": 20101, "metrics_code": "water_level", "value": z1, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20501, "metrics_code": "water_level", "value": z2, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20801, "metrics_code": "water_level", "value": z3, "position_code": "none"})
+            
+            self.agent._metrics_data_cache.update({"object_id": 20117, "metrics_code": "water_level", "value": z1, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20513, "metrics_code": "water_level", "value": z2, "position_code": "none"})
             
         self.assertTrue(True)
 
