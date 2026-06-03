@@ -9,7 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
-    PYTHONPATH=/opt/hydros
+    PYTHONPATH=/opt/hydros \
+    HYDROS_AGENT_START_ARGS="outflowplan scheduling"
 
 WORKDIR /opt/hydros
 
@@ -40,4 +41,4 @@ RUN mkdir -p /opt/hydros/custom-agent/pump/logs
 
 EXPOSE 8015
 
-CMD ["bash", "./start_agents.sh", "outflowplan", "scheduling"]
+CMD ["bash", "./start_agents.sh"]

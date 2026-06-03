@@ -136,6 +136,12 @@ view_logs() {
 
 # 主函数
 main() {
+    if [ $# -eq 0 ] && [ -n "${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}" ]; then
+        DEFAULT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}"
+        read -r -a DEFAULT_ARGS <<< "$DEFAULT_START_ARGS"
+        set -- "${DEFAULT_ARGS[@]}"
+    fi
+
     # 解析参数
     if [ $# -eq 0 ]; then
         show_help

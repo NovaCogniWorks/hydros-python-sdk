@@ -123,7 +123,7 @@ class AgentDirectoryResolver:
 
     def __init__(self, launcher_dir: str, aliases: Optional[Dict[str, str]] = None):
         self.launcher_dir = launcher_dir
-        self.aliases = aliases or {"power": "outflowplan", "pump": "outflowplan"}
+        self.aliases = aliases or {}
 
     def agents_root(self) -> str:
         agents_dir = os.path.join(self.launcher_dir, "agents")

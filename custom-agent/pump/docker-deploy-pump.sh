@@ -14,7 +14,7 @@ MQTT_BROKER_PORT="${MQTT_BROKER_PORT:-}"
 MQTT_TOPIC="${MQTT_TOPIC:-}"
 MQTT_USERNAME="${MQTT_USERNAME:-}"
 MQTT_PASSWORD="${MQTT_PASSWORD:-}"
-START_ARGS="${START_ARGS:-outflowplan scheduling}"
+HYDROS_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-outflowplan scheduling}}"
 PORT="${PORT:-8015}"
 DEBUG_PORT="${DEBUG_PORT:-}"
 LOG_VOLUME="${LOG_VOLUME:-${CONTAINER_NAME}-logs}"
@@ -24,7 +24,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PUMP_DIR="${REPO_ROOT}/custom-agent/pump"
 
 echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
-echo "Container start args: ${START_ARGS}"
+echo "Container start args: ${HYDROS_AGENT_START_ARGS}"
 if [ -n "${DEBUG_PORT}" ]; then
     echo "Debug port: ${DEBUG_PORT}"
 fi
@@ -55,6 +55,7 @@ docker run -d \
     -e MQTT_TOPIC="${MQTT_TOPIC}" \
     -e MQTT_USERNAME="${MQTT_USERNAME}" \
     -e MQTT_PASSWORD="${MQTT_PASSWORD}" \
+    -e HYDROS_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS}" \
     -v "${LOG_VOLUME}:/opt/hydros/custom-agent/pump/logs" \
     "${IMAGE_NAME}:${VERSION}" \
-    bash ./start_agents.sh ${START_ARGS}
+    bash ./start_agents.sh
