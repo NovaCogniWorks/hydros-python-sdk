@@ -349,6 +349,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
 
     event = OutflowTimeSeriesDataChangedEvent(
         hydro_event_type="OUTFLOW_TIME_SERIES_DATA_UPDATED",
+        source_agent_code="OUTFLOW_PLAN_AGENT_PUMP",
         object_type="GateStation",
         object_time_series=[
             ObjectTimeSeries(
@@ -372,6 +373,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
     assert len(callback.outflow_data_updates) == 1
     forwarded = callback.outflow_data_updates[0]
     assert forwarded.command_id == "CMD_OUTFLOW_UPDATED"
+    assert forwarded.outflow_time_series_data_changed_event.source_agent_code == "OUTFLOW_PLAN_AGENT_PUMP"
     assert forwarded.outflow_time_series_data_changed_event.object_type == "GateStation"
     assert forwarded.outflow_time_series_data_changed_event.object_time_series[0].object_id == 20000
 
@@ -466,6 +468,7 @@ def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_s
             "target_agent_instance": agent.model_dump(mode="json"),
             "payload": {
                 "hydro_event_type": "OUTFLOW_TIME_SERIES_DATA_UPDATED",
+                "sourceAgentCode": "OUTFLOW_PLAN_AGENT_PUMP",
                 "objectType": "GateStation",
                 "objectTimeSeries": [
                     {
@@ -481,5 +484,7 @@ def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_s
 
     assert isinstance(envelope.command, HydroEventCommand)
     assert isinstance(envelope.command.payload, OutflowTimeSeriesDataChangedEvent)
+    assert envelope.command.payload.source_agent_code == "OUTFLOW_PLAN_AGENT_PUMP"
     assert envelope.command.payload.object_type == "GateStation"
     assert envelope.command.payload.object_time_series[0].object_id == 20000
+    assert '"sourceAgentCode":"OUTFLOW_PLAN_AGENT_PUMP"' in envelope.command.model_dump_json(by_alias=True)

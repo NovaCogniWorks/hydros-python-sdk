@@ -19,7 +19,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
-from hydros_agent_sdk.protocol.models import CommandStatus
+from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgent
 
 logger = logging.getLogger(__name__)
 
@@ -233,12 +233,17 @@ class MultiAgentCallback(SimCoordinationCallback):
                     sim_coordination_client=self._client,
                     context=request.context
                 )
+                should_sync_identity = routed_agent_code == agent_code
+                if should_sync_identity:
+                    self._sync_agent_definition_from_request(agent, agent_def)
 
                 # Initialize agent
                 response = agent.on_init(request)
 
                 # Collect created agent instance
                 if response and hasattr(response, 'source_agent_instance'):
+                    if should_sync_identity:
+                        self._sync_init_response_agent_definition(response, agent_def)
                     created_agents.append(response.source_agent_instance)
 
                 # Store agent
@@ -275,6 +280,30 @@ class MultiAgentCallback(SimCoordinationCallback):
         else:
             logger.warning(f"No agents created for task {context_id}")
             return None
+
+    @staticmethod
+    def _sync_agent_definition_from_request(agent: Any, agent_def: HydroAgent) -> None:
+        """Keep runtime routing/config aligned without overriding local display name."""
+        if getattr(agent_def, "agent_type", None):
+            object.__setattr__(agent, "agent_type", agent_def.agent_type)
+        if getattr(agent_def, "agent_configuration_url", None):
+            object.__setattr__(
+                agent,
+                "agent_configuration_url",
+                agent_def.agent_configuration_url,
+            )
+
+    @classmethod
+    def _sync_init_response_agent_definition(
+        cls,
+        response: SimTaskInitResponse,
+        agent_def: HydroAgent,
+    ) -> None:
+        """Keep returned agent instances aligned with the coordinator request."""
+        cls._sync_agent_definition_from_request(response.source_agent_instance, agent_def)
+        for agent_instance in response.created_agent_instances or []:
+            if agent_instance.agent_code == agent_def.agent_code:
+                cls._sync_agent_definition_from_request(agent_instance, agent_def)
 
     def on_tick(self, request: TickCmdRequest):
         """Handle tick command for all agents in the context."""

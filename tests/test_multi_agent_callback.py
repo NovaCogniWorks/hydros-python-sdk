@@ -192,6 +192,35 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     assert "TEST_AGENT" in callback.agents[context.biz_scene_instance_id]
 
 
+def test_multi_agent_init_keeps_local_display_name_and_uses_requested_routing_config():
+    context = make_context()
+    instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
+    instance.agent_name = "梯级泵站调度智能体"
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory(
+        "CENTRAL_SCHEDULING_AGENT_PUMP",
+        FakeFactory(FakeAgent(instance)),
+    )
+    client = FakeClient()
+    callback.set_client(client)
+
+    request = make_init_request(
+        context,
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+    )
+    request.agent_list[0].agent_name = "东线-徐洪河中心调度智能体"
+    request.agent_list[0].agent_configuration_url = "https://example.test/agent_config.yaml"
+
+    response = callback.on_sim_task_init(request)
+
+    created = response.created_agent_instances[0]
+    assert created.agent_code == "CENTRAL_SCHEDULING_AGENT_PUMP"
+    assert created.agent_type == "CENTRAL_SCHEDULING_AGENT"
+    assert created.agent_name == "梯级泵站调度智能体"
+    assert created.agent_configuration_url == "https://example.test/agent_config.yaml"
+
+
 def test_default_central_scheduling_route_uses_system_factory_without_custom_factory():
     context = make_context()
     system_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT")
@@ -241,6 +270,67 @@ def test_custom_central_scheduling_route_requires_exact_agent_code_when_custom_f
     assert system_factory.created == 0
     assert custom_factory.created == 1
     assert "CENTRAL_SCHEDULING_AGENT_POWER01" in callback.agents[context.biz_scene_instance_id]
+
+
+def test_system_default_central_scheduling_can_coexist_with_custom_central_factory():
+    context = make_context()
+    custom_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory(
+        "CENTRAL_SCHEDULING_AGENT_PUMP",
+        FakeFactory(FakeAgent(custom_instance), agent_type="CENTRAL_SCHEDULING_AGENT"),
+    )
+
+    callback.register_system_default_central_scheduling_agent()
+
+    assert "CENTRAL_SCHEDULING_AGENT_PUMP" in callback.agent_factories
+    assert "CENTRAL_SCHEDULING_AGENT" in callback.agent_factories
+
+
+def test_multi_agent_init_allows_multiple_central_agents_with_different_codes():
+    context = make_context()
+    system_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT")
+    custom_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
+    system_factory = FakeFactory(FakeAgent(system_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
+    custom_factory = FakeFactory(FakeAgent(custom_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT", system_factory)
+    callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT_PUMP", custom_factory)
+    client = FakeClient()
+    callback.set_client(client)
+
+    request = SimTaskInitRequest(
+        command_id="CMD_INIT",
+        context=context,
+        agent_list=[
+            HydroAgent(
+                agent_code="CENTRAL_SCHEDULING_AGENT",
+                agent_type="CENTRAL_SCHEDULING_AGENT",
+                agent_name="东线-徐洪河中心调度智能体",
+                agent_configuration_url="",
+            ),
+            HydroAgent(
+                agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+                agent_type="CENTRAL_SCHEDULING_AGENT",
+                agent_name="梯级泵站调度智能体",
+                agent_configuration_url="",
+            ),
+        ],
+    )
+
+    response = callback.on_sim_task_init(request)
+
+    assert isinstance(response, SimTaskInitResponse)
+    assert [agent.agent_code for agent in response.created_agent_instances] == [
+        "CENTRAL_SCHEDULING_AGENT",
+        "CENTRAL_SCHEDULING_AGENT_PUMP"
+    ]
+    assert system_factory.created == 1
+    assert custom_factory.created == 1
+    assert list(callback.agents[context.biz_scene_instance_id]) == [
+        "CENTRAL_SCHEDULING_AGENT",
+        "CENTRAL_SCHEDULING_AGENT_PUMP"
+    ]
 
 
 def test_multi_agent_tick_and_terminate_return_response_lists():
