@@ -283,9 +283,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     @staticmethod
     def _sync_agent_definition_from_request(agent: Any, agent_def: HydroAgent) -> None:
-        """Keep local instance identity aligned with the coordinator request."""
-        if getattr(agent_def, "agent_name", None):
-            object.__setattr__(agent, "agent_name", agent_def.agent_name)
+        """Keep runtime routing/config aligned without overriding local display name."""
         if getattr(agent_def, "agent_type", None):
             object.__setattr__(agent, "agent_type", agent_def.agent_type)
         if getattr(agent_def, "agent_configuration_url", None):
