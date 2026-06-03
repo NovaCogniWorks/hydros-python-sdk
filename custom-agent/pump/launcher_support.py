@@ -371,9 +371,12 @@ class AgentFactoryRegistrationService:
         if env_config is None:
             raise RuntimeError("No environment configuration loaded!")
 
-        callback.register_system_default_central_scheduling_agent(env_config)
-        if not any(agent.agent_code == "CENTRAL_SCHEDULING_AGENT" for agent in registered_agents):
-            registered_agents.append(RegisteredAgentInfo.system_central_scheduling())
+        # Temporarily disable the SDK built-in CENTRAL_SCHEDULING_AGENT default
+        # startup. Restore these lines when the system default scheduler should
+        # be registered automatically again.
+        # callback.register_system_default_central_scheduling_agent(env_config)
+        # if not any(agent.agent_code == "CENTRAL_SCHEDULING_AGENT" for agent in registered_agents):
+        #     registered_agents.append(RegisteredAgentInfo.system_central_scheduling())
 
         return env_config, registered_agents
 
