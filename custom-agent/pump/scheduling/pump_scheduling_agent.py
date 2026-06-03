@@ -255,19 +255,20 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
+        stations_meta = self.response_metadata.get("stations", [])
+        station_object_ids = {s.get("station_id"): s.get("object_id") for s in stations_meta}
+
         station_back_levels = {}
         station_front_levels = {}
         station_heads = {}
         station_flows = {}
         
         for sid in self.system_config.station_ids:
-            front_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "front_level"), None)
-            back_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "back_level"), None)
-            flow_sensor = next((s for s in getattr(self, "station_sensors", []) if s.get("station_id") == sid and s.get("role") == "total_flow"), None)
+            station_obj_id = station_object_ids.get(sid)
             
-            f_val = self._metrics_data_cache.get_value(front_sensor["object_id"], front_sensor["metrics_code"]) if front_sensor else None
-            b_val = self._metrics_data_cache.get_value(back_sensor["object_id"], back_sensor["metrics_code"]) if back_sensor else None
-            q_val = self._metrics_data_cache.get_value(flow_sensor["object_id"], flow_sensor["metrics_code"]) if flow_sensor else None
+            f_val = self._metrics_data_cache.get_value(station_obj_id, "up_water_level") if station_obj_id else None
+            b_val = self._metrics_data_cache.get_value(station_obj_id, "down_water_level") if station_obj_id else None
+            q_val = self._metrics_data_cache.get_value(station_obj_id, "water_flow") if station_obj_id else None
             
             if f_val is None or b_val is None:
                 raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水位数据")
@@ -329,6 +330,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     mode="ODD1"
                 )
                 
+        # 计算观测器使用的时间步长
+        # 每次调用optimization减去上次调用optimization的step乘3600（第一次减0）
+        last_opt_step = getattr(self, "last_opt_step", 0)
+        step_seconds = (step - last_opt_step) * 3600
+        if step_seconds <= 0:
+            step_seconds = 3600  # 避免首次调用时 step_hours=0 导致报错
+        self.last_opt_step = step
+
         # Upper Scheduler
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
         self.observers.update(
@@ -341,7 +350,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             prev_basin_profiles=None,
             next_basin_profiles=None,
             defer_visibility=False,
-            step_hours=float(self.system_config.dt_hours),
+            step_hours=step_seconds / 3600.0,
             pool_areas=pool_areas,
         )
         

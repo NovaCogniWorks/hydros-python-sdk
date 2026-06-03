@@ -42,17 +42,17 @@ class TestPumpSchedulingAgent(unittest.TestCase):
         # Override initial station states
         z1, z2, z3 = 13.26, 23.1, 28.0
         
-        # S1
-        self.agent._metrics_data_cache.update({"object_id": 20701, "metrics_code": "water_level", "value": 10.5, "position_code": "none"})
-        self.agent._metrics_data_cache.update({"object_id": 20101, "metrics_code": "water_level", "value": z1, "position_code": "none"})
+        # S1 (object_id: 20000)
+        self.agent._metrics_data_cache.update({"object_id": 20000, "metrics_code": "up_water_level", "value": 10.5, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20000, "metrics_code": "down_water_level", "value": z1, "position_code": "none"})
         
-        # S2
-        self.agent._metrics_data_cache.update({"object_id": 20117, "metrics_code": "water_level", "value": z1, "position_code": "none"})
-        self.agent._metrics_data_cache.update({"object_id": 20501, "metrics_code": "water_level", "value": z2, "position_code": "none"})
+        # S2 (object_id: 20300)
+        self.agent._metrics_data_cache.update({"object_id": 20300, "metrics_code": "up_water_level", "value": z1, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20300, "metrics_code": "down_water_level", "value": z2, "position_code": "none"})
         
-        # S3
-        self.agent._metrics_data_cache.update({"object_id": 20513, "metrics_code": "water_level", "value": z2, "position_code": "none"})
-        self.agent._metrics_data_cache.update({"object_id": 20801, "metrics_code": "water_level", "value": z3, "position_code": "none"})
+        # S3 (object_id: 20600)
+        self.agent._metrics_data_cache.update({"object_id": 20600, "metrics_code": "up_water_level", "value": z2, "position_code": "none"})
+        self.agent._metrics_data_cache.update({"object_id": 20600, "metrics_code": "down_water_level", "value": z3, "position_code": "none"})
 
         for t in range(steps):
             print(f"\nStep {t}:")
@@ -78,12 +78,12 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             # Note: For this unit test, we just assume ideal tracking and move forward
             z1 += 0.01 * (lower_res[1]['total_q'][0] - lower_res[2]['total_q'][0])
             z2 += 0.01 * (lower_res[2]['total_q'][0] - lower_res[3]['total_q'][0])
-            self.agent._metrics_data_cache.update({"object_id": 20101, "metrics_code": "water_level", "value": z1, "position_code": "none"})
-            self.agent._metrics_data_cache.update({"object_id": 20501, "metrics_code": "water_level", "value": z2, "position_code": "none"})
-            self.agent._metrics_data_cache.update({"object_id": 20801, "metrics_code": "water_level", "value": z3, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20000, "metrics_code": "down_water_level", "value": z1, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20300, "metrics_code": "down_water_level", "value": z2, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20600, "metrics_code": "down_water_level", "value": z3, "position_code": "none"})
             
-            self.agent._metrics_data_cache.update({"object_id": 20117, "metrics_code": "water_level", "value": z1, "position_code": "none"})
-            self.agent._metrics_data_cache.update({"object_id": 20513, "metrics_code": "water_level", "value": z2, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20300, "metrics_code": "up_water_level", "value": z1, "position_code": "none"})
+            self.agent._metrics_data_cache.update({"object_id": 20600, "metrics_code": "up_water_level", "value": z2, "position_code": "none"})
             
         self.assertTrue(True)
 
