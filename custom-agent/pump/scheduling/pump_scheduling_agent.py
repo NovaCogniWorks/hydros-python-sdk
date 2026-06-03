@@ -606,7 +606,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
             # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
             self.on_boundary_condition_update(event.object_time_series)
-            # self._handle_time_series_changed(event)
+            self._mpc_rolling_runtime.handle_time_series_changed(event)
 
         # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(
