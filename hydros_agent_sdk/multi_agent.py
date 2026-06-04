@@ -20,11 +20,12 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgent
+from hydros_agent_sdk.agent_constants import (
+    CENTRAL_SCHEDULING_AGENT_TYPE,
+    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
 
 logger = logging.getLogger(__name__)
-
-SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE = "CENTRAL_SCHEDULING_AGENT"
-CENTRAL_SCHEDULING_AGENT_TYPE = "CENTRAL_SCHEDULING_AGENT"
 
 
 class MultiAgentCallback(SimCoordinationCallback):

@@ -12,6 +12,10 @@ from configparser import ConfigParser
 
 from hydros_agent_sdk.utils import generate_agent_instance_id
 from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.agent_constants import (
+    CENTRAL_SCHEDULING_AGENT_TYPE,
+    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
@@ -163,7 +167,7 @@ class HydroAgentFactory(Generic[AgentType]):
 class SystemCentralSchedulingAgentFactory:
     """Factory for the built-in CENTRAL_SCHEDULING_AGENT."""
 
-    agent_type = "CENTRAL_SCHEDULING_AGENT"
+    agent_type = CENTRAL_SCHEDULING_AGENT_TYPE
 
     def __init__(self, env_config: Optional[Dict[str, str]] = None):
         self.env_config = env_config
@@ -186,7 +190,7 @@ class SystemCentralSchedulingAgentFactory:
         )
         hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
 
-        agent_code = "CENTRAL_SCHEDULING_AGENT"
+        agent_code = SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
         agent_id = generate_agent_instance_id(agent_code)
 
         agent = SystemCentralSchedulingAgent(

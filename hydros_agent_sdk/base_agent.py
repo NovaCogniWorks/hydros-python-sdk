@@ -32,6 +32,10 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.agent_properties import AgentProperties
+from hydros_agent_sdk.agent_constants import (
+    CENTRAL_SCHEDULING_AGENT_TYPE,
+    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
 
 # Import for type checking only to avoid runtime circular imports
 if TYPE_CHECKING:
@@ -353,13 +357,14 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             central_agents = [
                 agent
                 for agent in request.agent_list
-                if getattr(agent, "agent_type", None) == "CENTRAL_SCHEDULING_AGENT"
+                if getattr(agent, "agent_type", None) == CENTRAL_SCHEDULING_AGENT_TYPE
             ]
             if len(central_agents) == 1:
                 matching_agent = central_agents[0]
                 logger.info(
-                    "Using system default CENTRAL_SCHEDULING_AGENT to load configuration "
+                    "Using system default %s to load configuration "
                     "for requested central agent '%s'",
+                    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
                     matching_agent.agent_code,
                 )
 
@@ -425,6 +430,6 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
 
     def _is_system_default_central_scheduling_agent(self) -> bool:
         return (
-            self.agent_code == "CENTRAL_SCHEDULING_AGENT"
-            and self.agent_type == "CENTRAL_SCHEDULING_AGENT"
+            self.agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
+            and self.agent_type == CENTRAL_SCHEDULING_AGENT_TYPE
         )

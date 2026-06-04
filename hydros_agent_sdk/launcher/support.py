@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config, setup_logging
 from hydros_agent_sdk.base_agent import BaseHydroAgent
-from hydros_agent_sdk.multi_agent import (
+from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
-    MultiAgentCallback,
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
+from hydros_agent_sdk.multi_agent import (
+    MultiAgentCallback,
 )
 
 logger = logging.getLogger(__name__)
