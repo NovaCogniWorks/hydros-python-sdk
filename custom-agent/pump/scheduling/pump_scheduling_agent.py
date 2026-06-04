@@ -384,8 +384,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
         
-        logger.info(f"准备调用 Upper Scheduler: step={step}, horizon={horizon}, station_flows={station_flows}, basin_levels={basin_levels}, current_heads={station_heads}")
-        
+        observer_est = self.observers.get_estimate()
+        logger.info(
+            f"准备调用 Upper Scheduler (step={step}):\n"
+            f"  传入当前工况值(6个节点水位): "
+            f"20701={station_front_levels.get(1)}, 20101={station_back_levels.get(1)}, "
+            f"20117={station_front_levels.get(2)}, 20501={station_back_levels.get(2)}, "
+            f"20513={station_front_levels.get(3)}, 20801={station_back_levels.get(3)}\n"
+            f"  各个渠道的误差观察器估计值: {observer_est}"
+        )
         upper_plan = self.upper_scheduler.solve(
             now=step,
             env_snapshot=observation,
@@ -395,7 +402,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             lower_feedback=self.lower_feedback,
         )
         
-        logger.info(f"Upper Scheduler 优化完成，返回结果: q_planned={upper_plan.flow_refs}, z_planned={upper_plan.station_back_levels}")
+        q_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.flow_refs.items() if refs}
+        z_f_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_front_levels.items() if refs}
+        z_b_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_back_levels.items() if refs}
+        h_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_heads.items() if refs}
+        logger.info(
+            f"上层预测(首步): 流量={q_next}, 预测前池={z_f_next}, 预测后池={z_b_next}, 预测扬程={h_next}"
+        )
         
         # Lower Controllers
         actions = {}
@@ -478,7 +491,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 station_memory=station_memory,
             )
             
-            logger.info(f"下层执行结果 S{station_id}: 模式={action.mode}, 开机状态={action.unit_status}, 叶片角={action.unit_openings}, 预测总流量={action.selected_flow:.2f}")
+            pf = round(action.predicted_front_level, 2) if action.predicted_front_level is not None else None
+            pb = round(action.predicted_back_level, 2) if action.predicted_back_level is not None else None
+            ph = round(action.predicted_head, 2) if action.predicted_head is not None else None
+            logger.info(
+                f"下层 S{station_id} 预测(首步): 流量={action.selected_flow:.2f}, 预测前池={pf}, 预测后池={pb}, 预测扬程={ph}, "
+                f"叶片角={action.unit_openings}, 状态={action.unit_status}, 模式={action.mode}"
+            )
             
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)
