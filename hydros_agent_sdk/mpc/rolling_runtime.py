@@ -116,7 +116,7 @@ class MpcRollingRuntime:
             mpc_task_state.total_steps = self.get_total_steps()
             should_roll = mpc_task_state.active_new_rolling(step)
 
-            logger.debug(
+            logger.info(
                 "MPC rolling check: bizSceneInstanceId=%s, startStep=%s, "
                 "currentStep=%s, rollStep=%s, shouldRoll=%s",
                 self.context.biz_scene_instance_id,
