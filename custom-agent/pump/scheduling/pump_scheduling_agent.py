@@ -281,7 +281,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         HARDCODED_SENSORS = {
             1: {"front": 20701, "back": 20101, "flow": 20101},
             2: {"front": 20117, "back": 20501, "flow": 20501},
-            3: {"front": 20513, "back": 20801, "flow": 20801},
+            3: {"front": 20513, "back": 20801, "flow": 20513},
         }
         
         for sid in self.system_config.station_ids:
