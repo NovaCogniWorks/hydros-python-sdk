@@ -16,7 +16,11 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config, setup_logging
 from hydros_agent_sdk.base_agent import BaseHydroAgent
-from hydros_agent_sdk.multi_agent import MultiAgentCallback
+from hydros_agent_sdk.multi_agent import (
+    CENTRAL_SCHEDULING_AGENT_TYPE,
+    MultiAgentCallback,
+    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +88,17 @@ class RegisteredAgentInfo:
             agent_display_name=agent_info.agent_display_name,
             agent_class=agent_info.agent_class.__name__,
             directory=os.path.basename(agent_info.script_dir),
+        )
+
+    @classmethod
+    def system_default_central_scheduling(cls) -> "RegisteredAgentInfo":
+        return cls(
+            name="中央调度智能体",
+            agent_code=SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+            agent_type=CENTRAL_SCHEDULING_AGENT_TYPE,
+            agent_display_name="中央调度智能体",
+            agent_class="SystemCentralSchedulingAgent",
+            directory="(sdk built-in)",
         )
 
 
@@ -323,10 +338,14 @@ class AgentFactoryRegistrationService:
         self,
         module_loader: AgentModuleLoader,
         env_file: str,
+        register_system_default_central_scheduling_agent: bool = True,
         logger: Optional[logging.Logger] = None,
     ):
         self.module_loader = module_loader
         self.env_file = env_file
+        self.register_system_default_central_scheduling_agent = (
+            register_system_default_central_scheduling_agent
+        )
         self.logger = logger or logging.getLogger(__name__)
 
     def register_agents(
@@ -359,7 +378,19 @@ class AgentFactoryRegistrationService:
             self._log_registered_agent(agent_name, registered_agent)
 
         if env_config is None:
-            raise RuntimeError("No environment configuration loaded!")
+            env_config = load_env_config(self.env_file)
+            self.logger.info("  Cluster ID: %s", env_config["hydros_cluster_id"])
+            self.logger.info("  Node ID: %s", env_config["hydros_node_id"])
+
+        if self.register_system_default_central_scheduling_agent:
+            callback.register_system_default_central_scheduling_agent(env_config)
+            if not any(
+                agent.agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
+                for agent in registered_agents
+            ):
+                registered_agent = RegisteredAgentInfo.system_default_central_scheduling()
+                registered_agents.append(registered_agent)
+                self._log_registered_agent(registered_agent.name, registered_agent)
 
         return env_config, registered_agents
 
