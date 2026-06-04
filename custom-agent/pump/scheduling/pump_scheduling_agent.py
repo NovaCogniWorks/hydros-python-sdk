@@ -386,8 +386,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         observer_est = self.observers.get_estimate()
         logger.info(
-            f"准备调用 Upper Scheduler (step={step}, horizon={horizon}):\n"
-            f"  传入当前工况值: 流量={station_flows}, 前池水位={station_front_levels}, 后池水位={station_back_levels}, 扬程={station_heads}\n"
+            f"准备调用 Upper Scheduler (step={step}):\n"
+            f"  传入当前工况值(6个节点水位): "
+            f"20701={station_front_levels.get(1)}, 20101={station_back_levels.get(1)}, "
+            f"20117={station_front_levels.get(2)}, 20501={station_back_levels.get(2)}, "
+            f"20513={station_front_levels.get(3)}, 20801={station_back_levels.get(3)}\n"
             f"  各个渠道的误差观察器估计值: {observer_est}"
         )
         upper_plan = self.upper_scheduler.solve(
@@ -399,12 +402,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             lower_feedback=self.lower_feedback,
         )
         
+        q_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.flow_refs.items() if refs}
+        z_f_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_front_levels.items() if refs}
+        z_b_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_back_levels.items() if refs}
+        h_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_heads.items() if refs}
         logger.info(
-            f"Upper Scheduler 优化完成，返回结果:\n"
-            f"  上层规划的下一步流量 (q_planned): {upper_plan.flow_refs}\n"
-            f"  上层规划的预测前池水位: {upper_plan.station_front_levels}\n"
-            f"  上层规划的预测后池水位 (z_planned): {upper_plan.station_back_levels}\n"
-            f"  上层规划的预测扬程: {upper_plan.station_heads}"
+            f"上层预测(首步): 流量={q_next}, 预测前池={z_f_next}, 预测后池={z_b_next}, 预测扬程={h_next}"
         )
         
         # Lower Controllers
@@ -488,15 +491,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 station_memory=station_memory,
             )
             
+            pf = round(action.predicted_front_level, 2) if action.predicted_front_level is not None else None
+            pb = round(action.predicted_back_level, 2) if action.predicted_back_level is not None else None
+            ph = round(action.predicted_head, 2) if action.predicted_head is not None else None
             logger.info(
-                f"下层执行结果 S{station_id}:\n"
-                f"  预测总流量: {action.selected_flow:.2f}\n"
-                f"  预测前池水位: {action.predicted_front_level}\n"
-                f"  预测后池水位: {action.predicted_back_level}\n"
-                f"  预测扬程: {action.predicted_head}\n"
-                f"  叶片角: {action.unit_openings}\n"
-                f"  开机状态: {action.unit_status}\n"
-                f"  模式: {action.mode}"
+                f"下层 S{station_id} 预测(首步): 流量={action.selected_flow:.2f}, 预测前池={pf}, 预测后池={pb}, 预测扬程={ph}, "
+                f"叶片角={action.unit_openings}, 状态={action.unit_status}, 模式={action.mode}"
             )
             
             actions[station_id] = action
