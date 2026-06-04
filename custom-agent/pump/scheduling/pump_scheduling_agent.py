@@ -384,8 +384,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
         
-        logger.info(f"准备调用 Upper Scheduler: step={step}, horizon={horizon}, station_flows={station_flows}, basin_levels={basin_levels}, current_heads={station_heads}")
-        
+        observer_est = self.observers.get_estimate()
+        logger.info(
+            f"准备调用 Upper Scheduler (step={step}, horizon={horizon}):\n"
+            f"  传入当前工况值: 流量={station_flows}, 前池水位={station_front_levels}, 后池水位={station_back_levels}, 扬程={station_heads}\n"
+            f"  各个渠道的误差观察器估计值: {observer_est}"
+        )
         upper_plan = self.upper_scheduler.solve(
             now=step,
             env_snapshot=observation,
@@ -395,7 +399,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             lower_feedback=self.lower_feedback,
         )
         
-        logger.info(f"Upper Scheduler 优化完成，返回结果: q_planned={upper_plan.flow_refs}, z_planned={upper_plan.station_back_levels}")
+        logger.info(
+            f"Upper Scheduler 优化完成，返回结果:\n"
+            f"  上层规划的下一步流量 (q_planned): {upper_plan.flow_refs}\n"
+            f"  上层规划的预测前池水位: {upper_plan.station_front_levels}\n"
+            f"  上层规划的预测后池水位 (z_planned): {upper_plan.station_back_levels}\n"
+            f"  上层规划的预测扬程: {upper_plan.station_heads}"
+        )
         
         # Lower Controllers
         actions = {}
@@ -478,7 +488,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 station_memory=station_memory,
             )
             
-            logger.info(f"下层执行结果 S{station_id}: 模式={action.mode}, 开机状态={action.unit_status}, 叶片角={action.unit_openings}, 预测总流量={action.selected_flow:.2f}")
+            logger.info(
+                f"下层执行结果 S{station_id}:\n"
+                f"  预测总流量: {action.selected_flow:.2f}\n"
+                f"  预测前池水位: {action.predicted_front_level}\n"
+                f"  预测后池水位: {action.predicted_back_level}\n"
+                f"  预测扬程: {action.predicted_head}\n"
+                f"  叶片角: {action.unit_openings}\n"
+                f"  开机状态: {action.unit_status}\n"
+                f"  模式: {action.mode}"
+            )
             
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)
