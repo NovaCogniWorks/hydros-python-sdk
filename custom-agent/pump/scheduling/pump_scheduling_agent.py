@@ -245,6 +245,25 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         import pandas as pd
         
         from odd_dmpc.environment import _level_keys, _ordered_station_ids, resolve_pool_areas
+        
+        # Init or update memories from our own self tracked state
+        if not self.station_memories:
+            for sid in self.system_config.station_ids:
+                self.station_memories[sid] = StationMemory(
+                    active_unit_ids=[],
+                    unit_openings={u: 0.0 for u in self.available_units_map[sid]},
+                    unit_status={u: 0 for u in self.available_units_map[sid]},
+                    time_since_adjust={u: 999 for u in self.available_units_map[sid]},
+                    time_since_switch={u: 999 for u in self.available_units_map[sid]},
+                    last_selected_flow=0.0,
+                    mode="ODD1"
+                )
+                
+        mem_log = []
+        for sid, mem in self.station_memories.items():
+            mem_log.append(f"S{sid} 状态: {mem.unit_status}, 叶片角: {mem.unit_openings}")
+        logger.info(f"当前Agent缓存机组工况:\n  " + "\n  ".join(mem_log))
+        
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
@@ -292,6 +311,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             else:
                 station_flows[sid] = self.station_flow_history[sid][-1] if self.station_flow_history.get(sid) else 0.0
                 
+        logger.info(
+            f"第一时间读取并传入当前工况值:\n"
+            f"  洪泽湖(泗洪上-20701): 水位={station_front_levels.get(1, 0.0):.3f}\n"
+            f"  泗洪下(20101): 水位={station_back_levels.get(1, 0.0):.3f}, 泗洪站流量={station_flows.get(1, 0.0):.3f}\n"
+            f"  睢宁前(20117): 水位={station_front_levels.get(2, 0.0):.3f}\n"
+            f"  睢宁后(20501): 水位={station_back_levels.get(2, 0.0):.3f}, 睢宁站流量={station_flows.get(2, 0.0):.3f}\n"
+            f"  邳州上(20513): 水位={station_front_levels.get(3, 0.0):.3f}\n"
+            f"  骆马湖(邳州下-20801): 水位={station_back_levels.get(3, 0.0):.3f}, 邳州站流量={station_flows.get(3, 0.0):.3f}"
+        )
+                
         basin_levels = {}
         if station_ids and level_keys:
             basin_levels[level_keys[0]] = station_front_levels.get(station_ids[0], 0.0)
@@ -327,19 +356,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             pool_levels=pool_levels
         )
         
-        # Init or update memories from our own self tracked state
-        if not self.station_memories:
-            for sid in self.system_config.station_ids:
-                self.station_memories[sid] = StationMemory(
-                    active_unit_ids=[],
-                    unit_openings={u: 0.0 for u in self.available_units_map[sid]},
-                    unit_status={u: 0 for u in self.available_units_map[sid]},
-                    time_since_adjust={u: 999 for u in self.available_units_map[sid]},
-                    time_since_switch={u: 999 for u in self.available_units_map[sid]},
-                    last_selected_flow=0.0,
-                    mode="ODD1"
-                )
-                
         # 计算观测器使用的时间步长
         # 每次调用optimization减去上次调用optimization的step乘3600（第一次减0）
         last_opt_step = getattr(self, "last_opt_step", 0)
@@ -387,10 +403,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         observer_est = self.observers.get_estimate()
         logger.info(
             f"准备调用 Upper Scheduler (step={step}):\n"
-            f"  传入当前工况值(6个节点水位): "
-            f"20701={station_front_levels.get(1)}, 20101={station_back_levels.get(1)}, "
-            f"20117={station_front_levels.get(2)}, 20501={station_back_levels.get(2)}, "
-            f"20513={station_front_levels.get(3)}, 20801={station_back_levels.get(3)}\n"
             f"  各个渠道的误差观察器估计值: {observer_est}"
         )
         upper_plan = self.upper_scheduler.solve(
