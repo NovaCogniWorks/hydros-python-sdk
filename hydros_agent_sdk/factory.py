@@ -198,7 +198,7 @@ class SystemCentralSchedulingAgentFactory:
             agent_id=agent_id,
             agent_code=agent_code,
             agent_type=self.agent_type,
-            agent_name="System Central Scheduling Agent",
+            agent_name="中央调度智能体",
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
