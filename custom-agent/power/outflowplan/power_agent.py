@@ -112,7 +112,6 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 10,
         **kwargs
     ):
         """Initialize power scheduling agent."""
@@ -125,7 +124,6 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            optimization_horizon=optimization_horizon,
             **kwargs
         )
 
@@ -139,7 +137,9 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         self._optimization_params = {}
 
         logger.info(f"PowerSchedulingAgent created: {agent_id}")
-        logger.info(f"Optimization horizon: {optimization_horizon} ticks")
+
+    def _planning_horizon_steps(self) -> int:
+        return self.mpc_rolling_runtime.get_roll_steps()
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -389,7 +389,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                         step=step,
                         system_state=system_state,
                         field_metrics=field_metrics,
-                        horizon=self._optimization_horizon,
+                        horizon=self._planning_horizon_steps(),
                         params=self._optimization_params
                     )
 
@@ -484,7 +484,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                         'object_id': object_id,
                         'power_output': schedule_info['power_output'],
                         'step': optimization_results.get('step', 0),
-                        'duration': self._optimization_horizon,
+                        'duration': self._planning_horizon_steps(),
                     }
                 }
                 control_commands.append(command)

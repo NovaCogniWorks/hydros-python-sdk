@@ -57,6 +57,7 @@ from hydros_agent_sdk.protocol.models import (
     Waterway,
 )
 from hydros_agent_sdk.runtime import RuntimeEnvSettings
+from hydros_agent_sdk.scenario_config import BizScenarioConfiguration, SimAgentProperties
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.utils import (
     SimpleChildObject,
@@ -231,6 +232,24 @@ def build_time_series_update_request(
     )
 
 
+def register_sim_agent_properties(
+    context: SimulationContext,
+    roll_steps: int = 3,
+    total_steps: int = 20,
+    topology: WaterwayTopology | None = None,
+) -> None:
+    ContextManager.create(
+        context=context,
+        topology=topology,
+        scenario_config=BizScenarioConfiguration(
+            sim_agent_properties=SimAgentProperties(
+                roll_steps=roll_steps,
+                total_steps=total_steps,
+            )
+        ),
+    )
+
+
 class AgentCommandsRefactorTest(unittest.TestCase):
     def setUp(self):
         ContextManager.clear()
@@ -285,6 +304,50 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             self.assertIsNone(original_repository.get_context(context))
         finally:
             ContextManager.set_repository(original_repository)
+
+    def test_scenario_config_parses_sim_agent_properties(self):
+        config = BizScenarioConfiguration.model_validate(
+            {
+                "hydros_objects_modeling_url": "https://example.test/objects.yaml",
+                "sim_agent_properties": {
+                    "roll_steps": "60",
+                    "total_steps": 36,
+                    "sim_step_size": 120,
+                    "output_step_size": 7200,
+                },
+            }
+        )
+
+        self.assertEqual(config.hydros_objects_modeling_url, "https://example.test/objects.yaml")
+        self.assertIsNotNone(config.sim_agent_properties)
+        self.assertEqual(config.sim_agent_properties.roll_steps, 60)
+        self.assertEqual(config.sim_agent_properties.total_steps, 36)
+        self.assertEqual(config.sim_agent_properties.sim_step_size, 120)
+        self.assertEqual(config.sim_agent_properties.output_step_size, 7200)
+
+    def test_context_repository_keeps_scenario_config_without_modeling_url(self):
+        context = SimulationContext(biz_scene_instance_id="scene-sim-agent-only")
+        repository = HydroModelContextRepository()
+        request = SimpleNamespace(
+            context=context,
+            biz_scene_configuration_url="https://example.test/scenario.yaml",
+        )
+
+        with patch(
+            "hydros_agent_sdk.context_manager.YamlLoader.from_url",
+            return_value={
+                "sim_agent_properties": {
+                    "roll_steps": 60,
+                    "total_steps": 36,
+                },
+            },
+        ):
+            model_context = repository.create_from_init_request(request)
+
+        self.assertIsNotNone(model_context)
+        self.assertIsNone(model_context.topology)
+        self.assertEqual(model_context.sim_agent_properties.roll_steps, 60)
+        self.assertEqual(model_context.sim_agent_properties.total_steps, 36)
 
     def test_client_on_message_no_longer_filters_remote_target_early(self):
         client = AgentCommandClient(
@@ -577,7 +640,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         send_command.assert_called_once_with(pump_request)
 
-    def test_central_scheduling_agent_caches_recent_field_metrics_by_horizon(self):
+    def test_central_scheduling_agent_caches_recent_field_metrics_by_default_window(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -600,26 +663,25 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
         )
 
-        for step_index, value in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0)]:
+        for step_index in range(1, 12):
             agent._metrics_subscriber.handle_payload(
                 "metrics/topic",
                 {
                     "object_id": 1001,
                     "metrics_code": "flow",
-                    "value": value,
+                    "value": float(step_index),
                     "timestamp": f"ts-{step_index}",
                     "step_index": step_index,
                     "position_code": "none",
                 },
             )
 
-        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 4.0)
-        self.assertEqual(set(agent._metrics_data_cache.history().keys()), {2, 3, 4})
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 11.0)
+        self.assertEqual(set(agent._metrics_data_cache.history().keys()), set(range(2, 12)))
         self.assertNotIn(1, agent._metrics_data_cache.history())
-        self.assertEqual(agent._metrics_data_cache.by_step(4)["1001_flow"]["value"], 4.0)
+        self.assertEqual(agent._metrics_data_cache.by_step(11)["1001_flow"]["value"], 11.0)
 
     def test_central_scheduling_agent_filters_field_metrics_by_position_code(self):
         state_manager = AgentStateManager()
@@ -644,7 +706,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
         )
 
         agent._metrics_subscriber.handle_payload(
@@ -686,6 +747,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-011",
@@ -695,8 +757,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
             mpc_config_url="http://config/mpc.yaml",
             target_and_constrain_config_url="http://config/control.yaml",
         )
@@ -718,6 +778,82 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
+    def test_central_scheduling_agent_fails_without_rolling_config(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011-missing-roll")
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011-missing-roll",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.FAILED)
+        self.assertIsNone(agent.mpc_rolling_runtime.mpc_task_state)
+
+    def test_central_scheduling_agent_prefers_scenario_sim_agent_properties(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011-scenario-config")
+        ContextManager.create(
+            context=context,
+            scenario_config=BizScenarioConfiguration(
+                sim_agent_properties=SimAgentProperties(
+                    roll_steps=60,
+                    total_steps=36,
+                )
+            ),
+        )
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011-scenario-config",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        agent.properties["roll_steps"] = 10
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        runtime = agent.mpc_rolling_runtime
+        self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 60)
+        self.assertEqual(runtime.mpc_task_state.total_steps, 36)
+
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
@@ -732,6 +868,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-config-alias")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-011-config-alias",
@@ -741,8 +878,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
         )
         agent.properties.update(
             {
@@ -777,6 +912,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-012")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-012",
@@ -786,8 +922,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
         )
         agent.properties["auto_start_mpc_on_tick"] = True
 
@@ -824,6 +958,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-012-disabled")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-012-disabled",
@@ -833,8 +968,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
         )
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-disabled", context=context, step=0))
@@ -1312,6 +1445,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-015")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
         target = build_agent_instance("gate-agent-015", "GATE_AGENT_015", "node-b", context)
         callback._store_sibling_agent_instance(target)
         mpc_response = MpcOptimizeResponse(
@@ -1341,8 +1475,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
             mpc_planning_client=mpc_client,
             mpc_result_reporter=reporter,
             object_agent_code_map={501: "GATE_AGENT_015"},
@@ -1393,8 +1525,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         context = SimulationContext(biz_scene_instance_id="scene-015-managed")
         target = build_agent_instance("gate-agent-015-managed", "GATE_AGENT_015_MANAGED", "node-b", context)
-        ContextManager.create(
+        register_sim_agent_properties(
             context=context,
+            roll_steps=3,
+            total_steps=20,
             topology=WaterwayTopology(
                 topObjects=[
                     TopologyTopHydroObject(
@@ -1458,8 +1592,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
             mpc_planning_client=mpc_client,
             mpc_result_reporter=reporter,
         )
@@ -1505,8 +1637,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         context = SimulationContext(biz_scene_instance_id="scene-015-parent-map")
         target = build_agent_instance("gate-agent-015-parent", "GATE_AGENT_015_PARENT", "node-b", context)
         callback._store_sibling_agent_instance(target)
-        ContextManager.create(
+        register_sim_agent_properties(
             context=context,
+            roll_steps=3,
+            total_steps=20,
             topology=WaterwayTopology(
                 topObjects=[
                     TopologyTopHydroObject(
@@ -1553,8 +1687,6 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             context=context,
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
-            optimization_horizon=3,
-            total_steps=20,
             mpc_planning_client=mpc_client,
             mpc_result_reporter=reporter,
             object_agent_code_map={20600: "GATE_AGENT_015_PARENT"},

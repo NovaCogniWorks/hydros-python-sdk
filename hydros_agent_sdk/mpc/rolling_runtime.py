@@ -23,13 +23,11 @@ class MpcRollingRuntime:
         self,
         context: SimulationContext,
         properties: AgentProperties,
-        optimization_horizon: int,
         optimize_step: Callable[[int], Optional[List[Any]]],
         dispatch_control_commands: Callable[[List[Any]], None],
         set_current_step: Callable[[int], None],
         get_current_step: Callable[[], int],
         set_agent_status: Callable[[AgentStatus], None],
-        configured_total_steps: Optional[int] = None,
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
@@ -37,13 +35,11 @@ class MpcRollingRuntime:
     ):
         self.context = context
         self.properties = properties
-        self.optimization_horizon = optimization_horizon
         self.optimize_step = optimize_step
         self.dispatch_control_commands = dispatch_control_commands
         self.set_current_step = set_current_step
         self.get_current_step = get_current_step
         self.set_agent_status = set_agent_status
-        self.configured_total_steps = configured_total_steps
         self.configured_mpc_config_url = configured_mpc_config_url
         self.configured_target_and_constrain_config_url = (
             configured_target_and_constrain_config_url
@@ -62,20 +58,43 @@ class MpcRollingRuntime:
     def mpc_task_state(self) -> Optional[MpcTaskState]:
         return self._mpc_task_state
 
+    def _get_scenario_sim_agent_properties(self):
+        from hydros_agent_sdk.context_manager import ContextManager
+
+        model_context = ContextManager.get_context(self.context)
+        if model_context is None:
+            return None
+        return model_context.sim_agent_properties
+
+    def _get_scenario_int(self, name: str) -> Optional[int]:
+        sim_agent_properties = self._get_scenario_sim_agent_properties()
+        if sim_agent_properties is None:
+            return None
+
+        value = getattr(sim_agent_properties, name, None)
+        if value is None:
+            return None
+        return int(value)
+
     def get_roll_steps(self) -> int:
         """Return the rolling interval, matching Java roll_steps fallback rules."""
+        scenario_roll_steps = self._get_scenario_int("roll_steps")
+        if scenario_roll_steps is not None:
+            return scenario_roll_steps
+
         return PropertyParseUtils.get_int(
             self.properties,
             "roll_steps",
-            self.optimization_horizon,
+            None,
         )
 
     def get_total_steps(self) -> int:
         """Return total task steps used to avoid rolling again at task end."""
-        default_total_steps = self.configured_total_steps
-        if default_total_steps is None:
-            default_total_steps = 36
-        return PropertyParseUtils.get_int(self.properties, "total_steps", default_total_steps)
+        scenario_total_steps = self._get_scenario_int("total_steps")
+        if scenario_total_steps is not None:
+            return scenario_total_steps
+
+        return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """Whether ticks may activate MPC before a time-series update arrives."""

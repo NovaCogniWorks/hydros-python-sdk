@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Any, Dict, List, Optional, Union
 
 from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext
+from hydros_agent_sdk.scenario_config import BizScenarioConfiguration
 from hydros_agent_sdk.utils import HydroObjectUtilsV2, WaterwayTopology
 from hydros_agent_sdk.utils.yaml_loader import YamlLoader
 
@@ -24,10 +25,18 @@ class HydroModelContext:
         self,
         context: SimulationContext,
         topology: Optional[WaterwayTopology] = None,
+        scenario_config: Optional[BizScenarioConfiguration] = None,
     ) -> None:
         self.context = context
         self.topology = topology
+        self.scenario_config = scenario_config
         self._object_owner_by_id: Dict[str, HydroAgentInstance] = {}
+
+    @property
+    def sim_agent_properties(self):
+        if self.scenario_config is None:
+            return None
+        return self.scenario_config.sim_agent_properties
 
     @staticmethod
     def _extract_object_id(hydro_object: Any) -> Optional[int]:
@@ -128,19 +137,6 @@ class HydroModelContextRepository:
         self._contexts: Dict[str, HydroModelContext] = {}
         self._lock = RLock()
 
-    @staticmethod
-    def _get_config_value(config: Dict[str, Any], *keys: str) -> Any:
-        for key in keys:
-            if key in config:
-                return config[key]
-
-        properties = config.get("properties")
-        if isinstance(properties, dict):
-            for key in keys:
-                if key in properties:
-                    return properties[key]
-        return None
-
     def create_from_init_request(self, request: Any) -> Optional[HydroModelContext]:
         """
         Create model context from SimTaskInitRequest scenario configuration.
@@ -162,21 +158,19 @@ class HydroModelContextRepository:
             return None
 
         config = YamlLoader.from_url(config_url)
-        modeling_url = self._get_config_value(
-            config,
-            "hydros_objects_modeling_url",
-            "hydrosObjectsModelingUrl",
-        )
-        if not modeling_url:
+        scenario_config = BizScenarioConfiguration.model_validate(config)
+        modeling_url = scenario_config.hydros_objects_modeling_url
+        if not modeling_url and scenario_config.sim_agent_properties is None:
             logger.info(
-                "Skip hydro model context init: hydrosObjectsModelingUrl missing, bizSceneInstanceId=%s",
+                "Skip hydro model context init: hydros_objects_modeling_url missing, bizSceneInstanceId=%s",
                 context.biz_scene_instance_id,
             )
             return None
 
         return self.create(
             context=context,
-            hydros_objects_modeling_url=str(modeling_url),
+            hydros_objects_modeling_url=str(modeling_url) if modeling_url else None,
+            scenario_config=scenario_config,
         )
 
     def create(
@@ -185,6 +179,7 @@ class HydroModelContextRepository:
         hydros_objects_modeling_url: Optional[str] = None,
         topology: Optional[WaterwayTopology] = None,
         param_keys: Optional[set[str]] = None,
+        scenario_config: Optional[BizScenarioConfiguration] = None,
     ) -> HydroModelContext:
         loaded_topology = topology
         if loaded_topology is None and hydros_objects_modeling_url:
@@ -194,7 +189,11 @@ class HydroModelContextRepository:
                 with_metrics_code=True,
             )
 
-        model_context = HydroModelContext(context=context, topology=loaded_topology)
+        model_context = HydroModelContext(
+            context=context,
+            topology=loaded_topology,
+            scenario_config=scenario_config,
+        )
         with self._lock:
             self._contexts[context.biz_scene_instance_id] = model_context
 
@@ -266,10 +265,6 @@ class ContextManager:
     def set_repository(cls, repository: HydroModelContextRepository) -> None:
         cls._default_repository = repository
 
-    @staticmethod
-    def _get_config_value(config: Dict[str, Any], *keys: str) -> Any:
-        return HydroModelContextRepository._get_config_value(config, *keys)
-
     @classmethod
     def create_from_init_request(cls, request: Any) -> Optional[HydroModelContext]:
         return cls.repository().create_from_init_request(request)
@@ -281,12 +276,14 @@ class ContextManager:
         hydros_objects_modeling_url: Optional[str] = None,
         topology: Optional[WaterwayTopology] = None,
         param_keys: Optional[set[str]] = None,
+        scenario_config: Optional[BizScenarioConfiguration] = None,
     ) -> HydroModelContext:
         return cls.repository().create(
             context=context,
             hydros_objects_modeling_url=hydros_objects_modeling_url,
             topology=topology,
             param_keys=param_keys,
+            scenario_config=scenario_config,
         )
 
     @classmethod

@@ -154,7 +154,13 @@ def test_multi_agent_init_creates_context_from_scenario_config_before_agent_init
     try:
         with patch(
             "hydros_agent_sdk.context_manager.YamlLoader.from_url",
-            return_value={"hydrosObjectsModelingUrl": "https://example.test/topology.yaml"},
+            return_value={
+                "hydros_objects_modeling_url": "https://example.test/topology.yaml",
+                "sim_agent_properties": {
+                    "roll_steps": 60,
+                    "total_steps": 36,
+                },
+            },
         ) as load_scenario_config, patch(
             "hydros_agent_sdk.context_manager.HydroObjectUtilsV2.build_waterway_topology",
             return_value=topology,
@@ -166,6 +172,8 @@ def test_multi_agent_init_creates_context_from_scenario_config_before_agent_init
     assert isinstance(response, SimTaskInitResponse)
     assert agent.context_on_init is not None
     assert agent.context_on_init.topology is topology
+    assert agent.context_on_init.sim_agent_properties.roll_steps == 60
+    assert agent.context_on_init.sim_agent_properties.total_steps == 36
     load_scenario_config.assert_called_once_with("https://example.test/scenario.yaml")
     build_topology.assert_called_once_with(
         modeling_yml_uri="https://example.test/topology.yaml",

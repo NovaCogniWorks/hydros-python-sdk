@@ -44,6 +44,9 @@ from hydros_agent_sdk.protocol.models import (
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_METRICS_HISTORY_STEPS = 10
+
+
 class CentralSchedulingAgent(TickableAgent):
     """
     具备 MPC 优化能力的中央调度智能体。
@@ -73,7 +76,6 @@ class CentralSchedulingAgent(TickableAgent):
             context=simulation_context,
             hydros_cluster_id="cluster_01",
             hydros_node_id="node_01",
-            optimization_horizon=10  # 每 10 个 tick 优化一次
         )
         ```
 
@@ -93,7 +95,6 @@ class CentralSchedulingAgent(TickableAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 10,
         agent_status: AgentStatus = AgentStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
@@ -111,13 +112,11 @@ class CentralSchedulingAgent(TickableAgent):
             context: 仿真上下文
             hydros_cluster_id: 集群 ID
             hydros_node_id: 节点 ID
-            optimization_horizon: 滚动优化周期（tick 数）
             agent_status: 初始业务状态
             drive_mode: 智能体驱动模式（默认：SIM_TICK_DRIVEN）
             agent_configuration_url: 可选的配置 URL
             **kwargs: 其他关键字参数
         """
-        configured_total_steps = kwargs.pop("total_steps", None)
         configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
         configured_target_and_constrain_config_url = kwargs.pop(
             "target_and_constrain_config_url", None
@@ -144,7 +143,6 @@ class CentralSchedulingAgent(TickableAgent):
         )
 
         # MPC 相关配置
-        self._optimization_horizon = optimization_horizon
         self._configured_mpc_service_base_url = configured_mpc_service_base_url
         self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
             configured_mpc_sensor_provider
@@ -184,7 +182,7 @@ class CentralSchedulingAgent(TickableAgent):
         self._topology = None
 
         # 现地设备实时指标缓存
-        self._metrics_data_cache = MetricsDataCache(max_steps=optimization_horizon)
+        self._metrics_data_cache = MetricsDataCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
         self._field_metrics_cache = self._metrics_data_cache.latest_metrics
         self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
         self._metrics_subscriber = MqttMetricsSubscriber(
@@ -203,20 +201,17 @@ class CentralSchedulingAgent(TickableAgent):
         self._mpc_rolling_runtime = MpcRollingRuntime(
             context=context,
             properties=self.properties,
-            optimization_horizon=optimization_horizon,
             optimize_step=self.on_optimization,
             dispatch_control_commands=self._control_command_dispatcher.dispatch,
             set_current_step=lambda step: setattr(self, "_current_step", step),
             get_current_step=lambda: self._current_step,
             set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
-            configured_total_steps=configured_total_steps,
             configured_mpc_config_url=configured_mpc_config_url,
             configured_target_and_constrain_config_url=configured_target_and_constrain_config_url,
             configured_mpc_service_base_url=self._configured_mpc_service_base_url,
         )
 
         logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
-        logger.info(f"Optimization horizon: {self._optimization_horizon} ticks")
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:

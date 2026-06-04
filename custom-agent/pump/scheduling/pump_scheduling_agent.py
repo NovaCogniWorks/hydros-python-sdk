@@ -55,15 +55,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 10,
         **kwargs
     ):
-        """
-        初始化中央调度智能体。
-
-        参数:
-            optimization_horizon: 优化步长（每隔多少个 Tick 执行一次优化）
-        """
+        """初始化中央调度智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -73,7 +67,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            optimization_horizon=optimization_horizon,
             **kwargs
         )
         logger.info(f"中央调度智能体实例已创建: {agent_id}")

@@ -67,15 +67,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 10,
         **kwargs
     ):
-        """
-        初始化中央调度智能体。
-
-        参数:
-            optimization_horizon: 优化步长（每隔多少个 Tick 执行一次优化）
-        """
+        """初始化中央调度智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -85,7 +79,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            optimization_horizon=optimization_horizon,
             **kwargs
         )
 
@@ -161,7 +154,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         """
         执行 MPC 优化逻辑。
-        该方法由基类根据 optimization_horizon 自动触发。
+        该方法由基类根据 roll_steps 自动触发。
 
         参数:
             step: 当前仿真步长
