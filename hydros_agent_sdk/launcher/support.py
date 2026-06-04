@@ -615,9 +615,9 @@ class LauncherCli:
 Multi-Agent Launcher - 在单个进程中运行多个 agents
 
 用法:
-    python multi_agent_launcher.py [选项] [agent1] [agent2] ...
-    python multi_agent_launcher.py --all
-    python multi_agent_launcher.py --list
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- [选项] [agent1] [agent2] ...
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --all
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --list
 
 可用的 agents (自动发现):
 {agents_list}
@@ -633,25 +633,25 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
 
 示例:
     # 列出所有可用的 agents
-    python multi_agent_launcher.py --list
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --list
 
     # 启动单个 agent
-    python multi_agent_launcher.py myagent
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- myagent
 
     # 启动多个 agents（在同一个进程中）
-    python multi_agent_launcher.py agent1 agent2
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- agent1 agent2
 
     # 启动所有 agents
-    python multi_agent_launcher.py --all
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --all
 
     # 启用调试模式（等待调试器连接）
-    python multi_agent_launcher.py --debug agent1 agent2
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --debug agent1 agent2
 
     # 启用调试模式（不等待，直接启动）
-    python multi_agent_launcher.py --debug --debug-nowait myagent
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --debug --debug-nowait myagent
 
     # 使用自定义调试端口
-    python multi_agent_launcher.py --debug --debug-port 5679 myagent
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --debug --debug-port 5679 myagent
 
 调试模式:
     • 使用 debugpy 进行远程调试
@@ -674,7 +674,7 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
     1. 在 launcher 目录或 agents/ 子目录下创建新目录（如 myagent/）
     2. 创建 agent.properties 文件，包含 agent_code 和 agent_name
     3. 创建 Python 文件，实现 BaseHydroAgent 的子类
-    4. 运行 python multi_agent_launcher.py myagent
+    4. 运行 python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- myagent
 """)
 
     def print_agent_list(self) -> int:

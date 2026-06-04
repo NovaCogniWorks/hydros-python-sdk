@@ -43,7 +43,7 @@ python twins_agent.py
 
 # Or run with multi-agent launcher
 cd ../..
-python multi_agent_launcher.py twins
+./start_agents.sh twins
 ```
 
 ## Customization Guide

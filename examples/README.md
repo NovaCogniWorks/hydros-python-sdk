@@ -8,7 +8,6 @@ This directory contains example implementations and business logic for Hydros si
 examples/
 ├── env.properties                 # Environment configuration (MQTT, cluster info)
 ├── simple_multi_agent_example.py  # Simple multi-agent example
-├── multi_agent_launcher.py        # Command-line launcher for multiple agents
 ├── start_agents.sh                # Shell script to start agents
 │
 └── agents/                        # Agent implementations
@@ -59,7 +58,7 @@ examples/
   - `agent.properties` - Agent metadata (code, type, name)
 
 - **Utility Scripts**:
-  - `multi_agent_launcher.py` - Launch multiple agents
+  - `start_agents.sh` - Launch multiple agents through the SDK launcher
   - `simple_multi_agent_example.py` - Simple usage example
 
 ## 🚀 Quick Start
@@ -93,7 +92,7 @@ python twins_agent.py
 ```bash
 # Run multiple agents in one process
 cd examples
-python multi_agent_launcher.py twins ontology
+./start_agents.sh twins ontology
 
 # Or use the simple example
 python simple_multi_agent_example.py
@@ -105,16 +104,16 @@ python simple_multi_agent_example.py
 cd examples
 
 # Launch specific agents
-python multi_agent_launcher.py twins ontology
+./start_agents.sh twins ontology
 
 # Launch all agents
-python multi_agent_launcher.py --all
+./start_agents.sh --all
 
 # Enable debug mode
-python multi_agent_launcher.py --debug twins
+./start_agents.sh --debug twins
 
 # Show help
-python multi_agent_launcher.py --help
+./start_agents.sh --help
 ```
 
 ## 💡 How to Create Your Own Agent
@@ -259,7 +258,7 @@ def main():
 
 **Key Files**:
 - `simple_multi_agent_example.py` - Simple example
-- `multi_agent_launcher.py` - Full-featured launcher
+- `start_agents.sh` - Shell wrapper for the SDK launcher
 
 **What it shows**:
 - How to use `MultiAgentCallback`
@@ -320,7 +319,7 @@ setup_logging(
 pip install debugpy
 
 # Run with debug mode
-python multi_agent_launcher.py --debug twins
+./start_agents.sh --debug twins
 ```
 
 Then attach your IDE debugger to `localhost:5678`.
@@ -353,7 +352,7 @@ See `DEBUG_GUIDE.md` for detailed debugging instructions.
 2. Create `agent.properties` with your agent metadata
 3. Create `my_agent.py` inheriting from appropriate base class
 4. Create your business logic modules
-5. Register in `multi_agent_launcher.py` if needed
+5. Run it with `./start_agents.sh my_agent`
 
 ### Q: Can I use a different MQTT broker?
 

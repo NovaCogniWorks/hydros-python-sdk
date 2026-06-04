@@ -178,7 +178,7 @@ python -m build
 运行示例前准备好对应目录下的 `env.properties` 和 `agent.properties`：
 
 ```bash
-python examples/multi_agent_launcher.py
+python -m hydros_agent_sdk.launcher --launcher-dir examples --project-root .
 python custom-agent/pump/multi_agent_launcher.py
 ```
 

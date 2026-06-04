@@ -72,10 +72,10 @@
 cd examples
 
 # 2. 先运行一个现成示例
-python multi_agent_launcher.py twins
+./start_agents.sh twins
 
 # 3. 再尝试多 Agent 或事件驱动示例
-python multi_agent_launcher.py twins ontology
+./start_agents.sh twins ontology
 cd agents/outflowplan && python outflow_plan_agent.py
 ```
 
@@ -179,7 +179,7 @@ docs/
 
 examples/
 ├── README.md                      # 示例导航
-├── multi_agent_launcher.py        # 多 Agent 启动入口
+├── start_agents.sh                # 多 Agent 启动入口
 ├── env.properties                 # 默认环境配置
 ├── agents/
 │   ├── twins/                     # 孪生仿真示例
@@ -204,7 +204,7 @@ hydros_agent_sdk/
 
 **A**: 按以下顺序学习：
 1. 阅读《新手智能体开发指南》前 3 章
-2. 运行 `examples/multi_agent_launcher.py twins`
+2. 运行 `examples/start_agents.sh twins`
 3. 查看 `twins` 或 `ontology` 示例
 4. 实现自己的业务逻辑
 

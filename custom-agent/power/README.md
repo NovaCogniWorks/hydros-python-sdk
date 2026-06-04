@@ -8,7 +8,6 @@
 custom-agent/
 ├── power/
 │   ├── start_agents.sh           # 启动脚本
-│   ├── multi_agent_launcher.py   # Python 启动器
 │   ├── env.properties            # 共享环境配置
 │   ├── outflowplan/
 │   │   ├── agent.properties
@@ -120,7 +119,7 @@ bash custom-agent/power/start_agents.sh --debug --debug-port 5679 power
 
 请使用可用的 Python 命令（如 `python` 或 `py`）直接启动：
 ```bash
-python custom-agent/power/multi_agent_launcher.py power pump scheduling
+python -m hydros_agent_sdk.launcher --launcher-dir custom-agent/power --project-root . -- outflowplan scheduling
 ```
 
 ### 2) MQTT 连接失败

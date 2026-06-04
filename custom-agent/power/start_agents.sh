@@ -197,12 +197,14 @@ main() {
         exit 1
     fi
 
-    # 使用 Python 启动器启动 agents
+    # 使用 SDK 统一启动器启动 agents
     echo -e "${GREEN}启动 Hydros Agents...${NC}"
     echo ""
 
-    # 调用 Python 启动器
-    "$PYTHON_EXEC" "${SCRIPT_DIR}/multi_agent_launcher.py" "${PYTHON_ARGS[@]}"
+    "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
+        --launcher-dir "${SCRIPT_DIR}" \
+        --project-root "${PROJECT_ROOT}" \
+        -- "${PYTHON_ARGS[@]}"
 }
 
 # 运行主函数
