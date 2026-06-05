@@ -55,6 +55,31 @@ class MetricsDataCache:
             return metrics_data.get("value")
         return None
 
+    def get_attribute_from_any_metric(self, object_id: int, attr_name: str) -> Optional[float]:
+        """Search all cached metrics for the object_id to find the given attribute in the 'attributes' JSON payload."""
+        prefix = f"{object_id}_"
+        for cache_key, metrics_data in self.latest_metrics.items():
+            if cache_key.startswith(prefix):
+                attributes = metrics_data.get("attributes")
+                if attributes:
+                    if isinstance(attributes, str):
+                        import json
+                        try:
+                            attrs = json.loads(attributes)
+                        except Exception:
+                            continue
+                    elif isinstance(attributes, dict):
+                        attrs = attributes
+                    else:
+                        continue
+                        
+                    if isinstance(attrs, dict) and attr_name in attrs:
+                        try:
+                            return float(attrs[attr_name])
+                        except (ValueError, TypeError):
+                            pass
+        return None
+
     def by_step(self, step_index: int) -> Dict[str, Dict[str, Any]]:
         return dict(self.metrics_by_step.get(int(step_index), {}))
 

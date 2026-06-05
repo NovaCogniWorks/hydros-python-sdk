@@ -199,9 +199,12 @@ def _boundary_plan_from_snapshot(system_config: SystemConfig, boundary_levels: M
         elif node.hydro_node in boundary_levels:
             row[column] = float(boundary_levels[node.hydro_node])
     if not row:
-        fallback_value = float(next(iter(boundary_levels.values()), 0.0))
-        row = {column: fallback_value for column in columns}
-    ordered_row = {column: float(row.get(column, 0.0)) for column in columns}
+        raise ValueError(f"无法将任何边界节点映射到水位数据: boundary_levels={boundary_levels}, expected_columns={columns}")
+    ordered_row = {}
+    for column in columns:
+        if column not in row:
+            raise ValueError(f"边界水位数据缺失列 '{column}': boundary_levels={boundary_levels}")
+        ordered_row[column] = float(row[column])
     return pd.DataFrame([ordered_row])
 
 
@@ -215,9 +218,17 @@ def resolve_pool_areas(
     auto_identify: bool = False,
 ) -> Dict[int, float]:
     del auto_identify
-    if snapshot is not None and snapshot.pool_areas:
-        return {pool.id: float(snapshot.pool_areas.get(pool.id, 1.0)) for pool in system_config.canal_pools}
-    return {pool.id: 1.0 for pool in system_config.canal_pools}
+    areas = {}
+    for pool in system_config.canal_pools:
+        area = None
+        if snapshot is not None and snapshot.pool_areas:
+            area = snapshot.pool_areas.get(pool.id)
+        if area is None:
+            area = pool.area
+        if area is None:
+            raise ValueError(f"缺少渠道 pool_id={pool.id} 的表面积配置，无法进行等效蓄量水位计算。")
+        areas[pool.id] = float(area)
+    return areas
 
 
 def basin_to_station_levels(
@@ -505,7 +516,9 @@ def simulate_basin_trajectory(
                 disturbance = disturbance_value_at_step(disturbance_forecast, pool_id, step)
                 demand = float(demand_row.get(demand_column, 0.0)) + float(disturbance)
                 if profile_states is None:
-                    pool_area = float(resolved_pool_areas.get(pool_id, 1.0))
+                    if pool_id not in resolved_pool_areas:
+                        raise ValueError(f"缺少 pool_id={pool_id} 的渠道表面积 (pool_area) 数据，无法推演水位。")
+                    pool_area = float(resolved_pool_areas[pool_id])
                     levels[level_key] = float(
                         levels.get(level_key, 0.0) + (upstream_flow - downstream_flow + demand) * dt_seconds / pool_area
                     )

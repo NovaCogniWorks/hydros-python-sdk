@@ -122,6 +122,7 @@ class StationConfig:
 class PoolConfig:
     id: int
     name: str
+    area: Optional[float] = None
 
 
 @dataclass

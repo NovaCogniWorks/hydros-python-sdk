@@ -239,13 +239,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         
-        # 打印 _metrics_data_cache 里的所有组件缓存数据
-        if hasattr(self, "_metrics_data_cache") and self._metrics_data_cache:
-            cache_dump = []
-            for k, v in self._metrics_data_cache.latest_metrics.items():
-                cache_dump.append(f"  {k}: {v}")
-            logger.info("当前 _metrics_data_cache 缓存内容:\n" + "\n".join(cache_dump))
-            
+        # 首先打印 _metrics_data_cache 包含的组件数据
+        cache_dump = []
+        for key, data in self._metrics_data_cache.latest_metrics.items():
+            cache_dump.append(f"  {key}: {data}")
+        logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
+        
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
@@ -309,14 +308,26 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     angle_val = "None"
                     status = "None"
                 
-                # 获取机组流量
-                q = self._metrics_data_cache.get_value(uid, MetricsCodes.WATER_FLOW.value)
-                if q is not None:
-                    total_q += float(q)
+                # 获取机组流量 (强制从 attributes 提取 front_water_flow，不允许降级)
+                q = self._metrics_data_cache.get_attribute_from_any_metric(uid, "front_water_flow")
+                if q is None:
+                    # 查找对应的组件名称
+                    station = next((s for s in self.system_config.stations if s.id == sid), None)
+                    station_name = station.name if station else f"S{sid}"
+                    unit_name = station.unit_name_by_id.get(uid, f"U{uid}") if station else f"U{uid}"
+                    raise ValueError(
+                        f"取值失败！无法从 metrics_data_cache 的 attributes JSON 字符串中提取 泵站[{station_name}]-机组[{unit_name}] (ID: {sid}-{uid}) 的 front_water_flow 最新流量数据"
+                    )
+                total_q += float(q)
                 
-                # 获取机组水文(前后水位)
-                u_lvl = self._metrics_data_cache.get_value(uid, "up_water_level")
-                d_lvl = self._metrics_data_cache.get_value(uid, "down_water_level")
+                # 获取机组水文(前后水位)，优先从 attributes 提取
+                u_lvl = self._metrics_data_cache.get_attribute_from_any_metric(uid, "front_water_level")
+                if u_lvl is None:
+                    u_lvl = self._metrics_data_cache.get_value(uid, "up_water_level")
+                    
+                d_lvl = self._metrics_data_cache.get_attribute_from_any_metric(uid, "back_water_level")
+                if d_lvl is None:
+                    d_lvl = self._metrics_data_cache.get_value(uid, "down_water_level")
                 if u_lvl is not None:
                     up_levels.append(float(u_lvl))
                 if d_lvl is not None:
@@ -332,9 +343,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             b_val = sum(dn_levels) / len(dn_levels) if dn_levels else None
             
             # 仿真模块异常，临时写死边界水位
-            if sid == 1 and (f_val is None or f_val < 0):
+            if sid == 20000 and (f_val is None or f_val < 0):
                 f_val = 13.26
-            if sid == 3 and (b_val is None or b_val < 0):
+            if sid == 20600 and (b_val is None or b_val < 0):
                 b_val = 23.093
             
             if f_val is None or b_val is None:
@@ -347,19 +358,27 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
         logger.info("从 _metrics_data_cache 获取的各泵机组原始数据:\n" + "\n".join(pump_data_logs))
                 
-        logger.info(
-            f"第一时间读取并传入当前工况值 (根据各泵机组平均和汇总):\n"
-            f"  S1(泗洪站): 前池水位={station_front_levels.get(1, 0.0):.3f}, 后池水位={station_back_levels.get(1, 0.0):.3f}, 总流量={station_flows.get(1, 0.0):.3f}\n"
-            f"  S2(睢宁二站): 前池水位={station_front_levels.get(2, 0.0):.3f}, 后池水位={station_back_levels.get(2, 0.0):.3f}, 总流量={station_flows.get(2, 0.0):.3f}\n"
-            f"  S3(邳州站): 前池水位={station_front_levels.get(3, 0.0):.3f}, 后池水位={station_back_levels.get(3, 0.0):.3f}, 总流量={station_flows.get(3, 0.0):.3f}"
-        )
+        summary_logs = []
+        for sid in self.system_config.station_ids:
+            station = next((s for s in self.system_config.stations if s.id == sid), None)
+            station_name = station.name if station else f"S{sid}"
+            summary_logs.append(
+                f"  S{sid}({station_name}): 前池水位={station_front_levels.get(sid, 0.0):.3f}, 后池水位={station_back_levels.get(sid, 0.0):.3f}, 总流量={station_flows.get(sid, 0.0):.3f}"
+            )
+            
+        logger.info("第一时间读取并传入当前工况值 (根据各泵机组平均和汇总):\n" + "\n".join(summary_logs))
                 
         basin_levels = {}
         if station_ids and level_keys:
             basin_levels[level_keys[0]] = station_front_levels.get(station_ids[0], 0.0)
-            for i, sid in enumerate(station_ids):
+            for i in range(len(station_ids) - 1):
+                s_up = station_ids[i]
+                s_dn = station_ids[i+1]
+                avg_lvl = (station_back_levels.get(s_up, 0.0) + station_front_levels.get(s_dn, 0.0)) / 2.0
                 if i + 1 < len(level_keys):
-                    basin_levels[level_keys[i + 1]] = station_back_levels.get(sid, 0.0)
+                    basin_levels[level_keys[i + 1]] = avg_lvl
+            if len(level_keys) > len(station_ids):
+                basin_levels[level_keys[-1]] = station_back_levels.get(station_ids[-1], 0.0)
         
         pool_areas = resolve_pool_areas(self.system_config)
         pool_levels = {}
@@ -418,13 +437,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         for node in self.system_config.topology.boundary_nodes:
             key = str(node.mpc_key or node.id or node.hydro_node)
             if node.mpc_key and node.mpc_key in basin_levels:
-                boundary_levels_dict[node.id] = basin_levels[node.mpc_key]
+                boundary_levels_dict[key] = basin_levels[node.mpc_key]
             else:
-                boundary_levels_dict[node.id] = basin_levels.get(key, 0.0)
+                boundary_levels_dict[key] = basin_levels.get(key, 0.0)
         
         if not boundary_levels_dict and level_keys:
-            boundary_levels_dict["upstream"] = basin_levels.get(level_keys[0], 0.0)
-            boundary_levels_dict["downstream"] = basin_levels.get(level_keys[-1], 0.0)
+            boundary_levels_dict[level_keys[0]] = basin_levels.get(level_keys[0], 0.0)
+            boundary_levels_dict[level_keys[-1]] = basin_levels.get(level_keys[-1], 0.0)
             
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
@@ -606,12 +625,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         from hydros_agent_sdk.agent_commands.models.device_value_types import DeviceValueTypeEnum
 
-        # 提取 response_metadata 中的机组 object_id 映射
-        units_metadata = self.response_metadata.get("units", []) if hasattr(self, 'response_metadata') else []
-        unit_object_ids = {}
-        for u in units_metadata:
-            unit_object_ids[(u.get("station_id"), u.get("unit_id"))] = u.get("object_id")
-
         for sid in self.system_config.station_ids:
             action = actions[sid]
             
@@ -621,8 +634,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # target_value是叶片角（100是关机）
                 target_value = 100.0 if st == 0 else float(op)
 
-                # object_id从station_config的response_metadata.units.object_id中获取
-                unit_object_id = unit_object_ids.get((sid, uid))
+                # 当前配置中 uid 本身就是真实的 pump object_id
+                unit_object_id = uid
 
                 # target_agent_code从TargetAgentResolver获取
                 target_agent_code = None

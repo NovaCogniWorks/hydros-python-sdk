@@ -43,11 +43,11 @@ class TestPumpSchedulingAgent(unittest.TestCase):
         z1, z2, z3 = 13.26, 23.1, 28.0
         
         def set_station_data(sid, u_lvl, d_lvl, q=0.0):
+            import json
             units = self.agent.available_units_map[sid]
             for uid in units:
-                self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "up_water_level", "value": u_lvl, "position_code": "none"})
-                self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "down_water_level", "value": d_lvl, "position_code": "none"})
-                self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "water_flow", "value": q / len(units), "position_code": "none"})
+                attrs = json.dumps({"front_water_level": u_lvl, "back_water_level": d_lvl, "front_water_flow": q / len(units)})
+                self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "pump_status", "value": 0.0, "position_code": "none", "attributes": attrs})
                 self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "blade_angle", "value": 0.0, "position_code": "none"})
 
         # S1
