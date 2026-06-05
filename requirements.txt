@@ -11,6 +11,7 @@ pandas==2.2.3
 scipy==1.13.1
 scikit-learn==1.6.1
 openpyxl==3.1.5
+matplotlib>=3.7.0
 
 # 构建与发布工具 (如果你只需要运行代码，这部分可以移到 requirements-dev.txt)
 build==1.4.0
