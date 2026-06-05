@@ -238,6 +238,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
+        
+        # 打印 _metrics_data_cache 里的所有组件缓存数据
+        if hasattr(self, "_metrics_data_cache") and self._metrics_data_cache:
+            cache_dump = []
+            for k, v in self._metrics_data_cache.latest_metrics.items():
+                cache_dump.append(f"  {k}: {v}")
+            logger.info("当前 _metrics_data_cache 缓存内容:\n" + "\n".join(cache_dump))
+            
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
