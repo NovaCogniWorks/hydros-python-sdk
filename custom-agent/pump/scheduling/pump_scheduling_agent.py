@@ -238,14 +238,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
-        
-        # 打印 _metrics_data_cache 里的所有组件缓存数据
-        if hasattr(self, "_metrics_data_cache") and self._metrics_data_cache:
-            cache_dump = []
-            for k, v in self._metrics_data_cache.latest_metrics.items():
-                cache_dump.append(f"  {k}: {v}")
-            logger.info("当前 _metrics_data_cache 缓存内容:\n" + "\n".join(cache_dump))
-            
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
@@ -283,19 +275,31 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         station_flows = {}
         
         # 遍历每座泵站，从各机组获取实时数据
+        import json
+        
+        # 遍历每座泵站，从各机组获取实时数据
         pump_data_logs = []
-        for sid in self.system_config.station_ids:
+        for station in self.system_config.stations:
+            sid = station.id
             uids = self.available_units_map.get(sid, [])
             if not uids:
                 continue
+            
+            unit_name_map = station.unit_name_by_id
             
             total_q = 0.0
             up_levels = []
             dn_levels = []
             
             for uid in uids:
-                # 获取机组开度(100为关机)
-                angle = self._metrics_data_cache.get_value(uid, "blade_angle")
+                u_name = unit_name_map.get(uid, str(uid))
+                cache_key = f"{uid}_blade_angle"
+                metric_data = self._metrics_data_cache.latest_metrics.get(cache_key)
+                
+                if not metric_data:
+                    raise ValueError(f"无法从 _metrics_data_cache 获取泵 (ID={uid}, 名称={u_name}) 的数据, 最新缓存中无键 {cache_key}")
+                    
+                angle = metric_data.get("value")
                 if angle is not None:
                     angle_val = float(angle)
                     status = 0 if abs(angle_val - 100.0) < 1e-3 else 1
@@ -308,22 +312,32 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 else:
                     angle_val = "None"
                     status = "None"
+                    
+                attributes_str = metric_data.get("attributes", "{}")
+                if isinstance(attributes_str, str):
+                    try:
+                        attributes = json.loads(attributes_str) if attributes_str else {}
+                    except Exception:
+                        attributes = {}
+                else:
+                    attributes = attributes_str or {}
+                    
+                q = attributes.get("front_water_flow")
+                u_lvl = attributes.get("front_water_level")
+                d_lvl = attributes.get("back_water_level")
                 
-                # 获取机组流量
-                q = self._metrics_data_cache.get_value(uid, MetricsCodes.WATER_FLOW.value)
-                if q is not None:
-                    total_q += float(q)
-                
-                # 获取机组水文(前后水位)
-                u_lvl = self._metrics_data_cache.get_value(uid, "up_water_level")
-                d_lvl = self._metrics_data_cache.get_value(uid, "down_water_level")
-                if u_lvl is not None:
-                    up_levels.append(float(u_lvl))
-                if d_lvl is not None:
-                    dn_levels.append(float(d_lvl))
+                if q is None and "back_water_flow" in attributes:
+                    q = attributes.get("back_water_flow")
+                    
+                if q is None or u_lvl is None or d_lvl is None:
+                    raise ValueError(f"从 _metrics_data_cache 提取属性失败: 泵 (ID={uid}, 名称={u_name}) 的 attributes 中缺少水文流量数据. 当前attributes: {attributes}")
+
+                total_q += float(q)
+                up_levels.append(float(u_lvl))
+                dn_levels.append(float(d_lvl))
                     
                 pump_data_logs.append(
-                    f"  泵S{sid}-U{uid}: 状态={status}, 开度={angle_val}, 流量={q}, "
+                    f"  泵S{sid}-U{uid}({u_name}): 状态={status}, 开度={angle_val}, 流量={q}, "
                     f"前水位={u_lvl}, 后水位={d_lvl}"
                 )
             
