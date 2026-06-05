@@ -1,5 +1,5 @@
 """
-Reusable launcher support objects for Hydros Python agent applications.
+Hydros Python 智能体应用的可复用启动器支撑对象。
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AgentModuleInfo:
-    """启动器发现到的 Agent 模块信息。"""
+    """启动器发现到的智能体模块信息。"""
 
     name: str
     agent_class: Type[BaseHydroAgent]
@@ -64,7 +64,7 @@ class LauncherOptions:
 
 @dataclass(frozen=True)
 class LauncherServices:
-    """launcher 启动过程需要的服务对象。"""
+    """启动器启动过程需要的服务对象。"""
 
     discovery_service: "AgentDiscoveryService"
     module_loader: "AgentModuleLoader"
@@ -72,7 +72,7 @@ class LauncherServices:
 
 @dataclass(frozen=True)
 class RegisteredAgentInfo:
-    """已注册到 MultiAgentCallback 的 Agent 摘要。"""
+    """已注册到 MultiAgentCallback 的智能体摘要。"""
 
     name: str
     agent_code: str
@@ -126,7 +126,7 @@ class PropertiesFileLoader:
 
 
 class AgentDirectoryResolver:
-    """解析 launcher 下的 Agent 根目录和别名。"""
+    """解析 launcher 下的智能体根目录和别名。"""
 
     def __init__(self, launcher_dir: str, aliases: Optional[Dict[str, str]] = None):
         self.launcher_dir = launcher_dir
@@ -147,7 +147,7 @@ class AgentDirectoryResolver:
 
 
 class AgentClassResolver:
-    """从 Agent 目录中寻找 BaseHydroAgent 子类。"""
+    """从智能体目录中寻找 BaseHydroAgent 子类。"""
 
     def find_agent_class(self, agent_dir: str) -> Optional[Type[BaseHydroAgent]]:
         py_files = [
@@ -209,7 +209,7 @@ class AgentClassResolver:
 
 
 class AgentDiscoveryService:
-    """发现 launcher 可启动的 Agent 目录。"""
+    """发现 launcher 可启动的智能体目录。"""
 
     def __init__(
         self,
@@ -253,7 +253,7 @@ class AgentDiscoveryService:
 
 
 class AgentModuleLoader:
-    """加载 Agent 配置和实现类。"""
+    """加载智能体配置和实现类。"""
 
     def __init__(
         self,
@@ -334,7 +334,7 @@ class LauncherServiceFactory:
 
 
 class AgentFactoryRegistrationService:
-    """把发现到的 Agent 模块注册为可由 callback 创建的 factory。"""
+    """把发现到的智能体模块注册为可由 callback 创建的 factory。"""
 
     def __init__(
         self,

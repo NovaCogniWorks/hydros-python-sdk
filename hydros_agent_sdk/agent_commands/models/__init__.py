@@ -1,5 +1,5 @@
 """
-Agent command 模型层导出。
+智能体指令模型层导出。
 """
 
 from .base import (

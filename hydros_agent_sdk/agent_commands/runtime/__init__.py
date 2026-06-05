@@ -1,5 +1,5 @@
 """
-Agent command runtime 层导出。
+智能体指令 runtime 层导出。
 """
 
 from .handlers import AgentCommandHandler

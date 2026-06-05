@@ -1,5 +1,5 @@
 """
-Agent command 子系统导出。
+智能体指令子系统导出。
 """
 
 from .models import (

@@ -1,10 +1,9 @@
 """
-Digital Twins Simulation Agent Example
+数字孪生仿真智能体示例。
 
-This example demonstrates how to implement a concrete digital twins simulation agent
-using the TwinsSimulationAgent base class.
+本示例展示如何使用 TwinsSimulationAgent 基类实现一个具体的数字孪生仿真智能体。
 
-The agent performs high-fidelity hydraulic simulation synchronized with real-world systems.
+该智能体执行与真实系统同步的高保真水力仿真。
 """
 
 import logging
@@ -81,14 +80,14 @@ logger = logging.getLogger(__name__)
 
 class MyTwinsSimulationAgent(TwinsSimulationAgent):
     """
-    Concrete implementation of digital twins simulation agent.
+    数字孪生仿真智能体的具体实现。
 
-    This agent:
-    1. Loads water network topology
-    2. Initializes hydraulic solver
-    3. Executes high-fidelity simulation at each tick
-    4. Handles boundary condition updates from external sources
-    5. Outputs detailed metrics via MQTT
+    该智能体会：
+    1. 加载水网拓扑
+    2. 初始化水力求解器
+    3. 在每个 tick 执行高保真仿真
+    4. 处理来自外部源的边界条件更新
+    5. 通过 MQTT 输出详细指标
     """
 
     def __init__(
@@ -123,9 +122,9 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def _initialize_twins_model(self):
         """
-        Initialize digital twins model with error handling.
+        带错误处理地初始化数字孪生模型。
 
-        This method initializes the hydraulic solver with the loaded topology.
+        该方法使用已加载拓扑初始化水力求解器。
         """
         logger.info("Initializing digital twins model...")
         idz_config_url = self.properties.get_property('idz_config_url')
@@ -164,7 +163,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             agent_name=self.agent_code
         ) as ctx:
             solver_params = {
-                'time_step': self.properties.get_property('time_step', 60),  # seconds
+                'time_step': self.properties.get_property('time_step', 60),  # 秒
                 'convergence_tolerance': self.properties.get_property('convergence_tolerance', 1e-6),
                 'max_iterations': self.properties.get_property('max_iterations', 100),
             }
@@ -181,13 +180,13 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def _execute_twins_simulation(self, step: int) -> List[MqttMetrics]:
         """
-        Execute digital twins simulation step with comprehensive error handling.
+        带完整错误处理地执行数字孪生仿真步。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         logger.info(f"Executing digital twins simulation for step {step}")
 
@@ -239,13 +238,13 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def _collect_boundary_conditions(self, step: int) -> Dict[int, Dict[str, float]]:
         """
-        Collect boundary conditions from time series cache.
+        从时序缓存采集边界条件。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            Boundary conditions {object_id: {metrics_code: value}}
+            边界条件 {object_id: {metrics_code: value}}
         """
         boundary_conditions = {}
 
@@ -282,13 +281,13 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         results: Dict[int, Dict[str, float]]
     ) -> List[MqttMetrics]:
         """
-        Convert solver results to metrics list.
+        将求解器结果转换为指标列表。
 
         Args:
-            results: Solver results {object_id: {metrics_code: value}}
+            results: 求解器结果 {object_id: {metrics_code: value}}
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         metrics_list = []
 
@@ -315,13 +314,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates with error handling.
+        带错误处理地处理边界条件更新。
 
-        This method is called when external boundary conditions are updated
-        (e.g., from field measurements, weather forecasts, etc.).
+        外部边界条件更新时会调用该方法，例如来自现地测量、天气预报等。
 
         Args:
-            time_series_list: List of updated time series data
+            time_series_list: 已更新的时序数据列表
         """
         logger.info(f"Updating digital twins with {len(time_series_list)} boundary conditions")
 
@@ -352,7 +350,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
 def main():
     """
-    Main entry point for twins simulation agent service.
+    孪生仿真智能体服务主入口。
     """
     # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))

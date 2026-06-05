@@ -6,7 +6,7 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 
 
 class PropertyParseUtils:
-    """AgentProperties 值的类型化访问器。"""
+    """用于 AgentProperties 值的类型化访问器。"""
 
     @staticmethod
     def get_int(properties: AgentProperties, name: str, default: Optional[int]) -> int:

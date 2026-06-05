@@ -1,8 +1,8 @@
 """
-Example demonstrating error handling in Hydros agents.
+Hydros 智能体错误处理示例。
 
-This example shows how to use the error handling decorators and utilities
-to properly handle errors and return error responses to the coordinator.
+本示例展示如何使用错误处理装饰器和工具函数来正确处理错误，
+并向协调器返回错误响应。
 """
 
 import logging
@@ -47,27 +47,27 @@ logger = logging.getLogger(__name__)
 
 class ErrorHandlingExampleAgent(TwinsSimulationAgent):
     """
-    Example agent demonstrating error handling patterns.
+    展示错误处理模式的示例智能体。
 
-    This agent shows three ways to handle errors:
-    1. Using @handle_agent_errors decorator (recommended)
-    2. Using safe_execute() utility function
-    3. Using AgentErrorContext context manager
+    该智能体展示三种错误处理方式：
+    1. 使用 @handle_agent_errors 装饰器（推荐）
+    2. 使用 safe_execute() 工具函数
+    3. 使用 AgentErrorContext 上下文管理器
     """
 
-    # ========== Method 1: Using @handle_agent_errors decorator ==========
+    # ========== 方法 1：使用 @handle_agent_errors 装饰器 ==========
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize agent with automatic error handling.
+        使用自动错误处理初始化智能体。
 
-        The @handle_agent_errors decorator will:
-        1. Catch any exception
-        2. Format error message with agent name and details
-        3. Create SimTaskInitResponse with FAILED status
-        4. Log the error
-        5. Return error response to coordinator
+        @handle_agent_errors 装饰器会：
+        1. 捕获任意异常
+        2. 使用智能体名称和详情格式化错误消息
+        3. 创建 FAILED 状态的 SimTaskInitResponse
+        4. 记录错误日志
+        5. 向协调器返回错误响应
         """
         logger.info("Initializing agent with error handling...")
 
@@ -77,7 +77,7 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
         # 加载拓扑（可能抛出异常）
         topology_url = self.properties.get_property('hydros_objects_modeling_url')
         if topology_url:
-            # URL 无效或文件不存在时会抛出异常
+            # 当 URL 无效或文件不存在时会抛出异常
             self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
 
         # 注册到状态管理器
@@ -97,14 +97,14 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             managed_top_objects={}
         )
 
-    # ========== Method 2: Using safe_execute() utility ==========
+    # ========== 方法 2：使用 safe_execute() 工具函数 ==========
 
     def _initialize_twins_model(self):
         """
-        Initialize twins model with manual error handling using safe_execute().
+        使用 safe_execute() 手动错误处理来初始化孪生模型。
 
-        This method shows how to use safe_execute() for fine-grained error handling
-        when you need more control than the decorator provides.
+        当需要比装饰器更细粒度的控制时，本方法展示如何使用 safe_execute()
+        进行错误处理。
         """
         logger.info("Initializing twins model...")
 
@@ -130,15 +130,14 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
         # 真实实现中，这里可能抛出异常
         return {"type": "hydraulic_solver", "version": "1.0"}
 
-    # ========== Method 3: Using AgentErrorContext context manager ==========
+    # ========== 方法 3：使用 AgentErrorContext 上下文管理器 ==========
 
     @handle_agent_errors(ErrorCodes.AGENT_TICK_FAILURE)
     def _execute_twins_simulation(self, step: int):
         """
-        Execute simulation with context manager error handling.
+        使用上下文管理器错误处理执行仿真。
 
-        This method shows how to use AgentErrorContext for handling errors
-        in specific code blocks.
+        本方法展示如何使用 AgentErrorContext 处理特定代码块中的错误。
         """
         logger.info(f"Executing simulation step {step}...")
 
@@ -191,14 +190,13 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             1002: {"water_level": 4.5 + step * 0.1, "flow": 8.0},
         }
 
-    # ========== Method 4: Manual error handling with create_error_response ==========
+    # ========== 方法 4：使用 create_error_response 手动处理错误 ==========
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate agent with manual error handling.
+        使用手动错误处理终止智能体。
 
-        This method shows how to manually create error responses when you need
-        full control over the error handling logic.
+        当需要完全控制错误处理逻辑时，本方法展示如何手动创建错误响应。
         """
         try:
             logger.info("Terminating agent...")

@@ -1,5 +1,5 @@
 """
-Agent command 传输层导出。
+智能体指令传输层导出。
 """
 
 from .client import AgentCommandClient

@@ -1,8 +1,8 @@
 """
-Unified state management for multi-task agent services.
+多任务智能体服务的统一状态管理。
 
-This module provides centralized state management for Hydro agent services,
-handling simulation contexts, agent instances, and task lifecycle tracking.
+本模块为 Hydro 智能体服务提供集中式状态管理，负责仿真上下文、
+智能体实例和任务生命周期跟踪。
 """
 
 from typing import Optional, Set, Dict, List
@@ -30,9 +30,9 @@ class TaskStatus(str, Enum):
 
 class TaskState:
     """
-    Represents the state of a simulation task.
+    表示仿真任务状态。
 
-    Tracks task lifecycle, associated agents, and timing information.
+    跟踪任务生命周期、关联智能体和时间信息。
     """
 
     def __init__(self, context_id: str, agent_ids: Optional[List[str]] = None):
@@ -49,26 +49,26 @@ class TaskState:
 
 class AgentStateManager:
     """
-    Unified state manager for multi-task agent services.
+    多任务智能体服务的统一状态管理器。
 
-    Manages:
-    - Active simulation contexts (multi-task isolation)
-    - Agent instances and their lifecycle
-    - Task states and transitions
-    - Local/remote agent tracking
+    管理内容：
+    - 活跃仿真上下文（用于多任务隔离）
+    - 智能体实例及其生命周期
+    - 任务状态和状态流转
+    - 本地/远端智能体跟踪
 
-    This class combines functionality from the original AgentContextManager
-    with enhanced task lifecycle tracking and agent instance management.
+    该类整合原 AgentContextManager 的能力，并增强任务生命周期跟踪
+    和智能体实例管理。
     """
 
     def __init__(self):
         # 核心状态
-        self._active_contexts: Set[str] = set()  # biz_scene_instance_id set
-        self._task_states: Dict[str, TaskState] = {}  # context_id → task state
-        self._agent_instances: Dict[str, HydroAgentInstance] = {}  # agent_id → instance
-        self._local_agent_instances: Set[str] = set()  # local agent_id set
-        self._hydros_cluster_id: Optional[str] = None  # current cluster ID
-        self._hydros_node_id: Optional[str] = None  # current node ID
+        self._active_contexts: Set[str] = set()  # biz_scene_instance_id 集合
+        self._task_states: Dict[str, TaskState] = {}  # context_id → 任务状态
+        self._agent_instances: Dict[str, HydroAgentInstance] = {}  # agent_id → 实例
+        self._local_agent_instances: Set[str] = set()  # 本地 agent_id 集合
+        self._hydros_cluster_id: Optional[str] = None  # 当前集群 ID
+        self._hydros_node_id: Optional[str] = None  # 当前节点 ID
         self._lock = RLock()
 
     # ========================================================================
@@ -103,8 +103,9 @@ class AgentStateManager:
 
     def add_active_context(self, context: SimulationContext):
         """
-        Add a simulation context to the active set.
-        Called when a task is initialized.
+        将仿真上下文加入活跃集合。
+
+        任务初始化时调用。
         """
         if context and context.biz_scene_instance_id:
             with self._lock:
@@ -113,8 +114,9 @@ class AgentStateManager:
 
     def remove_active_context(self, context: SimulationContext):
         """
-        Remove a simulation context from the active set.
-        Called when a task is terminated.
+        从活跃集合移除仿真上下文。
+
+        任务终止时调用。
         """
         if context and context.biz_scene_instance_id:
             with self._lock:
@@ -123,13 +125,13 @@ class AgentStateManager:
 
     def has_active_context(self, context: SimulationContext) -> bool:
         """
-        Check if a simulation context is currently active.
+        检查仿真上下文当前是否活跃。
 
         Args:
-            context: The simulation context to check
+            context: 要检查的仿真上下文
 
         Returns:
-            True if the context is active, False otherwise
+            上下文活跃时返回 True，否则返回 False
         """
         if not context or not context.biz_scene_instance_id:
             return False
@@ -141,10 +143,10 @@ class AgentStateManager:
 
     def get_active_contexts(self) -> Set[str]:
         """
-        Get all active context IDs.
+        获取全部活跃上下文 ID。
 
         Returns:
-            Set of active biz_scene_instance_id values
+            活跃 biz_scene_instance_id 的集合
         """
         with self._lock:
             return self._active_contexts.copy()
@@ -155,10 +157,10 @@ class AgentStateManager:
 
     def register_agent_instance(self, agent: HydroAgentInstance):
         """
-        Register an agent instance.
+        注册智能体实例。
 
         Args:
-            agent: The agent instance to register
+            agent: 要注册的智能体实例
         """
         if agent and agent.agent_id:
             with self._lock:
@@ -167,10 +169,10 @@ class AgentStateManager:
 
     def unregister_agent_instance(self, agent_id: str):
         """
-        Unregister an agent instance.
+        注销智能体实例。
 
         Args:
-            agent_id: The ID of the agent to unregister
+            agent_id: 要注销的智能体 ID
         """
         with self._lock:
             if agent_id in self._agent_instances:
@@ -180,24 +182,24 @@ class AgentStateManager:
 
     def get_agent_instance(self, agent_id: str) -> Optional[HydroAgentInstance]:
         """
-        Get an agent instance by ID.
+        按 ID 获取智能体实例。
 
         Args:
-            agent_id: The agent ID to look up
+            agent_id: 要查找的智能体 ID
 
         Returns:
-            The agent instance if found, None otherwise
+            找到时返回智能体实例，否则返回 None
         """
         with self._lock:
             return self._agent_instances.get(agent_id)
 
     def update_agent_status(self, agent_id: str, status: AgentStatus):
         """
-        Update the status of an agent instance.
+        更新智能体实例状态。
 
         Args:
-            agent_id: The agent ID
-            status: The new status
+            agent_id: 智能体 ID
+            status: 新状态
         """
         with self._lock:
             agent = self._agent_instances.get(agent_id)
@@ -210,13 +212,13 @@ class AgentStateManager:
 
     def get_agent_status(self, agent_id: str) -> Optional[AgentStatus]:
         """
-        Get the status of an agent instance.
+        获取智能体实例状态。
 
         Args:
-            agent_id: The agent ID
+            agent_id: 智能体 ID
 
         Returns:
-            The agent status if found, None otherwise
+            找到时返回智能体状态，否则返回 None
         """
         with self._lock:
             agent = self._agent_instances.get(agent_id)
@@ -228,10 +230,10 @@ class AgentStateManager:
 
     def add_local_agent(self, agent_instance: HydroAgentInstance):
         """
-        Register a local agent instance.
+        注册本地智能体实例。
 
         Args:
-            agent_instance: The agent instance to register
+            agent_instance: 要注册的智能体实例
         """
         if agent_instance and agent_instance.agent_id:
             with self._lock:
@@ -240,10 +242,10 @@ class AgentStateManager:
 
     def remove_local_agent(self, agent_instance: HydroAgentInstance):
         """
-        Unregister a local agent instance.
+        注销本地智能体实例。
 
         Args:
-            agent_instance: The agent instance to unregister
+            agent_instance: 要注销的智能体实例
         """
         if agent_instance and agent_instance.agent_id:
             with self._lock:
@@ -252,13 +254,13 @@ class AgentStateManager:
 
     def is_local_agent(self, agent_instance: HydroAgentInstance) -> bool:
         """
-        Check if an agent instance is local (running on this node).
+        检查智能体实例是否为本地实例（运行在当前节点上）。
 
         Args:
-            agent_instance: The agent instance to check
+            agent_instance: 要检查的智能体实例
 
         Returns:
-            True if the agent is local, False otherwise
+            本地智能体返回 True，否则返回 False
         """
         if not agent_instance:
             return False
@@ -281,13 +283,13 @@ class AgentStateManager:
 
     def is_remote_agent(self, agent_instance: HydroAgentInstance) -> bool:
         """
-        Check if an agent instance is remote (running on another node).
+        检查智能体实例是否为远端实例（运行在其他节点上）。
 
         Args:
-            agent_instance: The agent instance to check
+            agent_instance: 要检查的智能体实例
 
         Returns:
-            True if the agent is remote, False otherwise
+            远端智能体返回 True，否则返回 False
         """
         if not agent_instance:
             return False
@@ -300,11 +302,11 @@ class AgentStateManager:
 
     def init_task(self, context: SimulationContext, agents: Optional[List[HydroAgentInstance]] = None):
         """
-        Initialize a new task.
+        初始化新任务。
 
         Args:
-            context: The simulation context for the task
-            agents: Optional list of agents associated with this task
+            context: 任务对应的仿真上下文
+            agents: 与该任务关联的可选智能体列表
         """
         if not context or not context.biz_scene_instance_id:
             logger.warning("Cannot init task: invalid context")
@@ -334,10 +336,10 @@ class AgentStateManager:
 
     def terminate_task(self, context: SimulationContext):
         """
-        Terminate a task.
+        终止任务。
 
         Args:
-            context: The simulation context for the task
+            context: 任务对应的仿真上下文
         """
         if not context or not context.biz_scene_instance_id:
             logger.warning("Cannot terminate task: invalid context")
@@ -363,23 +365,23 @@ class AgentStateManager:
 
     def get_task_state(self, context_id: str) -> Optional[TaskState]:
         """
-        Get the state of a task.
+        获取任务状态。
 
         Args:
-            context_id: The context ID (biz_scene_instance_id)
+            context_id: 上下文 ID（biz_scene_instance_id）
 
         Returns:
-            The task state if found, None otherwise
+            找到时返回任务状态，否则返回 None
         """
         with self._lock:
             return self._task_states.get(context_id)
 
     def get_active_tasks(self) -> List[TaskState]:
         """
-        Get all active tasks.
+        获取全部活跃任务。
 
         Returns:
-            List of active task states
+            活跃任务状态列表
         """
         with self._lock:
             return [
@@ -389,13 +391,13 @@ class AgentStateManager:
 
     def get_agents_for_context(self, context_id: str) -> List[HydroAgentInstance]:
         """
-        Get all agents associated with a context.
+        获取与指定上下文关联的全部智能体。
 
         Args:
-            context_id: The context ID (biz_scene_instance_id)
+            context_id: 上下文 ID（biz_scene_instance_id）
 
         Returns:
-            List of agent instances for the context
+            该上下文下的智能体实例列表
         """
         with self._lock:
             task_state = self._task_states.get(context_id)

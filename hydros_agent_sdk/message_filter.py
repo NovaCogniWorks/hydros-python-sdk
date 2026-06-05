@@ -126,7 +126,7 @@ class MessageFilter:
                 logger.debug(f"Filtering out report from local agent: {sim_command.command_type}")
                 return False
 
-        # SimTaskInitResponse 只接收远端智能体发出的消息
+        # 任务初始化响应只接收远端智能体发出的消息
         if isinstance(sim_command, SimTaskInitResponse):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:

@@ -1,4 +1,4 @@
-"""Python agent 运行时使用的场景配置模型。"""
+"""场景配置模型，供 Python agent 运行时使用。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class SimAgentProperties(HydroBaseModel):
 
 
 class BizScenarioConfiguration(HydroBaseModel):
-    """Python SDK 运行时需要的业务场景配置子集。"""
+    """业务场景配置子集，供 Python SDK 运行时使用。"""
 
     model_config = ConfigDict(extra="allow")
 

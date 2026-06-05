@@ -1,5 +1,5 @@
 """
-Agent command handler 抽象。
+智能体指令处理器抽象。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ ResponseType = TypeVar("ResponseType", bound=AgentCommandResponse)
 
 
 class AgentCommandHandler(ABC, Generic[RequestType, ResponseType]):
-    """业务方实现这个类，就能接住一类 agent command。"""
+    """业务方实现这个类，就能接住一类智能体指令。"""
 
     @abstractmethod
     def get_command(self) -> str:

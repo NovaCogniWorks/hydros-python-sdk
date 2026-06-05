@@ -1,5 +1,5 @@
 """
-System default central scheduling agent implementation.
+系统默认中央调度智能体实现。
 """
 
 import json

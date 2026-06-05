@@ -1,10 +1,10 @@
 """
-Simulation coordination client with callback-based architecture.
+基于回调架构的仿真协调客户端。
 
-This module provides a high-level client that encapsulates all common MQTT logic,
-allowing developers to focus on business logic by implementing callbacks.
+本模块提供封装通用 MQTT 逻辑的高层客户端，让开发者通过实现回调
+专注于业务逻辑。
 
-Similar to Java's SimCoordinationSlave class.
+功能类似 Java 侧的 SimCoordinationSlave 类。
 """
 
 import logging
@@ -88,21 +88,21 @@ class InboundCommand:
 
 class SimCoordinationClient:
     """
-    High-level simulation coordination client with callback-based architecture.
+    基于回调架构的高层仿真协调客户端。
 
-    This class encapsulates all common MQTT and message handling logic:
-    - MQTT connection and subscription
-    - Message parsing and serialization
-    - Message filtering (active context, local/remote)
-    - Automatic message routing to callbacks
-    - Outgoing message queue with retry logic
-    - Thread management
+    该类封装全部通用 MQTT 和消息处理逻辑：
+    - MQTT 连接和订阅
+    - 消息解析和序列化
+    - 消息过滤（活跃上下文、本地/远端）
+    - 自动将消息路由到回调
+    - 带重试逻辑的出站消息队列
+    - 线程管理
 
-    Developers only need to implement SimCoordinationCallback to provide business logic.
+    开发者只需要实现 SimCoordinationCallback 来提供业务逻辑。
 
-    Similar to Java's SimCoordinationSlave class.
+    功能类似 Java 侧的 SimCoordinationSlave 类。
 
-    Example:
+    示例：
         ```python
         class MyCallback(SimCoordinationCallback):
         
@@ -143,22 +143,22 @@ class SimCoordinationClient:
         business_queue_size: int = 1000,
     ):
         """
-        Initialize the coordination client.
+        初始化协调客户端。
 
         Args:
-            broker_url: MQTT broker URL (e.g., "tcp://192.168.1.24")
-            broker_port: MQTT broker port (default: 1883)
-            topic: MQTT topic to subscribe to
-            hydros_cluster_id: Optional cluster ID used to derive the coordination topic
-            sim_coordination_callback: SimCoordinationCallback implementation
-            state_manager: Optional state manager (created if not provided)
-            qos: MQTT QoS level (default: 1)
-            max_retry_count: Maximum retry count for sending messages (default: 5)
-            base_retry_delay_ms: Base retry delay in milliseconds (default: 1000)
-            mqtt_username: Optional MQTT username for authentication (None for no auth)
-            mqtt_password: Optional MQTT password for authentication (None for no auth)
-            control_queue_size: Max pending lifecycle/control commands
-            business_queue_size: Max pending business commands
+            broker_url: MQTT broker URL（例如 "tcp://192.168.1.24"）
+            broker_port: MQTT broker 端口（默认 1883）
+            topic: 要订阅的 MQTT topic
+            hydros_cluster_id: 可选集群 ID，用于推导协调 topic
+            sim_coordination_callback: SimCoordinationCallback 实现
+            state_manager: 可选状态管理器，未提供时自动创建
+            qos: MQTT QoS 级别（默认 1）
+            max_retry_count: 发送消息的最大重试次数（默认 5）
+            base_retry_delay_ms: 基础重试延迟，单位毫秒（默认 1000）
+            mqtt_username: 可选 MQTT 认证用户名；None 表示不启用认证
+            mqtt_password: 可选 MQTT 认证密码；None 表示不启用认证
+            control_queue_size: 生命周期/控制指令最大积压数量
+            business_queue_size: 业务指令最大积压数量
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
@@ -199,7 +199,7 @@ class SimCoordinationClient:
         self.mqtt_client.on_disconnect = self._on_disconnect
 
         # 使用指数退避配置自动重连
-        # min_delay=1s，max_delay=120s（每次尝试翻倍：1、2、4、8、...、120）
+        # 重连延迟：min_delay=1s，max_delay=120s（每次尝试翻倍：1、2、4、8、...、120）
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
 
         # 如果提供凭据，则设置 MQTT 认证
@@ -249,12 +249,12 @@ class SimCoordinationClient:
 
     def start(self):
         """
-        Start the coordination client.
+        启动协调客户端。
 
-        This will:
-        1. Connect to MQTT broker
-        2. Subscribe to the coordination topic
-        3. Start the outgoing message queue thread
+        该方法会：
+        1. 连接 MQTT broker
+        2. 订阅协调 topic
+        3. 启动出站消息队列线程
         """
         if self.running.is_set():
             logger.warning("Client already running")
@@ -281,12 +281,12 @@ class SimCoordinationClient:
 
     def stop(self):
         """
-        Stop the coordination client.
+        停止协调客户端。
 
-        This will:
-        1. Stop the queue processing thread
-        2. Disconnect from MQTT broker
-        3. Clean up resources
+        该方法会：
+        1. 停止队列处理线程
+        2. 断开 MQTT broker
+        3. 清理资源
         """
         if not self.running.is_set():
             logger.warning("Client not running")
@@ -309,12 +309,12 @@ class SimCoordinationClient:
 
     def enqueue(self, command: SimCommand):
         """
-        Enqueue a command for sending.
+        将指令加入待发送队列。
 
-        The command will be sent asynchronously by the queue thread.
+        队列线程会异步发送该指令。
 
         Args:
-            command: The command to send
+            command: 要发送的指令
         """
         self.out_message_queue.put(command)
         # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
@@ -322,19 +322,19 @@ class SimCoordinationClient:
 
     def send_command(self, command: SimCommand):
         """
-        Send a command immediately (synchronous).
+        立即同步发送指令。
 
         Args:
-            command: The command to send
+            command: 要发送的指令
         """
         self._send_with_retry(command)
 
     # ========================================================================
-    # MQTT 回调
+    # 处理 MQTT 回调
     # ========================================================================
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """MQTT 连接回调，同时处理自动重连后的重新订阅。"""
+        """处理 MQTT 连接回调，同时处理自动重连后的重新订阅。"""
         rc = reason_code.value
         if rc == 0:
             was_connected = self.connected.is_set()
@@ -342,7 +342,7 @@ class SimCoordinationClient:
                 logger.info(f"Reconnected to MQTT broker: {self.broker_url}:{self.broker_port}")
             else:
                 logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            # (Re-)subscribe to topic on every connect/reconnect
+            # 每次连接或重连后都重新订阅 topic
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             logger.info(f"Subscribed to topic: {self.topic}")
             self.connected.set()
@@ -379,7 +379,7 @@ class SimCoordinationClient:
             logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
-        """MQTT 断开连接回调。"""
+        """处理 MQTT 断开连接回调。"""
         rc = reason_code.value
         self.connected.clear()
         if rc == 0 or self._intentional_disconnect:
@@ -393,7 +393,7 @@ class SimCoordinationClient:
             logger.warning(f"Disconnected from MQTT broker: {reason}. Auto-reconnecting...")
 
     def _on_message(self, client, userdata, msg):
-        """MQTT 消息接收回调。"""
+        """处理 MQTT 消息接收回调。"""
         payload_str = None
         data = None
         try:
@@ -500,7 +500,7 @@ class SimCoordinationClient:
             self.business_worker_thread.start()
 
     def _stop_inbound_workers(self):
-        """running 标记清除后，短暂等待入站 worker 停止。"""
+        """在 running 标记清除后，短暂等待入站 worker 停止。"""
         for worker in (self.control_worker_thread, self.business_worker_thread):
             if worker and worker.is_alive():
                 worker.join(timeout=5)
@@ -581,19 +581,18 @@ class SimCoordinationClient:
 
     def _set_logging_context(self, command: SimCommand):
         """
-        Set logging context from command for structured logging.
+        从指令设置日志上下文，用于结构化日志。
 
-        Extracts context information from the command and sets it in the logging
-        context so all subsequent logs will include this information.
+        从指令中提取上下文信息并写入日志上下文，确保后续日志包含这些信息。
 
-        The logging context includes:
-        - hydros_cluster_id: From state_manager (loaded from env.properties)
-        - hydros_node_id: From state_manager (loaded from env.properties)
-        - biz_scene_instance_id: From command's SimulationContext
-        - biz_component: Agent ID or component name (e.g., "SIM_COORDINATOR")
+        日志上下文包括：
+        - hydros_cluster_id: 来自 state_manager（从 env.properties 加载）
+        - hydros_node_id: 来自 state_manager（从 env.properties 加载）
+        - biz_scene_instance_id: 来自指令的 SimulationContext
+        - biz_component: 智能体 ID 或组件名称（例如 "SIM_COORDINATOR"）
 
         Args:
-            command: The command to extract context from
+            command: 用于提取上下文的指令
         """
         # 从 state_manager 设置 hydros_cluster_id
         cluster_id = self.state_manager.get_cluster_id()
@@ -619,13 +618,13 @@ class SimCoordinationClient:
 
     def _handle_incoming_message(self, command: SimCommand):
         """
-        Handle an incoming command by routing it to the appropriate handler.
+        处理入站指令，并路由到合适的处理器。
 
-        Automatically sets logging context (task_id, biz_component, node_id) before
-        calling the handler, so all logs within the handler will include this context.
+        调用处理器前会自动设置日志上下文（task_id、biz_component、node_id），
+        使处理器内的全部日志都包含该上下文。
 
         Args:
-            command: The command to handle
+            command: 要处理的指令
         """
         # 根据指令设置日志上下文
         self._set_logging_context(command)
@@ -653,10 +652,10 @@ class SimCoordinationClient:
 
     def _handle_callback_result(self, result):
         """
-        Send callback return values through the normal outgoing queue.
+        通过正常出站队列发送回调返回值。
 
-        This keeps the existing side-effect style callbacks working while also
-        supporting the simpler pattern of returning a response from callbacks.
+        这样既保留现有副作用式回调的工作方式，也支持从回调直接返回响应的
+        更简单模式。
         """
         if result is None:
             return
@@ -674,12 +673,11 @@ class SimCoordinationClient:
 
     def _create_error_response(self, command: SimCommand, error: Exception) -> Optional[SimCoordinationResponse]:
         """
-        Convert uncaught handler exceptions into failed responses when possible.
+        尽可能将未捕获的处理器异常转换为失败响应。
 
-        Some request types, especially task init before an agent exists, may not
-        have enough local agent context to satisfy the protocol's required
-        source_agent_instance field. In that case we log and leave the exception
-        as an infrastructure error rather than fabricating an invalid response.
+        某些请求类型，尤其是智能体创建前的任务初始化请求，可能缺少足够的
+        本地智能体上下文来满足协议要求的 source_agent_instance 字段。
+        这种情况下只记录日志，并将异常视为基础设施错误，而不是构造无效响应。
         """
         source_agent = self._resolve_error_source_agent(command)
         if source_agent is None:
@@ -919,9 +917,9 @@ class SimCoordinationClient:
 
     def _queue_loop(self):
         """
-        Main loop for processing outgoing message queue.
+        处理出站消息队列的主循环。
 
-        This runs in a separate thread and sends messages with retry logic.
+        该循环运行在独立线程中，并使用重试逻辑发送消息。
         """
         logger.info("Queue processing thread started")
         while self.running.is_set():
@@ -943,15 +941,15 @@ class SimCoordinationClient:
 
     def _should_send(self, command: SimCommand) -> bool:
         """
-        Check if a command should be sent.
+        检查指令是否应该发送。
 
-        Similar to Java's needSend() method.
+        类似 Java 侧的 needSend() 方法。
 
         Args:
-            command: The command to check
+            command: 要检查的指令
 
         Returns:
-            True if the command should be sent, False otherwise
+            应发送时返回 True，否则返回 False
         """
         # 不发送请求（只发送响应和报告）
         if isinstance(command, SimCoordinationRequest):
@@ -981,12 +979,12 @@ class SimCoordinationClient:
 
     def _send_with_retry(self, command: SimCommand):
         """
-        Send a command with retry logic.
+        使用重试逻辑发送指令。
 
-        Similar to Java's sendAsyncWithRetry() method.
+        类似 Java 侧的 sendAsyncWithRetry() 方法。
 
         Args:
-            command: The command to send
+            command: 要发送的指令
         """
         attempt = 0
         command_id = command.command_id
@@ -1009,7 +1007,7 @@ class SimCoordinationClient:
                         len(command.mpc_results or []),
                         self._count_mpc_result_details(command),
                     )
-                return  # Success
+                return  # 发送成功
 
             except Exception as e:
                 logger.error(f"Failed to send command: id={command_id}, attempt={attempt}/{self.max_retry_count}: {e}")

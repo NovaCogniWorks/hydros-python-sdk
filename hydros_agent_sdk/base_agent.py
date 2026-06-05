@@ -1,8 +1,8 @@
 """
-Base agent implementation for Hydros agents.
+Hydros 智能体基础实现。
 
-This module provides the BaseHydroAgent class which inherits from HydroAgentInstance
-and adds behavioral methods for handling simulation lifecycle.
+本模块提供继承自 HydroAgentInstance 的 BaseHydroAgent 类，
+并增加处理仿真生命周期的行为方法。
 """
 
 import logging
@@ -48,39 +48,39 @@ logger = logging.getLogger(__name__)
 
 class BaseHydroAgent(HydroAgentInstance, ABC):
     """
-    Base class for Hydro agents with improved inheritance design.
+    采用改进继承设计的 Hydro 智能体基类。
 
-    Inheritance hierarchy:
+    继承层级：
         HydroBaseModel (Pydantic base)
             ↓
-        HydroAgent (agent definition)
+        HydroAgent（智能体定义）
             - agent_code, agent_type, agent_name, agent_configuration_url
             ↓
-        HydroAgentInstance (running instance)
+        HydroAgentInstance（运行中实例）
             - agent_id, biz_scene_instance_id, hydros_cluster_id, hydros_node_id
             - context, agent_status, drive_mode
             ↓
-        BaseHydroAgent (behavioral base class)
-            - Adds lifecycle methods: on_init(), on_tick(), on_terminate()
-            - Adds non-Pydantic attributes: sim_coordination_client, state_manager, properties
+        BaseHydroAgent（行为基类）
+            - 增加生命周期方法：on_init(), on_tick(), on_terminate()
+            - 增加非 Pydantic 属性：sim_coordination_client, state_manager, properties
 
-    Key features:
-    1. Inherits from HydroAgentInstance for all agent instance properties
-    2. No duplicate attributes - all inherited from parent classes
-    3. sim_coordination_client is required in constructor (non-null)
-    4. Clear lifecycle: created on task init, destroyed on terminate
-    5. Each agent instance corresponds to one simulation task
-    6. properties: AgentProperties dictionary for flexible configuration
+    关键特性：
+    1. 继承 HydroAgentInstance 以复用全部智能体实例属性
+    2. 不重复定义属性，全部从父类继承
+    3. 构造函数要求传入非空 sim_coordination_client
+    4. 生命周期清晰：任务初始化时创建，任务终止时销毁
+    5. 每个智能体实例对应一个仿真任务
+    6. properties：用于灵活配置的 AgentProperties 字典
 
-    Non-Pydantic attributes (set dynamically, not serialized):
-    - sim_coordination_client: The coordination client instance
-    - state_manager: Reference to the state manager
-    - properties: AgentProperties dictionary with typed accessors
+    非 Pydantic 属性（动态设置，不参与序列化）：
+    - sim_coordination_client: 协调客户端实例
+    - state_manager: 状态管理器引用
+    - properties: 带类型化访问方法的 AgentProperties 字典
 
     Attributes:
-        sim_coordination_client: MQTT coordination client for sending commands
-        state_manager: Agent state manager for tracking active contexts
-        properties: AgentProperties dictionary with typed accessors
+        sim_coordination_client: 用于发送指令的 MQTT 协调客户端
+        state_manager: 用于跟踪活跃上下文的智能体状态管理器
+        properties: 带类型化访问方法的 AgentProperties 字典
     """
 
     # 配置 Pydantic 允许非模型属性使用额外字段
@@ -95,7 +95,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
 
     def __init__(
         self,
-        sim_coordination_client,  # Type hint removed to avoid circular import
+        sim_coordination_client,  # 移除类型提示以避免循环导入
         agent_id: str,
         agent_code: str,
         agent_type: str,
@@ -110,22 +110,22 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         **kwargs
     ):
         """
-        Initialize agent instance.
+        初始化智能体实例。
 
         Args:
-            sim_coordination_client: Required MQTT client (non-null)
-            agent_id: Unique agent instance ID
-            agent_code: Agent code (e.g., "TWINS_SIMULATION_AGENT")
-            agent_type: Agent type (e.g., "TWINS_SIMULATION_AGENT")
-            agent_name: Agent name (e.g., "Twins Simulation Agent")
-            context: Simulation context for this agent
-            hydros_cluster_id: Cluster ID where this agent runs
-            hydros_node_id: Node ID where this agent runs
-            agent_status: Initial container status (default: INIT)
-            agent_instance_status: Initial instance lifecycle status (default: INIT)
-            drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
-            agent_configuration_url: Optional URL to agent configuration (will be loaded from SimTaskInitRequest if not provided)
-            **kwargs: Additional keyword arguments for HydroAgentInstance
+            sim_coordination_client: 必填 MQTT 客户端（非空）
+            agent_id: 唯一智能体实例 ID
+            agent_code: 智能体编码（例如 "TWINS_SIMULATION_AGENT"）
+            agent_type: 智能体类型（例如 "TWINS_SIMULATION_AGENT"）
+            agent_name: 智能体名称（例如 "Twins Simulation Agent"）
+            context: 当前智能体的仿真上下文
+            hydros_cluster_id: 当前智能体运行所在集群 ID
+            hydros_node_id: 当前智能体运行所在节点 ID
+            agent_status: 初始容器状态（默认 INIT）
+            agent_instance_status: 初始实例生命周期状态（默认 INIT）
+            drive_mode: 智能体驱动模式（默认 SIM_TICK_DRIVEN）
+            agent_configuration_url: 可选智能体配置 URL，未提供时从 SimTaskInitRequest 加载
+            **kwargs: 传给 HydroAgentInstance 的额外关键字参数
         """
         # 必填参数校验
         if sim_coordination_client is None:
@@ -170,24 +170,24 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the agent and create HydroAgentInstance.
+        初始化智能体并创建 HydroAgentInstance。
 
-        This is called when the task is initialized.
+        任务初始化时调用。
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         pass
 
     def _set_agent_logging_context(self):
         """
-        Set logging context for this agent instance.
+        为当前智能体实例设置日志上下文。
 
-        This should be called at the beginning of each agent method (on_init, on_tick, etc.)
-        to ensure logs from agent business logic include the correct agent_id.
+        应在每个智能体方法（on_init、on_tick 等）开头调用，确保智能体
+        业务逻辑日志包含正确的 agent_id。
         """
         from hydros_agent_sdk.logging_config import set_biz_component, set_biz_scene_instance_id
 
@@ -206,44 +206,44 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
     @abstractmethod
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
-        Handle simulation tick.
+        处理仿真 tick。
 
-        This is called for each simulation step.
+        每个仿真步都会调用。
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            Tick command response
+            Tick 指令响应
         """
         pass
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the agent and clean up resources.
+        终止智能体并清理资源。
 
-        This is called when the task is terminated.
+        任务终止时调用。
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         pass
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        Handle time series data update.
+        处理时序数据更新。
 
-        Default implementation. Override if needed.
+        默认实现。可按需覆盖。
 
         Args:
-            request: Time series data update request
+            request: 时序数据更新请求
 
         Returns:
-            Time series data update response
+            时序数据更新响应
         """
         logger.info(f"Time series data update: {request.command_id}")
 
@@ -251,70 +251,70 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,  # self is already a HydroAgentInstance
+            source_agent_instance=self,  # self 已经是 HydroAgentInstance
             broadcast=False
         )
 
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
         """
-        Handle outflow time series data update.
+        处理外发流量时序数据更新。
 
-        Default implementation calls standard time series update logic.
+        默认实现调用标准时序更新逻辑。
 
         Args:
-            request: Outflow time series data update request
+            request: 外发流量时序数据更新请求
 
         Returns:
-            outflow time series data update response
+            外发流量时序数据更新响应
         """
         logger.info(f"Outflow time series data update: {request.command_id}")
         return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,  # self is already a HydroAgentInstance
+            source_agent_instance=self,  # self 已经是 HydroAgentInstance
             broadcast=False
         )
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """
-        Handle time series calculation.
+        处理时序计算。
 
-        Default implementation. Override if needed.
+        默认实现。可按需覆盖。
 
         Args:
-            request: Time series calculation request
+            request: 时序计算请求
         """
         logger.info(f"Time series calculation: {request.command_id}")
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        Handle outflow time series request.
+        处理外发流量时序请求。
 
-        Default implementation. Override if needed.
+        默认实现。可按需覆盖。
 
         Args:
-            request: Outflow time series request
+            request: 外发流量时序请求
         """
         logger.info(f"Outflow time series request: {request.command_id}")
 
     def send_response(self, response):
         """
-        Send a response via the coordination client.
+        通过协调客户端发送响应。
 
         Args:
-            response: Response to send
+            response: 要发送的响应
         """
         self.sim_coordination_client.enqueue(response)
 
     @property
     def runtime_context(self):
         """
-        Lightweight runtime facade for new agent code.
+        面向新智能体代码的轻量运行时门面。
 
-        Existing agents can keep using sim_coordination_client, state_manager,
-        and properties directly. Newer code can depend on this narrower context
-        as we gradually separate runtime concerns from business logic.
+        现有智能体可以继续直接使用 sim_coordination_client、state_manager
+        和 properties。较新的代码可以依赖这个更窄的上下文，便于逐步将
+        运行时关注点和业务逻辑拆开。
         """
         from hydros_agent_sdk.runtime import AgentContext
 
@@ -326,26 +326,25 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
 
     def load_agent_configuration(self, request: SimTaskInitRequest) -> None:
         """
-        Load agent configuration from SimTaskInitRequest.
+        从 SimTaskInitRequest 加载智能体配置。
 
-        This method:
-        1. Extracts agent_configuration_url from request.agent_list matching this agent's agent_code
-        2. Loads the YAML configuration from the URL
-        3. Validates that the agent_code in YAML matches this agent's agent_code
-           or agent_type, so specialized agent codes can share a typed config
-        4. Sets the properties from YAML to self.properties
+        该方法会：
+        1. 从 request.agent_list 中匹配当前 agent_code，并提取 agent_configuration_url
+        2. 从 URL 加载 YAML 配置
+        3. 校验 YAML 中的 agent_code 是否匹配当前智能体的 agent_code 或 agent_type，
+           这样专用 agent_code 可以共享同一类类型化配置
+        4. 将 YAML 中的属性写入 self.properties
 
         Args:
-            request: SimTaskInitRequest containing agent_list with configuration URLs
+            request: 包含 agent_list 和配置 URL 的 SimTaskInitRequest
 
         Raises:
-            ValueError: If agent_code mismatch in configuration
-            Exception: If configuration loading fails
+            ValueError: 配置中的 agent_code 不匹配时抛出
+            Exception: 配置加载失败时抛出
 
-        Note:
-            If agent is not found in agent_list, this method will skip loading
-            and return silently, as the SimTaskInitRequest may only initialize
-            a subset of agents.
+        注意：
+            如果 agent_list 中没有找到当前智能体，本方法会跳过加载并静默返回，
+            因为 SimTaskInitRequest 可能只初始化部分智能体。
         """
         from hydros_agent_sdk.agent_config import AgentConfigLoader
 

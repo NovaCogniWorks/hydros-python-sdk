@@ -1,5 +1,5 @@
 """
-Agent command 基础模型与注册表。
+智能体指令基础模型与注册表。
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ _COMMAND_MODEL_REGISTRY: Dict[str, Type["AgentCommand"]] = {}
 
 
 class HydroCmd(HydroBaseModel):
-    """所有 agent command 共享的最小公共字段。"""
+    """所有智能体指令共享的最小公共字段。"""
 
     command_id: str
 
 
 class AgentCommand(HydroCmd):
-    """所有 agent command 的公共字段。"""
+    """所有智能体指令的公共字段。"""
 
     command_type: str
     timestamp_ms: Optional[Any] = None

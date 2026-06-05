@@ -1,8 +1,8 @@
 """
-Agent Properties
+智能体属性。
 
-This module provides the AgentProperties class that matches the Java implementation.
-It's essentially a dictionary with typed accessor methods for common property types.
+本模块提供与 Java 实现对齐的 AgentProperties 类。
+它本质上是一个字典，并为常见属性类型提供类型化访问方法。
 """
 
 from typing import Any, Optional
@@ -10,28 +10,28 @@ from typing import Any, Optional
 
 class AgentProperties(dict):
     """
-    Agent properties dictionary with typed accessor methods.
+    带类型化访问方法的智能体属性字典。
 
-    This class matches the Java implementation:
+    该类对应 Java 实现：
     com.hydros.agent.configuration.base.AgentProperties
 
-    It extends dict to allow flexible key-value storage while providing
-    typed accessor methods for safe property retrieval.
+    它扩展 dict 以支持灵活的键值存储，同时提供类型化访问方法，
+    便于安全读取属性。
     """
 
     def get_property_as_integer(self, property_name: str) -> int:
         """
-        Get a property value as an integer.
+        将属性值读取为整数。
 
         Args:
-            property_name: The property key name
+            property_name: 属性键名
 
         Returns:
-            The property value as an integer
+            整数形式的属性值
 
         Raises:
-            KeyError: If property not found
-            ValueError: If property cannot be converted to integer
+            KeyError: 未找到属性时抛出
+            ValueError: 属性无法转换为整数时抛出
         """
         value = self.get(property_name)
         if value is None:
@@ -48,17 +48,17 @@ class AgentProperties(dict):
 
     def get_property_as_string(self, property_name: str) -> str:
         """
-        Get a property value as a string.
+        将属性值读取为字符串。
 
         Args:
-            property_name: The property key name
+            property_name: 属性键名
 
         Returns:
-            The property value as a string
+            字符串形式的属性值
 
         Raises:
-            KeyError: If property not found
-            ValueError: If property cannot be converted to string
+            KeyError: 未找到属性时抛出
+            ValueError: 属性无法转换为字符串时抛出
         """
         value = self.get(property_name)
         if value is None:
@@ -76,17 +76,17 @@ class AgentProperties(dict):
 
     def get_property_as_float(self, property_name: str) -> float:
         """
-        Get a property value as a float.
+        将属性值读取为浮点数。
 
         Args:
-            property_name: The property key name
+            property_name: 属性键名
 
         Returns:
-            The property value as a float
+            浮点数形式的属性值
 
         Raises:
-            KeyError: If property not found
-            ValueError: If property cannot be converted to float
+            KeyError: 未找到属性时抛出
+            ValueError: 属性无法转换为浮点数时抛出
         """
         value = self.get(property_name)
         if value is None:
@@ -103,16 +103,16 @@ class AgentProperties(dict):
 
     def get_property_as_bool(self, property_name: str) -> bool:
         """
-        Get a property value as a boolean.
+        将属性值读取为布尔值。
 
         Args:
-            property_name: The property key name
+            property_name: 属性键名
 
         Returns:
-            The property value as a boolean
+            布尔形式的属性值
 
         Raises:
-            KeyError: If property not found
+            KeyError: 未找到属性时抛出
         """
         value = self.get(property_name)
         if value is None:
@@ -128,13 +128,13 @@ class AgentProperties(dict):
 
     def get_property(self, property_name: str, default: Any = None) -> Any:
         """
-        Get a property value with optional default.
+        获取属性值，并支持可选默认值。
 
         Args:
-            property_name: The property key name
-            default: Default value if property not found
+            property_name: 属性键名
+            default: 未找到属性时返回的默认值
 
         Returns:
-            The property value or default
+            属性值或默认值
         """
         return self.get(property_name, default)

@@ -1,4 +1,4 @@
-"""MPC 优化使用的现地指标缓存。"""
+"""现地指标缓存，供 MPC 优化使用。"""
 
 from typing import Any, Dict, List, Optional
 

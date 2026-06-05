@@ -196,7 +196,7 @@ __all__ = [
     "AgentStateManager",
     "MessageFilter",
 
-    # MQTT 客户端
+    # 用于 MQTT 的客户端
     "HydrosMqttClient",
 
     # 智能体属性

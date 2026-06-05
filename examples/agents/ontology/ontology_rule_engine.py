@@ -1,15 +1,14 @@
 """
-Ontology Rule Engine - Example implementation for ontology-based simulation.
+本体规则引擎：基于本体仿真的示例实现。
 
-This is a simplified demonstration of an ontology rule engine.
-In a real implementation, this would use an ontology reasoner like
-OWL API, RDFLib, or a custom rule engine.
+这是一个简化版本体规则引擎演示。真实实现中会使用 OWL API、RDFLib
+或自定义规则引擎等本体推理器。
 
-This example shows:
-- How to load ontology model from topology
-- How to define and apply ontology rules
-- How to perform rule-based reasoning
-- How to compute water network state using ontology constraints
+本示例展示：
+- 如何从拓扑加载本体模型
+- 如何定义和应用本体规则
+- 如何执行基于规则的推理
+- 如何使用本体约束计算水网状态
 """
 
 import logging
@@ -20,11 +19,10 @@ logger = logging.getLogger(__name__)
 
 class OntologyRuleEngine:
     """
-    Ontology rule engine for water network simulation.
+    用于水网仿真的本体规则引擎。
 
-    This engine applies ontology-based rules to compute water network state.
-    In a real implementation, this would use an ontology reasoner like
-    OWL API, RDFLib, or a custom rule engine.
+    该引擎应用基于本体的规则来计算水网状态。真实实现中会使用 OWL API、
+    RDFLib 或自定义规则引擎等本体推理器。
     """
 
     def __init__(self):
@@ -35,10 +33,10 @@ class OntologyRuleEngine:
 
     def load_ontology(self, topology):
         """
-        Load ontology model from topology.
+        从拓扑加载本体模型。
 
         Args:
-            topology: Water network topology
+            topology: 水网拓扑
         """
         logger.info("Loading ontology model from topology")
 
@@ -65,10 +63,10 @@ class OntologyRuleEngine:
 
     def _load_rules(self):
         """
-        Load ontology rules.
+        加载本体规则。
 
-        In a real implementation, rules would be loaded from an ontology file
-        or rule base (e.g., SWRL rules, SPARQL queries, etc.).
+        真实实现中，规则会从本体文件或规则库加载，例如 SWRL 规则、
+        SPARQL 查询等。
         """
         logger.info("Loading ontology rules")
 
@@ -95,14 +93,14 @@ class OntologyRuleEngine:
 
     def apply_rules(self, step: int, boundary_conditions: Dict[int, Dict[str, float]]) -> Dict[int, Dict[str, float]]:
         """
-        Apply ontology rules to compute water network state.
+        应用本体规则来计算水网状态。
 
         Args:
-            step: Current simulation step
-            boundary_conditions: Boundary conditions {object_id: {metrics_code: value}}
+            step: 当前仿真步
+            boundary_conditions: 边界条件 {object_id: {metrics_code: value}}
 
         Returns:
-            Computed state {object_id: {metrics_code: value}}
+            计算得到的状态 {object_id: {metrics_code: value}}
         """
         logger.debug(f"Applying ontology rules for step {step}")
 

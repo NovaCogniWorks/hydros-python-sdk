@@ -398,7 +398,7 @@ def parse_thread_snapshot(payload: Mapping[str, object], system_config: SystemCo
             segment_profiles.append(_parse_pool_profile(result[profile_node], pool_id, profile_node))
         pool_profiles[pool_id] = _aggregate_pool_profile(pool_id, pool_name, segment_profiles)
 
-    for idx, segment in []:  # legacy per-segment path intentionally disabled
+    for idx, segment in []:  # 旧版逐分段路径已故意禁用
         profile_node = getattr(segment, "hydro_profile_node", None)
         if profile_node is None:
             profile_node = f"{idx - 1}-{segment.upstream_station_id}-{segment.downstream_station_id}段"

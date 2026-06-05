@@ -67,7 +67,7 @@ class Waterway(HydroBaseModel):
 
 class SimulationContext(HydroBaseModel):
     """
-    Represents the simulation context, used to support multi-task isolation.
+    表示仿真上下文，用于支持多任务隔离。
     """
     biz_scene_instance_id: str
     tenant: Optional[Tenant] = None
@@ -77,7 +77,7 @@ class SimulationContext(HydroBaseModel):
 
 class HydroAgent(HydroBaseModel):
     """
-    Represents an agent definition.
+    表示智能体定义。
     """
     agent_code: str
     agent_type: str
@@ -86,7 +86,7 @@ class HydroAgent(HydroBaseModel):
 
 class HydroAgentInstance(HydroAgent):
     """
-    Represents a running instance of an agent.
+    表示正在运行的智能体实例。
     """
     agent_id: str
     biz_scene_instance_id: str
@@ -143,9 +143,10 @@ class HydroAgentInstance(HydroAgent):
 
 class TopHydroObject(HydroBaseModel):
     """
-    Represents a top-level hydro object managed by the simulation.
-    Uses flexible schema to accommodate varying object types from the coordinator
-    (e.g., gate stations, channels, etc.) with different nested properties.
+    表示仿真管理的顶层水利对象。
+
+    使用灵活 schema 兼容协调器下发的不同对象类型（例如闸站、渠道等）
+    以及它们不同的嵌套属性。
     """
     model_config = ConfigDict(extra='allow')
 
@@ -158,7 +159,7 @@ class TopHydroObject(HydroBaseModel):
 
 class TimeSeriesValue(HydroBaseModel):
     step: Optional[int] = None
-    time: Optional[Any] = None # Using Any for Date/datetime generic support
+    time: Optional[Any] = None # 使用 Any 兼容 Date/datetime 泛型支持
     value: Optional[float] = None
 
 class ObjectTimeSeries(HydroBaseModel):
