@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 
@@ -40,7 +40,11 @@ class TargetNode(HydroBaseModel):
     node_id: Optional[int] = None
     node_name: Optional[str] = None
     water_level: Optional[float] = None
-    target_water_level: Optional[float] = None
+    target_water_level: Optional[float] = Field(
+        default=None,
+        validation_alias=AliasChoices("target_water_level", "target_water_value"),
+        serialization_alias="target_water_level",
+    )
     out_water_level: Optional[float] = None
     total_flow: Optional[float] = None
     inflow: Optional[float] = None

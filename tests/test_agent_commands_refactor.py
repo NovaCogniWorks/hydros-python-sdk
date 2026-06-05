@@ -1365,6 +1365,48 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
 
+    def test_mpc_result_reporter_accepts_java_target_water_value_alias(self):
+        context = SimulationContext(
+            biz_scene_instance_id="scene-014-java-alias",
+            tenant=Tenant(tenant_id="tenant-014"),
+            biz_scenario=BizScenario(biz_scenario_id="scenario-014"),
+            waterway=Waterway(waterway_id="waterway-014"),
+        )
+        source = build_agent_instance("agent-014-java-alias", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+        response = MpcOptimizeResponse.model_validate(
+            {
+                "plan_type": "OPTIMAL",
+                "horizon_controls": [
+                    {
+                        "horizon_step": 1,
+                        "target_node_list": [
+                            {
+                                "device_type": "Canal",
+                                "node_id": 31400,
+                                "water_level": 63.0,
+                                "target_water_value": 63.12,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        report = MpcResultReporter().build_report(source, state, [response])
+        payload = report.model_dump(by_alias=True)
+        detail = payload["mpc_results"][0]["details"][0]
+
+        self.assertEqual(response.horizon_controls[0].target_node_list[0].target_water_level, 63.12)
+        self.assertEqual(detail["command_type"], "WATER_LEVEL")
+        self.assertEqual(detail["node_id"], 31400)
+        self.assertEqual(detail["target_value"], 63.12)
+
     def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
         source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
