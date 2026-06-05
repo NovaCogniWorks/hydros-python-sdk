@@ -1,4 +1,6 @@
 import json
+import time
+from threading import Event
 from types import SimpleNamespace
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -8,6 +10,8 @@ from hydros_agent_sdk.protocol.commands import (
     HydroEventCommand,
     OutflowTimeSeriesResponse,
     OutflowTimeSeriesDataUpdateResponse,
+    SimTaskInitRequest,
+    SimTaskInitResponse,
     SimTaskTerminateResponse,
     SimCommandEnvelope,
     TickCmdRequest,
@@ -116,6 +120,38 @@ class HydroEventCallback(ReturningCallback):
         )
 
 
+class BlockingTickCallback(ReturningCallback):
+    def __init__(self, agent):
+        super().__init__(agent)
+        self.tick_started = Event()
+        self.tick_release = Event()
+        self.tick_finished = Event()
+
+    def on_tick(self, request):
+        self.tick_started.set()
+        self.tick_release.wait(timeout=5)
+        self.tick_finished.set()
+        return super().on_tick(request)
+
+
+class BlockingTickAndInitCallback(BlockingTickCallback):
+    def __init__(self, agent):
+        super().__init__(agent)
+        self.init_handled = Event()
+
+    def on_sim_task_init(self, request):
+        init_agent = make_agent(request.context)
+        self.init_handled.set()
+        return SimTaskInitResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=init_agent,
+            created_agent_instances=[init_agent],
+            managed_top_objects={},
+            broadcast=False,
+        )
+
 def make_client(callback, state_manager):
     return SimCoordinationClient(
         broker_url="tcp://localhost",
@@ -123,6 +159,23 @@ def make_client(callback, state_manager):
         topic="/hydros/commands/coordination/test",
         sim_coordination_callback=callback,
         state_manager=state_manager,
+    )
+
+
+def start_inbound_workers(client):
+    client.running.set()
+    client._start_inbound_workers()
+
+
+def stop_inbound_workers(client):
+    client.running.clear()
+    client._stop_inbound_workers()
+
+
+def mqtt_message(command):
+    return SimpleNamespace(
+        topic="/hydros/commands/coordination/test",
+        payload=command.model_dump_json(by_alias=True).encode("utf-8"),
     )
 
 
@@ -161,6 +214,75 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     assert response.command_status == CommandStatus.FAILED
     assert response.error_code == "AGENT_TICK_FAILURE"
     assert "boom" in response.error_message
+
+
+def test_on_message_enqueues_and_returns_before_slow_tick_finishes():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(context, [agent])
+    state_manager.add_local_agent(agent)
+    callback = BlockingTickCallback(agent)
+    client = make_client(callback, state_manager)
+    start_inbound_workers(client)
+
+    try:
+        request = TickCmdRequest(command_id="CMD_SLOW_TICK", context=context, step=1)
+        started_at = time.monotonic()
+        client._on_message(None, None, mqtt_message(request))
+        elapsed_ms = (time.monotonic() - started_at) * 1000
+
+        assert elapsed_ms < 200
+        assert callback.tick_started.wait(timeout=1)
+        assert client.out_message_queue.empty()
+
+        callback.tick_release.set()
+        response = client.out_message_queue.get(timeout=1)
+        assert callback.tick_finished.is_set()
+        assert isinstance(response, TickCmdResponse)
+        assert response.command_id == "CMD_SLOW_TICK"
+    finally:
+        callback.tick_release.set()
+        stop_inbound_workers(client)
+
+
+def test_task_init_is_processed_while_business_tick_is_blocked():
+    old_context = make_context()
+    new_context = SimulationContext(biz_scene_instance_id="TASK_NEW")
+    agent = make_agent(old_context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(old_context, [agent])
+    state_manager.add_local_agent(agent)
+    callback = BlockingTickAndInitCallback(agent)
+    client = make_client(callback, state_manager)
+    start_inbound_workers(client)
+
+    try:
+        tick_request = TickCmdRequest(command_id="CMD_BLOCKING_TICK", context=old_context, step=1)
+        client._on_message(None, None, mqtt_message(tick_request))
+        assert callback.tick_started.wait(timeout=1)
+
+        init_request = SimTaskInitRequest(
+            command_id="CMD_INIT_NEW",
+            context=new_context,
+            agent_list=[],
+        )
+        client._on_message(None, None, mqtt_message(init_request))
+
+        assert callback.init_handled.wait(timeout=1)
+        init_response = client.out_message_queue.get(timeout=1)
+        assert isinstance(init_response, SimTaskInitResponse)
+        assert init_response.command_id == "CMD_INIT_NEW"
+
+        callback.tick_release.set()
+        tick_response = client.out_message_queue.get(timeout=1)
+        assert isinstance(tick_response, TickCmdResponse)
+        assert tick_response.command_id == "CMD_BLOCKING_TICK"
+    finally:
+        callback.tick_release.set()
+        stop_inbound_workers(client)
 
 
 def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():

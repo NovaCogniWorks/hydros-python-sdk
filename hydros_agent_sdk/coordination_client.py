@@ -10,8 +10,9 @@ Similar to Java's SimCoordinationSlave class.
 import logging
 import time
 import traceback
+from dataclasses import dataclass
 from typing import Optional, Dict, Callable
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 from threading import Thread, Event
 import paho.mqtt.client as mqtt
 
@@ -78,6 +79,13 @@ IGNORED_COORDINATION_COMMAND_TYPES = {
 }
 
 
+@dataclass(frozen=True)
+class InboundCommand:
+    command: SimCommand
+    received_at: float
+    queue_name: str
+
+
 class SimCoordinationClient:
     """
     High-level simulation coordination client with callback-based architecture.
@@ -130,7 +138,9 @@ class SimCoordinationClient:
         max_retry_count: int = 5,
         base_retry_delay_ms: int = 1000,
         mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None
+        mqtt_password: Optional[str] = None,
+        control_queue_size: int = 1000,
+        business_queue_size: int = 1000,
     ):
         """
         Initialize the coordination client.
@@ -147,6 +157,8 @@ class SimCoordinationClient:
             base_retry_delay_ms: Base retry delay in milliseconds (default: 1000)
             mqtt_username: Optional MQTT username for authentication (None for no auth)
             mqtt_password: Optional MQTT password for authentication (None for no auth)
+            control_queue_size: Max pending lifecycle/control commands
+            business_queue_size: Max pending business commands
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
@@ -201,9 +213,16 @@ class SimCoordinationClient:
         # Outgoing message queue
         self.out_message_queue: Queue[SimCommand] = Queue()
 
+        # Incoming message queues. MQTT callbacks must stay lightweight; workers
+        # execute the potentially slow business handlers.
+        self.control_message_queue: Queue[InboundCommand] = Queue(maxsize=control_queue_size)
+        self.business_message_queue: Queue[InboundCommand] = Queue(maxsize=business_queue_size)
+
         # Thread management
         self.running = Event()
         self.queue_thread: Optional[Thread] = None
+        self.control_worker_thread: Optional[Thread] = None
+        self.business_worker_thread: Optional[Thread] = None
         self.connected = Event()
 
         # Register command handlers
@@ -254,6 +273,7 @@ class SimCoordinationClient:
 
         # Start queue processing thread
         self.running.set()
+        self._start_inbound_workers()
         self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
         self.queue_thread.start()
 
@@ -276,6 +296,7 @@ class SimCoordinationClient:
 
         # Stop queue thread
         self.running.clear()
+        self._stop_inbound_workers()
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
@@ -404,8 +425,9 @@ class SimCoordinationClient:
             if not self.message_filter.should_process_message(command):
                 return
 
-            # Route to handler
-            self._handle_incoming_message(command)
+            # Defer business handling to SDK workers so MQTT network callbacks
+            # never block on slow tick/event/MPC processing.
+            self._enqueue_incoming(command)
 
         except Exception as e:
             logger.error(
@@ -456,6 +478,106 @@ class SimCoordinationClient:
     # ========================================================================
     # Message Handling
     # ========================================================================
+
+    def _start_inbound_workers(self):
+        """Start inbound command workers if they are not already running."""
+        if self.control_worker_thread is None or not self.control_worker_thread.is_alive():
+            self.control_worker_thread = Thread(
+                target=self._inbound_worker_loop,
+                args=(self.control_message_queue, "ControlWorker"),
+                daemon=True,
+                name="ControlWorker",
+            )
+            self.control_worker_thread.start()
+
+        if self.business_worker_thread is None or not self.business_worker_thread.is_alive():
+            self.business_worker_thread = Thread(
+                target=self._inbound_worker_loop,
+                args=(self.business_message_queue, "BusinessWorker"),
+                daemon=True,
+                name="BusinessWorker",
+            )
+            self.business_worker_thread.start()
+
+    def _stop_inbound_workers(self):
+        """Wait briefly for inbound workers to stop after running is cleared."""
+        for worker in (self.control_worker_thread, self.business_worker_thread):
+            if worker and worker.is_alive():
+                worker.join(timeout=5)
+
+    def _enqueue_incoming(self, command: SimCommand):
+        queue_name, target_queue = self._select_inbound_queue(command)
+        item = InboundCommand(command=command, received_at=time.monotonic(), queue_name=queue_name)
+        try:
+            target_queue.put_nowait(item)
+            logger.info(
+                "Inbound command enqueued: type=%s, id=%s, context=%s, queue=%s, queueSize=%s",
+                command.command_type,
+                command.command_id,
+                self._command_context_id(command),
+                queue_name,
+                target_queue.qsize(),
+            )
+        except Full:
+            logger.error(
+                "Inbound queue full: type=%s, id=%s, context=%s, queue=%s, capacity=%s",
+                command.command_type,
+                command.command_id,
+                self._command_context_id(command),
+                queue_name,
+                target_queue.maxsize,
+            )
+
+    def _select_inbound_queue(self, command: SimCommand):
+        if isinstance(command, (SimTaskInitRequest, SimTaskTerminateRequest)):
+            return "control", self.control_message_queue
+        return "business", self.business_message_queue
+
+    def _inbound_worker_loop(self, source_queue: Queue[InboundCommand], worker_name: str):
+        logger.info("Inbound command worker started: %s", worker_name)
+        while self.running.is_set():
+            try:
+                item = source_queue.get(timeout=1)
+            except Empty:
+                continue
+
+            queue_wait_ms = (time.monotonic() - item.received_at) * 1000
+            started_at = time.monotonic()
+            command = item.command
+            try:
+                logger.info(
+                    "Inbound command handling started: type=%s, id=%s, context=%s, queue=%s, queueWaitMs=%.2f, worker=%s",
+                    command.command_type,
+                    command.command_id,
+                    self._command_context_id(command),
+                    item.queue_name,
+                    queue_wait_ms,
+                    worker_name,
+                )
+                self._handle_incoming_message(command)
+                duration_ms = (time.monotonic() - started_at) * 1000
+                logger.info(
+                    "Inbound command handled: type=%s, id=%s, context=%s, handlerDurationMs=%.2f, worker=%s",
+                    command.command_type,
+                    command.command_id,
+                    self._command_context_id(command),
+                    duration_ms,
+                    worker_name,
+                )
+            except Exception as e:
+                logger.error(
+                    "Error in inbound worker %s: type=%s, id=%s, context=%s, error=%s",
+                    worker_name,
+                    command.command_type,
+                    command.command_id,
+                    self._command_context_id(command),
+                    e,
+                    exc_info=True,
+                )
+            finally:
+                source_queue.task_done()
+
+        logger.info("Inbound command worker stopped: %s", worker_name)
 
     def _set_logging_context(self, command: SimCommand):
         """
