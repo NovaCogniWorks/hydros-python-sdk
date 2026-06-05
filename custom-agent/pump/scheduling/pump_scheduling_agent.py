@@ -411,9 +411,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 计算观测器使用的时间步长
         # 每次调用optimization减去上次调用optimization的step乘3600（第一次减0）
         last_opt_step = getattr(self, "last_opt_step", 0)
-        step_seconds = (step - last_opt_step) * 360
+        step_seconds = (step - last_opt_step) * 36
         if step_seconds <= 0:
-            step_seconds = 360  # 避免首次调用时 step_hours=0 导致报错
+            step_seconds = 3600  # 避免首次调用时 step_hours=0 导致报错
         self.last_opt_step = step
 
         # Upper Scheduler
