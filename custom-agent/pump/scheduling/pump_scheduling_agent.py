@@ -240,10 +240,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         
         # 首先打印 _metrics_data_cache 包含的组件数据
-        cache_dump = []
-        for key, data in self._metrics_data_cache.latest_metrics.items():
-            cache_dump.append(f"  {key}: {data}")
-        logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
+        # cache_dump = []
+        # for key, data in self._metrics_data_cache.latest_metrics.items():
+        #     cache_dump.append(f"  {key}: {data}")
+        # logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
         
         self._lazy_init_odd_mpc()
         
@@ -411,7 +411,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 计算观测器使用的时间步长
         # 每次调用optimization减去上次调用optimization的step乘3600（第一次减0）
         last_opt_step = getattr(self, "last_opt_step", 0)
-        step_seconds = (step - last_opt_step) * 3600
+        step_seconds = (step - last_opt_step) * 36
         if step_seconds <= 0:
             step_seconds = 3600  # 避免首次调用时 step_hours=0 导致报错
         self.last_opt_step = step
