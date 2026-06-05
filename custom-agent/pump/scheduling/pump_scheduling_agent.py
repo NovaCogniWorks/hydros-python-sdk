@@ -481,6 +481,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 下层控制器
         actions = {}
+        decisions = {}
         upstream_selected_flows = {}
         transfer_bundles = {}
         
@@ -530,6 +531,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 reference_back=reference_back_level[0],
                 reference_front=reference_front_level[0],
             )
+            decisions[station_id] = decision
             
             ctx = StationControlContext(
                 station_id=station_id,
@@ -623,6 +625,26 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         }
             
         self.mpc_output = {"upper": upper_res, "lower": lower_res}
+        
+        # Plotting Support
+        if not hasattr(self, "plot_tracker"):
+            from plot_tracker import PlotHistoryTracker
+            self.plot_tracker = PlotHistoryTracker(
+                system_config=self.system_config,
+                demand_plan=getattr(self, "odd_demand_plan", None),
+                output_dir="output/agent_steps"
+            )
+        
+        self.plot_tracker.update_and_plot(
+            step_index=int(step),
+            current_time_hours=float(observation.time_hours),
+            lower_step_hours=float(self.system_config.dt_hours),
+            upper_plan=upper_plan,
+            actions=actions,
+            decisions=decisions,
+            observation=observation,
+            transfer_bundles=transfer_bundles
+        )
         
         # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
