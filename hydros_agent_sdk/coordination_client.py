@@ -214,7 +214,7 @@ class SimCoordinationClient:
         self.out_message_queue: Queue[SimCommand] = Queue()
 
         # 入站消息队列。MQTT 回调必须保持轻量，
-        # 可能较慢的业务处理器由 worker 执行。
+        # 可能较慢的业务处理器由工作线程执行。
         self.control_message_queue: Queue[InboundCommand] = Queue(maxsize=control_queue_size)
         self.business_queue_size = business_queue_size
         self.business_message_queues: Dict[str, Queue[InboundCommand]] = {}
@@ -264,7 +264,7 @@ class SimCoordinationClient:
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
 
-        # 连接 MQTT broker
+        # 连接 MQTT 代理
         logger.info(f"Connecting to MQTT broker: {self.broker_url}:{self.broker_port}")
         self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
         self.mqtt_client.loop_start()
@@ -302,7 +302,7 @@ class SimCoordinationClient:
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
-        # 断开 MQTT
+        # 断开 MQTT 连接
         self._intentional_disconnect = True
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
@@ -344,7 +344,7 @@ class SimCoordinationClient:
                 logger.info(f"Reconnected to MQTT broker: {self.broker_url}:{self.broker_port}")
             else:
                 logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            # 每次连接或重连后都重新订阅 topic
+            # 每次连接或重连后都重新订阅主题
             self.mqtt_client.subscribe(self.topic, qos=self.qos)
             logger.info(f"Subscribed to topic: {self.topic}")
             self.connected.set()
@@ -427,7 +427,7 @@ class SimCoordinationClient:
             if not self.message_filter.should_process_message(command):
                 return
 
-            # 将业务处理推迟给 SDK worker，避免 MQTT 网络回调
+            # 将业务处理推迟给 SDK 工作线程，避免 MQTT 网络回调
             # 被较慢的 tick/event/MPC 处理阻塞。
             self._enqueue_incoming(command)
 
@@ -482,7 +482,7 @@ class SimCoordinationClient:
     # ========================================================================
 
     def _start_inbound_workers(self):
-        """如果入站指令 worker 尚未运行，则启动它们。"""
+        """如果入站指令工作线程尚未运行，则启动它们。"""
         if self.control_worker_thread is None or not self.control_worker_thread.is_alive():
             self.control_worker_thread = Thread(
                 target=self._inbound_worker_loop,
@@ -493,7 +493,7 @@ class SimCoordinationClient:
             self.control_worker_thread.start()
 
     def _stop_inbound_workers(self):
-        """running 标记清除后，短暂等待入站 worker 停止。"""
+        """运行标记清除后，短暂等待入站工作线程停止。"""
         with self._business_workers_lock:
             business_workers = list(self.business_worker_threads.values())
             self.business_worker_threads.clear()
@@ -944,7 +944,7 @@ class SimCoordinationClient:
         logger.info("Queue processing thread started")
         while self.running.is_set():
             try:
-                # 从队列获取下一条指令（带超时，以便检查 running 标记）
+                # 从队列获取下一条指令（带超时，以便检查运行标记）
                 command = self.out_message_queue.get(timeout=1)
 
                 # 检查消息是否应发送
@@ -984,7 +984,7 @@ class SimCoordinationClient:
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         # 发送本地智能体的状态报告。任务终止时，本地智能体注册表可能在异步发送循环
-        # 清空之前已被清理，因此仅对状态报告使用当前 node id 兜底。
+        # 清空之前已被清理，因此仅对状态报告使用当前节点 ID 兜底。
         if isinstance(command, AgentInstanceStatusReport):
             if self.state_manager.is_local_agent(command.source_agent_instance):
                 return True
@@ -1037,7 +1037,7 @@ class SimCoordinationClient:
                     logger.error(f"Max retry count exceeded for command: id={command_id}")
                     raise
 
-                # 指数退避：2^attempt * base_delay
+                # 指数退避：2^attempt * 基础延迟
                 delay_ms = self.base_retry_delay_ms * (2 ** attempt)
                 logger.info(f"Retrying after {delay_ms}ms... (attempt {attempt}/{self.max_retry_count})")
                 time.sleep(delay_ms / 1000.0)
