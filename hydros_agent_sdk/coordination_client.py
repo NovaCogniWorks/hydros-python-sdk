@@ -405,7 +405,7 @@ class SimCoordinationClient:
 
             # 解析 JSON
             data = json.loads(payload_str)
-            logger.info(
+            logger.debug(
                 "MQTT command received: topic=%s, rawType=%s, commandId=%s, context=%s",
                 msg.topic,
                 data.get("command_type") if isinstance(data, dict) else None,
@@ -413,7 +413,7 @@ class SimCoordinationClient:
                 self._raw_context_id(data),
             )
             if self._should_ignore_raw_command(data):
-                logger.info(
+                logger.debug(
                     "MQTT command ignored: type=%s, id=%s, context=%s, reason=disabled_command_type",
                     data.get("command_type"),
                     data.get("command_id"),

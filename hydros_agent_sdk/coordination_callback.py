@@ -312,7 +312,7 @@ class SimCoordinationCallback(ABC):
             report: The status report from the remote agent
         """
         self._store_sibling_agent_instance(report.source_agent_instance)
-        logger.info(f"Sibling agent status updated: {report.source_agent_instance.agent_id}")
+        logger.debug(f"Sibling agent status updated: {report.source_agent_instance.agent_id}")
 
     def on_mpc_result(self, report: MpcResultReport):
         """
