@@ -409,11 +409,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         )
         
         # 计算观测器使用的时间步长
-        # 每次调用optimization减去上次调用optimization的step乘3600（第一次减0）
-        last_opt_step = getattr(self, "last_opt_step", 0)
-        step_seconds = (step - last_opt_step) * 36
-        if step_seconds <= 0:
-            step_seconds = 3600  # 避免首次调用时 step_hours=0 导致报错
+        # 每次调用optimization的间隔按系统配置的 dt_hours 计算
+        last_opt_step = getattr(self, "last_opt_step", step - 1)
+        step_hours = (step - last_opt_step) * float(self.system_config.dt_hours)
+        if step_hours <= 0:
+            step_hours = float(self.system_config.dt_hours)  # 避免首次调用时为0
         self.last_opt_step = step
 
         # Upper Scheduler
@@ -428,7 +428,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             prev_basin_profiles=None,
             next_basin_profiles=None,
             defer_visibility=False,
-            step_hours=step_seconds / 3600.0,
+            step_hours=step_hours,
             pool_areas=pool_areas,
         )
         
