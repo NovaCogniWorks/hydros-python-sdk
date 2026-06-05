@@ -437,7 +437,7 @@ class LocalController:
             for unit_id in active_ids
         }
         previous_openings = {
-            unit_id: float(station_memory.unit_openings.get(unit_id, (unit_models[unit_id].r_min + unit_models[unit_id].r_max) / 2.0))
+            unit_id: float(station_memory.unit_openings.get(unit_id, (unit_models[unit_id].angle_min + unit_models[unit_id].angle_max) / 2.0))
             for unit_id in active_ids
         }
 
@@ -643,10 +643,10 @@ class LocalController:
         r0 = []
         for unit_id in active_unit_ids:
             unit = unit_models[unit_id]
-            bounds_min.append(float(unit.r_min))
-            bounds_max.append(float(unit.r_max))
-            guess = float(initial_openings.get(unit_id, 0.5 * (unit.r_min + unit.r_max)))
-            r0.append(float(np.clip(guess, unit.r_min, unit.r_max)))
+            bounds_min.append(float(unit.angle_min))
+            bounds_max.append(float(unit.angle_max))
+            guess = float(initial_openings.get(unit_id, 0.5 * (unit.angle_min + unit.angle_max)))
+            r0.append(float(np.clip(guess, unit.angle_min, unit.angle_max)))
 
         def residual(r_array):
             total_flow = 0.0
