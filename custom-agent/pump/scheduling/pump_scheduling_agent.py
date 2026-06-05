@@ -238,6 +238,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
+        
+        # 首先打印 _metrics_data_cache 包含的组件数据
+        cache_dump = []
+        for key, data in self._metrics_data_cache.latest_metrics.items():
+            cache_dump.append(f"  {key}: {data}")
+        logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
+        
         self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
@@ -301,12 +308,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     angle_val = "None"
                     status = "None"
                 
-                # 获取机组流量 (优先从 attributes 提取 front_water_flow)
+                # 获取机组流量 (强制从 attributes 提取 front_water_flow，不允许降级)
                 q = self._metrics_data_cache.get_attribute_from_any_metric(uid, "front_water_flow")
                 if q is None:
-                    q = self._metrics_data_cache.get_value(uid, MetricsCodes.WATER_FLOW.value)
-                if q is not None:
-                    total_q += float(q)
+                    raise ValueError(f"无法从 metrics_data_cache 的 attributes 中提取 S{sid}-U{uid} 的 front_water_flow 最新流量数据")
+                total_q += float(q)
                 
                 # 获取机组水文(前后水位)，优先从 attributes 提取
                 u_lvl = self._metrics_data_cache.get_attribute_from_any_metric(uid, "front_water_level")
