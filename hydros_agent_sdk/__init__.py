@@ -14,7 +14,6 @@ from hydros_agent_sdk.context_manager import (
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
-from hydros_agent_sdk.mqtt import HydrosMqttClient
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
@@ -188,9 +187,6 @@ __all__ = [
     # 状态管理
     "AgentStateManager",
     "MessageFilter",
-
-    # 用于 MQTT 的客户端
-    "HydrosMqttClient",
 
     # 智能体属性
     "AgentProperties",

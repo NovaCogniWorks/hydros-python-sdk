@@ -54,7 +54,7 @@ def send_metrics(
     通过 MQTT 发送单条指标消息。
 
     Args:
-        mqtt_client: MQTT 客户端实例（paho.mqtt.client.Client 或 HydrosMqttClient）
+        mqtt_client: 提供 publish(topic, payload, qos=...) 方法的 MQTT 客户端实例
         topic: 要发布到的 MQTT topic
         metrics: 要发送的 MqttMetrics 对象
         qos: 服务质量等级（0、1 或 2）
