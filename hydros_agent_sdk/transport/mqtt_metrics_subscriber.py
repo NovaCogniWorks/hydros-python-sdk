@@ -1,4 +1,4 @@
-"""MQTT subscription helper for field metrics."""
+"""现地指标的 MQTT 订阅辅助对象。"""
 
 import json
 import logging
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class MqttMetricsSubscriber:
-    """Subscribe to MQTT field metrics topics and feed parsed payloads into a cache."""
+    """订阅 MQTT 现地指标 topic，并把解析后的 payload 写入缓存。"""
 
     def __init__(self, mqtt_client: Any, metrics_data_cache: MetricsDataCache):
         self.mqtt_client = mqtt_client

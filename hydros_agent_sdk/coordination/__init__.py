@@ -1,4 +1,4 @@
-"""Coordination runtime support objects."""
+"""协调运行时支撑对象。"""
 
 from hydros_agent_sdk.coordination.runtime import (
     CoordinationCallbackResultDispatcher,

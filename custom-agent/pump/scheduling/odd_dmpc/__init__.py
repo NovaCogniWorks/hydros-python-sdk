@@ -1,4 +1,4 @@
-"""Core package for the ODD-driven hierarchical DMPC prototype."""
+"""ODD 驱动分层 DMPC 原型的核心包。"""
 
 import os
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""Rolling MPC runtime coordination."""
+"""滚动 MPC 运行时协调。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class MpcRollingRuntime:
-    """Own rolling MPC task state and trigger optimization cycles."""
+    """持有滚动 MPC 任务状态并触发优化周期。"""
 
     def __init__(
         self,
@@ -77,7 +77,7 @@ class MpcRollingRuntime:
         return int(value)
 
     def get_roll_steps(self) -> int:
-        """Return the rolling interval, matching Java roll_steps fallback rules."""
+        """返回滚动间隔，匹配 Java 侧 roll_steps 兜底规则。"""
         scenario_roll_steps = self._get_scenario_int("roll_steps")
         if scenario_roll_steps is not None:
             return scenario_roll_steps
@@ -89,7 +89,7 @@ class MpcRollingRuntime:
         )
 
     def get_total_steps(self) -> int:
-        """Return total task steps used to avoid rolling again at task end."""
+        """返回任务总步数，用于避免在任务结束时再次滚动。"""
         scenario_total_steps = self._get_scenario_int("total_steps")
         if scenario_total_steps is not None:
             return scenario_total_steps
@@ -97,7 +97,7 @@ class MpcRollingRuntime:
         return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
     def should_auto_start_mpc_on_tick(self) -> bool:
-        """Whether ticks may activate MPC before a time-series update arrives."""
+        """tick 是否可以在时间序列更新到达前激活 MPC。"""
         return PropertyParseUtils.get_bool(
             self.properties,
             "auto_start_mpc_on_tick",
@@ -111,7 +111,7 @@ class MpcRollingRuntime:
         self.rolling_cycle_runner = rolling_cycle_runner
 
     def is_mpc_optimizing_on_the_loop(self) -> bool:
-        """Whether the task has already activated its rolling MPC loop."""
+        """任务是否已经激活滚动 MPC 循环。"""
         return self._mpc_task_state is not None
 
     def on_tick(self, step: int) -> None:

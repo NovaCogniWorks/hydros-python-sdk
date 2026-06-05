@@ -1,8 +1,8 @@
 """
-MQTT Metrics utility for sending metrics data.
+用于发送指标数据的 MQTT Metrics 工具。
 
-This module provides utilities for sending metrics data via MQTT,
-matching the Java implementation in com.hydros.agent.edge.channel.biz.model.MqttMetrics.
+本模块提供通过 MQTT 发送指标数据的工具，并与 Java 实现
+com.hydros.agent.edge.channel.biz.model.MqttMetrics 保持匹配。
 """
 
 import json
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 class MqttMetrics(BaseModel):
     """
-    MQTT Metrics model matching Java MqttMetrics class.
+    匹配 Java MqttMetrics 类的 MQTT Metrics 模型。
 
-    This model represents metrics data sent via MQTT for water network objects.
+    该模型表示水网对象通过 MQTT 发送的指标数据。
     """
     source_id: str = Field(..., description="Source identifier (e.g., agent code)")
     job_instance_id: str = Field(..., description="Job instance ID (e.g., biz_scene_instance_id)")
@@ -30,7 +30,7 @@ class MqttMetrics(BaseModel):
     value: float = Field(..., description="Metrics value")
 
     class Config:
-        """Pydantic configuration."""
+        """Pydantic 配置。"""
         json_schema_extra = {
             "example": {
                 "source_id": "TWINS_SIMULATION_AGENT",
@@ -52,25 +52,25 @@ def send_metrics(
     qos: int = 0
 ) -> bool:
     """
-    Send a single metrics message via MQTT.
+    通过 MQTT 发送单条指标消息。
 
     Args:
-        mqtt_client: MQTT client instance (paho.mqtt.client.Client or HydrosMqttClient)
-        topic: MQTT topic to publish to
-        metrics: MqttMetrics object to send
-        qos: Quality of Service level (0, 1, or 2)
+        mqtt_client: MQTT 客户端实例（paho.mqtt.client.Client 或 HydrosMqttClient）
+        topic: 要发布到的 MQTT topic
+        metrics: 要发送的 MqttMetrics 对象
+        qos: 服务质量等级（0、1 或 2）
 
     Returns:
-        True if message was sent successfully, False otherwise
+        发送成功返回 True，否则返回 False
     """
     try:
-        # Serialize to JSON
+        # 序列化为 JSON
         payload = metrics.model_dump_json()
 
-        # Publish via MQTT
+        # 通过 MQTT 发布
         result = mqtt_client.publish(topic, payload, qos=qos)
 
-        # Check if publish was successful
+        # 检查发布是否成功
         if hasattr(result, 'rc') and result.rc == 0:
             logger.debug(f"Sent metrics: {metrics.metrics_code}={metrics.value} "
                         f"for object {metrics.object_name} (step {metrics.step_index})")
@@ -91,16 +91,16 @@ def send_metrics_batch(
     qos: int = 0
 ) -> int:
     """
-    Send multiple metrics messages via MQTT.
+    通过 MQTT 批量发送指标消息。
 
     Args:
-        mqtt_client: MQTT client instance
-        topic: MQTT topic to publish to
-        metrics_list: List of MqttMetrics objects to send
-        qos: Quality of Service level (0, 1, or 2)
+        mqtt_client: MQTT 客户端实例
+        topic: 要发布到的 MQTT topic
+        metrics_list: 要发送的 MqttMetrics 对象列表
+        qos: 服务质量等级（0、1 或 2）
 
     Returns:
-        Number of messages sent successfully
+        成功发送的消息数量
     """
     success_count = 0
 
@@ -123,20 +123,20 @@ def create_mock_metrics(
     timestamp_ms: Optional[int] = None
 ) -> MqttMetrics:
     """
-    Create a mock metrics object for testing.
+    创建用于测试的模拟指标对象。
 
     Args:
-        source_id: Source identifier (e.g., agent code)
-        job_instance_id: Job instance ID (e.g., biz_scene_instance_id)
-        object_id: Water network object ID
-        object_name: Water network object name
-        step_index: Simulation step index
-        metrics_code: Metrics code (e.g., water_level, flow_rate)
-        value: Metrics value
-        timestamp_ms: Optional timestamp in milliseconds (defaults to current time)
+        source_id: 来源标识（例如 agent code）
+        job_instance_id: 作业实例 ID（例如 biz_scene_instance_id）
+        object_id: 水网对象 ID
+        object_name: 水网对象名称
+        step_index: 仿真步索引
+        metrics_code: 指标编码（例如 water_level、flow_rate）
+        value: 指标值
+        timestamp_ms: 可选毫秒时间戳（默认使用当前时间）
 
     Returns:
-        MqttMetrics object
+        MqttMetrics 对象
     """
     if timestamp_ms is None:
         timestamp_ms = int(time.time() * 1000)

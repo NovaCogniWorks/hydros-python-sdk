@@ -1,4 +1,4 @@
-"""Run the reusable Hydros multi-agent launcher with python -m."""
+"""使用 python -m 运行可复用的 Hydros 多智能体启动器。"""
 
 from .cli import main
 

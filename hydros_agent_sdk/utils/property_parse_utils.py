@@ -1,4 +1,4 @@
-"""Shared helpers for reading typed values from agent properties."""
+"""从 agent properties 读取类型化值的共享辅助对象。"""
 
 from typing import Optional
 
@@ -6,7 +6,7 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 
 
 class PropertyParseUtils:
-    """Typed accessors for AgentProperties values."""
+    """AgentProperties 值的类型化访问器。"""
 
     @staticmethod
     def get_int(properties: AgentProperties, name: str, default: Optional[int]) -> int:

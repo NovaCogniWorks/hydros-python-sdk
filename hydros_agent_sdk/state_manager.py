@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
-    """Task lifecycle status."""
+    """任务生命周期状态。"""
     INITIALIZING = "INITIALIZING"
     ACTIVE = "ACTIVE"
     TERMINATING = "TERMINATING"
@@ -62,7 +62,7 @@ class AgentStateManager:
     """
 
     def __init__(self):
-        # Core state
+        # 核心状态
         self._active_contexts: Set[str] = set()  # biz_scene_instance_id set
         self._task_states: Dict[str, TaskState] = {}  # context_id → task state
         self._agent_instances: Dict[str, HydroAgentInstance] = {}  # agent_id → instance
@@ -72,33 +72,33 @@ class AgentStateManager:
         self._lock = RLock()
 
     # ========================================================================
-    # Cluster and Node Management
+    # 集群和节点管理
     # ========================================================================
 
     def set_cluster_id(self, cluster_id: str):
-        """Set the current cluster ID."""
+        """设置当前集群 ID。"""
         with self._lock:
             self._hydros_cluster_id = cluster_id
         logger.info(f"Cluster ID set to: {cluster_id}")
 
     def get_cluster_id(self) -> Optional[str]:
-        """Get the current cluster ID."""
+        """获取当前集群 ID。"""
         with self._lock:
             return self._hydros_cluster_id
 
     def set_node_id(self, node_id: str):
-        """Set the current node ID."""
+        """设置当前节点 ID。"""
         with self._lock:
             self._hydros_node_id = node_id
         logger.info(f"Node ID set to: {node_id}")
 
     def get_node_id(self) -> Optional[str]:
-        """Get the current node ID."""
+        """获取当前节点 ID。"""
         with self._lock:
             return self._hydros_node_id
 
     # ========================================================================
-    # Context Management (from AgentContextManager)
+    # 上下文管理（来自 AgentContextManager）
     # ========================================================================
 
     def add_active_context(self, context: SimulationContext):
@@ -150,7 +150,7 @@ class AgentStateManager:
             return self._active_contexts.copy()
 
     # ========================================================================
-    # Agent Instance Management
+    # 智能体实例管理
     # ========================================================================
 
     def register_agent_instance(self, agent: HydroAgentInstance):
@@ -223,7 +223,7 @@ class AgentStateManager:
             return agent.agent_status if agent else None
 
     # ========================================================================
-    # Local/Remote Agent Tracking (from AgentContextManager)
+    # 本地/远端智能体跟踪（来自 AgentContextManager）
     # ========================================================================
 
     def add_local_agent(self, agent_instance: HydroAgentInstance):
@@ -264,17 +264,17 @@ class AgentStateManager:
             return False
 
         with self._lock:
-            # Check by agent_id first (explicit registration)
+            # 先按 agent_id 检查（显式注册）
             if agent_instance.agent_id in self._local_agent_instances:
                 return True
 
-            # Check by node_id if available (implicit check)
-            # Only consider it local if node_id matches AND agent is not explicitly registered as remote
+            # 如果有 node_id，则按 node_id 检查（隐式检查）
+            # 只有 node_id 匹配且智能体没有显式注册为远端时，才视为本地
             if self._hydros_node_id and agent_instance.hydros_node_id == self._hydros_node_id:
-                # If agent_id is known but not in local set, it's not local
+                # 如果 agent_id 已知但不在本地集合中，则不是本地
                 if agent_instance.agent_id:
                     return False
-                # If agent_id is unknown, use node_id as fallback
+                # 如果 agent_id 未知，则使用 node_id 兜底
                 return True
 
         return False
@@ -295,7 +295,7 @@ class AgentStateManager:
         return not self.is_local_agent(agent_instance)
 
     # ========================================================================
-    # Task Lifecycle Management
+    # 任务生命周期管理
     # ========================================================================
 
     def init_task(self, context: SimulationContext, agents: Optional[List[HydroAgentInstance]] = None):
@@ -314,20 +314,20 @@ class AgentStateManager:
         agent_ids = [agent.agent_id for agent in agents if agent and agent.agent_id] if agents else []
 
         with self._lock:
-            # Create task state
+            # 创建任务状态
             task_state = TaskState(context_id, agent_ids)
             self._task_states[context_id] = task_state
 
-            # Register agents
+            # 注册智能体
             if agents:
                 for agent in agents:
                     if agent and agent.agent_id:
                         self.register_agent_instance(agent)
 
-            # Add to active contexts
+            # 加入活跃上下文
             self.add_active_context(context)
 
-            # Update task status to ACTIVE
+            # 将任务状态更新为 ACTIVE
             task_state.status = TaskStatus.ACTIVE
 
         logger.info(f"Initialized task: {context_id} with {len(agent_ids)} agents")
@@ -346,16 +346,16 @@ class AgentStateManager:
         context_id = context.biz_scene_instance_id
 
         with self._lock:
-            # Update task state
+            # 更新任务状态
             task_state = self._task_states.get(context_id)
             if task_state:
                 task_state.status = TaskStatus.TERMINATING
                 task_state.terminated_at = datetime.now()
 
-            # Remove from active contexts
+            # 从活跃上下文移除
             self.remove_active_context(context)
 
-            # Mark task as terminated
+            # 标记任务已终止
             if task_state:
                 task_state.status = TaskStatus.TERMINATED
 
@@ -411,11 +411,11 @@ class AgentStateManager:
             return agents
 
     # ========================================================================
-    # Utility
+    # 工具方法
     # ========================================================================
 
     def clear(self):
-        """Clear all state."""
+        """清空全部状态。"""
         with self._lock:
             self._active_contexts.clear()
             self._task_states.clear()

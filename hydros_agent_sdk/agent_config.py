@@ -1,19 +1,18 @@
 """
-Agent Configuration Loader
+智能体配置加载器。
 
-This module provides functionality to load and parse agent configuration YAML files
-from URLs or local files. It defines Pydantic models for the configuration structure
-and provides convenient accessor methods for common configuration values.
+本模块提供从 URL 或本地文件加载并解析智能体配置 YAML 的能力。
+它定义配置结构对应的 Pydantic 模型，并提供常用配置值的便捷访问方法。
 
-Example usage:
-    # Load from URL
+使用示例：
+    # 从 URL 加载
     config = AgentConfigLoader.from_url("http://example.com/agent_config.yaml")
 
-    # Access configuration values
+    # 访问配置值
     agent_code = config.get_agent_code()
     modeling_url = config.get_hydros_objects_modeling_url()
 
-    # Access nested properties
+    # 访问嵌套属性
     step_resolution = config.properties.step_resolution
     mqtt_host = config.properties.output_config.mqtt_broker.mqtt_host
 """
@@ -37,32 +36,32 @@ logger = logging.getLogger(__name__)
 
 
 class Author(HydroBaseModel):
-    """Author information for the agent configuration."""
+    """智能体配置的作者信息。"""
     user_name: str
 
 
 class Waterway(HydroBaseModel):
-    """Waterway information."""
+    """水系信息。"""
     waterway_id: int
     waterway_name: str
 
 
 class MqttBroker(HydroBaseModel):
-    """MQTT broker configuration."""
+    """MQTT broker 配置。"""
     mqtt_host: str
     mqtt_port: int
     server_uri: str
 
 
 class OutputConfig(HydroBaseModel):
-    """Output configuration for agent results."""
+    """智能体结果输出配置。"""
     output_mode: str
     mqtt_broker: MqttBroker
     mqtt_topic: str
 
 
 class AgentProperties(HydroBaseModel):
-    """Agent properties containing business logic configuration."""
+    """包含业务逻辑配置的智能体属性。"""
     model_config = ConfigDict(extra='allow')
 
     driven_by_coordinator: Optional[bool] = None
@@ -71,7 +70,7 @@ class AgentProperties(HydroBaseModel):
 
 
 class AgentComponentConfiguration(HydroBaseModel):
-    """Component configuration nested under an agent configuration."""
+    """嵌套在智能体配置下的组件配置。"""
     model_config = ConfigDict(extra='allow')
 
     component_id: Optional[str] = None
@@ -82,10 +81,10 @@ class AgentComponentConfiguration(HydroBaseModel):
 
 class AgentConfiguration(HydroBaseModel):
     """
-    Complete agent configuration model.
+    完整智能体配置模型。
 
-    This model represents the full structure of an agent configuration YAML file,
-    including agent metadata, waterway information, and business properties.
+    该模型表示智能体配置 YAML 文件的完整结构，
+    包括智能体元数据、水系信息和业务属性。
     """
     model_config = ConfigDict(extra='allow')
 
@@ -112,19 +111,19 @@ class AgentConfiguration(HydroBaseModel):
 
     def get_agent_code(self) -> str:
         """
-        Get the agent code.
+        获取 agent code。
 
         Returns:
-            The agent code string
+            agent code 字符串
         """
         return self.agent_code
 
     def get_hydros_objects_modeling_url(self) -> Optional[str]:
         """
-        Get the Hydros objects modeling URL from properties.
+        从 properties 获取 Hydros 对象建模 URL。
 
         Returns:
-            The modeling URL if present, None otherwise
+            存在时返回建模 URL，否则返回 None
         """
         return self.properties.hydros_objects_modeling_url if self.properties else None
 
@@ -132,14 +131,14 @@ class AgentConfiguration(HydroBaseModel):
 
     def get_property(self, key: str, default: Any = None) -> Any:
         """
-        Get a property value by key with optional default.
+        按 key 获取属性值，并支持可选默认值。
 
         Args:
-            key: Property key name (snake_case)
-            default: Default value if property not found
+            key: 属性 key 名称（snake_case）
+            default: 属性不存在时使用的默认值
 
         Returns:
-            Property value or default
+            属性值或默认值
         """
         if not self.properties:
             return default
@@ -148,29 +147,29 @@ class AgentConfiguration(HydroBaseModel):
 
 class AgentConfigLoader:
     """
-    Loader class for agent configuration files.
+    智能体配置文件加载类。
 
-    This class provides static methods to load agent configurations from URLs
-    or local file paths, and parse them into structured AgentConfiguration objects.
+    该类提供静态方法，从 URL 或本地文件路径加载智能体配置，
+    并解析为结构化的 AgentConfiguration 对象。
     """
 
     @staticmethod
     def from_url(url: str, timeout: int = 30) -> AgentConfiguration:
         """
-        Load agent configuration from a URL.
+        从 URL 加载智能体配置。
 
         Args:
-            url: The URL to fetch the YAML configuration from
-            timeout: Request timeout in seconds (default: 30)
+            url: 获取 YAML 配置的 URL
+            timeout: 请求超时时间，单位秒（默认 30）
 
         Returns:
-            AgentConfiguration object with parsed configuration
+            包含已解析配置的 AgentConfiguration 对象
 
         Raises:
-            ImportError: If PyYAML is not installed
-            URLError: If the URL cannot be accessed
-            HTTPError: If the HTTP request fails
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            URLError: URL 无法访问时抛出
+            HTTPError: HTTP 请求失败时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(
@@ -181,15 +180,15 @@ class AgentConfigLoader:
         logger.info(f"Loading agent configuration from URL: {url}")
 
         try:
-            # Encode URL to handle non-ASCII characters (e.g., Chinese characters)
-            # Split URL into parts and encode only the path part
+            # 编码 URL 以处理非 ASCII 字符（例如中文字符）
+            # 将 URL 拆分为多个部分，只编码 path 部分
             from urllib.parse import urlparse, urlunparse
             parsed = urlparse(url)
 
-            # Encode the path component while preserving already-encoded characters
+            # 编码 path 组件，同时保留已经编码的字符
             encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
 
-            # Reconstruct the URL with encoded path
+            # 使用编码后的 path 重建 URL
             encoded_url = urlunparse((
                 parsed.scheme,
                 parsed.netloc,
@@ -201,7 +200,7 @@ class AgentConfigLoader:
 
             logger.debug(f"Encoded URL: {encoded_url}")
 
-            # Create request with proper headers
+            # 创建带有合适 header 的请求
             request = Request(encoded_url)
             request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.4')
 
@@ -221,18 +220,18 @@ class AgentConfigLoader:
     @staticmethod
     def from_file(file_path: str) -> AgentConfiguration:
         """
-        Load agent configuration from a local file.
+        从本地文件加载智能体配置。
 
         Args:
-            file_path: Path to the YAML configuration file
+            file_path: YAML 配置文件路径
 
         Returns:
-            AgentConfiguration object with parsed configuration
+            包含已解析配置的 AgentConfiguration 对象
 
         Raises:
-            ImportError: If PyYAML is not installed
-            FileNotFoundError: If the file does not exist
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            FileNotFoundError: 文件不存在时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(
@@ -256,17 +255,17 @@ class AgentConfigLoader:
     @staticmethod
     def from_yaml_string(yaml_content: str) -> AgentConfiguration:
         """
-        Parse agent configuration from a YAML string.
+        从 YAML 字符串解析智能体配置。
 
         Args:
-            yaml_content: YAML content as a string
+            yaml_content: YAML 字符串内容
 
         Returns:
-            AgentConfiguration object with parsed configuration
+            包含已解析配置的 AgentConfiguration 对象
 
         Raises:
-            ImportError: If PyYAML is not installed
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(
@@ -290,12 +289,12 @@ class AgentConfigLoader:
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> AgentConfiguration:
         """
-        Create agent configuration from a dictionary.
+        从字典创建智能体配置。
 
         Args:
-            data: Dictionary containing configuration data
+            data: 包含配置数据的字典
 
         Returns:
-            AgentConfiguration object with parsed configuration
+            包含已解析配置的 AgentConfiguration 对象
         """
         return AgentConfiguration(**data)

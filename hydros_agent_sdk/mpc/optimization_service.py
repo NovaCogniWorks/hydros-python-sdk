@@ -1,4 +1,4 @@
-"""Default MPC optimization workflow service."""
+"""默认 MPC 优化工作流服务。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class MpcOptimizationService:
-    """Run the SDK's default MPC planning and reporting workflow."""
+    """运行 SDK 默认的 MPC 规划和结果上报工作流。"""
 
     def __init__(
         self,

@@ -1,4 +1,4 @@
-"""Reusable launcher support for Hydros Python agent applications."""
+"""Hydros Python agent 应用的可复用启动器支撑。"""
 
 from .support import (
     AgentClassResolver,

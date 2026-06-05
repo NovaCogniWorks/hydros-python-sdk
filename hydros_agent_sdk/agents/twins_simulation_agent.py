@@ -107,7 +107,7 @@ class TwinsSimulationAgent(TickableAgent):
             **kwargs
         )
 
-        # Digital twins model and state
+        # 数字孪生模型和状态
         self._twins_model = None
         self._topology = None
         self._simulation_state = {}
@@ -135,18 +135,18 @@ class TwinsSimulationAgent(TickableAgent):
         logger.info("="*70)
 
         try:
-            # Load agent configuration
+            # 加载智能体配置
             logger.info("Loading agent configuration...")
             self.load_agent_configuration(request)
             logger.info(f"Configuration loaded with {len(self.properties)} properties")
 
-            # Load water network topology
+            # 加载水网拓扑
             hydros_objects_modeling_url = self.properties.get_property('hydros_objects_modeling_url')
             if hydros_objects_modeling_url:
                 logger.info("Loading water network topology for digital twins...")
                 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 
-                # Load topology with all parameters for high-fidelity simulation
+                # 加载包含全部参数的拓扑，用于高保真仿真
                 param_keys = self.properties.get_property(
                     'param_keys',
                     {'max_opening', 'min_opening', 'interpolate_cross_section_count'}
@@ -159,21 +159,21 @@ class TwinsSimulationAgent(TickableAgent):
 
                 logger.info(f"Loaded topology with {len(self._topology.top_objects)} top-level objects")
 
-                # Initialize digital twins model (subclass-specific)
+                # 初始化数字孪生模型（子类专属）
                 self._initialize_twins_model()
             else:
                 logger.warning("No hydros_objects_modeling_url configured")
 
-            # Update agent status to ACTIVE
+            # 将智能体状态更新为 ACTIVE
             object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
-            # Register with state manager
+            # 注册到状态管理器
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
 
             logger.info(f"Digital twins simulation agent initialized: {self.agent_id}")
 
-            # Create response
+            # 创建响应
             response = SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -194,7 +194,7 @@ class TwinsSimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Failed to initialize digital twins simulation agent: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -251,8 +251,8 @@ class TwinsSimulationAgent(TickableAgent):
         Returns:
             List of MqttMetrics objects
         """
-        # Default implementation: return mock metrics
-        # Subclasses should override this method
+        # 默认实现：返回模拟指标
+        # 子类应覆盖该方法
         logger.warning("Using default digital twins simulation (mock data)")
 
         metrics_list = []
@@ -285,14 +285,14 @@ class TwinsSimulationAgent(TickableAgent):
         """
         logger.info(f"Updating digital twins state with {len(time_series_list)} boundary conditions")
 
-        # Update simulation state with boundary conditions
+        # 使用边界条件更新仿真状态
         for time_series in time_series_list:
             logger.debug(
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
 
-            # Store in simulation state
+            # 存入仿真状态
             state_key = f"{time_series.object_id}_{time_series.metrics_code}"
             self._simulation_state[state_key] = time_series
 
@@ -318,18 +318,18 @@ class TwinsSimulationAgent(TickableAgent):
         logger.info("="*70)
 
         try:
-            # Clean up digital twins model
+            # 清理数字孪生模型
             self._twins_model = None
             self._topology = None
             self._simulation_state.clear()
 
-            # Unregister from state manager
+            # 从状态管理器注销
             self.state_manager.terminate_task(self.context)
             self.state_manager.remove_local_agent(self)
 
             logger.info(f"Digital twins simulation agent terminated: {self.agent_id}")
 
-            # Create response
+            # 创建响应
             response = SimTaskTerminateResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -348,7 +348,7 @@ class TwinsSimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error terminating digital twins simulation agent: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return SimTaskTerminateResponse(
                 context=self.context,
                 command_id=request.command_id,

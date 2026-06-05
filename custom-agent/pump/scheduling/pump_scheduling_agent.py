@@ -253,7 +253,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         from odd_dmpc.environment import _level_keys, _ordered_station_ids, resolve_pool_areas
         
-        # Init or update memories from our own self tracked state
+        # 从自身跟踪状态初始化或更新记忆
         if not self.station_memories:
             for sid in self.system_config.station_ids:
                 self.station_memories[sid] = StationMemory(
@@ -416,7 +416,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             step_seconds = 3600  # 避免首次调用时 step_hours=0 导致报错
         self.last_opt_step = step
 
-        # Upper Scheduler
+        # 上层调度器
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
         self.observers.update(
             prev_basin_levels=basin_levels,
@@ -432,7 +432,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             pool_areas=pool_areas,
         )
         
-        # Boundary plan
+        # 边界计划
         boundary_levels_dict = {}
         for node in self.system_config.topology.boundary_nodes:
             key = str(node.mpc_key or node.id or node.hydro_node)
@@ -474,12 +474,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             f"上层预测(首步): 流量={q_next}, 预测前池={z_f_next}, 预测后池={z_b_next}, 预测扬程={h_next}"
         )
         
-        # Lower Controllers
+        # 下层控制器
         actions = {}
         upstream_selected_flows = {}
         transfer_bundles = {}
         
-        # First, pre-populate all transfer bundles so they are available for predictions
+        # 首先预填充全部传输 bundle，使其可用于预测
         for station_id in self.system_config.station_ids:
             station_memory = self.station_memories[station_id]
             reference_flow = [float(f) for f in upper_plan.flow_refs[station_id]]
@@ -566,7 +566,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)
             
-            # Update memory
+            # 更新记忆
             new_active_ids = []
             for uid, st in action.unit_status.items():
                 if st == 1: new_active_ids.append(uid)
@@ -597,7 +597,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         self.cumulative_last_station_flow += float(actions[self.system_config.last_station_id].selected_flow) * float(self.system_config.dt_hours)
 
-        # map to previous output format for test_mpc
+        # 映射到 test_mpc 使用的旧输出格式
         lower_res = {}
         for sid in self.system_config.station_ids:
             action = actions[sid]
@@ -611,7 +611,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 "total_q": [action.selected_flow]
             }
             
-        # format upper_res
+        # 格式化 upper_res
         upper_res = {
             "q_planned": {sid: upper_plan.flow_refs[sid] for sid in self.system_config.station_ids},
             "z_planned": {sid: upper_plan.station_back_levels[sid] for sid in self.system_config.station_ids}

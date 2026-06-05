@@ -15,7 +15,7 @@ from typing import Optional, List, Dict
 
 from hydros_agent_sdk.utils.yaml_loader import YamlLoader
 
-# Add current directory to Python path for hydraulic_solver import
+# 将当前目录加入 Python 路径，便于导入 hydraulic_solver
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -47,18 +47,18 @@ from hydros_agent_sdk.protocol.models import (
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
-# Import example hydraulic solver implementation
+# 导入示例水力求解器实现
 from hydraulic_solver import HydraulicSolver
 
-# Configure logging (only when running as main script)
-# When imported by multi_agent_launcher, logging is already configured
+# 配置日志（仅在作为主脚本运行时）
+# 被 multi_agent_launcher 导入时，日志已完成配置
 if __name__ == "__main__":
-    # Get the examples directory (two levels up from this script)
+    # 获取 examples 目录（当前脚本向上两级）
     EXAMPLES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # Load env config to get cluster_id and node_id for logging
+    # 加载 env 配置，用于获取日志中的 cluster_id 和 node_id
     try:
         env_config = load_env_config()
         hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
@@ -103,7 +103,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         hydros_node_id: str,
         **kwargs
     ):
-        """Initialize twins simulation agent."""
+        """初始化孪生仿真智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -116,7 +116,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             **kwargs
         )
 
-        # Hydraulic solver
+        # 水力求解器
         self._hydraulic_solver: Optional[HydraulicSolver] = None
 
         logger.info(f"MyTwinsSimulationAgent created: {agent_id}")
@@ -131,7 +131,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         idz_config_url = self.properties.get_property('idz_config_url')
         config = YamlLoader.from_url(idz_config_url)
 
-        # Create hydraulic solver with error context
+        # 在错误上下文中创建水力求解器
         with AgentErrorContext(
             ErrorCodes.MODEL_INITIALIZATION_FAILURE,
             agent_name=self.agent_code
@@ -142,7 +142,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             logger.error(f"Failed to create solver: {ctx.error_message}")
             raise RuntimeError(f"Solver creation failed: {ctx.error_message}")
 
-        # Initialize solver with topology
+        # 使用拓扑初始化求解器
         if self._topology:
             with AgentErrorContext(
                 ErrorCodes.MODEL_INITIALIZATION_FAILURE,
@@ -158,7 +158,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         else:
             logger.warning("No topology available for hydraulic solver")
 
-        # Load solver parameters from configuration with error handling
+        # 带错误处理地从配置加载求解器参数
         with AgentErrorContext(
             ErrorCodes.CONFIGURATION_LOAD_FAILURE,
             agent_name=self.agent_code
@@ -195,7 +195,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
             logger.error("Hydraulic solver not initialized")
             return []
 
-        # Collect boundary conditions with error handling
+        # 带错误处理地采集边界条件
         with AgentErrorContext(
             ErrorCodes.BOUNDARY_CONDITION_ERROR,
             agent_name=self.agent_code
@@ -204,12 +204,12 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         if ctx.has_error:
             logger.error(f"Failed to collect boundary conditions: {ctx.error_message}")
-            # Use empty boundary conditions as fallback
+            # 使用空边界条件兜底
             boundary_conditions = {}
 
         logger.debug(f"Boundary conditions: {len(boundary_conditions)} objects")
 
-        # Execute hydraulic solver with error handling
+        # 带错误处理地执行水力求解器
         with AgentErrorContext(
             ErrorCodes.SIMULATION_EXECUTION_FAILURE,
             agent_name=self.agent_code
@@ -222,7 +222,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
         logger.info(f"Hydraulic solver completed for step {step}")
 
-        # Convert results to metrics with error handling
+        # 带错误处理地将结果转换为指标
         with AgentErrorContext(
             ErrorCodes.METRICS_GENERATION_FAILURE,
             agent_name=self.agent_code
@@ -249,20 +249,20 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         boundary_conditions = {}
 
-        # Get boundary condition metrics codes from configuration
+        # 从配置获取边界条件指标编码
         bc_metrics = self.properties.get_property(
             'boundary_condition_metrics',
             ['inflow', 'upstream_water_level']
         )
 
-        # Collect boundary conditions for all objects
+        # 采集全部对象的边界条件
         if self._topology:
             for top_obj in self._topology.top_objects:
                 for child in top_obj.children:
                     object_bc = {}
 
                     for metrics_code in bc_metrics:
-                        # Get value from time series cache
+                        # 从时间序列缓存获取值
                         value = self.get_time_series_value(
                             child.object_id,
                             metrics_code,
@@ -325,7 +325,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
         """
         logger.info(f"Updating digital twins with {len(time_series_list)} boundary conditions")
 
-        # Log boundary condition updates with error handling
+        # 带错误处理地记录边界条件更新
         for time_series in time_series_list:
             try:
                 logger.info(
@@ -335,7 +335,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     f"values={len(time_series.time_series)}"
                 )
 
-                # Update simulation state if needed
+                # 如有需要则更新仿真状态
                 if self._simulation_state and time_series.object_id:
                     state_key = f"{time_series.object_id}_{time_series.metrics_code}"
                     self._simulation_state[state_key] = time_series
@@ -347,17 +347,17 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
                     f"Error updating boundary condition for {time_series.object_name}: {e}",
                     exc_info=True
                 )
-                # Continue with other updates
+                # 继续处理其他更新
 
 
 def main():
     """
     Main entry point for twins simulation agent service.
     """
-    # Get script directory
+    # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Load environment configuration (with fallback to shared config)
+    # 加载环境配置（支持回退到共享配置）
     ENV_FILE = os.path.join(script_dir, "env.properties")
     env_config = load_env_config(ENV_FILE)
 
@@ -367,21 +367,21 @@ def main():
     MQTT_USERNAME = env_config.get('mqtt_username')
     MQTT_PASSWORD = env_config.get('mqtt_password')
 
-    # Agent configuration file
+    # 智能体配置文件
     CONFIG_FILE = os.path.join(script_dir, "agent.properties")
 
-    # Create agent factory using generic HydroAgentFactory
+    # 使用通用 HydroAgentFactory 创建智能体工厂
     agent_factory = HydroAgentFactory(
         agent_class=MyTwinsSimulationAgent,
         config_file=CONFIG_FILE,
         env_config=env_config
     )
 
-    # Create unified callback
+    # 创建统一回调
     callback = MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
     callback.register_agent_factory("TWINS_SIMULATION_AGENT", agent_factory)
 
-    # Create coordination client
+    # 创建协调客户端
     sim_coordination_client = SimCoordinationClient(
         broker_url=BROKER_URL,
         broker_port=BROKER_PORT,
@@ -391,10 +391,10 @@ def main():
         mqtt_password=MQTT_PASSWORD
     )
 
-    # Set client reference
+    # 设置客户端引用
     callback.set_client(sim_coordination_client)
 
-    # Start service
+    # 启动服务
     try:
         logger.info("="*70)
         logger.info("Starting Digital Twins Simulation Agent Service")
@@ -411,7 +411,7 @@ def main():
         logger.info("Ready to create twins agent instances for incoming tasks...")
         logger.info("Press Ctrl+C to stop...")
 
-        # Keep running
+        # 保持运行
         while True:
             time.sleep(1)
 

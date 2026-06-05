@@ -38,7 +38,7 @@ from hydros_agent_sdk.agent_constants import (
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
 )
 
-# Import for type checking only to avoid runtime circular imports
+# 仅用于类型检查，避免运行时循环导入
 if TYPE_CHECKING:
     from hydros_agent_sdk.coordination_client import SimCoordinationClient
     from hydros_agent_sdk.state_manager import AgentStateManager
@@ -83,11 +83,11 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         properties: AgentProperties dictionary with typed accessors
     """
 
-    # Configure Pydantic to allow extra fields for non-model attributes
+    # 配置 Pydantic 允许非模型属性使用额外字段
     model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
-    # Type hints for dynamically set attributes (set via object.__setattr__)
-    # These are only for IDE support and are not Pydantic fields
+    # 动态设置属性的类型提示（通过 object.__setattr__ 设置）
+    # 仅用于 IDE 支持，不是 Pydantic 字段
     if TYPE_CHECKING:
         sim_coordination_client: 'SimCoordinationClient'
         state_manager: 'AgentStateManager'
@@ -127,13 +127,13 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             agent_configuration_url: Optional URL to agent configuration (will be loaded from SimTaskInitRequest if not provided)
             **kwargs: Additional keyword arguments for HydroAgentInstance
         """
-        # Required parameters validation
+        # 必填参数校验
         if sim_coordination_client is None:
             raise ValueError("sim_coordination_client is required")
         if context is None:
             raise ValueError("context is required")
 
-        # Initialize parent HydroAgentInstance with all required fields
+        # 使用全部必填字段初始化父类 HydroAgentInstance
         super().__init__(
             agent_id=agent_id,
             agent_code=agent_code,
@@ -150,15 +150,14 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             **kwargs
         )
 
-        # Store non-Pydantic attributes (not serialized)
-        # These are stored as extra fields due to model_config extra='allow'
+        # 存储非 Pydantic 属性（不会序列化）
+        # 由于 model_config extra='allow'，这些属性会作为额外字段保存
         object.__setattr__(self, 'sim_coordination_client', sim_coordination_client)
         object.__setattr__(self, 'state_manager', sim_coordination_client.state_manager)
         object.__setattr__(self, 'properties', AgentProperties())
 
-        # Note: Logging context (task_id, biz_component) is automatically set by
-        # SimCoordinationClient when processing commands, so all logs in callbacks
-        # will include the correct context information
+        # 注意：日志上下文（task_id、biz_component）会由 SimCoordinationClient
+        # 在处理指令时自动设置，因此回调中的全部日志都会包含正确的上下文信息。
         logger.info(f"Created agent instance: {self.agent_id}")
         logger.info(f"  - Agent Code: {self.agent_code}")
         logger.info(f"  - Agent Name: {self.agent_name}")
@@ -192,16 +191,16 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         from hydros_agent_sdk.logging_config import set_biz_component, set_biz_scene_instance_id
 
-        # Set biz_component to agent_id for agent business logic
+        # 为智能体业务逻辑把 biz_component 设置为 agent_id
         if self.agent_id:
             set_biz_component(self.agent_id)
 
-        # Set biz_scene_instance_id from context
+        # 从 context 设置 biz_scene_instance_id
         if self.context and self.context.biz_scene_instance_id:
             set_biz_scene_instance_id(self.context.biz_scene_instance_id)
 
     def supports_tick_command(self) -> bool:
-        """Return whether this agent participates in simulation tick dispatch."""
+        """返回该智能体是否参与仿真 tick 分派。"""
         return False
 
     @abstractmethod
@@ -350,7 +349,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         from hydros_agent_sdk.agent_config import AgentConfigLoader
 
-        # Find matching agent in agent_list by agent_code (exact match)
+        # 在 agent_list 中按 agent_code 精确查找匹配智能体
         matching_agent = None
         for agent in request.agent_list:
             if agent.agent_code == self.agent_code:
@@ -388,11 +387,11 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         logger.info(f"Loading agent configuration from: {agent_config_url}")
 
         try:
-            # Load configuration from URL
+            # 从 URL 加载配置
             agent_config = AgentConfigLoader.from_url(agent_config_url)
 
-            # Validate agent_code matches. Some deployments use a specialized
-            # runtime agent_code while sharing a generic agent_type config.
+            # 校验 agent_code 是否匹配。部分部署会共享通用 agent_type 配置，
+            # 同时使用专门的运行时 agent_code。
             allowed_agent_codes = {self.agent_code, self.agent_type}
             if getattr(matching_agent, 'agent_code', None):
                 allowed_agent_codes.add(matching_agent.agent_code)
@@ -411,9 +410,9 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
                 f"(YAML agent_code: '{agent_config.agent_code}')"
             )
 
-            # Set properties from YAML
+            # 从 YAML 设置属性
             if agent_config.properties:
-                # Convert Pydantic model to dict and update AgentProperties
+                # 将 Pydantic 模型转换为 dict 并更新 AgentProperties
                 properties_dict = agent_config.properties.model_dump(exclude_none=True)
                 self.properties.update(properties_dict)
 
@@ -426,7 +425,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             logger.info(f"Loaded {len(self.properties)} properties from configuration")
             logger.debug(f"Properties: {list(self.properties.keys())}")
 
-            # Update agent_configuration_url
+            # 更新 agent_configuration_url
             object.__setattr__(self, 'agent_configuration_url', agent_config_url)
 
         except Exception as e:

@@ -39,7 +39,7 @@ class TestPumpSchedulingAgent(unittest.TestCase):
     def test_rolling_optimization(self):
         print("\n--- Starting Rolling Optimization Test ---")
         steps = 3
-        # Override initial station states
+        # 覆盖初始泵站状态
         z1, z2, z3 = 13.26, 23.1, 28.0
         
         def set_station_data(sid, u_lvl, d_lvl, q=0.0):
@@ -64,12 +64,12 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             lower_res = agent_res['lower']
             upper_res = agent_res['upper']
             
-            # Print Upper MPC results
+            # 打印上层 MPC 结果
             print("  Upper MPC Predicted Flow:")
             for sid, q_list in upper_res['q_planned'].items():
                 print(f"    Station {sid}: {q_list[:3]}")
                 
-            # Print Lower MPC results
+            # 打印下层 MPC 结果
             print("  Lower MPC Output:")
             for sid, res in lower_res.items():
                 status = res['status'][0]
@@ -77,8 +77,8 @@ class TestPumpSchedulingAgent(unittest.TestCase):
                 total_q = res['total_q'][0]
                 print(f"    Station {sid} Target Flow: {total_q:.2f}, Status: {status}, Openings: {[round(o, 2) for o in openings]}")
                 
-            # Simulate a simple step
-            # Note: For this unit test, we just assume ideal tracking and move forward
+            # 模拟一个简单步
+            # 注意：该单元测试中假设理想跟踪并向前推进
             z1 += 0.01 * (lower_res[1]['total_q'][0] - lower_res[2]['total_q'][0])
             z2 += 0.01 * (lower_res[2]['total_q'][0] - lower_res[3]['total_q'][0])
             for u in self.agent.available_units_map[1]:

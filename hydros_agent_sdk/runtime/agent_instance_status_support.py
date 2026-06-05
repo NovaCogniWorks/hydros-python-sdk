@@ -1,4 +1,4 @@
-"""Java-compatible agent instance status transition support."""
+"""兼容 Java 侧的智能体实例状态流转支持。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentInstanceStatusSupport:
-    """Mirror Java AgentInstanceStatusSupport for Python coordination callbacks."""
+    """为 Python 协调回调镜像 Java AgentInstanceStatusSupport 的行为。"""
 
     def __init__(self, sim_coordination_client=None):
         self.sim_coordination_client = sim_coordination_client

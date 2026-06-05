@@ -6,7 +6,7 @@ Hydros MQTT topic 规则收口。
 
 
 class HydrosTopics:
-    """Hydros MQTT topic builder。"""
+    """Hydros MQTT topic 构造器。"""
 
     HYDROS_COMMANDS_COORDINATION_TOPIC = "/hydros/commands/coordination"
     HYDROS_COMMANDS_AGENT_TOPIC = "/hydros/commands/agent"

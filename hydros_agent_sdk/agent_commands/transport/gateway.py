@@ -1,4 +1,4 @@
-"""Agent command 客户端网关。"""
+"""智能体指令客户端网关。"""
 
 from __future__ import annotations
 

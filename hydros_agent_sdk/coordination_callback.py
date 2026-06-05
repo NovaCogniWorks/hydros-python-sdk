@@ -1,12 +1,12 @@
 """
-Callback interfaces for Hydro agent coordination.
+Hydro 智能体协调回调接口。
 
-This module provides callback interfaces similar to Java's SimCoordinationCallback,
-allowing developers to focus on business logic while the SDK handles:
-- Message parsing and serialization
-- MQTT connection and subscription
-- Message filtering and routing
-- Automatic response handling
+本模块提供类似 Java SimCoordinationCallback 的回调接口，让开发者专注业务逻辑，
+由 SDK 处理：
+- 消息解析和序列化
+- MQTT 连接和订阅
+- 消息过滤和路由
+- 自动响应处理
 """
 
 from abc import ABC, abstractmethod
@@ -33,70 +33,67 @@ logger = logging.getLogger(__name__)
 
 class SimCoordinationCallback(ABC):
     """
-    Abstract base class for simulation coordination callbacks.
+    仿真协调回调的抽象基类。
 
-    This interface defines callback methods that will be invoked when coordination
-    commands are received. Developers must implement the three core methods:
-    - get_component(): Return agent code
-    - on_sim_task_init(): Handle task initialization
-    - on_tick(): Handle simulation steps
+    该接口定义收到协调指令时会被调用的回调方法。开发者必须实现三个核心方法：
+    - get_component(): 返回 agent code
+    - on_sim_task_init(): 处理任务初始化
+    - on_tick(): 处理仿真步
 
-    All other methods have default implementations and can be optionally overridden.
+    其他方法都有默认实现，可按需覆盖。
 
-    Similar to Java's com.hydros.protocol.coordination.node.callback.SimCoordinationCallback
+    类似 Java 侧 com.hydros.protocol.coordination.node.callback.SimCoordinationCallback。
     """
 
     @abstractmethod
     def get_component(self) -> str:
         """
-        Get the agent code for this callback handler.
+        获取该回调处理器的 agent code。
 
-        This method must be implemented by subclasses.
+        子类必须实现该方法。
 
         Returns:
-            Agent code (e.g., "TWINS_SIMULATION_AGENT")
+            Agent code（例如 "TWINS_SIMULATION_AGENT"）
         """
         pass
 
     @abstractmethod
     def on_sim_task_init(self, request: SimTaskInitRequest):
         """
-        Called when a simulation task initialization request is received.
+        收到仿真任务初始化请求时调用。
 
-        This is the main entry point for starting a simulation task.
-        This method must be implemented by subclasses.
+        这是启动仿真任务的主入口。子类必须实现该方法。
 
         Args:
-            request: The task initialization request
+            request: 任务初始化请求
         """
         pass
 
     @abstractmethod
     def on_tick(self, request: TickCmdRequest):
         """
-        Called when a simulation tick command is received.
+        收到仿真 tick 指令时调用。
 
-        This is called for each simulation step.
-        This method must be implemented by subclasses.
+        每个仿真步都会调用该方法。子类必须实现该方法。
 
         Args:
-            request: The tick command request
+            request: tick 指令请求
         """
         pass
 
-    # Optional callbacks with default implementations
+    # 带默认实现的可选回调
     def is_remote_agent(self, agent_instance: HydroAgentInstance) -> bool:
         """
-        Check if an agent instance is remote (running on another node).
+        检查智能体实例是否为远端实例（运行在其他节点上）。
 
-        Default implementation returns False (treats all agents as local).
-        Override this method to implement proper remote agent detection.
+        默认实现返回 False（将全部智能体视为本地智能体）。
+        可覆盖该方法来实现真正的远端智能体识别。
 
         Args:
-            agent_instance: The agent instance to check
+            agent_instance: 要检查的智能体实例
 
         Returns:
-            True if the agent is remote, False if local
+            远端智能体返回 True，本地智能体返回 False
         """
         return False
 

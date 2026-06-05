@@ -106,7 +106,7 @@ class OntologySimulationAgent(TickableAgent):
             **kwargs
         )
 
-        # Ontology model and topology
+        # 本体模型和拓扑
         self._ontology_model = None
         self._topology = None
 
@@ -133,18 +133,18 @@ class OntologySimulationAgent(TickableAgent):
         logger.info("="*70)
 
         try:
-            # Load agent configuration
+            # 加载智能体配置
             logger.info("Loading agent configuration...")
             self.load_agent_configuration(request)
             logger.info(f"Configuration loaded with {len(self.properties)} properties")
 
-            # Load water network topology from ontology model
+            # 从本体模型加载水网拓扑
             hydros_objects_modeling_url = self.properties.get_property('hydros_objects_modeling_url')
             if hydros_objects_modeling_url:
                 logger.info("Loading water network topology from ontology model...")
                 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 
-                # Load topology with specific parameters
+                # 加载包含指定参数的拓扑
                 param_keys = self.properties.get_property('param_keys', {'max_opening', 'min_opening'})
                 self._topology = HydroObjectUtilsV2.build_waterway_topology(
                     modeling_yml_uri=hydros_objects_modeling_url,
@@ -154,21 +154,21 @@ class OntologySimulationAgent(TickableAgent):
 
                 logger.info(f"Loaded topology with {len(self._topology.top_objects)} top-level objects")
 
-                # Initialize ontology model (subclass-specific)
+                # 初始化本体模型（子类专属）
                 self._initialize_ontology_model()
             else:
                 logger.warning("No hydros_objects_modeling_url configured")
 
-            # Update agent status to ACTIVE
+            # 将智能体状态更新为 ACTIVE
             object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
-            # Register with state manager
+            # 注册到状态管理器
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
 
             logger.info(f"Ontology simulation agent initialized: {self.agent_id}")
 
-            # Create response
+            # 创建响应
             response = SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -189,7 +189,7 @@ class OntologySimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Failed to initialize ontology simulation agent: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -245,8 +245,8 @@ class OntologySimulationAgent(TickableAgent):
         Returns:
             List of MqttMetrics objects
         """
-        # Default implementation: return empty metrics
-        # Subclasses should override this method
+        # 默认实现：返回空指标
+        # 子类应覆盖该方法
         logger.warning("Using default ontology simulation (no-op)")
         return []
 
@@ -261,7 +261,7 @@ class OntologySimulationAgent(TickableAgent):
         """
         logger.info(f"Updating ontology model with {len(time_series_list)} boundary conditions")
 
-        # Update ontology model with boundary conditions
+        # 使用边界条件更新本体模型
         for time_series in time_series_list:
             logger.debug(
                 f"Boundary condition: object={time_series.object_name}, "
@@ -289,17 +289,17 @@ class OntologySimulationAgent(TickableAgent):
         logger.info("="*70)
 
         try:
-            # Clean up ontology model
+            # 清理本体模型
             self._ontology_model = None
             self._topology = None
 
-            # Unregister from state manager
+            # 从状态管理器注销
             self.state_manager.terminate_task(self.context)
             self.state_manager.remove_local_agent(self)
 
             logger.info(f"Ontology simulation agent terminated: {self.agent_id}")
 
-            # Create response
+            # 创建响应
             response = SimTaskTerminateResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -318,7 +318,7 @@ class OntologySimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error terminating ontology simulation agent: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return SimTaskTerminateResponse(
                 context=self.context,
                 command_id=request.command_id,
