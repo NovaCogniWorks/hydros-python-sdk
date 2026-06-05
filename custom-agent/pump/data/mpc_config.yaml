@@ -55268,8 +55268,10 @@ stations:
 canal_pools:
 - id: 1
   name: Pool 1 (Station 1 -> Station 2)
+  area: 4207978.728747
 - id: 2
   name: Pool 2 (Station 2 -> Station 3)
+  area: 1847638.722359
 service_mapping:
   pool_state_file: pool_states.generated.json
   boundary_sensors:

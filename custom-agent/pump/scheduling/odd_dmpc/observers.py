@@ -109,10 +109,12 @@ class DisturbanceObserverBank:
         station_ids = _ordered_station_ids(self.system_config)
         chain_pairs = _chain_pairs(self.system_config)
         level_keys = _level_keys(self.system_config)
-        areas = {
-            pair["pool_id"]: float(pool_areas[pair["pool_id"]]) if pool_areas is not None and pair["pool_id"] in pool_areas else 1.0
-            for pair in chain_pairs
-        }
+        areas = {}
+        for pair in chain_pairs:
+            pool_id = pair["pool_id"]
+            if pool_areas is None or pool_id not in pool_areas:
+                raise ValueError(f"缺少 pool_id={pool_id} 的表面积配置，无法进行等效蓄量观测。")
+            areas[pool_id] = float(pool_areas[pool_id])
 
         updated = {}
         for index, pair in enumerate(chain_pairs):

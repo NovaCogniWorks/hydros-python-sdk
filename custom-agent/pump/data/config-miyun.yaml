@@ -30332,14 +30332,19 @@ stations:
 canal_pools:
 - id: 1
   name: Pool 1 (屯佃 -> 前柳林)
+  area: 242144.580716
 - id: 2
   name: Pool 2 (前柳林 -> 埝头)
+  area: 488996.659566
 - id: 3
   name: Pool 3 (埝头 -> 兴寿)
+  area: 586584.849474
 - id: 4
   name: Pool 4 (兴寿 -> 李史山)
+  area: 253250.870255
 - id: 5
   name: Pool 5 (李史山 -> 西台上)
+  area: 50796.036226
 service_mapping:
   pool_state_file: pool_states.generated.json
   boundary_sensors:
