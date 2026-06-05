@@ -637,18 +637,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 当前配置中 uid 本身就是真实的 pump object_id
                 unit_object_id = uid
 
-                # target_agent_code从TargetAgentResolver获取
-                target_agent_code = None
-                if unit_object_id is not None:
-                    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
-                    if agent_instance:
-                        target_agent_code = agent_instance.agent_code
+                # # target_agent_code从TargetAgentResolver获取
+                # target_agent_code = None
+                # if unit_object_id is not None:
+                #     agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                #     if agent_instance:
+                #         target_agent_code = agent_instance.agent_code
 
-                if unit_object_id is None or target_agent_code is None:
-                    raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
+                # if unit_object_id is None or target_agent_code is None:
+                #     raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
 
                 commands.append({
-                    "target_agent_code": target_agent_code,
+                    "target_agent_code": "ONTOLOGY_SIMULATION_AGENT",
                     "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
                     "target_value": str(round(target_value, 2)),
                     "object_id": str(unit_object_id),
