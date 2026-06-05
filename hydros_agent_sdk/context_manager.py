@@ -1,9 +1,8 @@
 """
-Runtime hydro model context for central coordination.
+中央协调使用的运行时水利模型上下文。
 
-This module mirrors the Java central ContextManager pattern: one model context is
-kept per simulation task, and sibling-agent init responses populate an object
-owner index used by central scheduling commands.
+本模块对齐 Java 中央侧 ContextManager 模式：每个仿真任务维护一个模型上下文，
+兄弟智能体初始化响应会填充对象归属索引，供中央调度指令使用。
 """
 
 import logging
@@ -139,11 +138,11 @@ class HydroModelContextRepository:
 
     def create_from_init_request(self, request: Any) -> Optional[HydroModelContext]:
         """
-        Create model context from SimTaskInitRequest scenario configuration.
+        从 SimTaskInitRequest 的场景配置创建模型上下文。
 
-        Java central does this in SimTaskAgentInitializer#onInit. Python keeps it
-        small: only read the scenario config URL, pick the modeling URL, and let
-        create() load the topology.
+        Java 中央侧在 SimTaskAgentInitializer#onInit 中完成这件事。
+        Python 侧保持轻量：只读取场景配置 URL，选出建模 URL，并交给
+        create() 加载拓扑。
         """
         context = getattr(request, "context", None)
         if context is None:

@@ -1,5 +1,5 @@
 """
-Agent command log DTO models.
+智能体指令日志 DTO 模型。
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Agent command runtime 装配层。
+智能体指令 runtime 装配层。
 """
 
 from __future__ import annotations

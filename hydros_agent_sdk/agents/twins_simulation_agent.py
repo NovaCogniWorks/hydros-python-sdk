@@ -1,8 +1,7 @@
 """
-Digital twins simulation agent for real-time water network simulation.
+用于实时水网仿真的数字孪生仿真智能体。
 
-This module provides the TwinsSimulationAgent class which extends TickableAgent
-with digital twins simulation capabilities.
+本模块提供 TwinsSimulationAgent 类，在 TickableAgent 基础上增加数字孪生仿真能力。
 """
 
 import logging
@@ -30,22 +29,22 @@ logger = logging.getLogger(__name__)
 
 class TwinsSimulationAgent(TickableAgent):
     """
-    Digital twins simulation agent.
+    数字孪生仿真智能体。
 
-    This agent performs digital twins-based water network simulation:
-    1. Loads water network topology and physical models
-    2. Executes high-fidelity simulation steps
-    3. Handles real-time boundary condition updates
-    4. Outputs detailed metrics data via MQTT
+    该智能体执行基于数字孪生的水网仿真：
+    1. 加载水网拓扑和物理模型
+    2. 执行高保真仿真步
+    3. 处理实时边界条件更新
+    4. 通过 MQTT 输出详细指标数据
 
-    Key features:
-    - High-fidelity physical modeling
-    - Real-time simulation synchronization
-    - Support for complex hydraulic calculations
-    - Boundary condition handling
-    - State synchronization with physical system
+    关键特性：
+    - 高保真物理建模
+    - 实时仿真同步
+    - 支持复杂水力计算
+    - 边界条件处理
+    - 与物理系统进行状态同步
 
-    Usage example:
+    使用示例：
         ```python
         agent = TwinsSimulationAgent(
             sim_coordination_client=client,
@@ -76,21 +75,21 @@ class TwinsSimulationAgent(TickableAgent):
         **kwargs
     ):
         """
-        Initialize digital twins simulation agent.
+        初始化数字孪生仿真智能体。
 
         Args:
-            sim_coordination_client: Required MQTT client
-            agent_id: Unique agent instance ID
-            agent_code: Agent code
-            agent_type: Agent type
-            agent_name: Agent name
-            context: Simulation context
-            hydros_cluster_id: Cluster ID
-            hydros_node_id: Node ID
-            agent_status: Initial business status
-            drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
-            agent_configuration_url: Optional configuration URL
-            **kwargs: Additional keyword arguments
+            sim_coordination_client: 必填 MQTT 客户端
+            agent_id: 唯一智能体实例 ID
+            agent_code: 智能体编码
+            agent_type: 智能体类型
+            agent_name: 智能体名称
+            context: 仿真上下文
+            hydros_cluster_id: 集群 ID
+            hydros_node_id: 节点 ID
+            agent_status: 初始业务状态
+            drive_mode: 智能体驱动模式（默认 SIM_TICK_DRIVEN）
+            agent_configuration_url: 可选配置 URL
+            **kwargs: 额外关键字参数
         """
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -116,19 +115,19 @@ class TwinsSimulationAgent(TickableAgent):
 
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the digital twins simulation agent.
+        初始化数字孪生仿真智能体。
 
-        This method:
-        1. Loads agent configuration from SimTaskInitRequest
-        2. Loads water network topology and physical models
-        3. Initializes simulation state
-        4. Registers with state manager
+        该方法会：
+        1. 从 SimTaskInitRequest 加载智能体配置
+        2. 加载水网拓扑和物理模型
+        3. 初始化仿真状态
+        4. 注册到状态管理器
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         logger.info("="*70)
         logger.info(f"INITIALIZING DIGITAL TWINS SIMULATION AGENT: {self.biz_scene_instance_id}")
@@ -207,25 +206,24 @@ class TwinsSimulationAgent(TickableAgent):
 
     def _initialize_twins_model(self):
         """
-        Initialize digital twins model.
+        初始化数字孪生模型。
 
-        Subclasses can override this method to initialize their specific
-        digital twins model (e.g., hydraulic solver, state estimator).
-        Default implementation does nothing.
+        子类可覆盖该方法来初始化各自的数字孪生模型
+        （例如水力求解器、状态估计器）。默认实现不执行任何操作。
         """
         logger.info("Initializing digital twins model...")
-        # TODO：初始化水力求解器、状态估计器等组件。
+        # 待办：初始化水力求解器、状态估计器等组件。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        Execute digital twins simulation step.
+        执行数字孪生仿真步。
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            List of MqttMetrics objects to send via MQTT
+            要通过 MQTT 发送的 MqttMetrics 对象列表
         """
         logger.info(f"Executing digital twins simulation step {request.step}")
 
@@ -240,16 +238,15 @@ class TwinsSimulationAgent(TickableAgent):
 
     def _execute_twins_simulation(self, step: int) -> List[MqttMetrics]:
         """
-        Execute digital twins simulation logic.
+        执行数字孪生仿真逻辑。
 
-        Subclasses should override this method to implement their specific
-        digital twins simulation logic (e.g., hydraulic calculations).
+        子类应覆盖该方法，实现各自的数字孪生仿真逻辑（例如水力计算）。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         # 默认实现：返回模拟指标
         # 子类应覆盖该方法
@@ -257,10 +254,10 @@ class TwinsSimulationAgent(TickableAgent):
 
         metrics_list = []
         if self._topology:
-            for top_obj in self._topology.top_objects[:3]:  # First 3 objects
-                for child in top_obj.children[:2]:  # First 2 children
+            for top_obj in self._topology.top_objects[:3]:  # 前 3 个对象
+                for child in top_obj.children[:2]:  # 前 2 个子对象
                     if child.metrics:
-                        for metrics_code in child.metrics[:1]:  # First metric
+                        for metrics_code in child.metrics[:1]:  # 第 1 个指标
                             metrics_list.append(create_mock_metrics(
                                 source_id=self.agent_code,
                                 job_instance_id=self.biz_scene_instance_id,
@@ -275,13 +272,12 @@ class TwinsSimulationAgent(TickableAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates for digital twins simulation.
+        处理数字孪生仿真的边界条件更新。
 
-        This method updates the simulation state with new boundary conditions
-        for real-time synchronization with the physical system.
+        该方法用新的边界条件更新仿真状态，用于与物理系统实时同步。
 
         Args:
-            time_series_list: List of updated time series data
+            time_series_list: 已更新的时序数据列表
         """
         logger.info(f"Updating digital twins state with {len(time_series_list)} boundary conditions")
 
@@ -296,22 +292,22 @@ class TwinsSimulationAgent(TickableAgent):
             state_key = f"{time_series.object_id}_{time_series.metrics_code}"
             self._simulation_state[state_key] = time_series
 
-            # TODO：更新水力求解器的边界条件
+            # 待办：更新水力求解器的边界条件
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the digital twins simulation agent.
+        终止数字孪生仿真智能体。
 
-        This method:
-        1. Cleans up digital twins model
-        2. Unregisters from state manager
-        3. Returns SimTaskTerminateResponse
+        该方法会：
+        1. 清理数字孪生模型
+        2. 从状态管理器注销
+        3. 返回 SimTaskTerminateResponse
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         logger.info("="*70)
         logger.info(f"TERMINATING DIGITAL TWINS SIMULATION AGENT: {self.biz_scene_instance_id}")

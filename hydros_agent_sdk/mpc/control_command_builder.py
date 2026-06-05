@@ -1,4 +1,4 @@
-"""把 MPC 控制结果转换成 agent command。"""
+"""把 MPC 控制结果转换成智能体指令。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class MpcControlCommandBuilder:
-    """把 MPC 结果和内部控制意图转换成 agent command。"""
+    """把 MPC 结果和内部控制意图转换成智能体指令。"""
 
     def __init__(
         self,

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class MpcPlanningError(RuntimeError):
-    """MPC 规划服务无法产生可用结果时抛出。"""
+    """在 MPC 规划服务无法产生可用结果时抛出。"""
 
 
 class MpcPlanningClient:

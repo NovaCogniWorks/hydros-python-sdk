@@ -97,7 +97,7 @@ class MpcRollingRuntime:
         return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
     def should_auto_start_mpc_on_tick(self) -> bool:
-        """tick 是否可以在时间序列更新到达前激活 MPC。"""
+        """判断 tick 是否可以在时间序列更新到达前激活 MPC。"""
         return PropertyParseUtils.get_bool(
             self.properties,
             "auto_start_mpc_on_tick",

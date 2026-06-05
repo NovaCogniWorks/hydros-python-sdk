@@ -1,9 +1,8 @@
 """
-Power optimization solver placeholder.
+电力优化求解器占位实现。
 
-Provides a minimal implementation used by PowerSchedulingAgent when running
-central scheduling for power systems. The solver accepts topology and boundary
-constraints and returns a simple optimization result structure.
+为 PowerSchedulingAgent 运行电力系统中央调度时提供最小实现。
+该求解器接收拓扑和边界约束，并返回简单优化结果结构。
 """
 
 from __future__ import annotations

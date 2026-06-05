@@ -179,7 +179,7 @@ from hydros_agent_sdk.agent_commands import (
     HydroCommandLogReportScheduler,
 )
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 __all__ = [
     # 核心客户端和回调
@@ -196,7 +196,7 @@ __all__ = [
     "AgentStateManager",
     "MessageFilter",
 
-    # MQTT 客户端
+    # 用于 MQTT 的客户端
     "HydrosMqttClient",
 
     # 智能体属性

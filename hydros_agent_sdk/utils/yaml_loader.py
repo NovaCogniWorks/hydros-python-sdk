@@ -89,7 +89,7 @@ class YamlLoader:
 
             # 创建带有合适 header 的请求。
             request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.4')
+            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.5')
 
             with urlopen(request, timeout=timeout) as response:
                 content = response.read().decode('utf-8')
@@ -143,17 +143,17 @@ class YamlLoader:
     @staticmethod
     def from_yaml_string(yaml_content: str) -> Dict[str, Any]:
         """
-        Parse YAML content into a dictionary.
+        将 YAML 内容解析为字典。
 
         Args:
-            yaml_content: YAML content as a string
+            yaml_content: 字符串形式的 YAML 内容
 
         Returns:
-            Dictionary containing parsed YAML data
+            包含已解析 YAML 数据的字典
 
         Raises:
-            ImportError: If PyYAML is not installed
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(
@@ -180,17 +180,17 @@ class YamlLoader:
     @staticmethod
     def get_nested(data: Dict[str, Any], key_path: str, default: Any = None) -> Any:
         """
-        Get a nested value from a dictionary using dot notation.
+        使用点号路径从字典中获取嵌套值。
 
         Args:
-            data: Dictionary to search
-            key_path: Dot-separated key path (e.g., "nested.key.path")
-            default: Default value if key not found
+            data: 要查找的字典
+            key_path: 点号分隔的键路径（例如 "nested.key.path"）
+            default: 未找到键时返回的默认值
 
         Returns:
-            Value at the key path or default
+            键路径对应的值或默认值
 
-        Example:
+        示例：
             >>> data = {"config": {"database": {"host": "localhost"}}}
             >>> YamlLoader.get_nested(data, "config.database.host")
             'localhost'

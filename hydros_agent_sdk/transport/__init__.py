@@ -1,9 +1,8 @@
 """
-Transport abstractions for Hydros coordination messages.
+Hydros 协调消息的传输抽象。
 
-The existing SimCoordinationClient still owns the production MQTT path. These
-interfaces provide a small extension point for tests and future transports
-without rewiring the current client yet.
+现有 SimCoordinationClient 仍然负责生产 MQTT 路径。这些接口为测试和未来
+传输方式提供一个小扩展点，同时暂不重组当前客户端。
 """
 
 from hydros_agent_sdk.transport.base import MessageHandler, PublishRecord, Transport

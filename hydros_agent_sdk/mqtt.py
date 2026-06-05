@@ -142,7 +142,7 @@ class HydrosMqttClient:
         序列化指令/响应对象并发布到 topic。
         """
         try:
-            # Pydantic v2 使用 model_dump_json
+            # 在 Pydantic v2 中使用 model_dump_json
             payload = command.model_dump_json(by_alias=True)
             logger.info(f"Publishing to {topic}: {payload}")
             self.client.publish(topic, payload)

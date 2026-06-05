@@ -1,8 +1,8 @@
 """
-Tickable agent base class for tick-driven simulation agents.
+面向 tick 驱动仿真智能体的可调度智能体基类。
 
-This module provides the TickableAgent base class which extends BaseHydroAgent
-with tick-driven simulation capabilities and time series data update handling.
+本模块提供 TickableAgent 基类，在 BaseHydroAgent 基础上增加
+tick 驱动仿真能力和时序数据更新处理。
 """
 
 import logging
@@ -34,32 +34,32 @@ logger = logging.getLogger(__name__)
 
 class TickableAgent(BaseHydroAgent):
     """
-    Base class for tick-driven simulation agents.
+    tick 驱动仿真智能体的基类。
 
-    This class provides common functionality for agents that:
-    1. Execute simulation steps in response to TickCmdRequest
-    2. Handle time series data updates (boundary conditions)
-    3. Output metrics data via MQTT
+    该类为以下类型的智能体提供通用能力：
+    1. 响应 TickCmdRequest 并执行仿真步
+    2. 处理时序数据更新（边界条件）
+    3. 通过 MQTT 输出指标数据
 
-    Subclasses:
+    子类：
     - OntologySimulationAgent: Ontology-based simulation
     - TwinsSimulationAgent: Digital twins simulation
     - CentralSchedulingAgent: Central scheduling with MPC optimization
 
-    Key features:
-    - Tick-driven execution (responds to TickCmdRequest)
-    - Time series data update handling (boundary conditions)
-    - MQTT metrics output support
-    - Common lifecycle management (init, tick, terminate)
+    关键特性：
+    - tick 驱动执行（响应 TickCmdRequest）
+    - 时序数据更新处理（边界条件）
+    - MQTT 指标输出支持
+    - 通用生命周期管理（init、tick、terminate）
 
-    Subclasses must implement:
-    - on_init(): Initialize agent and load configuration
-    - on_tick_simulation(): Execute simulation step logic
-    - on_terminate(): Clean up resources
+    子类必须实现：
+    - on_init(): 初始化智能体并加载配置
+    - on_tick_simulation(): 执行仿真步逻辑
+    - on_terminate(): 清理资源
 
-    Subclasses can override:
-    - on_time_series_data_update(): Handle boundary condition updates
-    - send_metrics(): Send metrics data via MQTT
+    子类可覆盖：
+    - on_time_series_data_update(): 处理边界条件更新
+    - send_metrics(): 通过 MQTT 发送指标数据
     """
 
     def __init__(
@@ -78,21 +78,21 @@ class TickableAgent(BaseHydroAgent):
         **kwargs
     ):
         """
-        Initialize tickable agent.
+        初始化可调度智能体。
 
         Args:
-            sim_coordination_client: Required MQTT client
-            agent_id: Unique agent instance ID
-            agent_code: Agent code
-            agent_type: Agent type
-            agent_name: Agent name
-            context: Simulation context
-            hydros_cluster_id: Cluster ID
-            hydros_node_id: Node ID
-            agent_status: Initial business status
-            drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
-            agent_configuration_url: Optional configuration URL
-            **kwargs: Additional keyword arguments
+            sim_coordination_client: 必填 MQTT 客户端
+            agent_id: 唯一智能体实例 ID
+            agent_code: 智能体编码
+            agent_type: 智能体类型
+            agent_name: 智能体名称
+            context: 仿真上下文
+            hydros_cluster_id: 集群 ID
+            hydros_node_id: 节点 ID
+            agent_status: 初始业务状态
+            drive_mode: 智能体驱动模式（默认 SIM_TICK_DRIVEN）
+            agent_configuration_url: 可选配置 URL
+            **kwargs: 额外关键字参数
         """
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -124,39 +124,39 @@ class TickableAgent(BaseHydroAgent):
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the agent.
+        初始化智能体。
 
-        Subclasses should:
-        1. Load agent configuration using self.load_agent_configuration(request)
-        2. Load water network topology if needed
-        3. Initialize simulation state
-        4. Register with state manager
-        5. Return SimTaskInitResponse
+        子类应完成：
+        1. 使用 self.load_agent_configuration(request) 加载智能体配置
+        2. 按需加载水网拓扑
+        3. 初始化仿真状态
+        4. 注册到状态管理器
+        5. 返回 SimTaskInitResponse
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         pass
 
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
-        Handle simulation tick.
+        处理仿真 tick。
 
-        This method:
-        1. Sets agent logging context
-        2. Updates current step
-        3. Calls on_tick_simulation() for subclass-specific logic
-        4. Sends metrics data via MQTT
-        5. Returns TickCmdResponse
+        该方法会：
+        1. 设置智能体日志上下文
+        2. 更新当前步
+        3. 调用 on_tick_simulation() 执行子类专属逻辑
+        4. 通过 MQTT 发送指标数据
+        5. 返回 TickCmdResponse
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            Tick command response
+            Tick 指令响应
         """
         # 为智能体业务逻辑设置日志上下文
         self._set_agent_logging_context()
@@ -205,55 +205,54 @@ class TickableAgent(BaseHydroAgent):
     @abstractmethod
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        Execute simulation step logic.
+        执行仿真步逻辑。
 
-        This is where subclasses implement their specific simulation logic.
+        子类在这里实现各自的仿真逻辑。
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            List of MqttMetrics objects to send via MQTT, or None
+            要通过 MQTT 发送的 MqttMetrics 对象列表，或 None
         """
         pass
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the agent and clean up resources.
+        终止智能体并清理资源。
 
-        Subclasses should:
-        1. Clean up simulation state
-        2. Unregister from state manager
-        3. Return SimTaskTerminateResponse
+        子类应完成：
+        1. 清理仿真状态
+        2. 从状态管理器注销
+        3. 返回 SimTaskTerminateResponse
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         pass
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        Handle time series data update (boundary conditions).
+        处理时序数据更新（边界条件）。
 
-        This method:
-        1. Sets agent logging context
-        2. Extracts time series data from the event
-        3. Updates internal cache
-        4. Calls on_boundary_condition_update() for subclass-specific handling
-        5. Returns TimeSeriesDataUpdateResponse
+        该方法会：
+        1. 设置智能体日志上下文
+        2. 从事件中提取时序数据
+        3. 更新内部缓存
+        4. 调用 on_boundary_condition_update() 执行子类专属处理
+        5. 返回 TimeSeriesDataUpdateResponse
 
-        Subclasses can override on_boundary_condition_update() to handle
-        boundary condition changes.
+        子类可覆盖 on_boundary_condition_update() 来处理边界条件变化。
 
         Args:
-            request: Time series data update request
+            request: 时序数据更新请求
 
         Returns:
-            Time series data update response
+            时序数据更新响应
         """
         # 为智能体业务逻辑设置日志上下文
         self._set_agent_logging_context()
@@ -303,13 +302,12 @@ class TickableAgent(BaseHydroAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates.
+        处理边界条件更新。
 
-        Subclasses can override this method to handle boundary condition changes.
-        Default implementation does nothing.
+        子类可覆盖该方法来处理边界条件变化。默认实现不执行任何操作。
 
         Args:
-            time_series_list: List of updated time series data
+            time_series_list: 已更新的时序数据列表
         """
         pass
 
@@ -320,15 +318,15 @@ class TickableAgent(BaseHydroAgent):
         step: Optional[int] = None
     ) -> Optional[float]:
         """
-        Get time series value from cache.
+        从缓存获取时序值。
 
         Args:
-            object_id: Object ID
-            metrics_code: Metrics code
-            step: Simulation step (default: current step)
+            object_id: 对象 ID
+            metrics_code: 指标编码
+            step: 仿真步（默认使用当前步）
 
         Returns:
-            Time series value, or None if not found
+            时序值；未找到时返回 None
         """
         cache_key = f"{object_id}_{metrics_code}"
         time_series = self._time_series_cache.get(cache_key)
@@ -348,10 +346,10 @@ class TickableAgent(BaseHydroAgent):
 
     def send_metrics_batch(self, metrics_list: List[MqttMetrics]):
         """
-        Send batch of metrics data via MQTT.
+        通过 MQTT 批量发送指标数据。
 
         Args:
-            metrics_list: List of MqttMetrics objects to send
+            metrics_list: 要发送的 MqttMetrics 对象列表
         """
         from hydros_agent_sdk.utils.mqtt_metrics import send_metrics_batch
 

@@ -275,12 +275,12 @@ class SimCoordinationCallback(ABC):
 
     def on_agent_instance_sibling_created(self, response: SimTaskInitResponse):
         """
-        Called when a sibling agent instance is created (remote agent initialized).
+        兄弟智能体实例创建时调用（远端智能体已初始化）。
 
-        Default implementation logs the event. Override if needed.
+        默认实现会记录该事件。可按需覆盖。
 
         Args:
-            response: The task init response from the remote agent
+            response: 远端智能体返回的任务初始化响应
         """
         for agent_instance in response.created_agent_instances:
             self._store_sibling_agent_instance(agent_instance)
@@ -304,22 +304,22 @@ class SimCoordinationCallback(ABC):
 
     def on_agent_instance_sibling_status_updated(self, report: AgentInstanceStatusReport):
         """
-        Called when a sibling agent instance status is updated.
+        兄弟智能体实例状态更新时调用。
 
-        Default implementation logs the event. Override if needed.
+        默认实现会记录该事件。可按需覆盖。
 
         Args:
-            report: The status report from the remote agent
+            report: 远端智能体返回的状态报告
         """
         self._store_sibling_agent_instance(report.source_agent_instance)
         logger.debug(f"Sibling agent status updated: {report.source_agent_instance.agent_id}")
 
     def on_mpc_result(self, report: MpcResultReport):
         """
-        Called when an MPC result report is received.
+        收到 MPC 结果报告时调用。
 
-        Default implementation only logs the event. Coordinator/data side
-        consumers should override this to persist or forward MPC results.
+        默认实现仅记录事件。协调侧或数据侧消费者应覆盖该方法，
+        用于持久化或转发 MPC 结果。
         """
         logger.info(
             "MPC result report received: source=%s, result_count=%s",
@@ -329,100 +329,100 @@ class SimCoordinationCallback(ABC):
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """
-        Called when a time series calculation request is received.
+        收到时序计算请求时调用。
 
-        Default implementation logs a warning. Override if needed.
+        默认实现会记录警告。可按需覆盖。
 
         Args:
-            request: The calculation request
+            request: 计算请求
         """
         logger.warning("Time series calculation received but not implemented")
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """
-        Called when time series data is updated.
+        时序数据更新时调用。
 
-        Default implementation logs the event. Override if needed.
+        默认实现会记录该事件。可按需覆盖。
 
         Args:
-            request: The data update request
+            request: 数据更新请求
         """
         logger.info("Time series data update received")
 
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
         """
-        Called when outflow time series data is updated.
+        外发流量时序数据更新时调用。
 
-        Default implementation logs the event. Override if needed.
+        默认实现会记录该事件。可按需覆盖。
 
         Args:
-            request: The outflow data update request
+            request: 外发流量数据更新请求
         """
         logger.info("Outflow time series data update received")
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """
-        Called when a task termination request is received.
+        收到任务终止请求时调用。
 
-        Default implementation logs the termination. Override to add custom cleanup logic.
+        默认实现会记录终止事件。可覆盖该方法以增加自定义清理逻辑。
 
         Args:
-            request: The task termination request
+            request: 任务终止请求
         """
         self.clear_sibling_agent_instances(request.context.biz_scene_instance_id)
         logger.info(f"Task termination requested: {request.reason}")
 
     def on_monitor_rule_updated(self, request):
         """
-        Called when monitor rules are updated.
+        监控规则更新时调用。
 
-        Default implementation does nothing. Override if needed.
+        默认实现不执行任何操作。可按需覆盖。
 
         Args:
-            request: The monitor rule update request
+            request: 监控规则更新请求
         """
         logger.debug("Monitor rule updated (default handler)")
 
     def on_device_fault_inject(self, request):
         """
-        Called when a device fault injection request is received.
+        收到设备故障注入请求时调用。
 
-        Default implementation does nothing. Override if needed.
+        默认实现不执行任何操作。可按需覆盖。
 
         Args:
-            request: The fault injection request
+            request: 故障注入请求
         """
         logger.debug("Device fault inject (default handler)")
 
     def on_noise_simulation(self, request):
         """
-        Called when a noise simulation request is received.
+        收到噪声仿真请求时调用。
 
-        Default implementation does nothing. Override if needed.
+        默认实现不执行任何操作。可按需覆盖。
 
         Args:
-            request: The noise simulation request
+            request: 噪声仿真请求
         """
         logger.debug("Noise simulation (default handler)")
 
     def on_identified_param_updated(self, request):
         """
-        Called when identified parameters are updated.
+        辨识参数更新时调用。
 
-        Default implementation does nothing. Override if needed.
+        默认实现不执行任何操作。可按需覆盖。
 
         Args:
-            request: The parameter sync request
+            request: 参数同步请求
         """
         logger.debug("Identified parameter updated (default handler)")
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        Called when outflow time series data is requested.
+        请求外发流量时序数据时调用。
 
-        Default implementation logs the event. Override if needed.
+        默认实现会记录该事件。可按需覆盖。
 
         Args:
-            request: The outflow time series request
+            request: 外发流量时序请求
         """
         logger.debug("Outflow time series request received")

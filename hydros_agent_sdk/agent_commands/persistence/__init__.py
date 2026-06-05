@@ -1,5 +1,5 @@
 """
-Agent command 持久化层导出。
+智能体指令持久化层导出。
 """
 
 from .command_log_store import AgentCommandLogEntry, AgentCommandLogStore

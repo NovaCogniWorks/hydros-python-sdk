@@ -1,4 +1,4 @@
-"""MPC 配置解析辅助对象。"""
+"""配置解析辅助对象，用于 MPC。"""
 
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING

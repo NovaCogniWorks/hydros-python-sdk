@@ -1,9 +1,8 @@
 """
-Runtime helpers for Hydros agent execution.
+Hydros 智能体执行的运行时辅助工具。
 
-This package contains small runtime-facing utilities that sit between the
-coordination client and business agents. They are intentionally lightweight so
-existing agent implementations can adopt them gradually.
+该包包含位于协调客户端和业务智能体之间的轻量运行时工具。它们刻意保持简单，
+方便现有智能体实现逐步接入。
 """
 
 from hydros_agent_sdk.runtime.agent_context import AgentContext

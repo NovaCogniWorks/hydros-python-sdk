@@ -142,7 +142,7 @@ class CentralSchedulingAgent(TickableAgent):
             **kwargs
         )
 
-        # MPC 相关配置
+        # 相关 MPC 配置
         self._configured_mpc_service_base_url = configured_mpc_service_base_url
         self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
             configured_mpc_sensor_provider
@@ -282,11 +282,10 @@ class CentralSchedulingAgent(TickableAgent):
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        Handle time series updates and activate Java-compatible rolling MPC.
+        处理时序更新，并激活兼容 Java 侧的滚动 MPC。
 
-        In the Java central agent, TimeSeriesDataChangedEvent is the first
-        trigger that creates MpcTaskState. Later ticks only continue rolling
-        after this activation point.
+        在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建 MpcTaskState
+        的第一个触发点。后续 tick 只会在该激活点之后继续滚动。
         """
         self._set_agent_logging_context()
         logger.debug("Received central scheduling time series update: commandId=%s", request.command_id)
@@ -363,7 +362,7 @@ class CentralSchedulingAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO：更新优化模型约束
+            # 待办：更新优化模型约束
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:

@@ -1,5 +1,5 @@
 """
-Agent command 路由判断。
+智能体指令路由判断。
 """
 
 from __future__ import annotations
