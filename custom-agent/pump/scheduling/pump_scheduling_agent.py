@@ -274,51 +274,76 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         station_heads = {}
         station_flows = {}
         
-        # 用户要求写死的 object_id 映射
-        # 泗洪站(1) - 前:20701, 后:20101, 流量:20101
-        # 睢宁站(2) - 前:20117, 后:20501, 流量:20501
-        # 邳州站(3) - 前:20513, 后:20801, 流量:20801
-        HARDCODED_SENSORS = {
-            1: {"front": 20701, "back": 20101, "flow": 20101},
-            2: {"front": 20117, "back": 20501, "flow": 20501},
-            3: {"front": 20513, "back": 20801, "flow": 20513},
-        }
-        
+        # 遍历每座泵站，从各机组获取实时数据
+        pump_data_logs = []
         for sid in self.system_config.station_ids:
-            sensors = HARDCODED_SENSORS.get(sid)
-            if not sensors:
+            uids = self.available_units_map.get(sid, [])
+            if not uids:
                 continue
             
-            f_val = self._metrics_data_cache.get_value(sensors["front"], MetricsCodes.WATER_LEVEL.value)
-            b_val = self._metrics_data_cache.get_value(sensors["back"], MetricsCodes.WATER_LEVEL.value)
-            q_val = self._metrics_data_cache.get_value(sensors["flow"], MetricsCodes.WATER_FLOW.value)
+            total_q = 0.0
+            up_levels = []
+            dn_levels = []
+            
+            for uid in uids:
+                # 获取机组开度(100为关机)
+                angle = self._metrics_data_cache.get_value(uid, "blade_angle")
+                if angle is not None:
+                    angle_val = float(angle)
+                    status = 0 if abs(angle_val - 100.0) < 1e-3 else 1
+                    # 同步到 Agent 缓存。注意：这里直接覆盖 status 和 openings
+                    # 这个修改代表“从真实环境同步最新状态”，并没有修改 time_since_switch/time_since_adjust
+                    # 所以这个同步行为不会错误地计入下层MPC决策的启停和调整次数，逻辑是正确的。
+                    if self.station_memories and sid in self.station_memories:
+                        self.station_memories[sid].unit_status[uid] = status
+                        self.station_memories[sid].unit_openings[uid] = angle_val
+                else:
+                    angle_val = "None"
+                    status = "None"
+                
+                # 获取机组流量
+                q = self._metrics_data_cache.get_value(uid, MetricsCodes.WATER_FLOW.value)
+                if q is not None:
+                    total_q += float(q)
+                
+                # 获取机组水文(前后水位)
+                u_lvl = self._metrics_data_cache.get_value(uid, "up_water_level")
+                d_lvl = self._metrics_data_cache.get_value(uid, "down_water_level")
+                if u_lvl is not None:
+                    up_levels.append(float(u_lvl))
+                if d_lvl is not None:
+                    dn_levels.append(float(d_lvl))
+                    
+                pump_data_logs.append(
+                    f"  泵S{sid}-U{uid}: 状态={status}, 开度={angle_val}, 流量={q}, "
+                    f"前水位={u_lvl}, 后水位={d_lvl}"
+                )
+            
+            # 前后平均水位作为实际前后水位
+            f_val = sum(up_levels) / len(up_levels) if up_levels else None
+            b_val = sum(dn_levels) / len(dn_levels) if dn_levels else None
             
             # 仿真模块异常，临时写死边界水位
-            if sensors["front"] == 20701:
+            if sid == 1 and (f_val is None or f_val < 0):
                 f_val = 13.26
-            if sensors["back"] == 20801:
+            if sid == 3 and (b_val is None or b_val < 0):
                 b_val = 23.093
             
             if f_val is None or b_val is None:
-                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水位数据")
+                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水文数据")
                 
             station_front_levels[sid] = float(f_val)
             station_back_levels[sid] = float(b_val)
             station_heads[sid] = float(b_val) - float(f_val)
+            station_flows[sid] = total_q
             
-            if q_val is not None:
-                station_flows[sid] = float(q_val)
-            else:
-                station_flows[sid] = self.station_flow_history[sid][-1] if self.station_flow_history.get(sid) else 0.0
+        logger.info("从 _metrics_data_cache 获取的各泵机组原始数据:\n" + "\n".join(pump_data_logs))
                 
         logger.info(
-            f"第一时间读取并传入当前工况值:\n"
-            f"  洪泽湖(泗洪上-20701): 水位={station_front_levels.get(1, 0.0):.3f}\n"
-            f"  泗洪下(20101): 水位={station_back_levels.get(1, 0.0):.3f}, 泗洪站流量={station_flows.get(1, 0.0):.3f}\n"
-            f"  睢宁前(20117): 水位={station_front_levels.get(2, 0.0):.3f}\n"
-            f"  睢宁后(20501): 水位={station_back_levels.get(2, 0.0):.3f}, 睢宁站流量={station_flows.get(2, 0.0):.3f}\n"
-            f"  邳州上(20513): 水位={station_front_levels.get(3, 0.0):.3f}\n"
-            f"  骆马湖(邳州下-20801): 水位={station_back_levels.get(3, 0.0):.3f}, 邳州站流量={station_flows.get(3, 0.0):.3f}"
+            f"第一时间读取并传入当前工况值 (根据各泵机组平均和汇总):\n"
+            f"  S1(泗洪站): 前池水位={station_front_levels.get(1, 0.0):.3f}, 后池水位={station_back_levels.get(1, 0.0):.3f}, 总流量={station_flows.get(1, 0.0):.3f}\n"
+            f"  S2(睢宁二站): 前池水位={station_front_levels.get(2, 0.0):.3f}, 后池水位={station_back_levels.get(2, 0.0):.3f}, 总流量={station_flows.get(2, 0.0):.3f}\n"
+            f"  S3(邳州站): 前池水位={station_front_levels.get(3, 0.0):.3f}, 后池水位={station_back_levels.get(3, 0.0):.3f}, 总流量={station_flows.get(3, 0.0):.3f}"
         )
                 
         basin_levels = {}

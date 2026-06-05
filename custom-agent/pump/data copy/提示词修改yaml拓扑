@@ -1,0 +1,227 @@
+现在已总结出规律，当前项目是针对n梯级泵站和n-1个渠道的模型，因此现在需要在data里面的mpc_config.yaml文件里增加boundary_nodes属性序列，修改boundary_nodes、canal_pools、stations三个绑定的id对应下面资料。并且精简并统一全文id和name，比如hydro_front_node和front_level_key统一为front_level_id，  mpc_key这些统一用id代替，stations里面的units对应的id也更新。只有stations里面包含拓扑关系，把各个边界和渠道链接起来。注意修改代码，里面也要只依赖下面这些，如果有冲突或模糊无法取值的部分告诉我或作标记总结给我，要暴露问题，不要凭感觉写。
+
+需要保留的字段：
+boundary_nodes:
+  - id: 从资料里找洪泽湖对应的
+    name: 洪泽湖
+canal_pools：
+- id: 
+  name: 
+stations:
+- id: 1
+  name: 
+  front_level_id: 
+  back_level_id: 
+  level_back_min: 12.75
+  level_back_max: 16.8
+  level_front_min: 10.58
+  level_front_max: 13.84
+  num_units: 5
+  units:
+
+资料：
+渠道：
+    id: 20100
+    type: UnifiedCanal
+    name: 0-泗洪-睢宁段
+    id: 20500
+    type: UnifiedCanal
+    name: 1-睢宁-邳州段
+扰动分水口：
+    id: 20200
+    type: DisturbanceNode
+    name: 沙集站分水    
+    id: 20400
+    type: DisturbanceNode
+    name: 沙集站入水
+泵站：
+id: 20000
+    type: PumpStation
+    name: 泗洪站(5泵)
+    from_port:
+     -
+      id: 20001
+      type: Pump
+      name: 泗洪站1
+     -
+      id: 20002
+      type: Pump
+      name: 泗洪站2
+     -
+      id: 20003
+      type: Pump
+      name: 泗洪站3
+     -
+      id: 20004
+      type: Pump
+      name: 泗洪站4
+     -
+      id: 20005
+      type: Pump
+      name: 泗洪站5
+    id: 20300
+    type: PumpStation
+    name: 睢宁二站(4泵)
+    from_port:
+     -
+      id: 20301
+      type: Pump
+      name: 睢宁二站1
+     -
+      id: 20302
+      type: Pump
+      name: 睢宁二站2
+     -
+      id: 20303
+      type: Pump
+      name: 睢宁二站3
+     -
+      id: 20304
+      type: Pump
+      name: 睢宁二站4
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20601
+    type: Pump
+    name: 邳州站1
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20602
+    type: Pump
+    name: 邳州站2
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20603
+    type: Pump
+    name: 邳州站3
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20604
+    type: Pump
+    name: 邳州站4
+
+
+
+
+
+    删掉代码里写死id的相关的代码，但是保留这一段# 仿真模块异常，临时写死边界水位
+            if sensors["front"] == 20701:
+                f_val = 13.26
+            if sensors["back"] == 20801:
+                b_val = 23.093
+
+
+
+
+  修改data/mpc_config.yaml文件里对应各个部分的id，改成下述资料的id，并且检查代码里的逻辑是否正确调用了。接着修改代码中，每次调用优化函数时，给泵的初始状态的部分，应该根据下述的id从_metrics_data_cache获取每个泵机组的开度（100为关机）、流量，计算总流量为当前时刻的流量
+渠道：
+    id: 20100
+    type: UnifiedCanal
+    name: 0-泗洪-睢宁段
+    id: 20500
+    type: UnifiedCanal
+    name: 1-睢宁-邳州段
+扰动分水口：
+    id: 20200
+    type: DisturbanceNode
+    name: 沙集站分水    
+    id: 20400
+    type: DisturbanceNode
+    name: 沙集站入水
+泵站：
+id: 20000
+    type: PumpStation
+    name: 泗洪站(5泵)
+    from_port:
+     -
+      id: 20001
+      type: Pump
+      name: 泗洪站1
+     -
+      id: 20002
+      type: Pump
+      name: 泗洪站2
+     -
+      id: 20003
+      type: Pump
+      name: 泗洪站3
+     -
+      id: 20004
+      type: Pump
+      name: 泗洪站4
+     -
+      id: 20005
+      type: Pump
+      name: 泗洪站5
+    id: 20300
+    type: PumpStation
+    name: 睢宁二站(4泵)
+    from_port:
+     -
+      id: 20301
+      type: Pump
+      name: 睢宁二站1
+     -
+      id: 20302
+      type: Pump
+      name: 睢宁二站2
+     -
+      id: 20303
+      type: Pump
+      name: 睢宁二站3
+     -
+      id: 20304
+      type: Pump
+      name: 睢宁二站4
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20601
+    type: Pump
+    name: 邳州站1
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20602
+    type: Pump
+    name: 邳州站2
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20603
+    type: Pump
+    name: 邳州站3
+   -
+    parameters:
+      curve: 邳州曲线
+      condition_range:
+       - -7.0
+       - 5.0
+    id: 20604
+    type: Pump
+    name: 邳州站4

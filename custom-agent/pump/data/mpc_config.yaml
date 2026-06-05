@@ -314,24 +314,24 @@ topology:
     mpc_key: b3
   channel_segments:
   - id: pool_1
-    upstream_station_id: 1
-    downstream_station_id: 2
+    upstream_station_id: 20000
+    downstream_station_id: 20300
     hydro_channel: 泗洪站 -> 睢宁二站
-    hydro_profile_node: 0-泗洪-睢宁段
-    disturbance_node: 沙集站分水
+    hydro_profile_node: '20100'
+    disturbance_node: '20200'
   - id: pool_2
-    upstream_station_id: 2
-    downstream_station_id: 3
+    upstream_station_id: 20300
+    downstream_station_id: 20600
     hydro_channel: 睢宁二站 -> 邳州站
-    hydro_profile_node: 1-睢宁-邳州段
-    disturbance_node: 沙集站入水
+    hydro_profile_node: '20500'
+    disturbance_node: '20400'
   channel_groups:
-  - upstream_station_id: 1
-    downstream_station_id: 2
+  - upstream_station_id: 20000
+    downstream_station_id: 20300
     segment_ids:
     - pool_1
-  - upstream_station_id: 2
-    downstream_station_id: 3
+  - upstream_station_id: 20300
+    downstream_station_id: 20600
     segment_ids:
     - pool_2
 global_params:
@@ -387,9 +387,9 @@ runtime:
     unit_availability_active_scenario: maintenance_fault
     unit_availability_scenarios:
       baseline:
-        '1': []
-        '2': []
-        '3': []
+        '20000': []
+        '20300': []
+        '20600': []
       maintenance_fault: {}
   observer:
     observer_gain: 0.5
@@ -402,7 +402,7 @@ runtime:
     output_dir: output/xhh
     save_step_plots: true
 stations:
-- id: 1
+- id: 20000
   name: Station1
   remote_name: 泗洪站
   front_level_key: b0
@@ -415,7 +415,7 @@ stations:
   level_front_max: 13.84
   num_units: 5
   units:
-  - id: 1
+  - id: 20001
     name: Pump1
     table_e:
       columns:
@@ -8895,7 +8895,7 @@ stations:
       - - 1.765665
         - 38.2493
         - 2.0
-  - id: 2
+  - id: 20002
     name: Pump2
     table_e:
       columns:
@@ -17375,7 +17375,7 @@ stations:
       - - 1.765665
         - 38.2493
         - 2.0
-  - id: 3
+  - id: 20003
     name: Pump3
     table_e:
       columns:
@@ -25855,7 +25855,7 @@ stations:
       - - 1.765665
         - 38.2493
         - 2.0
-  - id: 4
+  - id: 20004
     name: Pump4
     table_e:
       columns:
@@ -34335,7 +34335,7 @@ stations:
       - - 1.765665
         - 38.2493
         - 2.0
-  - id: 5
+  - id: 20005
     name: Pump5
     table_e:
       columns:
@@ -42815,7 +42815,7 @@ stations:
       - - 1.765665
         - 38.2493
         - 2.0
-- id: 2
+- id: 20300
   name: Station2
   remote_name: 睢宁二站
   front_level_key: b1
@@ -42828,7 +42828,7 @@ stations:
   level_front_max: 16.7
   num_units: 4
   units:
-  - id: 1
+  - id: 20301
     name: Pump1
     table_e:
       columns:
@@ -44084,7 +44084,7 @@ stations:
       - - -6.0
         - 1.9983
         - 21.615
-  - id: 2
+  - id: 20302
     name: Pump2
     table_e:
       columns:
@@ -45340,7 +45340,7 @@ stations:
       - - -6.0
         - 1.9983
         - 21.615
-  - id: 3
+  - id: 20303
     name: Pump3
     table_e:
       columns:
@@ -46596,7 +46596,7 @@ stations:
       - - 1.9983
         - 21.615
         - -6.0
-  - id: 4
+  - id: 20304
     name: Pump4
     table_e:
       columns:
@@ -47852,7 +47852,7 @@ stations:
       - - 1.9983
         - 21.615
         - -6.0
-- id: 3
+- id: 20600
   name: Station3
   remote_name: 邳州站
   front_level_key: b2
@@ -47865,7 +47865,7 @@ stations:
   level_front_max: 22.1
   num_units: 4
   units:
-  - id: 1
+  - id: 20601
     name: pump1
     table_e:
       columns:
@@ -49715,7 +49715,7 @@ stations:
       - - 5.0
         - 0.9453
         - 48.7831
-  - id: 2
+  - id: 20602
     name: pump2
     table_e:
       columns:
@@ -51565,7 +51565,7 @@ stations:
       - - 5.0
         - 0.9453
         - 48.7831
-  - id: 3
+  - id: 20603
     name: pump3
     table_e:
       columns:
@@ -53415,7 +53415,7 @@ stations:
       - - 5.0
         - 0.9453
         - 48.7831
-  - id: 4
+  - id: 20604
     name: pump4
     table_e:
       columns:
