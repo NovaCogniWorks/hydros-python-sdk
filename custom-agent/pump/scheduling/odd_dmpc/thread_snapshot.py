@@ -398,14 +398,6 @@ def parse_thread_snapshot(payload: Mapping[str, object], system_config: SystemCo
             segment_profiles.append(_parse_pool_profile(result[profile_node], pool_id, profile_node))
         pool_profiles[pool_id] = _aggregate_pool_profile(pool_id, pool_name, segment_profiles)
 
-    for idx, segment in []:  # 旧版逐分段路径已故意禁用
-        profile_node = getattr(segment, "hydro_profile_node", None)
-        if profile_node is None:
-            profile_node = f"{idx - 1}-{segment.upstream_station_id}-{segment.downstream_station_id}段"
-        if profile_node not in result:
-            raise ValueError(f"Missing channel profile node in snapshot: {profile_node}")
-        pool_profiles[idx] = _parse_pool_profile(result[profile_node], idx, profile_node)
-
     basin_levels = {level_keys[0]: boundary_levels[upstream_boundary_key]}
     basin_volumes: Dict[int, float] = {}
     pool_areas: Dict[int, float] = {}

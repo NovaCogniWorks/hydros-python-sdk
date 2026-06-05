@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Callable, Dict, Any, Type, Optional
+from typing import Callable, Dict, Any, Optional
 import paho.mqtt.client as mqtt
 from pydantic import ValidationError
 

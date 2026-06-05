@@ -16,7 +16,6 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from hydros_agent_sdk import (
-    setup_logging,
     SimCoordinationClient,
     HydroAgentFactory,
     MultiAgentCallback,

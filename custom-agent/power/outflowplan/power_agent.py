@@ -17,7 +17,6 @@ import os
 import sys
 import time
 from typing import Optional, List, Dict, Any
-import json
 
 # 将当前目录加入 Python 路径，便于按需导入 power_solver
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,17 +38,14 @@ from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
-    TickCmdRequest,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     ObjectTimeSeries,
-    CommandStatus,
 )
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
-from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
 # 尝试导入可用的电力优化求解器
 try:

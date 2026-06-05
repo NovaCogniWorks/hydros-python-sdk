@@ -5,7 +5,7 @@
 它本质上是一个字典，并为常见属性类型提供类型化访问方法。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class AgentProperties(dict):

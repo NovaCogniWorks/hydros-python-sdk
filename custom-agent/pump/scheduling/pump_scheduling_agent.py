@@ -9,8 +9,6 @@ import logging
 import os
 import sys
 import json
-from scipy.optimize import differential_evolution
-import numpy as np
 import pandas as pd
 from typing import Optional, List, Dict, Any
 
@@ -19,7 +17,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from hydros_agent_sdk import (
-    setup_logging, SimCoordinationClient, HydroAgentFactory, MultiAgentCallback,
+    SimCoordinationClient, HydroAgentFactory, MultiAgentCallback,
     load_env_config, load_agent_config, ErrorCodes, handle_agent_errors,
     DeviceValueTypeEnum, HydroObjectType, generate_coordination_command_id
 )
@@ -27,9 +25,6 @@ from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import MpcResult, MpcResultDetail
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
-
-from flow_depart import generate_flow_depart
-
 
 logger = logging.getLogger(__name__)
 
@@ -275,8 +270,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         level_keys = _level_keys(self.system_config)
         station_ids = _ordered_station_ids(self.system_config)
 
-        from hydros_agent_sdk.utils.hydro_object_utils import MetricsCodes
-        
         station_back_levels = {}
         station_front_levels = {}
         station_heads = {}

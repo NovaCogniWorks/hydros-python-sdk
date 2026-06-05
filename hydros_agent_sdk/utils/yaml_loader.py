@@ -17,7 +17,7 @@ YAML 加载工具。
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote, urlparse, urlunparse

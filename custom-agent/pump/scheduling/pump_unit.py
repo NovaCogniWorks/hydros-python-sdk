@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 from scipy.spatial import Delaunay
 from scipy.interpolate import LinearNDInterpolator

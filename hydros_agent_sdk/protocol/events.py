@@ -1,5 +1,4 @@
 from __future__ import annotations
-from datetime import datetime
 from typing import List, Optional, Any, Literal, Union
 from pydantic import AliasChoices, Field
 from .models import SimulationContext, ObjectTimeSeries

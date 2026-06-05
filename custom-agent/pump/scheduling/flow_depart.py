@@ -1,16 +1,9 @@
 import pandas as pd
 import numpy as np
-import os
 import math
-import json
-import yaml
 import warnings
 from scipy.optimize import minimize
-from scipy.spatial import Delaunay
-from scipy.interpolate import LinearNDInterpolator
 from itertools import product
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.linear_model import LinearRegression
 
 # 抑制警告
 warnings.filterwarnings('ignore')
