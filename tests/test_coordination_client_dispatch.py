@@ -152,6 +152,35 @@ class BlockingTickAndInitCallback(BlockingTickCallback):
             broadcast=False,
         )
 
+
+class TaskIsolatedBlockingCallback(ReturningCallback):
+    def __init__(self, agents_by_context, blocked_context_id):
+        first_agent = next(iter(agents_by_context.values()))
+        super().__init__(first_agent)
+        self.agents_by_context = agents_by_context
+        self.blocked_context_id = blocked_context_id
+        self.blocked_tick_started = Event()
+        self.blocked_tick_release = Event()
+        self.fast_tick_handled = Event()
+
+    def on_tick(self, request):
+        context_id = request.context.biz_scene_instance_id
+        if context_id == self.blocked_context_id:
+            self.blocked_tick_started.set()
+            self.blocked_tick_release.wait(timeout=5)
+        else:
+            self.fast_tick_handled.set()
+
+        agent = self.agents_by_context[context_id]
+        return TickCmdResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=agent,
+            broadcast=False,
+        )
+
+
 def make_client(callback, state_manager):
     return SimCoordinationClient(
         broker_url="tcp://localhost",
@@ -282,6 +311,49 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
         assert tick_response.command_id == "CMD_BLOCKING_TICK"
     finally:
         callback.tick_release.set()
+        stop_inbound_workers(client)
+
+
+def test_business_commands_are_isolated_by_task_context():
+    slow_context = make_context()
+    fast_context = SimulationContext(biz_scene_instance_id="TASK_FAST")
+    slow_agent = make_agent(slow_context)
+    fast_agent = make_agent(fast_context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    for context, agent in ((slow_context, slow_agent), (fast_context, fast_agent)):
+        state_manager.init_task(context, [agent])
+        state_manager.add_local_agent(agent)
+
+    callback = TaskIsolatedBlockingCallback(
+        {
+            slow_context.biz_scene_instance_id: slow_agent,
+            fast_context.biz_scene_instance_id: fast_agent,
+        },
+        blocked_context_id=slow_context.biz_scene_instance_id,
+    )
+    client = make_client(callback, state_manager)
+    start_inbound_workers(client)
+
+    try:
+        slow_tick = TickCmdRequest(command_id="CMD_SLOW_TASK_TICK", context=slow_context, step=1)
+        fast_tick = TickCmdRequest(command_id="CMD_FAST_TASK_TICK", context=fast_context, step=1)
+        client._on_message(None, None, mqtt_message(slow_tick))
+        assert callback.blocked_tick_started.wait(timeout=1)
+
+        client._on_message(None, None, mqtt_message(fast_tick))
+
+        assert callback.fast_tick_handled.wait(timeout=1)
+        fast_response = client.out_message_queue.get(timeout=1)
+        assert isinstance(fast_response, TickCmdResponse)
+        assert fast_response.command_id == "CMD_FAST_TASK_TICK"
+
+        callback.blocked_tick_release.set()
+        slow_response = client.out_message_queue.get(timeout=1)
+        assert isinstance(slow_response, TickCmdResponse)
+        assert slow_response.command_id == "CMD_SLOW_TASK_TICK"
+    finally:
+        callback.blocked_tick_release.set()
         stop_inbound_workers(client)
 
 

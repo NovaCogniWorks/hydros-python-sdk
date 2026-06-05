@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Optional, Dict, Callable
 from queue import Queue, Empty, Full
-from threading import Thread, Event
+from threading import Thread, Event, RLock
 import paho.mqtt.client as mqtt
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -216,13 +216,15 @@ class SimCoordinationClient:
         # 入站消息队列。MQTT 回调必须保持轻量，
         # 可能较慢的业务处理器由 worker 执行。
         self.control_message_queue: Queue[InboundCommand] = Queue(maxsize=control_queue_size)
-        self.business_message_queue: Queue[InboundCommand] = Queue(maxsize=business_queue_size)
+        self.business_queue_size = business_queue_size
+        self.business_message_queues: Dict[str, Queue[InboundCommand]] = {}
+        self._business_workers_lock = RLock()
 
         # 线程管理
         self.running = Event()
         self.queue_thread: Optional[Thread] = None
         self.control_worker_thread: Optional[Thread] = None
-        self.business_worker_thread: Optional[Thread] = None
+        self.business_worker_threads: Dict[str, Thread] = {}
         self.connected = Event()
 
         # 注册指令处理器
@@ -490,18 +492,14 @@ class SimCoordinationClient:
             )
             self.control_worker_thread.start()
 
-        if self.business_worker_thread is None or not self.business_worker_thread.is_alive():
-            self.business_worker_thread = Thread(
-                target=self._inbound_worker_loop,
-                args=(self.business_message_queue, "BusinessWorker"),
-                daemon=True,
-                name="BusinessWorker",
-            )
-            self.business_worker_thread.start()
-
     def _stop_inbound_workers(self):
         """running 标记清除后，短暂等待入站 worker 停止。"""
-        for worker in (self.control_worker_thread, self.business_worker_thread):
+        with self._business_workers_lock:
+            business_workers = list(self.business_worker_threads.values())
+            self.business_worker_threads.clear()
+            self.business_message_queues.clear()
+
+        for worker in [self.control_worker_thread, *business_workers]:
             if worker and worker.is_alive():
                 worker.join(timeout=5)
 
@@ -531,7 +529,29 @@ class SimCoordinationClient:
     def _select_inbound_queue(self, command: SimCommand):
         if isinstance(command, (SimTaskInitRequest, SimTaskTerminateRequest)):
             return "control", self.control_message_queue
-        return "business", self.business_message_queue
+
+        context_id = self._command_context_id(command) or "__no_context__"
+        return f"business:{context_id}", self._get_or_start_business_queue(context_id)
+
+    def _get_or_start_business_queue(self, context_id: str) -> Queue[InboundCommand]:
+        with self._business_workers_lock:
+            business_queue = self.business_message_queues.get(context_id)
+            if business_queue is None:
+                business_queue = Queue(maxsize=self.business_queue_size)
+                self.business_message_queues[context_id] = business_queue
+
+            worker = self.business_worker_threads.get(context_id)
+            if worker is None or not worker.is_alive():
+                worker_name = f"BusinessWorker:{context_id}"
+                worker = Thread(
+                    target=self._inbound_worker_loop,
+                    args=(business_queue, worker_name),
+                    daemon=True,
+                    name=worker_name,
+                )
+                self.business_worker_threads[context_id] = worker
+                worker.start()
+        return business_queue
 
     def _inbound_worker_loop(self, source_queue: Queue[InboundCommand], worker_name: str):
         logger.info("Inbound command worker started: %s", worker_name)
