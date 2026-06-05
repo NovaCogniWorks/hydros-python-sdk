@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from hydros_agent_sdk.context_manager import ContextManager
+from hydros_agent_sdk.logging_config import get_biz_component, get_biz_scene_instance_id
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -384,3 +385,17 @@ def test_multi_agent_tick_skips_agents_without_tick_capability():
     assert tick_responses[0].source_agent_instance.agent_code == "TICK_AGENT"
     assert tick_agent.tick_count == 1
     assert event_agent.tick_count == 0
+
+
+def test_multi_agent_tick_sets_logging_context_for_target_agent():
+    context = make_context()
+    agent = FakeAgent(make_instance(context))
+    callback = MultiAgentCallback(node_id="node")
+    callback.agents[context.biz_scene_instance_id] = {
+        "TEST_AGENT": agent,
+    }
+
+    callback.on_tick(TickCmdRequest(command_id="CMD_TICK", context=context, step=1))
+
+    assert get_biz_component() == "AGT_TEST_AGENT"
+    assert get_biz_scene_instance_id() == "TASK_001"

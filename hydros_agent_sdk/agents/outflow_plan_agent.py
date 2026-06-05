@@ -189,7 +189,6 @@ class OutflowPlanAgent(BaseHydroAgent):
         返回:
             成功响应；正常多 Agent 分发会通过 supports_tick_command() 跳过本智能体。
         """
-        self._set_agent_logging_context()
         logger.debug(
             "Ignoring tick for event-driven outflow plan agent: step=%s, commandId=%s",
             request.step,

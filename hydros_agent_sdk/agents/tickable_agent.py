@@ -161,9 +161,6 @@ class TickableAgent(BaseHydroAgent):
         Returns:
             Tick 指令响应
         """
-        # 为智能体业务逻辑设置日志上下文
-        self._set_agent_logging_context()
-
         self._current_step = request.step
 
         logger.info(f"Processing tick: step={request.step}, commandId={request.command_id}")
@@ -229,11 +226,10 @@ class TickableAgent(BaseHydroAgent):
         处理时序数据更新（边界条件）。
 
         该方法会：
-        1. 设置智能体日志上下文
-        2. 从事件中提取时序数据
-        3. 更新内部缓存
-        4. 调用 on_boundary_condition_update() 执行子类专属处理
-        5. 返回 TimeSeriesDataUpdateResponse
+        1. 从事件中提取时序数据
+        2. 更新内部缓存
+        3. 调用 on_boundary_condition_update() 执行子类专属处理
+        4. 返回 TimeSeriesDataUpdateResponse
 
         子类可覆盖 on_boundary_condition_update() 来处理边界条件变化。
 
@@ -243,9 +239,6 @@ class TickableAgent(BaseHydroAgent):
         Returns:
             时序数据更新响应
         """
-        # 为智能体业务逻辑设置日志上下文
-        self._set_agent_logging_context()
-
         logger.info(f"Received time series data update: commandId={request.command_id}")
 
         try:

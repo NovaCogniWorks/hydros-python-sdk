@@ -20,6 +20,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
+from hydros_agent_sdk.runtime.agent_logging_context import AgentLoggingContextSetter
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
@@ -60,6 +61,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: 智能体}}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
+        self._logging_context_setter = AgentLoggingContextSetter()
 
         logger.info(f"MultiAgentCallback created for node: {node_id}")
 
@@ -184,12 +186,16 @@ class MultiAgentCallback(SimCoordinationCallback):
         phase: str,
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        if self._status_support is None:
+        def wrapped_action():
+            self._logging_context_setter.set_for_agent(agent)
             return action()
+
+        if self._status_support is None:
+            return wrapped_action()
 
         return self._status_support.execute_with_status(
             agent,
-            action,
+            wrapped_action,
             phase=phase,
             metadata=metadata,
         )
@@ -283,6 +289,7 @@ class MultiAgentCallback(SimCoordinationCallback):
                     self._sync_agent_definition_from_request(agent, agent_def)
 
                 # 初始化智能体
+                self._logging_context_setter.set_for_agent(agent)
                 response = agent.on_init(request)
                 created_agent_code = getattr(agent, "agent_code", routed_agent_code)
 
@@ -422,6 +429,7 @@ class MultiAgentCallback(SimCoordinationCallback):
                         "reason": request.reason,
                     },
                 )
+                self._logging_context_setter.set_for_agent(agent)
                 response = agent.on_terminate(request)
                 if response:
                     responses.append(response)

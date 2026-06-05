@@ -178,23 +178,6 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         pass
 
-    def _set_agent_logging_context(self):
-        """
-        为当前智能体实例设置日志上下文。
-
-        应在每个智能体方法（on_init、on_tick 等）开头调用，确保智能体
-        业务逻辑日志包含正确的 agent_id。
-        """
-        from hydros_agent_sdk.logging_config import set_biz_component, set_biz_scene_instance_id
-
-        # 为智能体业务逻辑把 biz_component 设置为 agent_id
-        if self.agent_id:
-            set_biz_component(self.agent_id)
-
-        # 从 context 设置 biz_scene_instance_id
-        if self.context and self.context.biz_scene_instance_id:
-            set_biz_scene_instance_id(self.context.biz_scene_instance_id)
-
     def supports_tick_command(self) -> bool:
         """返回该智能体是否参与仿真 tick 分派。"""
         return False

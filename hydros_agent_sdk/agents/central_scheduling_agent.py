@@ -287,7 +287,6 @@ class CentralSchedulingAgent(TickableAgent):
         在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建 MpcTaskState
         的第一个触发点。后续 tick 只会在该激活点之后继续滚动。
         """
-        self._set_agent_logging_context()
         logger.debug("Received central scheduling time series update: commandId=%s", request.command_id)
 
         try:

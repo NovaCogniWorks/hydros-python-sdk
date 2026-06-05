@@ -90,6 +90,7 @@ from hydros_agent_sdk.config_loader import (
 from hydros_agent_sdk.runtime import (
     AgentContext,
     AgentConfigurationService,
+    AgentLoggingContextSetter,
     RuntimeEnvSettings,
     ResponseFactory,
     TimeSeriesCache,
@@ -207,6 +208,7 @@ __all__ = [
     "load_properties_file",
     "AgentContext",
     "AgentConfigurationService",
+    "AgentLoggingContextSetter",
     "RuntimeEnvSettings",
     "ResponseFactory",
     "TimeSeriesCache",
