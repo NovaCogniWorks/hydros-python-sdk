@@ -22,6 +22,7 @@ class SensorData(HydroBaseModel):
     position_code: Optional[str] = _payload_field("position_code")
     value: Optional[float] = None
     step_index: Optional[int] = _payload_field("step_index")
+    attributes: Optional[str] = _payload_field("attributes")
 
 
 class DeviceOpening(HydroBaseModel):

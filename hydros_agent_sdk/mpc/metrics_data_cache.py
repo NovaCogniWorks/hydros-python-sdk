@@ -20,6 +20,7 @@ class MetricsDataCache:
         step_index = payload.get("step_index")
         object_type = payload.get("object_type")
         position_code = payload.get("position_code")
+        attributes = payload.get("attributes")
         if position_code != "none":
             return None
         if object_id is None or not metrics_code:
@@ -33,6 +34,7 @@ class MetricsDataCache:
             "position_code": position_code,
             "value": value,
             "step_index": step_index,
+            "attributes": attributes,
         }
         self.latest_metrics[cache_key] = metrics_data
 

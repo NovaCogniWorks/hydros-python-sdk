@@ -34,6 +34,7 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
                     "value": 2.5,
                     "step_index": 4,
                     "position_code": "none",
+                    "attributes": "{\"front_water_flow\":2.5}",
                 }
             ).encode("utf-8"),
         )
@@ -42,6 +43,7 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
         self.assertEqual(mqtt_client.subscriptions, ["/metrics/topic"])
         self.assertEqual(cache.get_value(1001, "flow"), 2.5)
         self.assertEqual(cache.by_step(4)["1001_flow"]["position_code"], "none")
+        self.assertEqual(cache.by_step(4)["1001_flow"]["attributes"], "{\"front_water_flow\":2.5}")
 
     def test_invalid_json_is_ignored(self):
         cache = MetricsDataCache(max_steps=3)

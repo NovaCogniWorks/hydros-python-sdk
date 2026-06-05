@@ -26,6 +26,7 @@ class MetricsDataCacheTest(unittest.TestCase):
                 "value": 2.0,
                 "step_index": 2,
                 "position_code": "none",
+                "attributes": "{\"front_water_flow\":2.0}",
             }
         )
 
@@ -33,6 +34,7 @@ class MetricsDataCacheTest(unittest.TestCase):
         self.assertEqual(cache.get_value(1001, "flow"), 2.0)
         self.assertEqual(cache.by_step(1), {})
         self.assertEqual(cache.by_step(2)["1001_flow"]["position_code"], "none")
+        self.assertEqual(cache.by_step(2)["1001_flow"]["attributes"], "{\"front_water_flow\":2.0}")
 
     def test_trims_step_history_by_max_steps(self):
         cache = MetricsDataCache(max_steps=2)
@@ -60,6 +62,7 @@ class MetricsDataCacheTest(unittest.TestCase):
                 "value": 12.5,
                 "step_index": 7,
                 "position_code": "none",
+                "attributes": "{\"front_water_level\":12.5}",
             }
         )
 
@@ -70,6 +73,7 @@ class MetricsDataCacheTest(unittest.TestCase):
         self.assertEqual(sensor_data[0].metrics_code, "water_level")
         self.assertEqual(sensor_data[0].value, 12.5)
         self.assertEqual(sensor_data[0].step_index, 7)
+        self.assertEqual(sensor_data[0].attributes, "{\"front_water_level\":12.5}")
 
 
 if __name__ == "__main__":
