@@ -20,6 +20,7 @@ from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
 from .tickable_agent import TickableAgent
@@ -35,7 +36,6 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
     AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
@@ -300,22 +300,10 @@ class CentralSchedulingAgent(TickableAgent):
 
             self._mpc_rolling_runtime.handle_time_series_changed(event)
 
-            return TimeSeriesDataUpdateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                broadcast=False,
-            )
+            return ResponseFactory.time_series_data_update_succeed(self, request)
         except Exception as e:
             logger.error("Error handling central scheduling time series update: %s", e, exc_info=True)
-            return TimeSeriesDataUpdateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                broadcast=False,
-            )
+            return ResponseFactory.time_series_data_update_failed(self, request)
 
     def on_optimization(self, step: int) -> Optional[List[Any]]:
         """

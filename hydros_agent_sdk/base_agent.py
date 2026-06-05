@@ -31,12 +31,8 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesCalculationRequest,
     OutflowTimeSeriesRequest,
 )
-from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.agent_properties import AgentProperties
-from hydros_agent_sdk.agent_constants import (
-    CENTRAL_SCHEDULING_AGENT_TYPE,
-    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
-)
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 
 # 仅用于类型检查，避免运行时循环导入
 if TYPE_CHECKING:
@@ -247,13 +243,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         """
         logger.info(f"Time series data update: {request.command_id}")
 
-        return TimeSeriesDataUpdateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,  # self 已经是 HydroAgentInstance
-            broadcast=False
-        )
+        return ResponseFactory.time_series_data_update_succeed(self, request)
 
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
         """
@@ -268,13 +258,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             外发流量时序数据更新响应
         """
         logger.info(f"Outflow time series data update: {request.command_id}")
-        return OutflowTimeSeriesDataUpdateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,  # self 已经是 HydroAgentInstance
-            broadcast=False
-        )
+        return ResponseFactory.outflow_time_series_data_update_succeed(self, request)
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """
@@ -346,93 +330,6 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             如果 agent_list 中没有找到当前智能体，本方法会跳过加载并静默返回，
             因为 SimTaskInitRequest 可能只初始化部分智能体。
         """
-        from hydros_agent_sdk.agent_config import AgentConfigLoader
+        from hydros_agent_sdk.runtime.agent_configuration_service import AgentConfigurationService
 
-        # 在 agent_list 中按 agent_code 精确查找匹配智能体
-        matching_agent = None
-        for agent in request.agent_list:
-            if agent.agent_code == self.agent_code:
-                matching_agent = agent
-                break
-
-        # 系统默认中央调度智能体可以承接唯一一个中央调度定义的配置。
-        if matching_agent is None and self._is_system_default_central_scheduling_agent():
-            central_agents = [
-                agent
-                for agent in request.agent_list
-                if getattr(agent, "agent_type", None) == CENTRAL_SCHEDULING_AGENT_TYPE
-            ]
-            if len(central_agents) == 1:
-                matching_agent = central_agents[0]
-                logger.info(
-                    "Using system default %s to load configuration "
-                    "for requested central agent '%s'",
-                    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
-                    matching_agent.agent_code,
-                )
-
-        if matching_agent is None:
-            logger.info(
-                f"Agent '{self.agent_code}' not found in SimTaskInitRequest.agent_list, "
-                f"skipping configuration loading (this is normal if only initializing a subset of agents)"
-            )
-            return
-
-        if not matching_agent.agent_configuration_url:
-            logger.warning(f"No agent_configuration_url provided for agent '{self.agent_code}'")
-            return
-
-        agent_config_url = matching_agent.agent_configuration_url
-        logger.info(f"Loading agent configuration from: {agent_config_url}")
-
-        try:
-            # 从 URL 加载配置
-            agent_config = AgentConfigLoader.from_url(agent_config_url)
-
-            # 校验 agent_code 是否匹配。部分部署会共享通用 agent_type 配置，
-            # 同时使用专门的运行时 agent_code。
-            allowed_agent_codes = {self.agent_code, self.agent_type}
-            if getattr(matching_agent, 'agent_code', None):
-                allowed_agent_codes.add(matching_agent.agent_code)
-            if getattr(matching_agent, 'agent_type', None):
-                allowed_agent_codes.add(matching_agent.agent_type)
-
-            if agent_config.agent_code not in allowed_agent_codes:
-                raise ValueError(
-                    f"Agent code mismatch: expected one of {sorted(allowed_agent_codes)}, "
-                    f"but YAML contains '{agent_config.agent_code}'. "
-                    f"Please check the agent_configuration_url: {agent_config_url}"
-                )
-
-            logger.info(
-                f"Agent configuration validated successfully for '{self.agent_code}' "
-                f"(YAML agent_code: '{agent_config.agent_code}')"
-            )
-
-            # 从 YAML 设置属性
-            if agent_config.properties:
-                # 将 Pydantic 模型转换为 dict 并更新 AgentProperties
-                properties_dict = agent_config.properties.model_dump(exclude_none=True)
-                self.properties.update(properties_dict)
-
-            for component in agent_config.components or []:
-                if not component.enabled or not component.properties:
-                    continue
-                component_properties = component.properties.model_dump(exclude_none=True)
-                self.properties.update(component_properties)
-
-            logger.info(f"Loaded {len(self.properties)} properties from configuration")
-            logger.debug(f"Properties: {list(self.properties.keys())}")
-
-            # 更新 agent_configuration_url
-            object.__setattr__(self, 'agent_configuration_url', agent_config_url)
-
-        except Exception as e:
-            logger.error(f"Failed to load agent configuration from {agent_config_url}: {e}")
-            raise
-
-    def _is_system_default_central_scheduling_agent(self) -> bool:
-        return (
-            self.agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
-            and self.agent_type == CENTRAL_SCHEDULING_AGENT_TYPE
-        )
+        AgentConfigurationService().load_into(self, request)

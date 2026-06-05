@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -18,11 +19,9 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     TimeSeriesCalculationRequest,
-    TimeSeriesCalculationResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
     AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
@@ -159,13 +158,7 @@ class ModelCalculationAgent(BaseHydroAgent):
             f"This agent is EVENT_DRIVEN and should not receive tick commands."
         )
 
-        return TickCmdResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.FAILED,
-            source_agent_instance=self,
-            broadcast=False
-        )
+        return ResponseFactory.tick_failed(self, request)
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """
@@ -188,15 +181,10 @@ class ModelCalculationAgent(BaseHydroAgent):
 
             logger.info(f"Model calculation completed, produced {len(object_time_series_list)} time series")
 
-            # 创建响应
-            response = TimeSeriesCalculationResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                hydro_event=request.hydro_event,
+            response = ResponseFactory.time_series_calculation_succeed(
+                self,
+                request,
                 object_time_series_list=object_time_series_list,
-                broadcast=False
             )
 
             # 发送响应
@@ -210,16 +198,7 @@ class ModelCalculationAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error in model calculation: {e}", exc_info=True)
 
-            # 发送失败响应
-            response = TimeSeriesCalculationResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                hydro_event=request.hydro_event,
-                object_time_series_list=[],
-                broadcast=False
-            )
+            response = ResponseFactory.time_series_calculation_failed(self, request)
 
             self.send_response(response)
 

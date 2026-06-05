@@ -8,6 +8,7 @@ import logging
 from typing import Optional, List
 
 from .tickable_agent import TickableAgent
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -18,7 +19,6 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
     AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
@@ -172,16 +172,7 @@ class TwinsSimulationAgent(TickableAgent):
 
             logger.info(f"Digital twins simulation agent initialized: {self.agent_id}")
 
-            # 创建响应
-            response = SimTaskInitResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                created_agent_instances=[self],
-                managed_top_objects={},
-                broadcast=False
-            )
+            response = ResponseFactory.init_succeed(self, request)
 
             logger.info(
                 f"发布协调指令成功,commandId={response.command_id},"
@@ -193,16 +184,7 @@ class TwinsSimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Failed to initialize digital twins simulation agent: {e}", exc_info=True)
 
-            # 返回失败响应
-            return SimTaskInitResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                created_agent_instances=[],
-                managed_top_objects={},
-                broadcast=False
-            )
+            return ResponseFactory.init_failed(self, request)
 
     def _initialize_twins_model(self):
         """
@@ -325,14 +307,7 @@ class TwinsSimulationAgent(TickableAgent):
 
             logger.info(f"Digital twins simulation agent terminated: {self.agent_id}")
 
-            # 创建响应
-            response = SimTaskTerminateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                broadcast=False
-            )
+            response = ResponseFactory.terminate_succeed(self, request)
 
             logger.info(
                 f"发布协调指令成功,commandId={response.command_id},"
@@ -344,11 +319,4 @@ class TwinsSimulationAgent(TickableAgent):
         except Exception as e:
             logger.error(f"Error terminating digital twins simulation agent: {e}", exc_info=True)
 
-            # 返回失败响应
-            return SimTaskTerminateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                broadcast=False
-            )
+            return ResponseFactory.terminate_failed(self, request)

@@ -7,9 +7,12 @@ tick 驱动仿真能力和时序数据更新处理。
 
 import logging
 from abc import abstractmethod
-from typing import Optional, List, Dict
+from typing import Optional, List
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
+from hydros_agent_sdk.runtime.time_series_cache import TimeSeriesCache
+from hydros_agent_sdk.transport.mqtt_metrics_publisher import MqttMetricsPublisher
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -23,7 +26,6 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
     AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
@@ -112,8 +114,9 @@ class TickableAgent(BaseHydroAgent):
         # 当前仿真步
         self._current_step: int = 0
 
-        # 时间序列数据缓存（用于边界条件）
-        self._time_series_cache: Dict[str, ObjectTimeSeries] = {}
+        self.time_series_cache = TimeSeriesCache()
+        self._time_series_cache = self.time_series_cache.store
+        self.metrics_publisher = MqttMetricsPublisher.from_coordination_client(sim_coordination_client)
 
         logger.info(f"TickableAgent initialized: {self.agent_id}")
 
@@ -174,14 +177,7 @@ class TickableAgent(BaseHydroAgent):
                 self.send_metrics_batch(metrics_list)
                 logger.info(f"Sent {len(metrics_list)} metrics for step {request.step}")
 
-            # 创建响应
-            response = TickCmdResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                broadcast=False
-            )
+            response = ResponseFactory.tick_succeed(self, request)
 
             logger.info(
                 f"发布协调指令成功,commandId={response.command_id},"
@@ -193,14 +189,7 @@ class TickableAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error processing tick {request.step}: {e}", exc_info=True)
 
-            # 返回失败响应
-            return TickCmdResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                broadcast=False
-            )
+            return ResponseFactory.tick_failed(self, request)
 
     @abstractmethod
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -264,9 +253,7 @@ class TickableAgent(BaseHydroAgent):
             event = request.time_series_data_changed_event
             if event and event.object_time_series:
                 for time_series in event.object_time_series:
-                    # 按 object_id 和 metrics_code 缓存时间序列数据
-                    cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
-                    self._time_series_cache[cache_key] = time_series
+                    self.time_series_cache.update(time_series)
 
                     logger.info(
                         f"Updated time series: object={time_series.object_name}, "
@@ -277,28 +264,12 @@ class TickableAgent(BaseHydroAgent):
                 # 调用子类专属处理器
                 self.on_boundary_condition_update(event.object_time_series)
 
-            # 创建响应
-            response = TimeSeriesDataUpdateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                broadcast=False
-            )
-
-            return response
+            return ResponseFactory.time_series_data_update_succeed(self, request)
 
         except Exception as e:
             logger.error(f"Error handling time series data update: {e}", exc_info=True)
 
-            # 返回失败响应
-            return TimeSeriesDataUpdateResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=self,
-                broadcast=False
-            )
+            return ResponseFactory.time_series_data_update_failed(self, request)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
@@ -328,21 +299,9 @@ class TickableAgent(BaseHydroAgent):
         Returns:
             时序值；未找到时返回 None
         """
-        cache_key = f"{object_id}_{metrics_code}"
-        time_series = self._time_series_cache.get(cache_key)
-
-        if not time_series or not time_series.time_series:
-            return None
-
         # 未指定时使用当前步
         target_step = step if step is not None else self._current_step
-
-        # 查找目标步的值
-        for ts_value in time_series.time_series:
-            if ts_value.step == target_step:
-                return ts_value.value
-
-        return None
+        return self.time_series_cache.get_value(object_id, metrics_code, target_step)
 
     def send_metrics_batch(self, metrics_list: List[MqttMetrics]):
         """
@@ -351,15 +310,7 @@ class TickableAgent(BaseHydroAgent):
         Args:
             metrics_list: 要发送的 MqttMetrics 对象列表
         """
-        from hydros_agent_sdk.utils.mqtt_metrics import send_metrics_batch
-
-        metrics_topic = f"{self.sim_coordination_client.topic}/metrics"
-        send_metrics_batch(
-            mqtt_client=self.sim_coordination_client.mqtt_client,
-            topic=metrics_topic,
-            metrics_list=metrics_list,
-            qos=0
-        )
+        return self.metrics_publisher.publish_batch(metrics_list)
 
     @property
     def current_step(self) -> int:

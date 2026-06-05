@@ -14,6 +14,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdResponse,
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesDataUpdateResponse,
     TimeSeriesCalculationResponse,
 )
 from hydros_agent_sdk.protocol.models import (
@@ -141,6 +142,49 @@ class ResponseFactory:
             error_code=error_code,
             error_message=error_message,
             source_agent_instance=agent,
+            broadcast=False,
+        )
+
+    @staticmethod
+    def outflow_time_series_data_update_succeed(agent: HydroAgentInstance, request) -> OutflowTimeSeriesDataUpdateResponse:
+        return OutflowTimeSeriesDataUpdateResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=agent,
+            broadcast=False,
+        )
+
+    @staticmethod
+    def outflow_time_series_data_update_failed(
+        agent: HydroAgentInstance,
+        request,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> OutflowTimeSeriesDataUpdateResponse:
+        return OutflowTimeSeriesDataUpdateResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.FAILED,
+            error_code=error_code,
+            error_message=error_message,
+            source_agent_instance=agent,
+            broadcast=False,
+        )
+
+    @staticmethod
+    def time_series_calculation_succeed(
+        agent: HydroAgentInstance,
+        request,
+        object_time_series_list: Optional[List[ObjectTimeSeries]] = None,
+    ) -> TimeSeriesCalculationResponse:
+        return TimeSeriesCalculationResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=agent,
+            hydro_event=request.hydro_event,
+            object_time_series_list=object_time_series_list if object_time_series_list is not None else [],
             broadcast=False,
         )
 

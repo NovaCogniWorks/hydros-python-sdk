@@ -10,6 +10,7 @@ from typing import Optional
 from abc import abstractmethod
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -18,14 +19,11 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     OutflowTimeSeriesRequest,
-    OutflowTimeSeriesResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
     AgentStatus,
     AgentDriveMode,
-    ObjectTimeSeries,
 )
 
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
@@ -167,16 +165,7 @@ class OutflowPlanAgent(BaseHydroAgent):
         # 将智能体状态更新为 ACTIVE
         object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
-        # 返回响应
-        return SimTaskInitResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            created_agent_instances=[self],
-            managed_top_objects={},
-            broadcast=False
-        )
+        return ResponseFactory.init_succeed(self, request)
 
     def _initialize_planning_models(self):
         """初始化外发流量计划模型。"""
@@ -206,13 +195,7 @@ class OutflowPlanAgent(BaseHydroAgent):
             request.step,
             request.command_id,
         )
-        return TickCmdResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
-        )
+        return ResponseFactory.tick_succeed(self, request)
 
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):

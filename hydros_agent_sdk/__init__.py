@@ -89,12 +89,15 @@ from hydros_agent_sdk.config_loader import (
 )
 from hydros_agent_sdk.runtime import (
     AgentContext,
+    AgentConfigurationService,
     RuntimeEnvSettings,
     ResponseFactory,
+    TimeSeriesCache,
     load_runtime_env_settings,
 )
 from hydros_agent_sdk.transport import (
     InMemoryTransport,
+    MqttMetricsPublisher,
     MqttMetricsSubscriber,
     PublishRecord,
     Transport,
@@ -203,12 +206,15 @@ __all__ = [
     "load_agent_config",
     "load_properties_file",
     "AgentContext",
+    "AgentConfigurationService",
     "RuntimeEnvSettings",
     "ResponseFactory",
+    "TimeSeriesCache",
     "load_runtime_env_settings",
     "InMemoryTransport",
     "PublishRecord",
     "Transport",
+    "MqttMetricsPublisher",
     "DeviceOpening",
     "HorizonControlStep",
     "MetricsDataCache",

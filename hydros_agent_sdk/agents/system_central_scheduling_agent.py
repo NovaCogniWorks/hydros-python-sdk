@@ -12,8 +12,9 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
 )
-from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus
+from hydros_agent_sdk.protocol.models import AgentStatus
 from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 
 logger = logging.getLogger(__name__)
@@ -70,15 +71,7 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
 
-            return SimTaskInitResponse(
-                context=self.context,
-                command_id=request.command_id,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=self,
-                created_agent_instances=[self],
-                managed_top_objects={},
-                broadcast=False,
-            )
+            return ResponseFactory.init_succeed(self, request)
         except Exception:
             self.agent_command_gateway.shutdown()
             raise
@@ -91,10 +84,4 @@ class SystemCentralSchedulingAgent(CentralSchedulingAgent):
         self.state_manager.remove_local_agent(self)
         object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
 
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
-        )
+        return ResponseFactory.terminate_succeed(self, request)

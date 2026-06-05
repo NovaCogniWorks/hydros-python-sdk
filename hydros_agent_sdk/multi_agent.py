@@ -18,8 +18,9 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
-from hydros_agent_sdk.protocol.models import AgentInstanceStatus, CommandStatus, HydroAgent
+from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
@@ -321,13 +322,10 @@ class MultiAgentCallback(SimCoordinationCallback):
             # 协议限制：理想情况下应支持多个 source_agent_instance
             first_agent = created_agents[0]
 
-            response = SimTaskInitResponse(
-                command_id=request.command_id,
-                context=request.context,
-                command_status=CommandStatus.SUCCEED,
-                source_agent_instance=first_agent,
+            response = ResponseFactory.init_succeed(
+                first_agent,
+                request,
                 created_agent_instances=created_agents,
-                managed_top_objects={}
             )
 
             logger.info(f"SimTaskInitResponse created with {len(created_agents)} agent(s)")
