@@ -1,8 +1,7 @@
 """
-In-memory transport implementation.
+内存传输实现。
 
-This is useful for tests and local harnesses where we want publish/subscribe
-semantics without a broker.
+用于测试和本地 harness，在没有 broker 的情况下提供发布/订阅语义。
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from hydros_agent_sdk.transport.base import MessageHandler, PublishRecord
 
 
 class InMemoryTransport:
-    """Synchronous in-process transport for tests and local simulations."""
+    """用于测试和本地仿真的同步进程内传输。"""
 
     def __init__(self):
         self._handlers: DefaultDict[str, List[Tuple[MessageHandler, int]]] = defaultdict(list)

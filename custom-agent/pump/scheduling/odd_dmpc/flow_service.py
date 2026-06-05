@@ -106,10 +106,10 @@ class FlowDepartService:
 
         station = self.system_config.station_by_id[station_id]
         
-        # Load the pump units we need
+        # 加载所需泵组
         units = [self.get_unit_model(station_id, uid) for uid in key[1]]
         
-        # Get parameters from system config or use defaults
+        # 从系统配置获取参数，或使用默认值
         step_q = getattr(self.system_config, 'flow_depart_step_q', 1.0)
         step_h = getattr(self.system_config, 'flow_depart_step_h', 0.1)
         rho = getattr(self.system_config, 'global_rho', 1000.0)

@@ -42,7 +42,7 @@ class FakeRuntime:
         self.responses: List[SimCommand] = []
 
     def send(self, command: SimCommand) -> List[SimCommand]:
-        """Dispatch a command and return responses produced by this command."""
+        """分派指令并返回该指令产生的响应。"""
         before = self.client.out_message_queue.qsize()
         self.client._handle_incoming_message(command)
         produced = self._drain_new_responses(before)
@@ -72,7 +72,7 @@ class FakeRuntime:
         return produced[:new_count]
 
     def publish_all(self) -> None:
-        """Synchronously publish queued responses through the fake MQTT client."""
+        """通过 fake MQTT 客户端同步发布队列中的响应。"""
         self.client.connected.set()
         while not self.client.out_message_queue.empty():
             command = self.client.out_message_queue.get_nowait()

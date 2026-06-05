@@ -12,18 +12,18 @@ from typing import Dict, Any, Optional
 
 
 class PowerOptimizationSolver:
-    """Simple power optimization solver placeholder."""
+    """简单电力优化求解器占位实现。"""
 
     def __init__(self) -> None:
         self._topology = None
         self._constraints: Dict[str, Dict[str, Any]] = {}
 
     def initialize(self, topology: Any) -> None:
-        """Initialize solver with power system topology."""
+        """使用电力系统拓扑初始化求解器。"""
         self._topology = topology
 
     def update_constraints(self, object_id: int, metrics_code: str, time_series: Any) -> None:
-        """Update optimization constraints with new time series data."""
+        """使用新的时间序列数据更新优化约束。"""
         self._constraints.setdefault(str(object_id), {})[metrics_code] = time_series
 
     def optimize(
@@ -35,7 +35,7 @@ class PowerOptimizationSolver:
         horizon: int,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Run a minimal optimization routine and return a schedule."""
+        """运行最小优化流程并返回调度计划。"""
         params = params or {}
         schedule: Dict[str, Any] = {}
 

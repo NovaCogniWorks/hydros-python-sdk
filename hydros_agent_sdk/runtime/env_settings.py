@@ -1,9 +1,8 @@
 """
-Shared runtime environment settings.
+共享的运行时环境设置。
 
-This module centralizes deployment-level defaults so agents and factories do not
-each need to know how the SDK env.properties and OS environment variables are
-layered.
+本模块集中管理部署级默认值，避免 agent 和工厂各自理解 SDK env.properties
+与操作系统环境变量的叠加规则。
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ def _first_value(*values: Optional[str]) -> Optional[str]:
 
 @dataclass(frozen=True)
 class RuntimeEnvSettings:
-    """Deployment-level settings shared by runtime modules."""
+    """运行时模块共享的部署级设置。"""
 
     raw: Dict[str, str] = field(default_factory=dict)
     hydros_cluster_id: Optional[str] = None
@@ -90,7 +89,7 @@ def load_runtime_env_settings(
     env_config: Optional[Mapping[str, str]] = None,
     suppress_errors: bool = True,
 ) -> RuntimeEnvSettings:
-    """Load shared runtime settings from an optional dict or env.properties."""
+    """从可选字典或 env.properties 加载共享运行时设置。"""
     if env_config is None:
         try:
             from hydros_agent_sdk.config_loader import load_env_config

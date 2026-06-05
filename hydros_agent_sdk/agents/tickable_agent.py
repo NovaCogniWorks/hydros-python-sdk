@@ -109,16 +109,16 @@ class TickableAgent(BaseHydroAgent):
             **kwargs
         )
 
-        # Current simulation step
+        # 当前仿真步
         self._current_step: int = 0
 
-        # Time series data cache (for boundary conditions)
+        # 时间序列数据缓存（用于边界条件）
         self._time_series_cache: Dict[str, ObjectTimeSeries] = {}
 
         logger.info(f"TickableAgent initialized: {self.agent_id}")
 
     def supports_tick_command(self) -> bool:
-        """Return whether this agent participates in simulation tick dispatch."""
+        """返回该智能体是否参与仿真 tick 分派。"""
         return True
 
     @abstractmethod
@@ -158,7 +158,7 @@ class TickableAgent(BaseHydroAgent):
         Returns:
             Tick command response
         """
-        # Set agent logging context for agent business logic
+        # 为智能体业务逻辑设置日志上下文
         self._set_agent_logging_context()
 
         self._current_step = request.step
@@ -166,15 +166,15 @@ class TickableAgent(BaseHydroAgent):
         logger.info(f"Processing tick: step={request.step}, commandId={request.command_id}")
 
         try:
-            # Execute simulation step (subclass-specific logic)
+            # 执行仿真步（子类专属逻辑）
             metrics_list = self.on_tick_simulation(request)
 
-            # Send metrics data via MQTT
+            # 通过 MQTT 发送指标数据
             if metrics_list:
                 self.send_metrics_batch(metrics_list)
                 logger.info(f"Sent {len(metrics_list)} metrics for step {request.step}")
 
-            # Create response
+            # 创建响应
             response = TickCmdResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -193,7 +193,7 @@ class TickableAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error processing tick {request.step}: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return TickCmdResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -255,17 +255,17 @@ class TickableAgent(BaseHydroAgent):
         Returns:
             Time series data update response
         """
-        # Set agent logging context for agent business logic
+        # 为智能体业务逻辑设置日志上下文
         self._set_agent_logging_context()
 
         logger.info(f"Received time series data update: commandId={request.command_id}")
 
         try:
-            # Extract time series data from event
+            # 从事件中提取时间序列数据
             event = request.time_series_data_changed_event
             if event and event.object_time_series:
                 for time_series in event.object_time_series:
-                    # Cache time series data by object_id and metrics_code
+                    # 按 object_id 和 metrics_code 缓存时间序列数据
                     cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
                     self._time_series_cache[cache_key] = time_series
 
@@ -275,10 +275,10 @@ class TickableAgent(BaseHydroAgent):
                         f"values={len(time_series.time_series)}"
                     )
 
-                # Call subclass-specific handler
+                # 调用子类专属处理器
                 self.on_boundary_condition_update(event.object_time_series)
 
-            # Create response
+            # 创建响应
             response = TimeSeriesDataUpdateResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -292,7 +292,7 @@ class TickableAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error handling time series data update: {e}", exc_info=True)
 
-            # Return failed response
+            # 返回失败响应
             return TimeSeriesDataUpdateResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -336,10 +336,10 @@ class TickableAgent(BaseHydroAgent):
         if not time_series or not time_series.time_series:
             return None
 
-        # Use current step if not specified
+        # 未指定时使用当前步
         target_step = step if step is not None else self._current_step
 
-        # Find value for the target step
+        # 查找目标步的值
         for ts_value in time_series.time_series:
             if ts_value.step == target_step:
                 return ts_value.value
@@ -365,5 +365,5 @@ class TickableAgent(BaseHydroAgent):
 
     @property
     def current_step(self) -> int:
-        """Get current simulation step."""
+        """获取当前仿真步。"""
         return self._current_step

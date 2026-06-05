@@ -1,4 +1,4 @@
-"""Stable agent identity constants used across the SDK."""
+"""SDK 内部使用的稳定智能体身份常量。"""
 
 SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE = "CENTRAL_SCHEDULING_AGENT"
 CENTRAL_SCHEDULING_AGENT_TYPE = "CENTRAL_SCHEDULING_AGENT"

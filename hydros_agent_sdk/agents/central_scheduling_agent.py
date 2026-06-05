@@ -155,7 +155,7 @@ class CentralSchedulingAgent(TickableAgent):
             str(object_id): agent_code
             for object_id, agent_code in (configured_object_agent_code_map or {}).items()
         }
-        # agent command 客户端按需懒加载
+        # 智能体指令客户端按需懒加载
         self._agent_command_gateway = AgentCommandGateway(
             sim_coordination_client=sim_coordination_client,
             hydros_cluster_id=hydros_cluster_id,
@@ -343,7 +343,7 @@ class CentralSchedulingAgent(TickableAgent):
         return self.control_command_builder.build_from_mpc_responses(responses)
 
     def list_mpc_sensor_data(self, mpc_task_state: Optional[MpcTaskState] = None) -> List[SensorData]:
-        """Return field metrics in the SensorDTO shape required by the MPC service."""
+        """按 MPC 服务要求的 SensorDTO 形态返回现地指标。"""
         return self._mpc_optimization_service.list_sensor_data(self, mpc_task_state)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
@@ -385,7 +385,7 @@ class CentralSchedulingAgent(TickableAgent):
         pass
 
     def _initialize_model_context(self) -> None:
-        """Initialize task-scoped hydro model context for object owner lookup."""
+        """初始化任务级水利模型上下文，用于对象归属查找。"""
         if ContextManager.get_context(self.context) is not None:
             return
 

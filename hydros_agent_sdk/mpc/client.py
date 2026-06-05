@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class MpcPlanningError(RuntimeError):
-    """Raised when the MPC planning service cannot produce usable results."""
+    """MPC 规划服务无法产生可用结果时抛出。"""
 
 
 class MpcPlanningClient:
-    """HTTP client and request builder for the strategy-planning MPC API."""
+    """策略规划 MPC API 的 HTTP 客户端和请求构造器。"""
 
     def __init__(
         self,

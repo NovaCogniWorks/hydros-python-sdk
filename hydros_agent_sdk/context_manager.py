@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class HydroModelContext:
-    """Per-task hydro model context and object owner index."""
+    """按任务维护的水利模型上下文和对象归属索引。"""
 
     def __init__(
         self,
@@ -102,7 +102,7 @@ class HydroModelContext:
         agent_instance: HydroAgentInstance,
         managed_top_objects: Optional[List[Any]],
     ) -> int:
-        """Index top hydro objects and all known child objects to the owner agent."""
+        """把顶层水利对象及其已知子对象索引到归属智能体。"""
         if not managed_top_objects:
             return 0
 
@@ -117,7 +117,7 @@ class HydroModelContext:
 
 
 class ContextKeyResolver:
-    """Resolve supported context key inputs into biz_scene_instance_id."""
+    """将支持的上下文 key 输入解析为 biz_scene_instance_id。"""
 
     @staticmethod
     def resolve(context_or_biz_scene_instance_id: Union[SimulationContext, str, None]) -> Optional[str]:
@@ -131,7 +131,7 @@ class ContextKeyResolver:
 
 
 class HydroModelContextRepository:
-    """Instance-owned task-scoped hydro model context registry."""
+    """实例持有的任务级水利模型上下文注册表。"""
 
     def __init__(self) -> None:
         self._contexts: Dict[str, HydroModelContext] = {}
@@ -253,7 +253,7 @@ class HydroModelContextRepository:
 
 
 class ContextManager:
-    """Compatibility facade for the default hydro model context repository."""
+    """默认水利模型上下文仓储的兼容门面。"""
 
     _default_repository = HydroModelContextRepository()
 

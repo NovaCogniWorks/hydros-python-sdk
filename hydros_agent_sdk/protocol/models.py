@@ -5,7 +5,7 @@ from .base import HydroBaseModel
 
 class AgentStatus(str, Enum):
     """
-    Agent container management status enumeration matching Java implementation.
+    匹配 Java 实现的智能体容器管理状态枚举。
     """
     INIT = "INIT"
     IDLE = "IDLE"
@@ -15,7 +15,7 @@ class AgentStatus(str, Enum):
 
 class AgentInstanceStatus(str, Enum):
     """
-    Agent instance lifecycle status enumeration matching Java implementation.
+    匹配 Java 实现的智能体实例生命周期状态枚举。
     """
     INIT = "INIT"
     READY = "READY"
@@ -28,8 +28,8 @@ class AgentInstanceStatus(str, Enum):
 
 class AgentDriveMode(str, Enum):
     """
-    Agent drive mode enumeration matching Java implementation.
-    Defines how an agent responds to simulation control signals.
+    匹配 Java 实现的智能体驱动模式枚举。
+    定义智能体如何响应仿真控制信号。
     """
     SIM_TICK_DRIVEN = "SIM_TICK_DRIVEN"  # Tick驱动：响应时钟节拍，同步执行仿真步骤
     EVENT_DRIVEN = "EVENT_DRIVEN"        # 事件驱动：响应特定事件，异步执行处理逻辑
@@ -37,7 +37,7 @@ class AgentDriveMode(str, Enum):
 
 class CommandStatus(str, Enum):
     """
-    Command status enumeration matching Java implementation.
+    匹配 Java 实现的指令状态枚举。
     """
     INIT = "INIT"
     PROCESSING = "PROCESSING"
@@ -46,21 +46,21 @@ class CommandStatus(str, Enum):
 
 class Tenant(HydroBaseModel):
     """
-    Represents tenant information.
+    表示租户信息。
     """
     tenant_id: str
     tenant_name: str
 
 class BizScenario(HydroBaseModel):
     """
-    Represents business scenario information.
+    表示业务场景信息。
     """
     biz_scenario_id: str
     biz_scenario_name: str
 
 class Waterway(HydroBaseModel):
     """
-    Represents waterway information.
+    表示水系信息。
     """
     waterway_id: str
     waterway_name: str
@@ -125,7 +125,7 @@ class HydroAgentInstance(HydroAgent):
 
     @property
     def hydros_cluster_id(self) -> str:
-        """Backward-compatible SDK name for Java-compatible cluster_id."""
+        """兼容旧 SDK 的名称，对应 Java 兼容字段 cluster_id。"""
         return self.cluster_id
 
     @hydros_cluster_id.setter
@@ -134,7 +134,7 @@ class HydroAgentInstance(HydroAgent):
 
     @property
     def hydros_node_id(self) -> str:
-        """Backward-compatible SDK name for Java-compatible node_id."""
+        """兼容旧 SDK 的名称，对应 Java 兼容字段 node_id。"""
         return self.node_id
 
     @hydros_node_id.setter

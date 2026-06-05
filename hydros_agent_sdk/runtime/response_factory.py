@@ -1,9 +1,8 @@
 """
-Factories for standard coordination responses.
+标准协调响应的工厂。
 
-The factory centralizes the repeated response construction pattern used by
-agents and runtime error handling. It does not send responses; callers still
-decide whether to return or enqueue them.
+该工厂集中封装 agent 和运行时错误处理里重复的响应构造模式。
+它不负责发送响应；调用方仍自行决定返回响应或把响应放入队列。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from hydros_agent_sdk.protocol.models import (
 
 
 class ResponseFactory:
-    """Create standard success and failure response DTOs."""
+    """创建标准成功和失败响应 DTO。"""
 
     @staticmethod
     def init_succeed(

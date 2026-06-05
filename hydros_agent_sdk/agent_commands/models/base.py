@@ -52,14 +52,14 @@ class AgentCommand(HydroCmd):
 
 
 class AgentCommandRequest(AgentCommand):
-    """agent command 请求的公共字段。"""
+    """智能体指令请求的公共字段。"""
 
     need_ack_reply: Optional[bool] = None
     acked: Optional[bool] = None
 
 
 class AgentCommandResponse(AgentCommand):
-    """agent command 响应的公共字段。"""
+    """智能体指令响应的公共字段。"""
 
     success: bool = False
     error_code: Optional[str] = None

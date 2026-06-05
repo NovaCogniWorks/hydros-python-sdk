@@ -26,7 +26,7 @@ MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
 
 
 class MpcResultReporter:
-    """Build and publish MPC result reports through the coordination channel."""
+    """通过协调通道构建并发布 MPC 结果报告。"""
 
     def __init__(self, sim_coordination_client=None):
         self.sim_coordination_client = sim_coordination_client

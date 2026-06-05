@@ -3,7 +3,7 @@ import re
 with open("custom-agent/pump/scheduling/pump_scheduling_agent.py", "r") as f:
     content = f.read()
 
-# We need to insert _lazy_init_odd_mpc and rewrite on_optimization
+# 需要插入 _lazy_init_odd_mpc 并重写 on_optimization
 
 lazy_init_code = """
     def _lazy_init_odd_mpc(self):
@@ -21,7 +21,7 @@ lazy_init_code = """
         from .odd_dmpc.environment import _boundary_plan_from_snapshot
         import pandas as pd
         
-        # Determine the data directory
+        # 确定数据目录
         config_path = "data/config_odd.yaml"
         if not os.path.exists(config_path):
             config_path = "../../../data/config_odd.yaml"
@@ -111,7 +111,7 @@ on_opt_code = """
             pool_levels=pool_levels
         )
         
-        # Init or update memories from our own self tracked state
+        # 从自身跟踪状态初始化或更新记忆
         if not self.station_memories:
             for s in self.stations:
                 self.station_memories[s.id] = StationMemory(
@@ -124,7 +124,7 @@ on_opt_code = """
                     mode="ODD1"
                 )
                 
-        # Upper Scheduler
+        # 上层调度器
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
         self.observers.update(
             prev_basin_levels=basin_levels,
@@ -152,7 +152,7 @@ on_opt_code = """
             lower_feedback=self.lower_feedback,
         )
         
-        # Lower Controllers
+        # 下层控制器
         actions = {}
         upstream_selected_flows = {}
         transfer_bundles = {}
@@ -225,7 +225,7 @@ on_opt_code = """
             actions[station_id] = action
             upstream_selected_flows[station_id] = float(action.selected_flow)
             
-            # Update memory
+            # 更新记忆
             new_active_ids = []
             for uid, st in action.unit_status.items():
                 if st == 1: new_active_ids.append(uid)
@@ -256,7 +256,7 @@ on_opt_code = """
 
         self.cumulative_last_station_flow += float(actions[self.system_config.last_station_id].selected_flow) * float(self.system_config.dt_hours)
 
-        # map to previous output format for test_mpc
+        # 映射到 test_mpc 使用的旧输出格式
         lower_res = {}
         for s in self.stations:
             action = actions[s.id]
@@ -270,7 +270,7 @@ on_opt_code = """
                 "total_q": [action.selected_flow]
             }
             
-        # format upper_res
+        # 格式化 upper_res
         upper_res = {
             "q_planned": {sid: upper_plan.flow_refs[sid] for sid in self.system_config.station_ids},
             "z_planned": {sid: upper_plan.station_back_levels[sid] for sid in self.system_config.station_ids}
@@ -282,7 +282,7 @@ on_opt_code = """
         return self.mpc_output
 """
 
-# Replace on_optimization entirely
+# 整体替换 on_optimization
 import ast
 class FuncFinder(ast.NodeVisitor):
     def __init__(self):
@@ -299,14 +299,14 @@ finder.visit(tree)
 lines = content.split('\n')
 if finder.on_opt_node:
     start = finder.on_opt_node.lineno - 1
-    # find end of function
+    # 查找函数结束位置
     end = start
     while end < len(lines):
         if end > start and lines[end].startswith('    def '):
             break
         end += 1
     
-    # We replace from start to end
+    # 从起始位置替换到结束位置
     new_content = '\n'.join(lines[:start]) + '\n' + lazy_init_code + '\n' + on_opt_code + '\n' + '\n'.join(lines[end:])
     
     with open("custom-agent/pump/scheduling/pump_scheduling_agent.py", "w") as f:
@@ -314,4 +314,3 @@ if finder.on_opt_node:
     print("Successfully replaced on_optimization!")
 else:
     print("Could not find on_optimization")
-

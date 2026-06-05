@@ -7,10 +7,10 @@ matching the Java ErrorCodes implementation in hydros-common.
 Usage:
     from hydros_agent_sdk.error_codes import ErrorCodes
 
-    # Format error message
+    # 格式化错误消息
     error_msg = ErrorCodes.SYSTEM_ERROR.format_message("NetworkError", "Connection timeout")
 
-    # Use in response
+    # 在响应中使用
     response = SimTaskInitResponse(
         command_status=CommandStatus.FAILED,
         error_code=ErrorCodes.SYSTEM_ERROR.code,
@@ -64,21 +64,21 @@ class ErrorCode:
             'Error: Connection failed, detail: Timeout'
         """
         try:
-            # Replace {0}, {1}, etc. with provided arguments
+            # 使用传入参数替换 {0}、{1} 等占位符
             message = self.message_template
             for i, arg in enumerate(args):
                 message = message.replace(f"{{{i}}}", str(arg))
             return message
         except Exception as e:
-            # Fallback: return template with error info
+            # 兜底：返回带错误信息的模板
             return f"{self.message_template} (format error: {e})"
 
     def __str__(self) -> str:
-        """String representation of error code."""
+        """错误码的字符串表示。"""
         return f"ErrorCode({self.code})"
 
     def __repr__(self) -> str:
-        """Detailed representation of error code."""
+        """错误码的详细表示。"""
         return f"ErrorCode(code='{self.code}', template='{self.message_template}')"
 
 
@@ -104,11 +104,11 @@ class ErrorCodes:
     - SIMULATION_EXECUTION_FAILURE: Simulation execution failures
 
     Usage:
-        # Get error code and format message
+        # 获取错误码并格式化消息
         error_code = ErrorCodes.SYSTEM_ERROR.code
         error_message = ErrorCodes.SYSTEM_ERROR.format_message("NetworkError", "Connection timeout")
 
-        # Use in response
+        # 在响应中使用
         response = TickCmdResponse(
             command_status=CommandStatus.FAILED,
             error_code=error_code,
@@ -267,7 +267,7 @@ class ErrorCodes:
     )
 
 
-# Convenience function for creating error responses
+# 创建错误响应的便捷函数
 def create_error_response(
     response_class,
     error_code: ErrorCode,

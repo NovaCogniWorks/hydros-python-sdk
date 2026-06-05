@@ -47,12 +47,12 @@ class OutflowTimeSeriesEvent(HydroEvent):
     )
     priority: Optional[str] = None
 
-# Union for polymorphic events if needed later
+# 后续需要多态事件时使用的 Union
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
     OutflowTimeSeriesDataChangedEvent,
     OutflowTimeSeriesEvent,
-    # Add generic HydroEvent as fallback?
+    # 是否增加通用 HydroEvent 作为兜底？
     HydroEvent
 ]
 

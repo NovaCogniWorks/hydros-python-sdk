@@ -1,4 +1,4 @@
-"""Scenario configuration models used by the Python agent runtime."""
+"""Python agent 运行时使用的场景配置模型。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from hydros_agent_sdk.protocol.base import HydroBaseModel
 
 
 class SimAgentProperties(HydroBaseModel):
-    """Simulation-level agent properties from biz scenario configuration."""
+    """来自业务场景配置的仿真级智能体属性。"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -25,7 +25,7 @@ class SimAgentProperties(HydroBaseModel):
 
 
 class BizScenarioConfiguration(HydroBaseModel):
-    """Subset of biz scenario configuration needed by the Python SDK runtime."""
+    """Python SDK 运行时需要的业务场景配置子集。"""
 
     model_config = ConfigDict(extra="allow")
 

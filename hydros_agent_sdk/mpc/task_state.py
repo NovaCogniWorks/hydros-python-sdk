@@ -1,4 +1,4 @@
-"""Runtime state for rolling MPC tasks."""
+"""滚动 MPC 任务的运行时状态。"""
 
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -9,7 +9,7 @@ from hydros_agent_sdk.protocol.models import SimulationContext
 
 @dataclass
 class MpcTaskState:
-    """Runtime state for one Java-compatible rolling MPC loop."""
+    """单个兼容 Java 侧滚动 MPC 循环的运行时状态。"""
 
     context: SimulationContext
     rolling_interval_steps: int

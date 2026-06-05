@@ -117,7 +117,7 @@ class ModelCalculationAgent(BaseHydroAgent):
             **kwargs
         )
 
-        # Model state
+        # 模型状态
         self._model = None
         self._model_config = {}
 
@@ -184,12 +184,12 @@ class ModelCalculationAgent(BaseHydroAgent):
         logger.info(f"Event: {request.hydro_event}")
 
         try:
-            # Execute model calculation (subclass-specific)
+            # 执行模型计算（子类专属）
             object_time_series_list = self.on_model_calculation(request.hydro_event)
 
             logger.info(f"Model calculation completed, produced {len(object_time_series_list)} time series")
 
-            # Create response
+            # 创建响应
             response = TimeSeriesCalculationResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -200,7 +200,7 @@ class ModelCalculationAgent(BaseHydroAgent):
                 broadcast=False
             )
 
-            # Send response
+            # 发送响应
             self.send_response(response)
 
             logger.info(
@@ -211,7 +211,7 @@ class ModelCalculationAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error in model calculation: {e}", exc_info=True)
 
-            # Send failed response
+            # 发送失败响应
             response = TimeSeriesCalculationResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -282,7 +282,7 @@ class ModelCalculationAgent(BaseHydroAgent):
         Returns:
             ObjectTimeSeries instance
         """
-        # Convert to TimeSeriesValue objects
+        # 转换为 TimeSeriesValue 对象
         ts_values = []
         for ts_dict in time_series_values:
             ts_value = TimeSeriesValue(
@@ -292,7 +292,7 @@ class ModelCalculationAgent(BaseHydroAgent):
             )
             ts_values.append(ts_value)
 
-        # Create ObjectTimeSeries
+        # 创建 ObjectTimeSeries
         return ObjectTimeSeries(
             time_series_name=time_series_name or f"{object_name}_{metrics_code}",
             object_id=object_id,

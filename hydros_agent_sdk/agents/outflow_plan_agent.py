@@ -124,7 +124,7 @@ class OutflowPlanAgent(BaseHydroAgent):
         logger.info(f"OutflowPlanAgent initialized: {self.agent_id}")
 
     def supports_tick_command(self) -> bool:
-        """Outflow planning is triggered by hydro events, not simulation ticks."""
+        """出流计划由水利事件触发，而不是由仿真 tick 触发。"""
         return False
 
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:

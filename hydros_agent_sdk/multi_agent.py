@@ -159,7 +159,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         return SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE, system_factory
 
     def set_client(self, client: Any):
-        """Set coordination client reference."""
+        """设置协调客户端引用。"""
         self._client = client
         self._status_support = AgentInstanceStatusSupport(sim_coordination_client=client)
         logger.info("Coordination client reference set")
@@ -175,7 +175,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         return "MULTI_AGENT_COORDINATOR"
 
     def is_remote_agent(self, agent_instance: Any) -> bool:
-        """Check if agent is remote."""
+        """检查智能体是否为远端智能体。"""
         if self._client:
             return self._client.state_manager.is_remote_agent(agent_instance)
         return False
@@ -252,16 +252,16 @@ class MultiAgentCallback(SimCoordinationCallback):
                 exc_info=True,
             )
 
-        # Track agents created in this task
+        # 跟踪本任务中创建的智能体
         created_agents = []
         context_agents = {}
         routed_agent_codes = set()
 
-        # Process each agent in agent_list
+        # 逐个处理 agent_list 中的智能体
         for agent_def in request.agent_list:
             agent_code = agent_def.agent_code
 
-            # Check if we have a factory for this agent_code or the system default central agent.
+            # 检查是否存在该 agent_code 的工厂，或是否为系统默认中央调度智能体。
             routed_agent_code, factory = self._resolve_agent_factory(agent_def)
 
             if factory is None:
@@ -276,7 +276,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.info(f"  Creating agent: {routed_agent_code} (requested: {agent_code})")
 
             try:
-                # Create agent instance
+                # 创建智能体实例
                 agent = factory.create_agent(
                     sim_coordination_client=self._client,
                     context=request.context
@@ -285,11 +285,11 @@ class MultiAgentCallback(SimCoordinationCallback):
                 if should_sync_identity:
                     self._sync_agent_definition_from_request(agent, agent_def)
 
-                # Initialize agent
+                # 初始化智能体
                 response = agent.on_init(request)
                 created_agent_code = getattr(agent, "agent_code", routed_agent_code)
 
-                # Collect created agent instance
+                # 收集已创建的智能体实例
                 if response and hasattr(response, 'source_agent_instance'):
                     if should_sync_identity:
                         self._sync_init_response_agent_definition(response, agent_def)
@@ -306,22 +306,22 @@ class MultiAgentCallback(SimCoordinationCallback):
                         },
                     )
 
-                # Store agent
+                # 存储智能体
                 context_agents[created_agent_code] = agent
 
                 logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
 
             except Exception as e:
                 logger.error(f"  ✗ Failed to create agent {routed_agent_code}: {e}", exc_info=True)
-                # Continue with other agents
+                # 继续处理其他智能体
 
-        # Store agents for this context
+        # 存储该上下文下的智能体
         if context_agents:
             self.agents[context_id] = context_agents
 
-        # Return single response with all created instances
+        # 返回包含全部已创建实例的单个响应
         if created_agents:
-            # Use the first created agent as source_agent_instance
+            # 使用第一个已创建智能体作为 source_agent_instance
             # (protocol limitation - should ideally support multiple sources)
             first_agent = created_agents[0]
 
@@ -342,7 +342,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     @staticmethod
     def _sync_agent_definition_from_request(agent: Any, agent_def: HydroAgent) -> None:
-        """Keep runtime routing/config aligned without overriding local display name."""
+        """保持运行时路由/配置一致，但不覆盖本地显示名称。"""
         if getattr(agent_def, "agent_type", None):
             object.__setattr__(agent, "agent_type", agent_def.agent_type)
         if getattr(agent_def, "agent_configuration_url", None):
@@ -358,14 +358,14 @@ class MultiAgentCallback(SimCoordinationCallback):
         response: SimTaskInitResponse,
         agent_def: HydroAgent,
     ) -> None:
-        """Keep returned agent instances aligned with the coordinator request."""
+        """保持返回的智能体实例与协调器请求一致。"""
         cls._sync_agent_definition_from_request(response.source_agent_instance, agent_def)
         for agent_instance in response.created_agent_instances or []:
             if agent_instance.agent_code == agent_def.agent_code:
                 cls._sync_agent_definition_from_request(agent_instance, agent_def)
 
     def on_tick(self, request: TickCmdRequest):
-        """Handle tick command for all agents in the context."""
+        """处理上下文中全部智能体的 tick 指令。"""
         context_id = request.context.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
@@ -373,7 +373,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.error(f"No agents found for context: {context_id}")
             return None
 
-        # Forward tick to all agents in this context
+        # 将 tick 转发给该上下文中的全部智能体
         responses = []
         for agent_code, agent in context_agents.items():
             if not self._supports_tick_command(agent):
@@ -405,7 +405,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         return bool(supports_tick_command())
 
     def on_task_terminate(self, request: SimTaskTerminateRequest):
-        """Handle task termination for all agents in the context."""
+        """处理上下文中全部智能体的任务终止。"""
         context_id = request.context.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
@@ -413,7 +413,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.error(f"No agents found for context: {context_id}")
             return None
 
-        # Terminate all agents in this context
+        # 终止该上下文中的全部智能体
         responses = []
         for agent_code, agent in context_agents.items():
             try:
@@ -463,14 +463,14 @@ class MultiAgentCallback(SimCoordinationCallback):
                 )
                 logger.error(f"Error terminating {agent_code}: {e}", exc_info=True)
 
-        # Remove agents from tracking
+        # 从跟踪结构中移除智能体
         del self.agents[context_id]
         super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
-        """Handle time series data update for all agents in the context."""
+        """处理上下文中全部智能体的时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
@@ -478,7 +478,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.error(f"No agents found for context: {context_id}")
             return None
 
-        # Forward update to all agents in this context
+        # 将更新转发给该上下文中的全部智能体
         responses = []
         for agent_code, agent in context_agents.items():
             try:
@@ -503,7 +503,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         return responses
 
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
-        """Handle outflow time series data update for all agents in the context."""
+        """处理上下文中全部智能体的出流时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
         context_agents = self.agents.get(context_id)
 
@@ -511,7 +511,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.error(f"No agents found for context: {context_id}")
             return None
 
-        # Forward update to all agents in this context
+        # 将更新转发给该上下文中的全部智能体
         responses = []
         for agent_code, agent in context_agents.items():
             try:
@@ -549,10 +549,10 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.error(f"No agents found for context: {context_id}")
             return None
 
-        # Extract target agent code from request
+        # 从请求中提取目标 agent code
         target_agent_code = request.target_agent_instance.agent_code
 
-        # Find the target agent
+        # 查找目标智能体
         target_agent = context_agents.get(target_agent_code)
 
         if not target_agent:
@@ -562,7 +562,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             )
             return None
 
-        # Forward request to the target agent only
+        # 仅将请求转发给目标智能体
         try:
             logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
             response = self._execute_with_status(
