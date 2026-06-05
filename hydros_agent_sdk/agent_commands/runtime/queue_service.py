@@ -79,10 +79,6 @@ class AgentCommandQueueService:
         self._queue_thread = None
         self.execution_service.stop()
 
-    def enqueue_received(self, command: AgentCommand) -> None:
-        """入站命令处理接口的兼容别名。"""
-        self.enqueue_incoming(command)
-
     def enqueue_incoming(self, command: AgentCommand) -> None:
         """从这里接收 MQTT 收到的命令。"""
         command.auth()

@@ -119,37 +119,6 @@ def get_hydros_node_id() -> Optional[str]:
     return _hydros_node_id.get()
 
 
-# 向后兼容别名（已废弃）
-def set_task_id(task_id: Optional[str]):
-    """已废弃：请改用 set_biz_scene_instance_id。"""
-    set_biz_scene_instance_id(task_id)
-
-
-def set_agent_id(agent_id: Optional[str]):
-    """已废弃：请改用 set_biz_component。"""
-    set_biz_component(agent_id)
-
-
-def set_node_id(node_id: Optional[str]):
-    """已废弃：请改用 set_hydros_node_id。"""
-    set_hydros_node_id(node_id)
-
-
-def get_task_id() -> Optional[str]:
-    """已废弃：请改用 get_biz_scene_instance_id。"""
-    return get_biz_scene_instance_id()
-
-
-def get_agent_id() -> Optional[str]:
-    """已废弃：请改用 get_biz_component。"""
-    return get_biz_component()
-
-
-def get_node_id() -> Optional[str]:
-    """已废弃：请改用 get_hydros_node_id。"""
-    return get_hydros_node_id()
-
-
 class HydrosSimpleFormatter(logging.Formatter):
     """
     供本地开发使用的简化格式化器。
@@ -269,8 +238,6 @@ def setup_logging(
     console: bool = True,
     simple: bool = True,
     use_rolling: bool = False,
-    # 用于向后兼容的废弃参数
-    node_id: Optional[str] = None
 ):
     """
     使用 Hydros 格式化器配置日志。
@@ -284,12 +251,7 @@ def setup_logging(
         simple: 是否使用本地开发的简化日志格式（默认 True）。
                 设置为 False 时使用完整生产格式。
         use_rolling: 日志文件是否按天滚动（默认 False）。
-        node_id: 已废弃，请改用 hydros_node_id
     """
-    # 向后兼容：未显式设置 hydros_node_id 时使用 node_id
-    if node_id is not None and hydros_node_id == "LOCAL":
-        hydros_node_id = node_id
-
     # 按模式创建 formatter
     if simple:
         formatter = HydrosSimpleFormatter()

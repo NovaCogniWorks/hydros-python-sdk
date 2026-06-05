@@ -64,13 +64,6 @@ from hydros_agent_sdk.logging_config import (
     get_biz_component,
     get_hydros_cluster_id,
     get_hydros_node_id,
-    # 已废弃 API（用于向后兼容）
-    set_task_id,
-    set_agent_id,
-    set_node_id,
-    get_task_id,
-    get_agent_id,
-    get_node_id,
 )
 
 # 导入专用智能体类型
@@ -329,13 +322,6 @@ __all__ = [
     "get_biz_component",
     "get_hydros_cluster_id",
     "get_hydros_node_id",
-    # 已废弃 API（用于向后兼容）
-    "set_task_id",
-    "set_agent_id",
-    "set_node_id",
-    "get_task_id",
-    "get_agent_id",
-    "get_node_id",
 
     # 专用智能体类型
     "TickableAgent",

@@ -16,9 +16,6 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
-# 向后兼容别名
-AgentContextManager = AgentStateManager
-
 logger = logging.getLogger(__name__)
 
 
