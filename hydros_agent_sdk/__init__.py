@@ -1,8 +1,7 @@
 """
-Hydros Agent SDK
+Hydros Agent SDK。
 
-Official Python SDK for the Hydros ecosystem, providing simulation agent
-coordination and MQTT protocol support.
+Hydros 生态的官方 Python SDK，提供仿真智能体协调和 MQTT 协议支持。
 """
 
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
@@ -56,7 +55,7 @@ from hydros_agent_sdk.logging_config import (
     setup_logging,
     LogContext,
     HydrosFormatter,
-    # New API
+    # 新 API
     set_biz_scene_instance_id,
     set_biz_component,
     set_hydros_cluster_id,
@@ -65,7 +64,7 @@ from hydros_agent_sdk.logging_config import (
     get_biz_component,
     get_hydros_cluster_id,
     get_hydros_node_id,
-    # Deprecated API (for backward compatibility)
+    # 已废弃 API（用于向后兼容）
     set_task_id,
     set_agent_id,
     set_node_id,
@@ -74,7 +73,7 @@ from hydros_agent_sdk.logging_config import (
     get_node_id,
 )
 
-# Import specialized agent types
+# 导入专用智能体类型
 from hydros_agent_sdk.agents import (
     TickableAgent,
     OntologySimulationAgent,
@@ -85,7 +84,7 @@ from hydros_agent_sdk.agents import (
     OutflowPlanAgent,
 )
 
-# Import factory and multi-agent support
+# 导入工厂和多智能体支持
 from hydros_agent_sdk.factory import HydroAgentFactory, SystemCentralSchedulingAgentFactory
 from hydros_agent_sdk.multi_agent import (
     MultiAgentCallback,
@@ -125,7 +124,7 @@ from hydros_agent_sdk.mpc import (
 )
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 
-# Import error handling
+# 导入错误处理
 from hydros_agent_sdk.error_codes import (
     ErrorCode,
     ErrorCodes,
@@ -183,7 +182,7 @@ from hydros_agent_sdk.agent_commands import (
 __version__ = "0.1.4"
 
 __all__ = [
-    # Core client and callback
+    # 核心客户端和回调
     "SimCoordinationClient",
     "SimCoordinationCallback",
     "ContextManager",
@@ -193,17 +192,17 @@ __all__ = [
     "BaseHydroAgent",
     "HydrosTopics",
 
-    # State management
+    # 状态管理
     "AgentStateManager",
     "MessageFilter",
 
-    # MQTT client
+    # MQTT 客户端
     "HydrosMqttClient",
 
-    # Agent properties
+    # 智能体属性
     "AgentProperties",
 
-    # Configuration loading
+    # 配置加载
     "AgentConfigLoader",
     "AgentConfiguration",
     "Author",
@@ -237,7 +236,7 @@ __all__ = [
     "SensorData",
     "TargetNode",
 
-    # Factory and multi-agent support
+    # 工厂和多智能体支持
     "generate_agent_instance_id",
     "generate_system_command_id",
     "generate_agent_command_id",
@@ -254,7 +253,7 @@ __all__ = [
     "SystemCentralSchedulingAgentFactory",
     "MultiAgentCallback",
 
-    # Error handling
+    # 错误处理
     "ErrorCode",
     "ErrorCodes",
     "create_error_response",
@@ -263,7 +262,7 @@ __all__ = [
     "AgentErrorContext",
     "validate_request",
 
-    # System commands
+    # 系统指令
     "SystemCmd",
     "SystemCommand",
     "SystemCommandRequest",
@@ -271,7 +270,7 @@ __all__ = [
     "CommandLogDTO",
     "HydroCommandLogReportRequest",
 
-    # Agent command runtime
+    # 智能体指令运行时
     "AgentHydroCmd",
     "AgentCommand",
     "AgentCommandRequest",
@@ -305,7 +304,7 @@ __all__ = [
     "AgentCommandClient",
     "HydroCommandLogReportScheduler",
 
-    # Utility classes
+    # 工具类
     "HydroObjectUtilsV2",
     "WaterwayTopology",
     "TopHydroObject",
@@ -317,11 +316,11 @@ __all__ = [
     "send_metrics_batch",
     "create_mock_metrics",
 
-    # Logging configuration
+    # 日志配置
     "setup_logging",
     "LogContext",
     "HydrosFormatter",
-    # New API
+    # 新 API
     "set_biz_scene_instance_id",
     "set_biz_component",
     "set_hydros_cluster_id",
@@ -330,7 +329,7 @@ __all__ = [
     "get_biz_component",
     "get_hydros_cluster_id",
     "get_hydros_node_id",
-    # Deprecated API (for backward compatibility)
+    # 已废弃 API（用于向后兼容）
     "set_task_id",
     "set_agent_id",
     "set_node_id",
@@ -338,7 +337,7 @@ __all__ = [
     "get_agent_id",
     "get_node_id",
 
-    # Specialized agent types
+    # 专用智能体类型
     "TickableAgent",
     "OntologySimulationAgent",
     "TwinsSimulationAgent",

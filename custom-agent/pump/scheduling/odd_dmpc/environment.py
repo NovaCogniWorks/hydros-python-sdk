@@ -173,7 +173,7 @@ def _pool_level_clip_bounds(
     if lower <= upper:
         return float(lower), float(upper)
 
-    # Fallback to the combined envelope if the configured station limits do not overlap.
+    # 如果配置的泵站限值没有重叠，则回退到组合包络。
     lower = min(
         float(upstream_station.level_back_min),
         float(downstream_station.level_front_min),

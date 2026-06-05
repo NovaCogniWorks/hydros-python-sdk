@@ -13,7 +13,7 @@ import sys
 import time
 from typing import Optional, List, Dict
 
-# Add current directory to Python path for ontology_rule_engine import
+# 将当前目录加入 Python 路径，便于导入 ontology_rule_engine
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -44,18 +44,18 @@ from hydros_agent_sdk.protocol.models import (
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
-# Import example ontology rule engine implementation
+# 导入示例本体规则引擎实现
 from ontology_rule_engine import OntologyRuleEngine
 
-# Configure logging (only when running as main script)
-# When imported by multi_agent_launcher, logging is already configured
+# 配置日志（仅在作为主脚本运行时）
+# 被 multi_agent_launcher 导入时，日志已完成配置
 if __name__ == "__main__":
-    # Get the examples directory (two levels up from this script)
+    # 获取 examples 目录（当前脚本向上两级）
     EXAMPLES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # Load env config to get cluster_id and node_id for logging
+    # 加载 env 配置，用于获取日志中的 cluster_id 和 node_id
     try:
         env_config = load_env_config()
         hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
@@ -100,7 +100,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
         hydros_node_id: str,
         **kwargs
     ):
-        """Initialize ontology simulation agent."""
+        """初始化本体仿真智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -113,7 +113,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
             **kwargs
         )
 
-        # Ontology rule engine
+        # 本体规则引擎
         self._rule_engine: Optional[OntologyRuleEngine] = None
 
         logger.info(f"MyOntologySimulationAgent created: {agent_id}")
@@ -126,7 +126,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
         """
         logger.info("Initializing ontology model...")
 
-        # Create ontology rule engine with error context
+        # 在错误上下文中创建本体规则引擎
         with AgentErrorContext(
             ErrorCodes.MODEL_INITIALIZATION_FAILURE,
             agent_name=self.agent_code
@@ -137,7 +137,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
             logger.error(f"Failed to create rule engine: {ctx.error_message}")
             raise RuntimeError(f"Rule engine creation failed: {ctx.error_message}")
 
-        # Load ontology from topology
+        # 从拓扑加载本体
         if self._topology:
             with AgentErrorContext(
                 ErrorCodes.MODEL_INITIALIZATION_FAILURE,
@@ -153,7 +153,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
         else:
             logger.warning("No topology available for ontology model")
 
-        # Load ontology parameters from configuration with error handling
+        # 带错误处理地从配置加载本体参数
         with AgentErrorContext(
             ErrorCodes.CONFIGURATION_LOAD_FAILURE,
             agent_name=self.agent_code
@@ -190,7 +190,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
             logger.error("Ontology rule engine not initialized")
             return []
 
-        # Collect boundary conditions with error handling
+        # 带错误处理地采集边界条件
         with AgentErrorContext(
             ErrorCodes.BOUNDARY_CONDITION_ERROR,
             agent_name=self.agent_code
@@ -199,12 +199,12 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
         if ctx.has_error:
             logger.error(f"Failed to collect boundary conditions: {ctx.error_message}")
-            # Use empty boundary conditions as fallback
+            # 使用空边界条件兜底
             boundary_conditions = {}
 
         logger.debug(f"Boundary conditions: {len(boundary_conditions)} objects")
 
-        # Apply ontology rules with error handling
+        # 带错误处理地应用本体规则
         with AgentErrorContext(
             ErrorCodes.SIMULATION_EXECUTION_FAILURE,
             agent_name=self.agent_code
@@ -217,7 +217,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
         logger.info(f"Ontology reasoning completed for step {step}")
 
-        # Convert results to metrics with error handling
+        # 带错误处理地将结果转换为指标
         with AgentErrorContext(
             ErrorCodes.METRICS_GENERATION_FAILURE,
             agent_name=self.agent_code
@@ -244,20 +244,20 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
         """
         boundary_conditions = {}
 
-        # Get boundary condition metrics codes from configuration
+        # 从配置获取边界条件指标编码
         bc_metrics = self.properties.get_property(
             'boundary_condition_metrics',
             ['inflow', 'upstream_water_level']
         )
 
-        # Collect boundary conditions for all objects
+        # 采集全部对象的边界条件
         if self._topology:
             for top_obj in self._topology.top_objects:
                 for child in top_obj.children:
                     object_bc = {}
 
                     for metrics_code in bc_metrics:
-                        # Get value from time series cache
+                        # 从时间序列缓存获取值
                         value = self.get_time_series_value(
                             child.object_id,
                             metrics_code,
@@ -313,10 +313,10 @@ def main():
     """
     Main entry point for ontology simulation agent service.
     """
-    # Get script directory
+    # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Load environment configuration
+    # 加载环境配置
     ENV_FILE = os.path.join(script_dir, "env.properties")
     env_config = load_env_config(ENV_FILE)
 
@@ -326,21 +326,21 @@ def main():
     MQTT_USERNAME = env_config.get('mqtt_username')
     MQTT_PASSWORD = env_config.get('mqtt_password')
 
-    # Agent configuration file
+    # 智能体配置文件
     CONFIG_FILE = os.path.join(script_dir, "agent.properties")
 
-    # Create agent factory using generic HydroAgentFactory
+    # 使用通用 HydroAgentFactory 创建智能体工厂
     agent_factory = HydroAgentFactory(
         agent_class=MyOntologySimulationAgent,
         config_file=CONFIG_FILE,
         env_config=env_config
     )
 
-    # Create unified callback
+    # 创建统一回调
     callback = MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
     callback.register_agent_factory("ONTOLOGY_SIMULATION_AGENT", agent_factory)
 
-    # Create coordination client
+    # 创建协调客户端
     sim_coordination_client = SimCoordinationClient(
         broker_url=BROKER_URL,
         broker_port=BROKER_PORT,
@@ -350,10 +350,10 @@ def main():
         mqtt_password=MQTT_PASSWORD
     )
 
-    # Set client reference
+    # 设置客户端引用
     callback.set_client(sim_coordination_client)
 
-    # Start service
+    # 启动服务
     try:
         logger.info("="*70)
         logger.info("Starting Ontology Simulation Agent Service")
@@ -370,7 +370,7 @@ def main():
         logger.info("Ready to create ontology agent instances for incoming tasks...")
         logger.info("Press Ctrl+C to stop...")
 
-        # Keep running
+        # 保持运行
         while True:
             time.sleep(1)
 

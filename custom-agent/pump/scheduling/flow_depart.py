@@ -12,7 +12,7 @@ from itertools import product
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 
-# Suppress warnings
+# 抑制警告
 warnings.filterwarnings('ignore')
 
 import logging
@@ -94,7 +94,7 @@ def load_specific_station_data(station_config, data_dir, target_unit_names):
     
     units = []
     
-    # Build a lookup dict for unit config
+    # 为机组配置构建查找字典
     unit_config_map = {}
     for u_cfg in station_config.get("units", []):
         unit_config_map[u_cfg["name"]] = u_cfg
@@ -116,7 +116,7 @@ def load_specific_station_data(station_config, data_dir, target_unit_names):
         
         u = PumpUnit(sheet, df_e, df_r)
         
-        # Override q_min/q_max from config if provided
+        # 如配置提供 q_min/q_max，则用配置覆盖
         if "q_min" in u_cfg:
             u.q_min = u_cfg["q_min"]
         if "q_max" in u_cfg:
@@ -146,7 +146,7 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     target_unit_names = [u.name for u in units]
     logger.info(f"目标机组: {', '.join(target_unit_names)}")
     
-    # Calculate Range specifically for the loaded units
+    # 针对已加载机组计算范围
     global_h_min = min([u.h_min for u in units])
     global_h_max = max([u.h_max for u in units])
     global_q_min = min([u.q_min for u in units]) 
@@ -164,7 +164,7 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     logger.info(f"计算网格范围: Q [{calc_q_min}, {calc_q_max}] 步长 {step_q} | H [{calc_h_min}, {calc_h_max}] 步长 {step_h}")
     logger.info(f"总计需要评估的工况数: {total_cases}")
     
-    # Batch calculation
+    # 批量计算
     results = []
     count = 0
     
@@ -214,4 +214,3 @@ def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=
     logger.info("机组流量分配计算完成。")
     
     return df_res
-

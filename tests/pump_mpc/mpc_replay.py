@@ -20,7 +20,7 @@ def angle_to_flow(unit, target_angle, H):
         return 0.0
     def obj(q):
         pred_angle = unit.predict_opening(q, H)
-        # Handle nan gracefully if interpolation goes out of bounds
+        # 插值越界产生 nan 时做平滑处理
         if np.isnan(pred_angle):
             return 1e6
         return (pred_angle - target_angle)**2
@@ -33,20 +33,20 @@ class MockStorageModel:
         self.stations = stations
         self.levels = [stations[0].init_up, stations[1].init_up, stations[2].init_up]
         
-        # Load pump units for physical inverse simulation
+        # 加载泵组，用于物理反向仿真
         self.units = {}
         for s in db_config['stations']:
             units_loaded = load_specific_station_data(s, 'data', [u['name'] for u in s['units']])
             self.units[s['id']] = units_loaded
         
     def simulate_flow(self, lower_res, current_levels):
-        # Inverse simulation: Angle, Head -> actual Q
+        # 反向仿真：角度、扬程 -> 实际 Q
         actual_flows = {1: 0.0, 2: 0.0, 3: 0.0}
         actual_effs = {1: [], 2: [], 3: []}
         actual_angles = {1: [], 2: [], 3: []}
         
         for sid in [1, 2, 3]:
-            # Current head (simplified, assuming fixed downstream level for simplicity)
+            # 当前扬程（简化处理：假设下游水位固定）
             H = current_levels[sid-1] - self.stations[sid-1].init_down 
             if sid == 1: H = current_levels[0] - self.stations[0].init_down
             if sid == 2: H = current_levels[1] - self.stations[1].init_down
@@ -96,11 +96,11 @@ class MockClient:
 def plot_step(step, steps, results_hist, predictions, db_config):
     fig = plt.figure(figsize=(20, 16))
     
-    # Grid layout: 
-    # Row 1: Flow (Upper MPC), Level (Upper/Actual)
-    # Row 2: Efficiency (Lower MPC)
-    # Row 3: Angles St1 & St2
-    # Row 4: Angles St3
+    # 网格布局：
+    # 第 1 行：流量（上层 MPC）、水位（上层/实际）
+    # 第 2 行：效率（下层 MPC）
+    # 第 3 行：St1 和 St2 角度
+    # 第 4 行：St3 角度
     
     # 1. Flow (Upper and Lower MPC)
     ax1 = plt.subplot(4, 2, 1)
@@ -151,7 +151,7 @@ def plot_step(step, steps, results_hist, predictions, db_config):
     ax3.set_title("Lower MPC Average Unit Efficiency Tracking")
     ax3.set_ylabel("Efficiency (%)")
     
-    # Averages over units
+    # 机组均值
     eff_hist1 = [np.mean([e for e in h if e>0]) if any(e>0 for e in h) else 0 for h in results_hist['eff1']]
     eff_hist2 = [np.mean([e for e in h if e>0]) if any(e>0 for e in h) else 0 for h in results_hist['eff2']]
     eff_hist3 = [np.mean([e for e in h if e>0]) if any(e>0 for e in h) else 0 for h in results_hist['eff3']]
@@ -173,7 +173,7 @@ def plot_step(step, steps, results_hist, predictions, db_config):
 
     # 4. Blade Angles
     colors = ['c', 'm', 'y', 'k', 'orange']
-    # Station 1
+    # 泵站 1
     ax4 = plt.subplot(4, 2, 5)
     ax4.set_title("Station 1 Angles")
     for u in range(5):
@@ -186,7 +186,7 @@ def plot_step(step, steps, results_hist, predictions, db_config):
     ax4.set_xlim(0, steps + 10)
     ax4.legend()
     
-    # Station 2
+    # 泵站 2
     ax5 = plt.subplot(4, 2, 6)
     ax5.set_title("Station 2 Angles")
     for u in range(4):
@@ -199,7 +199,7 @@ def plot_step(step, steps, results_hist, predictions, db_config):
     ax5.set_xlim(0, steps + 10)
     ax5.legend()
     
-    # Station 3
+    # 泵站 3
     ax6 = plt.subplot(4, 2, 7)
     ax6.set_title("Station 3 Angles")
     for u in range(4):
@@ -228,14 +228,14 @@ def main():
         agent_name="Test Agent", context=MockContext(),
         hydros_cluster_id="local", hydros_node_id="local"
     )
-    # Override methods to avoid noisy SDK logs
+    # 覆盖方法以避免 SDK 日志过于嘈杂
     agent.control_command_dispatcher.send_command = lambda cmd: None
     agent.control_command_dispatcher.build_station_target_value_request = lambda **kwargs: "mock_request"
     
-    # Init logic
+    # 初始化逻辑
     agent._init_pump_system()
     
-    # Storage simulation environment
+    # 蓄水仿真环境
     env = MockStorageModel(agent.pools, agent.stations, db_config)
     
     results_hist = {
@@ -251,11 +251,11 @@ def main():
         print(f"\n--- Simulating Step {step} ---")
         out = agent.on_optimization(step)
         
-        # Upper and Lower predictions
+        # 上层和下层预测
         upper_res = agent.mpc_output['upper']
         lower_res = agent.mpc_output['lower']
         
-        # Simulate physics based on lower_res angles
+        # 基于 lower_res 角度进行物理仿真
         actual_flows, actual_effs, actual_angles = env.simulate_flow(lower_res, env.levels)
         
         for sid in [1, 2, 3]:
@@ -264,13 +264,13 @@ def main():
             aq = actual_flows.get(sid, 0.0)
             print(f"  Station {sid} | Upper MPC: {uq:>6.2f} m³/s | Lower MPC: {lq:>6.2f} m³/s | Actual Env: {aq:>6.2f} m³/s")
         
-        # Env steps (Levels updating)
+        # 环境步进（水位更新）
         levels = env.step(actual_flows, dt)
         
-        # Agent reads actual
+        # 智能体读取实际值
         agent.on_next(levels[1:], list(actual_flows.values()), step)
         
-        # Log history
+        # 记录历史
         results_hist['q1'].append(actual_flows[1])
         results_hist['q2'].append(actual_flows[2])
         results_hist['q3'].append(actual_flows[3])
@@ -285,7 +285,7 @@ def main():
         results_hist['ang2'].append(actual_angles[2])
         results_hist['ang3'].append(actual_angles[3])
         
-        # Calculate Lower MPC predicted levels
+        # 计算下层 MPC 预测水位
         pred_z2_lower = []
         pred_z3_lower = []
         if lower_res and 1 in lower_res:
@@ -303,7 +303,7 @@ def main():
                 pred_z2_lower.append(temp_z2)
                 pred_z3_lower.append(temp_z3)
                 
-        # Plot Frame
+        # 绘制帧
         predictions = {
             'upper': upper_res, 
             'lower': lower_res,

@@ -1,5 +1,5 @@
 """
-Common ID generators for Hydros SDK.
+Hydros SDK 通用 ID 生成器。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ def _random_alphanumeric(length: int) -> str:
 
 
 def generate_agent_instance_id(agent_code: str) -> str:
-    """Generate agent instance ID in Java-compatible format."""
+    """按兼容 Java 侧的格式生成智能体实例 ID。"""
     return f"AGT{_timestamp_str()}{_random_alphanumeric(6)}_{agent_code}"
 
 

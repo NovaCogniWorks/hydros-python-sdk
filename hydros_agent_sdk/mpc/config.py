@@ -1,4 +1,4 @@
-"""MPC configuration resolution helpers."""
+"""MPC 配置解析辅助对象。"""
 
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
@@ -18,7 +18,7 @@ class MpcRuntimeConfig:
 
 
 class MpcConfigResolver:
-    """Resolve MPC config values from agent properties and runtime defaults."""
+    """从 agent properties 和运行时默认值解析 MPC 配置。"""
 
     @classmethod
     def resolve(

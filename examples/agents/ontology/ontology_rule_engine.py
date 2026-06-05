@@ -28,7 +28,7 @@ class OntologyRuleEngine:
     """
 
     def __init__(self):
-        """Initialize ontology rule engine."""
+        """初始化本体规则引擎。"""
         self.rules = []
         self.ontology_model = {}
         logger.info("Ontology rule engine initialized")
@@ -42,10 +42,10 @@ class OntologyRuleEngine:
         """
         logger.info("Loading ontology model from topology")
 
-        # Build ontology model from topology
+        # 从拓扑构建本体模型
         for top_obj in topology.top_objects:
             for child in top_obj.children:
-                # Create ontology instance for each object
+                # 为每个对象创建本体实例
                 self.ontology_model[child.object_id] = {
                     'object_id': child.object_id,
                     'object_name': child.object_name,
@@ -60,7 +60,7 @@ class OntologyRuleEngine:
 
         logger.info(f"Loaded ontology model with {len(self.ontology_model)} instances")
 
-        # Load ontology rules
+        # 加载本体规则
         self._load_rules()
 
     def _load_rules(self):
@@ -72,7 +72,7 @@ class OntologyRuleEngine:
         """
         logger.info("Loading ontology rules")
 
-        # Example rules (simplified)
+        # 示例规则（简化版）
         self.rules = [
             {
                 'name': 'water_level_constraint',
@@ -106,31 +106,31 @@ class OntologyRuleEngine:
         """
         logger.debug(f"Applying ontology rules for step {step}")
 
-        # Update ontology model with boundary conditions
+        # 使用边界条件更新本体模型
         for object_id, bc_values in boundary_conditions.items():
             if object_id in self.ontology_model:
                 self.ontology_model[object_id]['state'].update(bc_values)
 
-        # Apply ontology reasoning
+        # 应用本体推理
         results = {}
 
         for object_id, obj_instance in self.ontology_model.items():
-            # Simulate ontology-based computation
-            # In a real implementation, this would use ontology reasoning
-            # to infer new facts based on rules and constraints
+            # 模拟基于本体的计算
+            # 真实实现中应使用本体推理，
+            # 基于规则和约束推断新事实
 
             state = obj_instance['state']
 
-            # Example: Simple rule-based calculation
-            # Rule 1: Water level increases with inflow
+            # 示例：简单规则计算
+            # 规则 1：水位随入流增加
             inflow = boundary_conditions.get(object_id, {}).get('inflow', 0.0)
             water_level = state['water_level'] + 0.01 * inflow
 
-            # Rule 2: Flow depends on gate opening and water level
+            # 规则 2：流量取决于闸门开度和水位
             gate_opening = state['gate_opening']
             flow = gate_opening * water_level * 0.5
 
-            # Apply constraint rules
+            # 应用约束规则
             water_level = max(0.0, min(10.0, water_level))
             flow = max(0.0, min(100.0, flow))
 
@@ -140,10 +140,10 @@ class OntologyRuleEngine:
                 'gate_opening': gate_opening,
             }
 
-            # Update internal state
+            # 更新内部状态
             obj_instance['state'] = results[object_id]
 
-            # Apply ontology rules
+            # 应用本体规则
             for rule in self.rules:
                 if rule['condition'](obj_instance):
                     rule['action'](obj_instance)

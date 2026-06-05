@@ -20,7 +20,7 @@ import time
 from typing import Optional, List, Dict, Any
 import json
 
-# Add current directory to Python path for potential power_solver import
+# 将当前目录加入 Python 路径，便于按需导入 power_solver
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
@@ -52,7 +52,7 @@ from hydros_agent_sdk.protocol.models import (
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
-# Try to import power optimization solver if available
+# 尝试导入可用的电力优化求解器
 try:
     from power_solver import PowerOptimizationSolver
     HAS_POWER_SOLVER = True
@@ -60,16 +60,16 @@ except ImportError:
     HAS_POWER_SOLVER = False
     PowerOptimizationSolver = None
 
-# Configure logging (only when running as main script)
-# When imported by multi_agent_launcher, logging is already configured
+# 配置日志（仅在作为主脚本运行时）
+# 被 multi_agent_launcher 导入时，日志已完成配置
 if __name__ == "__main__":
-    # Get the project directory (two levels up from this script)
+    # 获取项目目录（当前脚本向上两级）
     PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     EXAMPLES_DIR = os.path.join(PROJECT_DIR, "examples")
     LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # Load env config to get cluster_id and node_id for logging
+    # 加载 env 配置，用于获取日志中的 cluster_id 和 node_id
     try:
         env_config = load_env_config()
         hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
@@ -114,7 +114,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         hydros_node_id: str,
         **kwargs
     ):
-        """Initialize power scheduling agent."""
+        """初始化电力调度智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -127,13 +127,13 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
             **kwargs
         )
 
-        # Power optimization solver
+        # 电力优化求解器
         self._power_solver: Optional[PowerOptimizationSolver] = None
 
-        # Power system topology
+        # 电力系统拓扑
         self._topology = None
 
-        # Optimization parameters
+        # 优化参数
         self._optimization_params = {}
 
         logger.info(f"PowerSchedulingAgent created: {agent_id}")
@@ -190,7 +190,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
             if ctx.has_error:
                 logger.error(f"Failed to initialize power solver: {ctx.error_message}")
-                # Continue without solver, will use dummy optimization
+                # 无求解器时继续执行，后续使用模拟优化
                 self._power_solver = None
             else:
                 logger.info("Power optimization solver initialized")
@@ -291,11 +291,11 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
             'constraints': {},
         }
 
-        # Extract information from topology if available
+        # 如果有拓扑，则从拓扑提取信息
         if self._topology:
             for top_obj in self._topology.top_objects:
                 for child in top_obj.children:
-                    # Classify objects by type
+                    # 按类型划分对象
                     if 'load' in child.object_name.lower() or 'demand' in child.object_name.lower():
                         system_state['loads'].append({
                             'id': child.object_id,
@@ -315,7 +315,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                             'type': 'storage',
                         })
 
-        # Add boundary conditions as constraints
+        # 将边界条件作为约束加入
         constraints = self._collect_boundary_constraints(step)
         if constraints:
             system_state['constraints'] = constraints
@@ -334,12 +334,12 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         """
         constraints = {}
 
-        # Example: get time series data for constraints
-        # This would be populated from time_series_cache
+        # 示例：获取用于约束的时间序列数据
+        # 真实数据会从 time_series_cache 填充
         constraint_metrics = ['max_generation', 'min_generation', 'max_load', 'min_load']
 
         for metric in constraint_metrics:
-            # This is a placeholder - actual implementation would query time series cache
+            # 这里是占位实现，真实实现应查询时间序列缓存
             constraints[metric] = None
 
         return constraints
@@ -353,7 +353,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         """
         field_metrics = {}
 
-        # Get metrics from field metrics cache (populated by MQTT subscription)
+        # 从现地指标缓存获取指标（由 MQTT 订阅填充）
         for cache_key, metrics_data in self._field_metrics_cache.items():
             field_metrics[cache_key] = metrics_data.get('value')
 
@@ -376,7 +376,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         Returns:
             Optimization results
         """
-        # Use power solver if available
+        # 如有可用电力求解器则使用
         if self._power_solver and HAS_POWER_SOLVER:
             try:
                 logger.info("Running optimization with PowerOptimizationSolver")
@@ -395,7 +395,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
                 if ctx.has_error:
                     logger.error(f"Optimization solver failed: {ctx.error_message}")
-                    # Fall back to dummy optimization
+                    # 回退到模拟优化
                     return self._dummy_optimization(step, system_state, field_metrics)
 
                 return results
@@ -404,7 +404,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                 logger.error(f"Error in optimization solver: {e}", exc_info=True)
                 return self._dummy_optimization(step, system_state, field_metrics)
         else:
-            # Use dummy optimization
+            # 使用模拟优化
             logger.info("Using dummy optimization (no solver available)")
             return self._dummy_optimization(step, system_state, field_metrics)
 
@@ -427,7 +427,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         """
         logger.debug("Running dummy optimization")
 
-        # Simple rule-based scheduling
+        # 简单规则调度
         results = {
             'step': step,
             'schedule': {},
@@ -435,7 +435,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
             'constraints_violated': False,
         }
 
-        # Generate simple schedule
+        # 生成简单计划
         for generator in system_state.get('generators', []):
             gen_id = generator['id']
             results['schedule'][gen_id] = {
@@ -473,10 +473,10 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
         schedule = optimization_results.get('schedule', {})
 
-        # Generate commands for generators
+        # 为发电机生成指令
         for object_id, schedule_info in schedule.items():
             if 'power_output' in schedule_info:
-                # Generator control command
+                # 发电机控制指令
                 command = {
                     'target_agent': f"GENERATOR_AGENT_{object_id}",
                     'command_type': 'SET_POWER_OUTPUT',
@@ -490,7 +490,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                 control_commands.append(command)
 
             elif 'power_demand' in schedule_info:
-                # Load control command
+                # 负荷控制指令
                 command = {
                     'target_agent': f"LOAD_AGENT_{object_id}",
                     'command_type': 'SET_POWER_DEMAND',
@@ -525,7 +525,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                     f"values={len(time_series.time_series)}"
                 )
 
-                # Update optimization model constraints if solver exists
+                # 如有求解器，则更新优化模型约束
                 if self._power_solver:
                     self._power_solver.update_constraints(
                         object_id=time_series.object_id,
@@ -575,10 +575,10 @@ def main():
     """
     Main entry point for power scheduling agent service.
     """
-    # Get script directory
+    # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Load environment configuration (with fallback to shared config)
+    # 加载环境配置（支持回退到共享配置）
     ENV_FILE = os.path.join(script_dir, "env.properties")
     env_config = load_env_config(ENV_FILE)
 
@@ -588,21 +588,21 @@ def main():
     MQTT_USERNAME = env_config.get('mqtt_username')
     MQTT_PASSWORD = env_config.get('mqtt_password')
 
-    # Agent configuration file
+    # 智能体配置文件
     CONFIG_FILE = os.path.join(script_dir, "agent.properties")
 
-    # Create agent factory using generic HydroAgentFactory
+    # 使用通用 HydroAgentFactory 创建智能体工厂
     agent_factory = HydroAgentFactory(
         agent_class=PowerSchedulingAgent,
         config_file=CONFIG_FILE,
         env_config=env_config
     )
 
-    # Create unified callback
+    # 创建统一回调
     callback = MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT_POWER01", agent_factory)
 
-    # Create coordination client
+    # 创建协调客户端
     sim_coordination_client = SimCoordinationClient(
         broker_url=BROKER_URL,
         broker_port=BROKER_PORT,
@@ -612,10 +612,10 @@ def main():
         mqtt_password=MQTT_PASSWORD
     )
 
-    # Set client reference
+    # 设置客户端引用
     callback.set_client(sim_coordination_client)
 
-    # Start service
+    # 启动服务
     try:
         logger.info("=" * 70)
         logger.info("Starting Power Scheduling Agent Service")
@@ -632,7 +632,7 @@ def main():
         logger.info("Ready to create power scheduling agent instances for incoming tasks...")
         logger.info("Press Ctrl+C to stop...")
 
-        # Keep running
+        # 保持运行
         while True:
             time.sleep(1)
 

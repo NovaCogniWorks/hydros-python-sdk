@@ -1,18 +1,17 @@
 """
-YAML Loader Utility
+YAML 加载工具。
 
-This module provides a utility class for loading YAML content from URLs or local files.
-It returns raw dictionary data without Pydantic model validation, making it suitable
-for generic YAML parsing use cases.
+本模块提供从 URL 或本地文件加载 YAML 内容的工具类。它返回未经 Pydantic
+模型校验的原始字典数据，适用于通用 YAML 解析场景。
 
-Example usage:
-    # Load from URL
+使用示例：
+    # 从 URL 加载
     config = YamlLoader.from_url("http://example.com/config.yaml")
 
-    # Load from file
+    # 从文件加载
     config = YamlLoader.from_file("/path/to/config.yaml")
 
-    # Access configuration values
+    # 访问配置值
     value = config.get("key")
     nested_value = config.get("nested.key")
 """
@@ -33,33 +32,32 @@ logger = logging.getLogger(__name__)
 
 class YamlLoader:
     """
-    Generic YAML loader utility.
+    通用 YAML 加载工具。
 
-    This class provides static methods to load YAML content from URLs
-    or local file paths, and parse them into dictionary objects.
+    该类提供静态方法，用于从 URL 或本地文件路径加载 YAML 内容，
+    并解析为字典对象。
 
-    Unlike AgentConfigLoader, this class returns raw dictionary data
-    without Pydantic model validation, making it more flexible for
-    generic YAML parsing scenarios.
+    与 AgentConfigLoader 不同，该类返回未经 Pydantic 模型校验的原始字典数据，
+    在通用 YAML 解析场景中更灵活。
     """
 
     @staticmethod
     def from_url(url: str, timeout: int = 30) -> Dict[str, Any]:
         """
-        Load YAML configuration from a URL.
+        从 URL 加载 YAML 配置。
 
         Args:
-            url: The URL to fetch the YAML content from
-            timeout: Request timeout in seconds (default: 30)
+            url: 获取 YAML 内容的 URL
+            timeout: 请求超时时间，单位秒（默认 30）
 
         Returns:
-            Dictionary containing parsed YAML data
+            包含已解析 YAML 数据的字典
 
         Raises:
-            ImportError: If PyYAML is not installed
-            URLError: If the URL cannot be accessed
-            HTTPError: If the HTTP request fails
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            URLError: URL 无法访问时抛出
+            HTTPError: HTTP 请求失败时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(
@@ -70,14 +68,14 @@ class YamlLoader:
         logger.info(f"Loading YAML from URL: {url}")
 
         try:
-            # Encode URL to handle non-ASCII characters (e.g., Chinese characters)
-            # Split URL into parts and encode only the path part
+            # 编码 URL 以处理非 ASCII 字符（例如中文字符）。
+            # 将 URL 拆分为多个部分，只编码 path 部分。
             parsed = urlparse(url)
 
-            # Encode the path component while preserving already-encoded characters
+            # 编码 path 组件，同时保留已经编码的字符。
             encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
 
-            # Reconstruct the URL with encoded path
+            # 使用编码后的 path 重建 URL。
             encoded_url = urlunparse((
                 parsed.scheme,
                 parsed.netloc,
@@ -89,7 +87,7 @@ class YamlLoader:
 
             logger.debug(f"Encoded URL: {encoded_url}")
 
-            # Create request with proper headers
+            # 创建带有合适 header 的请求。
             request = Request(encoded_url)
             request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.4')
 
@@ -109,19 +107,19 @@ class YamlLoader:
     @staticmethod
     def from_file(file_path: str, encoding: str = 'utf-8') -> Dict[str, Any]:
         """
-        Load YAML configuration from a local file.
+        从本地文件加载 YAML 配置。
 
         Args:
-            file_path: Path to the YAML file
-            encoding: File encoding (default: 'utf-8')
+            file_path: YAML 文件路径
+            encoding: 文件编码（默认 'utf-8'）
 
         Returns:
-            Dictionary containing parsed YAML data
+            包含已解析 YAML 数据的字典
 
         Raises:
-            ImportError: If PyYAML is not installed
-            FileNotFoundError: If the file does not exist
-            ValueError: If the YAML content is invalid
+            ImportError: 未安装 PyYAML 时抛出
+            FileNotFoundError: 文件不存在时抛出
+            ValueError: YAML 内容无效时抛出
         """
         if yaml is None:
             raise ImportError(

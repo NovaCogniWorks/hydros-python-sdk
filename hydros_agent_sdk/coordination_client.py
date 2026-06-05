@@ -48,7 +48,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesRequest,
     OutflowTimeSeriesResponse,
 
-    # Command type constants
+    # 指令类型常量
     SIMCMD_TASK_INIT_REQUEST,
     SIMCMD_TASK_INIT_RESPONSE,
     SIMCMD_TICK_CMD_REQUEST,
@@ -107,14 +107,14 @@ class SimCoordinationClient:
         class MyCallback(SimCoordinationCallback):
         
             def on_sim_task_init(self, request):
-                # Your business logic here
+                # 你的业务逻辑写在这里
                 pass
 
             def on_tick(self, request):
-                # Your business logic here
+                # 你的业务逻辑写在这里
                 pass
 
-        # Create and start client
+        # 创建并启动客户端
         callback = MyCallback()
         client = SimCoordinationClient(
             broker_url="tcp://192.168.1.24",
@@ -177,18 +177,18 @@ class SimCoordinationClient:
         self.mqtt_username = mqtt_username
         self.mqtt_password = mqtt_password
 
-        # Generate client ID
+        # 生成客户端 ID
         self.client_id = f"hydros_node_{int(time.time() * 1000)}"
 
-        # Initialize state manager
+        # 初始化状态管理器
         if state_manager is None:
             state_manager = AgentStateManager()
         self.state_manager = state_manager
 
-        # Initialize message filter
+        # 初始化消息过滤器
         self.message_filter = MessageFilter(self.state_manager)
 
-        # Initialize MQTT client
+        # 初始化 MQTT 客户端
         self.mqtt_client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.client_id,
@@ -198,40 +198,40 @@ class SimCoordinationClient:
         self.mqtt_client.on_message = self._on_message
         self.mqtt_client.on_disconnect = self._on_disconnect
 
-        # Configure automatic reconnect with exponential backoff
-        # min_delay=1s, max_delay=120s (doubles each attempt: 1, 2, 4, 8, ... 120)
+        # 使用指数退避配置自动重连
+        # min_delay=1s，max_delay=120s（每次尝试翻倍：1、2、4、8、...、120）
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
 
-        # Set MQTT authentication if credentials provided
+        # 如果提供凭据，则设置 MQTT 认证
         if mqtt_username:
             self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
             logger.info(f"MQTT authentication configured for user: {mqtt_username}")
 
-        # Track intentional disconnect to distinguish from unexpected ones
+        # 跟踪主动断开，用于区分非预期断开
         self._intentional_disconnect = False
 
-        # Outgoing message queue
+        # 出站消息队列
         self.out_message_queue: Queue[SimCommand] = Queue()
 
-        # Incoming message queues. MQTT callbacks must stay lightweight; workers
-        # execute the potentially slow business handlers.
+        # 入站消息队列。MQTT 回调必须保持轻量，
+        # 可能较慢的业务处理器由 worker 执行。
         self.control_message_queue: Queue[InboundCommand] = Queue(maxsize=control_queue_size)
         self.business_message_queue: Queue[InboundCommand] = Queue(maxsize=business_queue_size)
 
-        # Thread management
+        # 线程管理
         self.running = Event()
         self.queue_thread: Optional[Thread] = None
         self.control_worker_thread: Optional[Thread] = None
         self.business_worker_thread: Optional[Thread] = None
         self.connected = Event()
 
-        # Register command handlers
+        # 注册指令处理器
         self._register_handlers()
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
 
     def _register_handlers(self):
-        """Register all command handlers that route to callback methods."""
+        """注册全部会路由到回调方法的指令处理器。"""
         self.handlers: Dict[str, Callable[[SimCommand], None]] = {
             SIMCMD_TASK_INIT_REQUEST: self._handle_task_init,
             SIMCMD_TASK_INIT_RESPONSE: self._handle_task_init_response,
@@ -262,16 +262,16 @@ class SimCoordinationClient:
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
 
-        # Connect to MQTT broker
+        # 连接 MQTT broker
         logger.info(f"Connecting to MQTT broker: {self.broker_url}:{self.broker_port}")
         self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
         self.mqtt_client.loop_start()
 
-        # Wait for connection
+        # 等待连接建立
         if not self.connected.wait(timeout=10):
             raise RuntimeError("Failed to connect to MQTT broker within 10 seconds")
 
-        # Start queue processing thread
+        # 启动队列处理线程
         self.running.set()
         self._start_inbound_workers()
         self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
@@ -294,13 +294,13 @@ class SimCoordinationClient:
 
         logger.info("Stopping SimCoordinationClient...")
 
-        # Stop queue thread
+        # 停止队列线程
         self.running.clear()
         self._stop_inbound_workers()
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
-        # Disconnect MQTT
+        # 断开 MQTT
         self._intentional_disconnect = True
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
@@ -317,7 +317,7 @@ class SimCoordinationClient:
             command: The command to send
         """
         self.out_message_queue.put(command)
-        # Use Pydantic's model_dump() to properly serialize nested models
+        # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
         logger.info(f"Enqueued command: {self._format_command_for_log(command)}")
 
     def send_command(self, command: SimCommand):
@@ -330,11 +330,11 @@ class SimCoordinationClient:
         self._send_with_retry(command)
 
     # ========================================================================
-    # MQTT Callbacks
+    # MQTT 回调
     # ========================================================================
 
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """MQTT connection callback. Also handles auto-reconnect re-subscription."""
+        """MQTT 连接回调，同时处理自动重连后的重新订阅。"""
         rc = reason_code.value
         if rc == 0:
             was_connected = self.connected.is_set()
@@ -379,7 +379,7 @@ class SimCoordinationClient:
             logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
 
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
-        """MQTT disconnection callback."""
+        """MQTT 断开连接回调。"""
         rc = reason_code.value
         self.connected.clear()
         if rc == 0 or self._intentional_disconnect:
@@ -393,15 +393,15 @@ class SimCoordinationClient:
             logger.warning(f"Disconnected from MQTT broker: {reason}. Auto-reconnecting...")
 
     def _on_message(self, client, userdata, msg):
-        """MQTT message received callback."""
+        """MQTT 消息接收回调。"""
         payload_str = None
         data = None
         try:
-            # Parse message
+            # 解析消息
             payload_str = msg.payload.decode("utf-8")
             logger.debug(f"Received message on topic {msg.topic}: {payload_str[:200]}...")
 
-            # Parse JSON
+            # 解析 JSON
             data = json.loads(payload_str)
             logger.info(
                 "MQTT command received: topic=%s, rawType=%s, commandId=%s, context=%s",
@@ -421,12 +421,12 @@ class SimCoordinationClient:
 
             envelope = SimCommandEnvelope(command=data)
             command = envelope.command
-            # Apply message filters
+            # 应用消息过滤器
             if not self.message_filter.should_process_message(command):
                 return
 
-            # Defer business handling to SDK workers so MQTT network callbacks
-            # never block on slow tick/event/MPC processing.
+            # 将业务处理推迟给 SDK worker，避免 MQTT 网络回调
+            # 被较慢的 tick/event/MPC 处理阻塞。
             self._enqueue_incoming(command)
 
         except Exception as e:
@@ -476,11 +476,11 @@ class SimCoordinationClient:
         return None
 
     # ========================================================================
-    # Message Handling
+    # 消息处理
     # ========================================================================
 
     def _start_inbound_workers(self):
-        """Start inbound command workers if they are not already running."""
+        """如果入站指令 worker 尚未运行，则启动它们。"""
         if self.control_worker_thread is None or not self.control_worker_thread.is_alive():
             self.control_worker_thread = Thread(
                 target=self._inbound_worker_loop,
@@ -500,7 +500,7 @@ class SimCoordinationClient:
             self.business_worker_thread.start()
 
     def _stop_inbound_workers(self):
-        """Wait briefly for inbound workers to stop after running is cleared."""
+        """running 标记清除后，短暂等待入站 worker 停止。"""
         for worker in (self.control_worker_thread, self.business_worker_thread):
             if worker and worker.is_alive():
                 worker.join(timeout=5)
@@ -595,24 +595,24 @@ class SimCoordinationClient:
         Args:
             command: The command to extract context from
         """
-        # Set hydros_cluster_id from state_manager
+        # 从 state_manager 设置 hydros_cluster_id
         cluster_id = self.state_manager.get_cluster_id()
         if cluster_id:
             set_hydros_cluster_id(cluster_id)
 
-        # Set hydros_node_id from state_manager
+        # 从 state_manager 设置 hydros_node_id
         node_id = self.state_manager.get_node_id()
         if node_id:
             set_hydros_node_id(node_id)
 
-        # Set biz_scene_instance_id from command's context (SimulationContext)
+        # 从指令上下文（SimulationContext）设置 biz_scene_instance_id
         if hasattr(command, 'context') and command.context:
             biz_scene_instance_id = command.context.biz_scene_instance_id
             if biz_scene_instance_id:
                 set_biz_scene_instance_id(biz_scene_instance_id)
 
-        # Set biz_component from callback's component
-        # This will be agent_id in agent context, or component name in infrastructure
+        # 从 callback 的 component 设置 biz_component
+        # 在智能体上下文中为 agent_id，在基础设施上下文中为 component 名称
         component = self.sim_coordination_callback.get_component()
         if component:
             set_biz_component(component)
@@ -627,7 +627,7 @@ class SimCoordinationClient:
         Args:
             command: The command to handle
         """
-        # Set logging context from command
+        # 根据指令设置日志上下文
         self._set_logging_context(command)
 
         handler = self.handlers.get(command.command_type)
@@ -737,7 +737,7 @@ class SimCoordinationClient:
         )
 
     def _resolve_error_source_agent(self, command: SimCommand) -> Optional[HydroAgentInstance]:
-        """Find a local agent instance suitable as source_agent_instance."""
+        """查找适合作为 source_agent_instance 的本地智能体实例。"""
         target_agent = getattr(command, "target_agent_instance", None)
         if target_agent is not None:
             return target_agent
@@ -758,17 +758,17 @@ class SimCoordinationClient:
         return None
 
     # ========================================================================
-    # Command Handlers (route to callback)
+    # 指令处理器（路由到 callback）
     # ========================================================================
 
     def _handle_task_init(self, command: SimCommand):
-        """Handle task init request."""
+        """处理任务初始化请求。"""
         request = command
         assert isinstance(request, SimTaskInitRequest)
         return self.sim_coordination_callback.on_sim_task_init(request)
 
     def _handle_task_init_response(self, command: SimCommand):
-        """Handle task init response from remote agent."""
+        """处理远端智能体的任务初始化响应。"""
         response = command
         assert isinstance(response, SimTaskInitResponse)
         if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
@@ -776,25 +776,25 @@ class SimCoordinationClient:
         return None
 
     def _handle_tick(self, command: SimCommand):
-        """Handle tick command."""
+        """处理 tick 指令。"""
         request = command
         assert isinstance(request, TickCmdRequest)
         return self.sim_coordination_callback.on_tick(request)
 
     def _handle_task_terminate(self, command: SimCommand):
-        """Handle task terminate request."""
+        """处理任务终止请求。"""
         request = command
         assert isinstance(request, SimTaskTerminateRequest)
         return self.sim_coordination_callback.on_task_terminate(request)
 
     def _handle_time_series_data_update(self, command: SimCommand):
-        """Handle time series data update."""
+        """处理时间序列数据更新。"""
         request = command
         assert isinstance(request, TimeSeriesDataUpdateRequest)
         return self.sim_coordination_callback.on_time_series_data_update(request)
 
     def _handle_hydro_event_command(self, command: SimCommand):
-        """Handle Java-compatible hydro_event_command payload routing."""
+        """处理兼容 Java 侧的 hydro_event_command payload 路由。"""
         request = command
         assert isinstance(request, HydroEventCommand)
         payload = request.payload
@@ -843,7 +843,7 @@ class SimCoordinationClient:
         return None
 
     def _to_hydro_event_ack_response(self, request: HydroEventCommand, result):
-        """Convert update responses into Java-compatible hydro_event_ack_response."""
+        """将更新响应转换为兼容 Java 侧的 hydro_event_ack_response。"""
         if result is None:
             return None
 
@@ -880,19 +880,19 @@ class SimCoordinationClient:
         )
 
     def _handle_outflow_time_series_data_update(self, command: SimCommand):
-        """Handle outflow time series data update."""
+        """处理出流时间序列数据更新。"""
         request = command
         assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
         return self.sim_coordination_callback.on_outflow_time_series_data_update(request)
 
     def _handle_time_series_calculation(self, command: SimCommand):
-        """Handle time series calculation."""
+        """处理时间序列计算。"""
         request = command
         assert isinstance(request, TimeSeriesCalculationRequest)
         return self.sim_coordination_callback.on_time_series_calculation(request)
 
     def _handle_agent_status_report(self, command: SimCommand):
-        """Handle agent status report from remote agent."""
+        """处理远端智能体状态报告。"""
         report = command
         assert isinstance(report, AgentInstanceStatusReport)
         if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
@@ -900,7 +900,7 @@ class SimCoordinationClient:
         return None
 
     def _handle_mpc_result_report(self, command: SimCommand):
-        """Handle MPC result report from remote agents."""
+        """处理远端智能体的 MPC 结果报告。"""
         report = command
         assert isinstance(report, MpcResultReport)
         if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
@@ -908,13 +908,13 @@ class SimCoordinationClient:
         return None
 
     def _handle_outflow_time_series_request(self, command: SimCommand):
-        """Handle outflow time series request."""
+        """处理出流时间序列请求。"""
         request = command
         assert isinstance(request, OutflowTimeSeriesRequest)
         return self.sim_coordination_callback.on_outflow_time_series(request)
 
     # ========================================================================
-    # Outgoing Message Queue
+    # 出站消息队列
     # ========================================================================
 
     def _queue_loop(self):
@@ -926,15 +926,15 @@ class SimCoordinationClient:
         logger.info("Queue processing thread started")
         while self.running.is_set():
             try:
-                # Get next command from queue (with timeout to allow checking running flag)
+                # 从队列获取下一条指令（带超时，以便检查 running 标记）
                 command = self.out_message_queue.get(timeout=1)
 
-                # Check if message should be sent
+                # 检查消息是否应发送
                 if self._should_send(command):
                     self._send_with_retry(command)
 
             except Empty:
-                # Timeout, continue loop
+                # 超时，继续循环
                 continue
             except Exception as e:
                 logger.error(f"Error in queue loop: {e}", exc_info=True)
@@ -953,11 +953,11 @@ class SimCoordinationClient:
         Returns:
             True if the command should be sent, False otherwise
         """
-        # Don't send requests (only responses and reports)
+        # 不发送请求（只发送响应和报告）
         if isinstance(command, SimCoordinationRequest):
             return False
 
-        # Send responses only from local agents
+        # 只发送本地智能体的响应
         if isinstance(command, SimCoordinationResponse):
             if isinstance(command, SimTaskTerminateResponse):
                 node_id = self.state_manager.get_node_id()
@@ -965,16 +965,15 @@ class SimCoordinationClient:
                     return True
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
-        # Send status reports from local agents. During task termination the
-        # local-agent registry may be cleared before the async send loop drains,
-        # so fall back to the current node id for status reports only.
+        # 发送本地智能体的状态报告。任务终止时，本地智能体注册表可能在异步发送循环
+        # 清空之前已被清理，因此仅对状态报告使用当前 node id 兜底。
         if isinstance(command, AgentInstanceStatusReport):
             if self.state_manager.is_local_agent(command.source_agent_instance):
                 return True
             node_id = self.state_manager.get_node_id()
             return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
 
-        # Send MPC result reports only from registered local agents.
+        # 只发送已注册本地智能体的 MPC 结果报告。
         if isinstance(command, MpcResultReport):
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
@@ -994,10 +993,10 @@ class SimCoordinationClient:
 
         while attempt <= self.max_retry_count:
             try:
-                # Serialize command
+                # 序列化指令
                 payload = command.model_dump_json(by_alias=True)
 
-                # Publish to MQTT
+                # 发布到 MQTT
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
 
@@ -1020,7 +1019,7 @@ class SimCoordinationClient:
                     logger.error(f"Max retry count exceeded for command: id={command_id}")
                     raise
 
-                # Exponential backoff: 2^attempt * base_delay
+                # 指数退避：2^attempt * base_delay
                 delay_ms = self.base_retry_delay_ms * (2 ** attempt)
                 logger.info(f"Retrying after {delay_ms}ms... (attempt {attempt}/{self.max_retry_count})")
                 time.sleep(delay_ms / 1000.0)

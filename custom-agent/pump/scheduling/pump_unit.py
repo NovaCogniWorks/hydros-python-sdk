@@ -12,7 +12,7 @@ class PumpUnit:
         self.data_e = df_e
         self.data_r = df_r
         
-        # Fitting and interpolation
+        # 拟合和插值
         self.poly = PolynomialFeatures(degree=2, include_bias=False)
         self.model_e = LinearRegression()
         self._fit_efficiency()
@@ -20,7 +20,7 @@ class PumpUnit:
         self.interp_r = None
         self._build_interpolation()
         
-        # Boundaries and geometry
+        # 边界和几何参数
         self.hull = None
         self.q_min = df_e['Q'].min()
         self.q_max = df_e['Q'].max()
@@ -35,7 +35,7 @@ class PumpUnit:
 
     def _build_interpolation(self):
         points = self.data_r[['Q', 'H']].values
-        # The angle column might be 'R', 'Alpha', or something else, but it's the one that is not Q and not H
+        # 角度列可能是 'R'、'Alpha' 或其他名称，但它一定不是 Q 或 H
         angle_col = [c for c in self.data_r.columns if c not in ['Q', 'H']][0]
         values = self.data_r[angle_col].values 
         self.angle_min = float(np.nanmin(values))

@@ -28,7 +28,7 @@ from contextvars import ContextVar
 from typing import Optional
 from datetime import datetime
 
-# Context variables for MDC-like functionality (similar to Java's MDC)
+# 用于类 MDC 功能的上下文变量（类似 Java MDC）
 _biz_scene_instance_id: ContextVar[Optional[str]] = ContextVar('biz_scene_instance_id', default=None)
 _biz_component: ContextVar[Optional[str]] = ContextVar('biz_component', default=None)
 _hydros_cluster_id: ContextVar[Optional[str]] = ContextVar('hydros_cluster_id', default=None)
@@ -74,7 +74,7 @@ class LogContext:
 
 
 def set_biz_scene_instance_id(biz_scene_instance_id: Optional[str]):
-    """Set the biz_scene_instance_id (from SimulationContext) for the current context."""
+    """为当前上下文设置 biz_scene_instance_id（来自 SimulationContext）。"""
     _biz_scene_instance_id.set(biz_scene_instance_id)
 
 
@@ -90,63 +90,63 @@ def set_biz_component(biz_component: Optional[str]):
 
 
 def set_hydros_cluster_id(hydros_cluster_id: Optional[str]):
-    """Set the hydros_cluster_id for the current context."""
+    """为当前上下文设置 hydros_cluster_id。"""
     _hydros_cluster_id.set(hydros_cluster_id)
 
 
 def set_hydros_node_id(hydros_node_id: Optional[str]):
-    """Set the hydros_node_id for the current context."""
+    """为当前上下文设置 hydros_node_id。"""
     _hydros_node_id.set(hydros_node_id)
 
 
 def get_biz_scene_instance_id() -> Optional[str]:
-    """Get the current biz_scene_instance_id."""
+    """获取当前 biz_scene_instance_id。"""
     return _biz_scene_instance_id.get()
 
 
 def get_biz_component() -> Optional[str]:
-    """Get the current biz_component."""
+    """获取当前 biz_component。"""
     return _biz_component.get()
 
 
 def get_hydros_cluster_id() -> Optional[str]:
-    """Get the current hydros_cluster_id."""
+    """获取当前 hydros_cluster_id。"""
     return _hydros_cluster_id.get()
 
 
 def get_hydros_node_id() -> Optional[str]:
-    """Get the current hydros_node_id."""
+    """获取当前 hydros_node_id。"""
     return _hydros_node_id.get()
 
 
-# Backward compatibility aliases (deprecated)
+# 向后兼容别名（已废弃）
 def set_task_id(task_id: Optional[str]):
-    """Deprecated: Use set_biz_scene_instance_id instead."""
+    """已废弃：请改用 set_biz_scene_instance_id。"""
     set_biz_scene_instance_id(task_id)
 
 
 def set_agent_id(agent_id: Optional[str]):
-    """Deprecated: Use set_biz_component instead."""
+    """已废弃：请改用 set_biz_component。"""
     set_biz_component(agent_id)
 
 
 def set_node_id(node_id: Optional[str]):
-    """Deprecated: Use set_hydros_node_id instead."""
+    """已废弃：请改用 set_hydros_node_id。"""
     set_hydros_node_id(node_id)
 
 
 def get_task_id() -> Optional[str]:
-    """Deprecated: Use get_biz_scene_instance_id instead."""
+    """已废弃：请改用 get_biz_scene_instance_id。"""
     return get_biz_scene_instance_id()
 
 
 def get_agent_id() -> Optional[str]:
-    """Deprecated: Use get_biz_component instead."""
+    """已废弃：请改用 get_biz_component。"""
     return get_biz_component()
 
 
 def get_node_id() -> Optional[str]:
-    """Deprecated: Use get_hydros_node_id instead."""
+    """已废弃：请改用 get_hydros_node_id。"""
     return get_hydros_node_id()
 
 
@@ -207,34 +207,34 @@ class HydrosFormatter(logging.Formatter):
         self.default_hydros_node_id = default_hydros_node_id
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format the log record with Python-style source location."""
-        # Get context values with defaults
+        """使用 Python 风格源码位置格式化日志记录。"""
+        # 获取带默认值的上下文值
         hydros_cluster_id = get_hydros_cluster_id() or self.default_hydros_cluster_id
         hydros_node_id = get_hydros_node_id() or self.default_hydros_node_id
         biz_scene_instance_id = get_biz_scene_instance_id()
         biz_component = get_biz_component() or "Common"
 
-        # Format timestamp
+        # 格式化时间戳
         timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S')
 
-        # Format log level (5 chars, left-aligned)
+        # 格式化日志级别（5 个字符，左对齐）
         level = f"{record.levelname:<5}"
 
-        # Format source location (filename:lineno) for VSCode navigation
+        # 格式化源码位置（filename:lineno），便于 VSCode 跳转
         source_location = f"{record.filename}:{record.lineno}"
 
-        # Format message
+        # 格式化消息
         message = record.getMessage()
 
-        # Handle exceptions
+        # 处理异常
         if record.exc_info:
             if not message.endswith('\n'):
                 message += '\n'
             message += self.formatException(record.exc_info)
 
-        # Build the log line based on context
+        # 根据上下文构建日志行
         if biz_scene_instance_id:
-            # Agent business logic format: CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|SOURCE|MESSAGE
+            # 智能体业务逻辑格式：CLUSTER|NODE|TIME|LEVEL|BIZ_SCENE_ID|AGENT_ID|SOURCE|MESSAGE
             parts = [
                 hydros_cluster_id,
                 hydros_node_id,
@@ -246,7 +246,7 @@ class HydrosFormatter(logging.Formatter):
                 message
             ]
         else:
-            # Infrastructure format: CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
+            # 基础设施格式：CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
             parts = [
                 hydros_cluster_id,
                 hydros_node_id,
@@ -269,7 +269,7 @@ def setup_logging(
     console: bool = True,
     simple: bool = True,
     use_rolling: bool = False,
-    # Deprecated parameters for backward compatibility
+    # 用于向后兼容的废弃参数
     node_id: Optional[str] = None
 ):
     """
@@ -286,11 +286,11 @@ def setup_logging(
         use_rolling: Whether to use daily rolling for log files (default: False).
         node_id: Deprecated, use hydros_node_id instead
     """
-    # Backward compatibility: use node_id if hydros_node_id not explicitly set
+    # 向后兼容：未显式设置 hydros_node_id 时使用 node_id
     if node_id is not None and hydros_node_id == "LOCAL":
         hydros_node_id = node_id
 
-    # Create formatter based on mode
+    # 按模式创建 formatter
     if simple:
         formatter = HydrosSimpleFormatter()
     else:
@@ -299,23 +299,23 @@ def setup_logging(
             default_hydros_node_id=hydros_node_id
         )
 
-    # Get root logger
+    # 获取 root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # Remove existing handlers
+    # 移除已有 handler
     root_logger.handlers.clear()
 
-    # Add console handler
+    # 添加控制台 handler
     if console:
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 
-    # Add file handler if specified
+    # 如果指定了日志文件，则添加文件 handler
     if log_file:
         if use_rolling:
-            # Use TimedRotatingFileHandler for daily rotation
+            # 使用 TimedRotatingFileHandler 做每日轮转
             file_handler = TimedRotatingFileHandler(
                 log_file,
                 when='midnight',
@@ -324,7 +324,7 @@ def setup_logging(
                 encoding='utf-8',
                 utc=False
             )
-            # Set the suffix for rotated files to include the date
+            # 设置轮转文件后缀，使其包含日期
             file_handler.suffix = "%Y-%m-%d"
         else:
             file_handler = logging.FileHandler(log_file, encoding='utf-8')

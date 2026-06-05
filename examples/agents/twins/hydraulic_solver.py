@@ -27,7 +27,7 @@ class HydraulicSolver:
     """
 
     def __init__(self):
-        """Initialize hydraulic solver."""
+        """初始化水力求解器。"""
         self.state = {}
         logger.info("Hydraulic solver initialized")
 
@@ -40,7 +40,7 @@ class HydraulicSolver:
         """
         logger.info("Initializing hydraulic solver with topology")
 
-        # Initialize state for each object
+        # 为每个对象初始化状态
         for top_obj in topology.top_objects:
             for child in top_obj.children:
                 self.state[child.object_id] = {
@@ -68,26 +68,26 @@ class HydraulicSolver:
         """
         logger.debug(f"Solving hydraulic equations for step {step}")
 
-        # Update state with boundary conditions
+        # 使用边界条件更新状态
         for object_id, bc_values in boundary_conditions.items():
             if object_id in self.state:
                 self.state[object_id].update(bc_values)
 
-        # Simplified hydraulic calculations (placeholder)
-        # In a real implementation, this would solve Saint-Venant equations,
-        # continuity equations, etc.
+        # 简化水力计算（占位）
+        # 真实实现中应求解 Saint-Venant 方程、
+        # 连续性方程等。
 
         results = {}
         for object_id, state in self.state.items():
-            # Example: Simple water level calculation
+            # 示例：简单水位计算
             # water_level = f(inflow, outflow, gate_opening, ...)
 
-            # Mock calculation with some dynamics
+            # 带有少量动态特征的模拟计算
             water_level = state['water_level'] + 0.01 * (step % 10)
             flow = state['flow'] + 0.05 * (step % 5)
             gate_opening = state['gate_opening']
 
-            # Clamp values to realistic ranges
+            # 将值限制在现实范围内
             water_level = max(0.0, min(10.0, water_level))
             flow = max(0.0, min(100.0, flow))
 
@@ -97,7 +97,7 @@ class HydraulicSolver:
                 'gate_opening': gate_opening,
             }
 
-            # Update internal state
+            # 更新内部状态
             self.state[object_id] = results[object_id]
 
         return results

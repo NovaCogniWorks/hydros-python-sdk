@@ -1,4 +1,4 @@
-"""Cache for field metrics used by MPC optimization."""
+"""MPC 优化使用的现地指标缓存。"""
 
 from typing import Any, Dict, List, Optional
 
@@ -6,7 +6,7 @@ from hydros_agent_sdk.mpc.models import SensorData
 
 
 class MetricsDataCache:
-    """Store latest field metrics and a bounded per-step history."""
+    """存储最新现地指标和有界的逐步历史数据。"""
 
     def __init__(self, max_steps: int):
         self.max_steps = max_steps
@@ -56,7 +56,7 @@ class MetricsDataCache:
         return None
 
     def get_attribute_from_any_metric(self, object_id: int, attr_name: str) -> Optional[float]:
-        """Search all cached metrics for the object_id to find the given attribute in the 'attributes' JSON payload."""
+        """在指定对象的全部缓存指标中查找 attributes JSON payload 里的属性。"""
         prefix = f"{object_id}_"
         for cache_key, metrics_data in self.latest_metrics.items():
             if cache_key.startswith(prefix):

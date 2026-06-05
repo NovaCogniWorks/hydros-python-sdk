@@ -1,4 +1,4 @@
-"""Command-line entry point for the reusable Hydros multi-agent launcher."""
+"""可复用 Hydros 多智能体启动器的命令行入口。"""
 
 from __future__ import annotations
 

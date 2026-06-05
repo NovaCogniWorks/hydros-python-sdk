@@ -246,8 +246,8 @@ def _aggregate_pool_profile(
     bed_level = float(weighted_level - representative_depth)
     section_area = float(total_volume / total_length)
 
-    # Collapse serial segments into one synthetic reach while preserving
-    # total volume and total storage area for the upper MPC state model.
+    # 将串联河段折叠为一个合成河段，同时为上层 MPC 状态模型
+    # 保留总库容和总蓄水面积。
     return PoolProfileState(
         pool_id=int(pool_id),
         name=label,
