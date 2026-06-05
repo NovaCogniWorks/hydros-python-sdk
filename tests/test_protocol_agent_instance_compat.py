@@ -32,6 +32,7 @@ def test_agent_instance_accepts_legacy_sdk_names_and_serializes_java_names():
         hydros_node_id="node-a",
         context=context,
         agent_status=AgentStatus.ACTIVE,
+        agent_instance_status=AgentInstanceStatus.RUNNING,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 
@@ -40,18 +41,19 @@ def test_agent_instance_accepts_legacy_sdk_names_and_serializes_java_names():
     assert agent.hydros_cluster_id == "cluster-a"
     assert agent.hydros_node_id == "node-a"
     assert agent.agent_status == AgentStatus.ACTIVE
+    assert agent.agent_instance_status == AgentInstanceStatus.RUNNING
 
     payload = agent.model_dump(mode="json", by_alias=True)
     assert payload["cluster_id"] == "cluster-a"
     assert payload["node_id"] == "node-a"
     assert payload["agent_status"] == "ACTIVE"
+    assert payload["agent_instance_status"] == "RUNNING"
     assert "hydros_cluster_id" not in payload
     assert "hydros_node_id" not in payload
     assert "agent_biz_status" not in payload
-    assert "agent_instance_status" not in payload
 
 
-def test_agent_instance_accepts_java_camel_case_names():
+def test_agent_instance_accepts_java_camel_case_status_names():
     context = make_context()
 
     agent = HydroAgentInstance.model_validate(
@@ -66,6 +68,7 @@ def test_agent_instance_accepts_java_camel_case_names():
             "nodeId": "node-a",
             "context": context.model_dump(mode="json"),
             "agentStatus": "IDLE",
+            "agentInstanceStatus": "WAITING",
             "drive_mode": "SIM_TICK_DRIVEN",
         }
     )
@@ -73,9 +76,10 @@ def test_agent_instance_accepts_java_camel_case_names():
     assert agent.cluster_id == "cluster-a"
     assert agent.node_id == "node-a"
     assert agent.agent_status == AgentStatus.IDLE
+    assert agent.agent_instance_status == AgentInstanceStatus.WAITING
 
 
-def test_agent_instance_status_report_uses_java_status_field():
+def test_agent_instance_status_report_uses_agent_instance_status_field():
     context = make_context()
     agent = HydroAgentInstance(
         agent_code="TEST_AGENT",
@@ -88,6 +92,7 @@ def test_agent_instance_status_report_uses_java_status_field():
         node_id="node-a",
         context=context,
         agent_status=AgentStatus.ACTIVE,
+        agent_instance_status=AgentInstanceStatus.RUNNING,
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 
@@ -95,15 +100,16 @@ def test_agent_instance_status_report_uses_java_status_field():
         command_id="CMD_STATUS",
         context=context,
         source_agent_instance=agent,
-        created_state="RUNNING",
+        agent_instance_status=AgentInstanceStatus.RUNNING,
     )
 
     assert report.agent_instance_status == AgentInstanceStatus.RUNNING
-    assert report.created_state == AgentInstanceStatus.RUNNING
 
     payload = report.model_dump(mode="json", by_alias=True)
     assert payload["agent_instance_status"] == "RUNNING"
+    assert payload["source_agent_instance"]["agent_instance_status"] == "RUNNING"
     assert "created_state" not in payload
+    assert "created_state" not in payload["source_agent_instance"]
 
 
 def test_task_init_response_accepts_missing_managed_top_objects():

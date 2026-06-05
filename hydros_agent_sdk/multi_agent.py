@@ -19,7 +19,8 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
 )
-from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgent
+from hydros_agent_sdk.protocol.models import AgentInstanceStatus, CommandStatus, HydroAgent
+from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
@@ -59,6 +60,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
         self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: agent}}
         self._client: Optional[Any] = None
+        self._status_support: Optional[AgentInstanceStatusSupport] = None
 
         logger.info(f"MultiAgentCallback created for node: {node_id}")
 
@@ -159,6 +161,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def set_client(self, client: Any):
         """Set coordination client reference."""
         self._client = client
+        self._status_support = AgentInstanceStatusSupport(sim_coordination_client=client)
         logger.info("Coordination client reference set")
 
     def get_component(self) -> str:
@@ -176,6 +179,50 @@ class MultiAgentCallback(SimCoordinationCallback):
         if self._client:
             return self._client.state_manager.is_remote_agent(agent_instance)
         return False
+
+    def _execute_with_status(
+        self,
+        agent,
+        action,
+        phase: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        if self._status_support is None:
+            return action()
+
+        return self._status_support.execute_with_status(
+            agent,
+            action,
+            phase=phase,
+            metadata=metadata,
+        )
+
+    def _transition_status(
+        self,
+        agent,
+        status: AgentInstanceStatus,
+        phase: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        if self._status_support is None:
+            return None
+
+        try:
+            return self._status_support.transition_status(
+                agent,
+                status,
+                phase=phase,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to transition agent instance status: agentCode=%s, status=%s, phase=%s",
+                getattr(agent, "agent_code", None),
+                status,
+                phase,
+                exc_info=True,
+            )
+            return None
 
     def on_sim_task_init(self, request: SimTaskInitRequest):
         """
@@ -240,15 +287,26 @@ class MultiAgentCallback(SimCoordinationCallback):
 
                 # Initialize agent
                 response = agent.on_init(request)
+                created_agent_code = getattr(agent, "agent_code", routed_agent_code)
 
                 # Collect created agent instance
                 if response and hasattr(response, 'source_agent_instance'):
                     if should_sync_identity:
                         self._sync_init_response_agent_definition(response, agent_def)
                     created_agents.append(response.source_agent_instance)
+                    self._transition_status(
+                        response.source_agent_instance,
+                        AgentInstanceStatus.WAITING,
+                        phase="TASK_INITIALIZED",
+                        metadata={
+                            "command_id": request.command_id,
+                            "agent_code": created_agent_code,
+                            "requested_agent_code": agent_code,
+                            "biz_scene_instance_id": context_id,
+                        },
+                    )
 
                 # Store agent
-                created_agent_code = getattr(agent, "agent_code", routed_agent_code)
                 context_agents[created_agent_code] = agent
 
                 logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
@@ -322,7 +380,17 @@ class MultiAgentCallback(SimCoordinationCallback):
                 logger.debug("Skipping tick for agent without tick capability: %s", agent_code)
                 continue
             try:
-                response = agent.on_tick(request)
+                response = self._execute_with_status(
+                    agent,
+                    lambda agent=agent: agent.on_tick(request),
+                    phase="TICK",
+                    metadata={
+                        "command_id": request.command_id,
+                        "step": request.step,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                    },
+                )
                 if response:
                     responses.append(response)
             except Exception as e:
@@ -349,11 +417,50 @@ class MultiAgentCallback(SimCoordinationCallback):
         responses = []
         for agent_code, agent in context_agents.items():
             try:
+                self._transition_status(
+                    agent,
+                    AgentInstanceStatus.RUNNING,
+                    phase="TASK_TERMINATE_STARTED",
+                    metadata={
+                        "command_id": request.command_id,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                        "reason": request.reason,
+                    },
+                )
                 response = agent.on_terminate(request)
                 if response:
                     responses.append(response)
+                terminal_status = (
+                    AgentInstanceStatus.CANCELED
+                    if request.reason and "cancel" in request.reason.lower()
+                    else AgentInstanceStatus.COMPLETED
+                )
+                self._transition_status(
+                    agent,
+                    terminal_status,
+                    phase="TASK_TERMINATED",
+                    metadata={
+                        "command_id": request.command_id,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                        "reason": request.reason,
+                    },
+                )
                 logger.info(f"Agent terminated: {agent_code}")
             except Exception as e:
+                self._transition_status(
+                    agent,
+                    AgentInstanceStatus.FAILED,
+                    phase="TASK_TERMINATE_FAILED",
+                    metadata={
+                        "command_id": request.command_id,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                        "reason": request.reason,
+                        "error_message": str(e),
+                    },
+                )
                 logger.error(f"Error terminating {agent_code}: {e}", exc_info=True)
 
         # Remove agents from tracking
@@ -375,7 +482,20 @@ class MultiAgentCallback(SimCoordinationCallback):
         responses = []
         for agent_code, agent in context_agents.items():
             try:
-                response = agent.on_time_series_data_update(request)
+                event = request.time_series_data_changed_event
+                response = self._execute_with_status(
+                    agent,
+                    lambda agent=agent: agent.on_time_series_data_update(request),
+                    phase="TIME_SERIES_DATA_UPDATE",
+                    metadata={
+                        "command_id": request.command_id,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                        "auto_schedule_at_step": getattr(event, "auto_schedule_at_step", None),
+                        "hydro_event_type": getattr(event, "hydro_event_type", None),
+                        "hydro_event_source_type": getattr(event, "hydro_event_source_type", None),
+                    },
+                )
                 if response:
                     responses.append(response)
             except Exception as e:
@@ -395,7 +515,20 @@ class MultiAgentCallback(SimCoordinationCallback):
         responses = []
         for agent_code, agent in context_agents.items():
             try:
-                response = agent.on_outflow_time_series_data_update(request)
+                event = request.outflow_time_series_data_changed_event
+                response = self._execute_with_status(
+                    agent,
+                    lambda agent=agent: agent.on_outflow_time_series_data_update(request),
+                    phase="OUTFLOW_TIME_SERIES_DATA_UPDATE",
+                    metadata={
+                        "command_id": request.command_id,
+                        "agent_code": agent_code,
+                        "biz_scene_instance_id": context_id,
+                        "auto_schedule_at_step": getattr(event, "auto_schedule_at_step", None),
+                        "hydro_event_type": getattr(event, "hydro_event_type", None),
+                        "hydro_event_source_type": getattr(event, "hydro_event_source_type", None),
+                    },
+                )
                 if response:
                     responses.append(response)
             except Exception as e:
@@ -432,7 +565,18 @@ class MultiAgentCallback(SimCoordinationCallback):
         # Forward request to the target agent only
         try:
             logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
-            response = target_agent.on_outflow_time_series(request)
+            response = self._execute_with_status(
+                target_agent,
+                lambda: target_agent.on_outflow_time_series(request),
+                phase="OUTFLOW_TIME_SERIES",
+                metadata={
+                    "command_id": request.command_id,
+                    "agent_code": target_agent_code,
+                    "biz_scene_instance_id": context_id,
+                    "target_agent_id": request.target_agent_instance.agent_id,
+                    "target_agent_code": request.target_agent_instance.agent_code,
+                },
+            )
             return response
         except Exception as e:
             logger.error(

@@ -7,11 +7,13 @@ existing agent implementations can adopt them gradually.
 """
 
 from hydros_agent_sdk.runtime.agent_context import AgentContext
+from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
 from hydros_agent_sdk.runtime.env_settings import RuntimeEnvSettings, load_runtime_env_settings
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 
 __all__ = [
     "AgentContext",
+    "AgentInstanceStatusSupport",
     "RuntimeEnvSettings",
     "load_runtime_env_settings",
     "ResponseFactory",

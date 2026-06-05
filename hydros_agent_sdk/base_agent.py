@@ -12,6 +12,7 @@ from pydantic import ConfigDict
 
 from hydros_agent_sdk.protocol.models import (
     AgentStatus,
+    AgentInstanceStatus,
     HydroAgentInstance,
     SimulationContext,
     AgentDriveMode,
@@ -103,6 +104,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         hydros_cluster_id: str,
         hydros_node_id: str,
         agent_status: AgentStatus = AgentStatus.INIT,
+        agent_instance_status: AgentInstanceStatus = AgentInstanceStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -120,6 +122,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             hydros_cluster_id: Cluster ID where this agent runs
             hydros_node_id: Node ID where this agent runs
             agent_status: Initial container status (default: INIT)
+            agent_instance_status: Initial instance lifecycle status (default: INIT)
             drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
             agent_configuration_url: Optional URL to agent configuration (will be loaded from SimTaskInitRequest if not provided)
             **kwargs: Additional keyword arguments for HydroAgentInstance
@@ -142,6 +145,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             node_id=hydros_node_id,
             context=context,
             agent_status=agent_status,
+            agent_instance_status=agent_instance_status,
             drive_mode=drive_mode,
             **kwargs
         )
@@ -161,6 +165,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         logger.info(f"  - Agent Type: {self.agent_type}")
         logger.info(f"  - Context: {self.biz_scene_instance_id}")
         logger.info(f"  - Status: {self.agent_status}")
+        logger.info(f"  - Instance Status: {self.agent_instance_status}")
         logger.info(f"  - Drive Mode: {self.drive_mode}")
 
     @abstractmethod

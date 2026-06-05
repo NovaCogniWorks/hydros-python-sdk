@@ -114,6 +114,13 @@ class HydroAgentInstance(HydroAgent):
             "agentStatus",
         )
     )
+    agent_instance_status: AgentInstanceStatus = Field(
+        default=AgentInstanceStatus.INIT,
+        validation_alias=AliasChoices(
+            "agent_instance_status",
+            "agentInstanceStatus",
+        ),
+    )
     drive_mode: AgentDriveMode
 
     @property

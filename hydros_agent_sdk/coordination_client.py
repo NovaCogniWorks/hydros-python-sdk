@@ -965,8 +965,17 @@ class SimCoordinationClient:
                     return True
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
-        # Send reports only from local agents
-        if isinstance(command, (AgentInstanceStatusReport, MpcResultReport)):
+        # Send status reports from local agents. During task termination the
+        # local-agent registry may be cleared before the async send loop drains,
+        # so fall back to the current node id for status reports only.
+        if isinstance(command, AgentInstanceStatusReport):
+            if self.state_manager.is_local_agent(command.source_agent_instance):
+                return True
+            node_id = self.state_manager.get_node_id()
+            return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
+
+        # Send MPC result reports only from registered local agents.
+        if isinstance(command, MpcResultReport):
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         return False
