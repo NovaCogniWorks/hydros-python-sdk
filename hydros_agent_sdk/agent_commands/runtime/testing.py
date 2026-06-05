@@ -1,5 +1,5 @@
 """
-Agent command runtime 的本地调试和测试辅助工具。
+智能体指令 runtime 的本地调试和测试辅助工具。
 """
 
 from __future__ import annotations

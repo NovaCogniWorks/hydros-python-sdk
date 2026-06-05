@@ -1,5 +1,5 @@
 """
-Agent command handler registry.
+智能体指令处理器注册表。
 """
 
 from __future__ import annotations

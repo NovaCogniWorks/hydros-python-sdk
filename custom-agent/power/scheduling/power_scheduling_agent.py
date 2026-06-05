@@ -165,7 +165,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"--- 第 {step} 步：开始执行 MPC 滚动优化 ---")
 
         # 1. 获取输入数据（例如：从缓存中读取订阅到的水位数据）
-        # water_level = self._metrics_data_cache.get_value(101, "water_level")
+        # 示例：water_level = self._metrics_data_cache.get_value(101, "water_level")
         
         # 2. 调用优化算法（模拟运行）
         logger.info("求解器正在运行中...")
@@ -208,7 +208,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
             # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
             # 例如更新模型的边界约束:
-            # self.on_boundary_condition_update([obj_ts])
+            # 可按需调用：self.on_boundary_condition_update([obj_ts])
             
             # 打印部分数据供调试
             if obj_ts.time_series:
@@ -247,7 +247,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
 
             # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
-            # self.on_boundary_condition_update(event.object_time_series)
+            # 可按需调用：self.on_boundary_condition_update(event.object_time_series)
 
         # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(

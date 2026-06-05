@@ -30,7 +30,7 @@ class MqttMetrics(BaseModel):
     value: float = Field(..., description="Metrics value")
 
     class Config:
-        """Pydantic 配置。"""
+        """用于 Pydantic 的配置。"""
         json_schema_extra = {
             "example": {
                 "source_id": "TWINS_SIMULATION_AGENT",

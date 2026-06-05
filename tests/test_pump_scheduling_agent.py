@@ -50,11 +50,11 @@ class TestPumpSchedulingAgent(unittest.TestCase):
                 self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "pump_status", "value": 0.0, "position_code": "none", "attributes": attrs})
                 self.agent._metrics_data_cache.update({"object_id": uid, "metrics_code": "blade_angle", "value": 0.0, "position_code": "none"})
 
-        # S1
+        # 泵站 S1
         set_station_data(1, 10.5, z1, 0.0)
-        # S2
+        # 泵站 S2
         set_station_data(2, z1, z2, 0.0)
-        # S3
+        # 泵站 S3
         set_station_data(3, z2, z3, 0.0)
 
         for t in range(steps):

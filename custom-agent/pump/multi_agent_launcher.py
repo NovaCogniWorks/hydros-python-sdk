@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-Agent Launcher - 在单个进程中运行多个 agents
+多智能体启动器：在单个进程中运行多个智能体
 
 用法:
     python multi_agent_launcher.py agent1 agent2

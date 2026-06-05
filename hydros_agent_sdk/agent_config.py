@@ -47,7 +47,7 @@ class Waterway(HydroBaseModel):
 
 
 class MqttBroker(HydroBaseModel):
-    """MQTT broker 配置。"""
+    """用于 MQTT broker 的配置。"""
     mqtt_host: str
     mqtt_port: int
     server_uri: str

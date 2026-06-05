@@ -1,4 +1,4 @@
-"""Hydros Python agent 应用的可复用启动器支撑。"""
+"""可复用启动器支撑，用于 Hydros Python agent 应用。"""
 
 from .support import (
     AgentClassResolver,

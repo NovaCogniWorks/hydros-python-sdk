@@ -1,5 +1,5 @@
 """
-Agent command handler 执行服务。
+智能体指令处理器执行服务。
 """
 
 from __future__ import annotations

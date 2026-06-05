@@ -1,5 +1,5 @@
 """
-Small local runtime for testing agent callbacks without MQTT.
+用于在无 MQTT 环境下测试智能体回调的小型本地运行时。
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 
 class FakeRuntime:
     """
-    In-process harness around SimCoordinationClient dispatch behavior.
+    围绕 SimCoordinationClient 分派行为的进程内测试工具。
 
-    The runtime does not start network loops. Tests can feed command objects into
-    ``send`` and inspect responses captured from the outgoing queue.
+    该运行时不会启动网络循环。测试可以把指令对象传给 ``send``，
+    并检查从出站队列捕获的响应。
     """
 
     def __init__(

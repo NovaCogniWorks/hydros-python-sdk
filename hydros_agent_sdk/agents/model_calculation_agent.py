@@ -1,8 +1,8 @@
 """
-Model calculation agent for event-driven model calculations.
+用于事件驱动模型计算的模型计算智能体。
 
-This module provides the ModelCalculationAgent class which extends BaseHydroAgent
-with event-driven model calculation capabilities.
+本模块提供 ModelCalculationAgent 类，在 BaseHydroAgent 基础上增加
+事件驱动模型计算能力。
 """
 
 import logging
@@ -35,21 +35,21 @@ logger = logging.getLogger(__name__)
 
 class ModelCalculationAgent(BaseHydroAgent):
     """
-    Event-driven model calculation agent.
+    事件驱动型模型计算智能体。
 
-    This agent performs one-time model calculations in response to events:
-    1. Receives TimeSeriesCalculationRequest from coordinator
-    2. Executes complex model calculations (e.g., hydrological models)
-    3. Produces ObjectTimeSeries results
-    4. Returns TimeSeriesCalculationResponse to coordinator
+    该智能体响应事件并执行一次性模型计算：
+    1. 接收协调器发送的 TimeSeriesCalculationRequest
+    2. 执行复杂模型计算（例如水文模型）
+    3. 生成 ObjectTimeSeries 结果
+    4. 向协调器返回 TimeSeriesCalculationResponse
 
-    Key features:
-    - Event-driven execution (not tick-driven)
-    - One-time calculation per request
-    - Complex model support (weather forecast, hydrological models, etc.)
-    - Time series output
+    关键特性：
+    - 事件驱动执行（非 tick 驱动）
+    - 每个请求执行一次计算
+    - 支持复杂模型（天气预报、水文模型等）
+    - 输出时序结果
 
-    Usage example:
+    使用示例：
         ```python
         agent = ModelCalculationAgent(
             sim_coordination_client=client,
@@ -64,10 +64,10 @@ class ModelCalculationAgent(BaseHydroAgent):
         )
         ```
 
-    Subclasses must implement:
-    - on_init(): Initialize agent and load model
-    - on_model_calculation(): Execute model calculation logic
-    - on_terminate(): Clean up resources
+    子类必须实现：
+    - on_init(): 初始化智能体并加载模型
+    - on_model_calculation(): 执行模型计算逻辑
+    - on_terminate(): 清理资源
     """
 
     def __init__(
@@ -86,21 +86,21 @@ class ModelCalculationAgent(BaseHydroAgent):
         **kwargs
     ):
         """
-        Initialize model calculation agent.
+        初始化模型计算智能体。
 
         Args:
-            sim_coordination_client: Required MQTT client
-            agent_id: Unique agent instance ID
-            agent_code: Agent code
-            agent_type: Agent type
-            agent_name: Agent name
-            context: Simulation context
-            hydros_cluster_id: Cluster ID
-            hydros_node_id: Node ID
-            agent_status: Initial business status
-            drive_mode: Agent drive mode (default: EVENT_DRIVEN)
-            agent_configuration_url: Optional configuration URL
-            **kwargs: Additional keyword arguments
+            sim_coordination_client: 必填 MQTT 客户端
+            agent_id: 唯一智能体实例 ID
+            agent_code: 智能体编码
+            agent_type: 智能体类型
+            agent_name: 智能体名称
+            context: 仿真上下文
+            hydros_cluster_id: 集群 ID
+            hydros_node_id: 节点 ID
+            agent_status: 初始业务状态
+            drive_mode: 智能体驱动模式（默认 EVENT_DRIVEN）
+            agent_configuration_url: 可选配置 URL
+            **kwargs: 额外关键字参数
         """
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -126,34 +126,33 @@ class ModelCalculationAgent(BaseHydroAgent):
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the model calculation agent.
+        初始化模型计算智能体。
 
-        Subclasses should:
-        1. Load agent configuration using self.load_agent_configuration(request)
-        2. Load and initialize the calculation model
-        3. Register with state manager
-        4. Return SimTaskInitResponse
+        子类应完成：
+        1. 使用 self.load_agent_configuration(request) 加载智能体配置
+        2. 加载并初始化计算模型
+        3. 注册到状态管理器
+        4. 返回 SimTaskInitResponse
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         pass
 
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
-        Handle tick command (not applicable for event-driven agents).
+        处理 tick 指令（不适用于事件驱动智能体）。
 
-        Model calculation agents are event-driven and do not respond to tick commands.
-        This method returns a failed response.
+        模型计算智能体是事件驱动的，不响应 tick 指令。该方法会返回失败响应。
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            Tick command response with FAILED status
+            状态为 FAILED 的 Tick 指令响应
         """
         logger.warning(
             f"ModelCalculationAgent received TickCmdRequest (not supported). "
@@ -170,15 +169,15 @@ class ModelCalculationAgent(BaseHydroAgent):
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):
         """
-        Handle time series calculation request.
+        处理时序计算请求。
 
-        This method:
-        1. Extracts event information from request
-        2. Calls on_model_calculation() for subclass-specific logic
-        3. Sends TimeSeriesCalculationResponse with results
+        该方法会：
+        1. 从请求中提取事件信息
+        2. 调用 on_model_calculation() 执行子类专属逻辑
+        3. 发送带计算结果的 TimeSeriesCalculationResponse
 
         Args:
-            request: Time series calculation request
+            request: 时序计算请求
         """
         logger.info(f"Received TimeSeriesCalculationRequest, commandId={request.command_id}")
         logger.info(f"Event: {request.hydro_event}")
@@ -227,34 +226,33 @@ class ModelCalculationAgent(BaseHydroAgent):
     @abstractmethod
     def on_model_calculation(self, hydro_event: HydroEvent) -> List[ObjectTimeSeries]:
         """
-        Execute model calculation logic.
+        执行模型计算逻辑。
 
-        Subclasses must implement this method to perform their specific
-        model calculations (e.g., hydrological model, weather forecast model).
+        子类必须实现该方法，以执行各自的模型计算（例如水文模型、天气预报模型）。
 
         Args:
-            hydro_event: Event that triggered the calculation
+            hydro_event: 触发计算的事件
 
         Returns:
-            List of ObjectTimeSeries containing calculation results
+            包含计算结果的 ObjectTimeSeries 列表
         """
         pass
 
     @abstractmethod
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the model calculation agent.
+        终止模型计算智能体。
 
-        Subclasses should:
-        1. Clean up model resources
-        2. Unregister from state manager
-        3. Return SimTaskTerminateResponse
+        子类应完成：
+        1. 清理模型资源
+        2. 从状态管理器注销
+        3. 返回 SimTaskTerminateResponse
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         pass
 
@@ -268,19 +266,18 @@ class ModelCalculationAgent(BaseHydroAgent):
         time_series_name: Optional[str] = None
     ) -> ObjectTimeSeries:
         """
-        Helper method to create ObjectTimeSeries.
+        创建 ObjectTimeSeries 的辅助方法。
 
         Args:
-            object_id: Object ID
-            object_name: Object name
-            object_type: Object type
-            metrics_code: Metrics code
-            time_series_values: List of time series values
-                Each dict should contain: step, time (optional), value
-            time_series_name: Optional time series name
+            object_id: 对象 ID
+            object_name: 对象名称
+            object_type: 对象类型
+            metrics_code: 指标编码
+            time_series_values: 时序值列表，每个 dict 应包含 step、time（可选）和 value
+            time_series_name: 可选时序名称
 
         Returns:
-            ObjectTimeSeries instance
+            ObjectTimeSeries 实例
         """
         # 转换为 TimeSeriesValue 对象
         ts_values = []

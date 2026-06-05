@@ -1,8 +1,7 @@
 """
-Ontology simulation agent for ontology-based water network simulation.
+用于本体驱动水网仿真的本体仿真智能体。
 
-This module provides the OntologySimulationAgent class which extends TickableAgent
-with ontology-based simulation capabilities.
+本模块提供 OntologySimulationAgent 类，在 TickableAgent 基础上增加本体仿真能力。
 """
 
 import logging
@@ -30,21 +29,21 @@ logger = logging.getLogger(__name__)
 
 class OntologySimulationAgent(TickableAgent):
     """
-    Ontology-based simulation agent.
+    基于本体的仿真智能体。
 
-    This agent performs ontology-based water network simulation:
-    1. Loads water network topology from ontology model
-    2. Executes simulation steps based on ontology rules
-    3. Handles boundary condition updates
-    4. Outputs metrics data via MQTT
+    该智能体执行基于本体的水网仿真：
+    1. 从本体模型加载水网拓扑
+    2. 基于本体规则执行仿真步
+    3. 处理边界条件更新
+    4. 通过 MQTT 输出指标数据
 
-    Key features:
-    - Ontology-based modeling and simulation
-    - Rule-based simulation logic
-    - Support for complex water network topology
-    - Boundary condition handling
+    关键特性：
+    - 基于本体的建模和仿真
+    - 基于规则的仿真逻辑
+    - 支持复杂水网拓扑
+    - 边界条件处理
 
-    Usage example:
+    使用示例：
         ```python
         agent = OntologySimulationAgent(
             sim_coordination_client=client,
@@ -75,21 +74,21 @@ class OntologySimulationAgent(TickableAgent):
         **kwargs
     ):
         """
-        Initialize ontology simulation agent.
+        初始化本体仿真智能体。
 
         Args:
-            sim_coordination_client: Required MQTT client
-            agent_id: Unique agent instance ID
-            agent_code: Agent code
-            agent_type: Agent type
-            agent_name: Agent name
-            context: Simulation context
-            hydros_cluster_id: Cluster ID
-            hydros_node_id: Node ID
-            agent_status: Initial business status
-            drive_mode: Agent drive mode (default: SIM_TICK_DRIVEN)
-            agent_configuration_url: Optional configuration URL
-            **kwargs: Additional keyword arguments
+            sim_coordination_client: 必填 MQTT 客户端
+            agent_id: 唯一智能体实例 ID
+            agent_code: 智能体编码
+            agent_type: 智能体类型
+            agent_name: 智能体名称
+            context: 仿真上下文
+            hydros_cluster_id: 集群 ID
+            hydros_node_id: 节点 ID
+            agent_status: 初始业务状态
+            drive_mode: 智能体驱动模式（默认 SIM_TICK_DRIVEN）
+            agent_configuration_url: 可选配置 URL
+            **kwargs: 额外关键字参数
         """
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -114,19 +113,19 @@ class OntologySimulationAgent(TickableAgent):
 
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize the ontology simulation agent.
+        初始化本体仿真智能体。
 
-        This method:
-        1. Loads agent configuration from SimTaskInitRequest
-        2. Loads water network topology from ontology model
-        3. Initializes simulation state
-        4. Registers with state manager
+        该方法会：
+        1. 从 SimTaskInitRequest 加载智能体配置
+        2. 从本体模型加载水网拓扑
+        3. 初始化仿真状态
+        4. 注册到状态管理器
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         logger.info("="*70)
         logger.info(f"INITIALIZING ONTOLOGY SIMULATION AGENT: {self.biz_scene_instance_id}")
@@ -202,24 +201,23 @@ class OntologySimulationAgent(TickableAgent):
 
     def _initialize_ontology_model(self):
         """
-        Initialize ontology model.
+        初始化本体模型。
 
-        Subclasses can override this method to initialize their specific ontology model.
-        Default implementation does nothing.
+        子类可覆盖该方法来初始化各自的本体模型。默认实现不执行任何操作。
         """
         logger.info("Initializing ontology model...")
-        # TODO：加载本体规则、约束等内容。
+        # 待办：加载本体规则、约束等内容。
         pass
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        Execute ontology-based simulation step.
+        执行基于本体的仿真步。
 
         Args:
-            request: Tick command request
+            request: Tick 指令请求
 
         Returns:
-            List of MqttMetrics objects to send via MQTT
+            要通过 MQTT 发送的 MqttMetrics 对象列表
         """
         logger.info(f"Executing ontology simulation step {request.step}")
 
@@ -234,16 +232,15 @@ class OntologySimulationAgent(TickableAgent):
 
     def _execute_ontology_simulation(self, step: int) -> List[MqttMetrics]:
         """
-        Execute ontology-based simulation logic.
+        执行基于本体的仿真逻辑。
 
-        Subclasses should override this method to implement their specific
-        ontology-based simulation logic.
+        子类应覆盖该方法，实现各自的本体仿真逻辑。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         # 默认实现：返回空指标
         # 子类应覆盖该方法
@@ -252,12 +249,12 @@ class OntologySimulationAgent(TickableAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates for ontology simulation.
+        处理本体仿真的边界条件更新。
 
-        This method updates the ontology model with new boundary conditions.
+        该方法会用新的边界条件更新本体模型。
 
         Args:
-            time_series_list: List of updated time series data
+            time_series_list: 已更新的时序数据列表
         """
         logger.info(f"Updating ontology model with {len(time_series_list)} boundary conditions")
 
@@ -267,22 +264,22 @@ class OntologySimulationAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO：更新本体模型状态
+            # 待办：更新本体模型状态
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the ontology simulation agent.
+        终止本体仿真智能体。
 
-        This method:
-        1. Cleans up ontology model
-        2. Unregisters from state manager
-        3. Returns SimTaskTerminateResponse
+        该方法会：
+        1. 清理本体模型
+        2. 从状态管理器注销
+        3. 返回 SimTaskTerminateResponse
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         logger.info("="*70)
         logger.info(f"TERMINATING ONTOLOGY SIMULATION AGENT: {self.biz_scene_instance_id}")

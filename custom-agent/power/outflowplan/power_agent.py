@@ -1,16 +1,15 @@
 """
-Central Scheduling Power Agent
+中央调度电力智能体。
 
-This agent implements Model Predictive Control (MPC) optimization for power systems.
-It inherits from CentralSchedulingAgent and provides optimization logic for power
-generation and distribution scheduling.
+该智能体为电力系统实现模型预测控制（MPC）优化。它继承
+CentralSchedulingAgent，并提供发电和配电调度的优化逻辑。
 
-The agent:
-1. Loads power system topology
-2. Initializes optimization model for power scheduling
-3. Subscribes to field metrics (power generation, consumption, etc.)
-4. Executes MPC optimization at specified horizon
-5. Sends control commands to power system components
+该智能体会：
+1. 加载电力系统拓扑
+2. 初始化电力调度优化模型
+3. 订阅现地指标（发电、用电等）
+4. 在指定滚动视界执行 MPC 优化
+5. 向电力系统组件发送控制指令
 """
 
 import logging
@@ -92,14 +91,14 @@ logger = logging.getLogger(__name__)
 
 class PowerSchedulingAgent(CentralSchedulingAgent):
     """
-    Concrete implementation of central scheduling agent for power systems.
+    面向电力系统的中央调度智能体具体实现。
 
-    This agent:
-    1. Loads power system topology
-    2. Initializes power optimization model
-    3. Subscribes to field metrics (power generation, load, etc.)
-    4. Executes MPC optimization for power scheduling
-    5. Sends control commands to generators and loads
+    该智能体会：
+    1. 加载电力系统拓扑
+    2. 初始化电力优化模型
+    3. 订阅现地指标（发电、负荷等）
+    4. 执行电力调度 MPC 优化
+    5. 向发电机和负荷发送控制指令
     """
 
     def __init__(
@@ -144,20 +143,20 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize power scheduling agent with error handling.
+        带错误处理地初始化电力调度智能体。
 
         Args:
-            request: Task initialization request
+            request: 任务初始化请求
 
         Returns:
-            Task initialization response
+            任务初始化响应
         """
         logger.info("Initializing power scheduling agent...")
 
-        # 1. Load agent configuration (skip if not in agent_list)
+        # 1. 加载智能体配置（不在 agent_list 中则跳过）
         self.load_agent_configuration(request)
 
-        # 2. Load power system topology if configured
+        # 2. 如果配置了拓扑，则加载电力系统拓扑
         topology_url = self.properties.get_property('hydros_objects_modeling_url')
         if topology_url:
             logger.info(f"Loading power system topology from: {topology_url}")
@@ -176,7 +175,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
                 logger.warning(f"Failed to load topology: {error_msg}")
                 logger.warning("Continuing without topology...")
 
-        # 3. Initialize power optimization solver
+        # 3. 初始化电力优化求解器
         logger.info("Initializing power optimization solver...")
 
         if HAS_POWER_SOLVER:
@@ -197,16 +196,16 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         else:
             logger.warning("PowerOptimizationSolver not available, using dummy optimization")
 
-        # 4. Load optimization parameters
+        # 4. 加载优化参数
         self._optimization_params = {
-            'time_horizon': self.properties.get_property('optimization_time_horizon', 24),  # hours
-            'time_step': self.properties.get_property('optimization_time_step', 1),  # hour
+            'time_horizon': self.properties.get_property('optimization_time_horizon', 24),  # 小时
+            'time_step': self.properties.get_property('optimization_time_step', 1),  # 小时
             'objective': self.properties.get_property('optimization_objective', 'minimize_cost'),
             'constraints': self.properties.get_property('optimization_constraints', []),
         }
         logger.info(f"Optimization parameters: {self._optimization_params}")
 
-        # 5. Subscribe to field metrics for real-time power data
+        # 5. 订阅现地指标，获取实时电力数据
         metrics_topic = self.properties.get_property(
             'field_metrics_topic',
             f"/hydros/metrics/power/{self.hydros_cluster_id}"
@@ -218,13 +217,13 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         except Exception as e:
             logger.warning(f"Failed to subscribe to metrics topic: {e}")
 
-        # 6. Register with state manager
+        # 6. 注册到状态管理器
         self.state_manager.init_task(self.context, [self])
         self.state_manager.add_local_agent(self)
 
         logger.info("Power scheduling agent initialized successfully")
 
-        # 7. Return initialization response
+        # 7. 返回初始化响应
         return SimTaskInitResponse(
             command_id=request.command_id,
             context=request.context,
@@ -236,37 +235,37 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         """
-        Execute MPC optimization for power scheduling.
+        执行电力调度 MPC 优化。
 
-        This method implements the core optimization logic:
-        1. Collect current system state (loads, generation, constraints)
-        2. Gather field metrics (real-time measurements)
-        3. Run optimization model
-        4. Generate control commands for power system components
+        该方法实现核心优化逻辑：
+        1. 采集当前系统状态（负荷、发电、约束）
+        2. 收集现地指标（实时测量）
+        3. 运行优化模型
+        4. 生成面向电力系统组件的控制指令
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            List of control commands to send to power system agents
+            要发送给电力系统智能体的控制指令列表
         """
         logger.info(f"Executing power scheduling optimization at step {step}")
 
-        # 1. Collect system state
+        # 1. 采集系统状态
         system_state = self._collect_system_state(step)
         logger.info(
             f"System state collected: {len(system_state.get('loads', []))} loads, "
             f"{len(system_state.get('generators', []))} generators"
         )
 
-        # 2. Gather field metrics
+        # 2. 收集现地指标
         field_metrics = self._collect_field_metrics()
         logger.debug(f"Field metrics collected: {len(field_metrics)} measurements")
 
-        # 3. Run optimization
+        # 3. 运行优化
         optimization_results = self._run_optimization(step, system_state, field_metrics)
 
-        # 4. Generate control commands
+        # 4. 生成控制指令
         control_commands = self._generate_control_commands(optimization_results)
 
         logger.info(f"Optimization completed: {len(control_commands)} control commands generated")
@@ -275,13 +274,13 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
     def _collect_system_state(self, step: int) -> Dict[str, Any]:
         """
-        Collect current power system state.
+        采集当前电力系统状态。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            Dictionary containing system state information
+            包含系统状态信息的字典
         """
         system_state = {
             'step': step,
@@ -324,13 +323,13 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
     def _collect_boundary_constraints(self, step: int) -> Dict[str, Any]:
         """
-        Collect boundary constraints for optimization.
+        采集优化用边界约束。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            Dictionary of constraints
+            约束字典
         """
         constraints = {}
 
@@ -346,10 +345,10 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
     def _collect_field_metrics(self) -> Dict[str, float]:
         """
-        Collect field metrics from cache.
+        从缓存采集现地指标。
 
         Returns:
-            Dictionary of field metrics {object_id_metric: value}
+            现地指标字典 {object_id_metric: value}
         """
         field_metrics = {}
 
@@ -366,15 +365,15 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         field_metrics: Dict[str, float]
     ) -> Dict[str, Any]:
         """
-        Run power optimization.
+        运行电力优化。
 
         Args:
-            step: Current simulation step
-            system_state: Current system state
-            field_metrics: Field measurements
+            step: 当前仿真步
+            system_state: 当前系统状态
+            field_metrics: 现地测量值
 
         Returns:
-            Optimization results
+            优化结果
         """
         # 如有可用电力求解器则使用
         if self._power_solver and HAS_POWER_SOLVER:
@@ -415,15 +414,15 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         field_metrics: Dict[str, float]
     ) -> Dict[str, Any]:
         """
-        Dummy optimization for demonstration purposes.
+        用于演示的模拟优化。
 
         Args:
-            step: Current simulation step
-            system_state: Current system state
-            field_metrics: Field measurements
+            step: 当前仿真步
+            system_state: 当前系统状态
+            field_metrics: 现地测量值
 
         Returns:
-            Dummy optimization results
+            模拟优化结果
         """
         logger.debug("Running dummy optimization")
 
@@ -439,7 +438,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         for generator in system_state.get('generators', []):
             gen_id = generator['id']
             results['schedule'][gen_id] = {
-                'power_output': 50.0,  # MW
+                'power_output': 50.0,  # 兆瓦
                 'cost': 45.0,  # $/MWh
                 'status': 'online',
             }
@@ -447,7 +446,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         for load in system_state.get('loads', []):
             load_id = load['id']
             results['schedule'][load_id] = {
-                'power_demand': 30.0,  # MW
+                'power_demand': 30.0,  # 兆瓦
                 'priority': 'normal',
                 'sheddable': True,
             }
@@ -461,13 +460,13 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         optimization_results: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
-        Generate control commands from optimization results.
+        根据优化结果生成控制指令。
 
         Args:
-            optimization_results: Optimization results
+            optimization_results: 优化结果
 
         Returns:
-            List of control commands
+            控制指令列表
         """
         control_commands = []
 
@@ -509,10 +508,10 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
-        Handle boundary condition updates for power optimization.
+        处理电力优化的边界条件更新。
 
         Args:
-            time_series_list: List of updated time series data
+            time_series_list: 已更新的时序数据列表
         """
         logger.info(f"Updating power optimization with {len(time_series_list)} boundary conditions")
 
@@ -542,25 +541,25 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate the power scheduling agent.
+        终止电力调度智能体。
 
         Args:
-            request: Task termination request
+            request: 任务终止请求
 
         Returns:
-            Task termination response
+            任务终止响应
         """
         logger.info("Terminating power scheduling agent...")
 
-        # 1. Clean up power solver
+        # 1. 清理电力求解器
         if self._power_solver:
             logger.info("Cleaning up power solver...")
 
-        # 2. Clean up state manager
+        # 2. 清理状态管理器
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
 
-        # 3. Return termination response
+        # 3. 返回终止响应
         logger.info("Power scheduling agent termination complete")
 
         return SimTaskTerminateResponse(
@@ -573,7 +572,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
 
 def main():
     """
-    Main entry point for power scheduling agent service.
+    电力调度智能体服务主入口。
     """
     # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))

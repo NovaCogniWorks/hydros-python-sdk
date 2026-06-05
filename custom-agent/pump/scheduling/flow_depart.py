@@ -87,8 +87,9 @@ def optimize_single_case(total_Q, target_H, units, rho, g):
 
 def load_specific_station_data(station_config, data_dir, target_unit_names):
     """
-    Loads data only for the specified units in the given station configuration.
-    Supports optional q_min/q_max override from config.
+    只为给定泵站配置中的指定机组加载数据。
+
+    支持从配置中覆盖可选 q_min/q_max。
     """
     station_name = station_config["name"]
     
@@ -130,7 +131,7 @@ def load_specific_station_data(station_config, data_dir, target_unit_names):
 
 def generate_flow_depart(station_id, units, step_q=1.0, step_h=0.1, rho=1000, g=9.81):
     """
-    Generate flow depart table dynamically based on station configuration and memory PumpUnit objects.
+    基于泵站配置和内存中的 PumpUnit 对象动态生成流量分配表。
     """
     import math
     import numpy as np

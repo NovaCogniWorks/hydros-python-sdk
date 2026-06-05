@@ -1,8 +1,7 @@
 """
-Multi-agent coordination support.
+多智能体协调支持。
 
-This module provides MultiAgentCallback for handling multiple agent types
-in a single process.
+本模块提供 MultiAgentCallback，用于在单个进程中处理多个智能体类型。
 """
 
 import logging
@@ -31,18 +30,17 @@ logger = logging.getLogger(__name__)
 
 class MultiAgentCallback(SimCoordinationCallback):
     """
-    Multi-agent callback that manages multiple agent types in a single process.
+    在单个进程中管理多个智能体类型的多智能体回调。
 
-    This callback handles SimTaskInitRequest correctly by:
-    1. Checking agent_list to determine which agents to instantiate
-    2. Creating all matching agent instances
-    3. Returning a single SimTaskInitResponse with all created instances
+    该回调会按以下方式处理 SimTaskInitRequest：
+    1. 检查 agent_list 以决定需要实例化哪些智能体
+    2. 创建全部匹配的智能体实例
+    3. 返回一个包含全部已创建实例的 SimTaskInitResponse
 
-    This is the correct implementation for multi-agent coordination where
-    one SimTaskInitRequest can trigger multiple agent instantiations but
-    should only return one SimTaskInitResponse.
+    这是多智能体协调场景的正确实现：一个 SimTaskInitRequest 可以触发
+    多个智能体实例化，但只应返回一个 SimTaskInitResponse。
 
-    Example:
+    示例：
         callback = MultiAgentCallback(node_id="LOCAL")
         callback.register_agent_factory("TWINS_SIMULATION_AGENT", twins_factory)
         callback.register_agent_factory("ONTOLOGY_SIMULATION_AGENT", ontology_factory)
@@ -50,15 +48,15 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def __init__(self, node_id: str = "LOCAL"):
         """
-        Initialize multi-agent callback.
+        初始化多智能体回调。
 
         Args:
-            node_id: Node identifier for this agent host
+            node_id: 当前智能体宿主节点标识
         """
         self.node_id = node_id
-        self.agent_factories: Dict[str, Any] = {}  # {agent_code: factory}
+        self.agent_factories: Dict[str, Any] = {}  # {agent_code: 工厂}
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
-        self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: agent}}
+        self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: 智能体}}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
 
@@ -66,13 +64,12 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def register_agent_factory(self, agent_code: str, factory: Any, agent_type: Optional[str] = None):
         """
-        Register an agent factory for a specific agent_code.
+        为指定 agent_code 注册智能体工厂。
 
         Args:
-            agent_code: Agent code (e.g., "TWINS_SIMULATION_AGENT")
-            factory: Agent factory instance (HydroAgentFactory)
-            agent_type: Optional agent type. When omitted, it is inferred from
-                the factory config where possible.
+            agent_code: 智能体编码（例如 "TWINS_SIMULATION_AGENT"）
+            factory: 智能体工厂实例（HydroAgentFactory）
+            agent_type: 可选智能体类型。未提供时会尽量从工厂配置推断。
         """
         self.agent_factories[agent_code] = factory
         self.agent_factory_types[agent_code] = agent_type or self._infer_factory_agent_type(agent_code, factory)
@@ -166,11 +163,10 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def get_component(self) -> str:
         """
-        Get component name.
+        获取组件名称。
 
-        For multi-agent callback, we return a generic name since we handle
-        multiple agent types. The actual agent_code filtering is done in
-        on_sim_task_init based on agent_list.
+        对于多智能体回调，这里返回一个通用名称，因为它会处理多个智能体类型。
+        实际 agent_code 过滤会在 on_sim_task_init 中基于 agent_list 完成。
         """
         return "MULTI_AGENT_COORDINATOR"
 
@@ -226,13 +222,13 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def on_sim_task_init(self, request: SimTaskInitRequest):
         """
-        Handle task initialization for multiple agents.
+        处理多智能体任务初始化。
 
-        This method:
-        1. Iterates through request.agent_list
-        2. For each agent_code that has a registered factory, creates an instance
-        3. Collects all created agent instances
-        4. Returns a single SimTaskInitResponse with all instances
+        该方法会：
+        1. 遍历 request.agent_list
+        2. 对每个已注册工厂的 agent_code 创建实例
+        3. 收集全部已创建的智能体实例
+        4. 返回一个包含全部实例的 SimTaskInitResponse
         """
         context_id = request.context.biz_scene_instance_id
 
@@ -322,7 +318,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         # 返回包含全部已创建实例的单个响应
         if created_agents:
             # 使用第一个已创建智能体作为 source_agent_instance
-            # (protocol limitation - should ideally support multiple sources)
+            # 协议限制：理想情况下应支持多个 source_agent_instance
             first_agent = created_agents[0]
 
             response = SimTaskInitResponse(
@@ -537,10 +533,10 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        Handle outflow time series request for the target agent.
+        处理目标智能体的出流时间序列请求。
 
-        Unlike on_tick or on_time_series_data_update which broadcast to all agents,
-        this method routes the request only to the target agent specified in the request.
+        与会广播给全部智能体的 on_tick 或 on_time_series_data_update 不同，
+        该方法只把请求路由给请求中指定的目标智能体。
         """
         context_id = request.context.biz_scene_instance_id
         context_agents = self.agents.get(context_id)

@@ -1,14 +1,14 @@
 """
-Specialized agent types for different use cases.
+面向不同使用场景的专用智能体类型。
 
-This module provides pre-built agent types that extend BaseHydroAgent:
-- TickableAgent: Base class for tick-driven simulation agents
-- OntologySimulationAgent: Ontology-based simulation agent
-- TwinsSimulationAgent: Digital twins simulation agent
-- ModelCalculationAgent: Event-driven model calculation agent
-- CentralSchedulingAgent: Central scheduling agent with MPC optimization
-- SystemCentralSchedulingAgent: System default CENTRAL_SCHEDULING_AGENT implementation
-- OutflowPlanAgent: Event-driven outflow planning agent
+本模块提供预置的 BaseHydroAgent 扩展类型：
+- TickableAgent: tick 驱动仿真智能体基类
+- OntologySimulationAgent: 基于本体的仿真智能体
+- TwinsSimulationAgent: 数字孪生仿真智能体
+- ModelCalculationAgent: 事件驱动模型计算智能体
+- CentralSchedulingAgent: 带 MPC 优化能力的中央调度智能体
+- SystemCentralSchedulingAgent: 系统默认 CENTRAL_SCHEDULING_AGENT 实现
+- OutflowPlanAgent: 事件驱动外发流量计划智能体
 """
 
 from .tickable_agent import TickableAgent

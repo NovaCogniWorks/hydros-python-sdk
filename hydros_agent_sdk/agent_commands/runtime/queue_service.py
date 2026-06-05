@@ -84,7 +84,7 @@ class AgentCommandQueueService:
         self.enqueue_incoming(command)
 
     def enqueue_incoming(self, command: AgentCommand) -> None:
-        """MQTT 收到的命令从这里进。"""
+        """从这里接收 MQTT 收到的命令。"""
         command.auth()
         current_node_id = self._get_current_node_id()
 

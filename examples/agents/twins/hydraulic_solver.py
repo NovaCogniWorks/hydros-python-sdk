@@ -1,15 +1,14 @@
 """
-Hydraulic Solver - Example implementation for digital twins simulation.
+水力求解器：数字孪生仿真的示例实现。
 
-This is a simplified demonstration of a hydraulic solver.
-In a real implementation, this would use a sophisticated hydraulic solver
-like SWMM, HEC-RAS, or a custom solver.
+这是一个简化版水力求解器演示。真实实现中会使用更复杂的水力求解器，
+例如 SWMM、HEC-RAS 或自定义求解器。
 
-This example shows:
-- How to initialize solver state from topology
-- How to solve hydraulic equations for each time step
-- How to handle boundary conditions
-- How to compute water network state (water level, flow, gate opening, etc.)
+本示例展示：
+- 如何从拓扑初始化求解器状态
+- 如何为每个时间步求解水力方程
+- 如何处理边界条件
+- 如何计算水网状态（水位、流量、闸门开度等）
 """
 
 import logging
@@ -20,10 +19,9 @@ logger = logging.getLogger(__name__)
 
 class HydraulicSolver:
     """
-    Simple hydraulic solver for demonstration.
+    用于演示的简单水力求解器。
 
-    In a real implementation, this would use a sophisticated hydraulic solver
-    like SWMM, HEC-RAS, or a custom solver.
+    真实实现中会使用更复杂的水力求解器，例如 SWMM、HEC-RAS 或自定义求解器。
     """
 
     def __init__(self):
@@ -33,10 +31,10 @@ class HydraulicSolver:
 
     def initialize(self, topology):
         """
-        Initialize solver with topology.
+        使用拓扑初始化求解器。
 
         Args:
-            topology: Water network topology
+            topology: 水网拓扑
         """
         logger.info("Initializing hydraulic solver with topology")
 
@@ -57,14 +55,14 @@ class HydraulicSolver:
         boundary_conditions: Dict[int, Dict[str, float]]
     ) -> Dict[int, Dict[str, float]]:
         """
-        Solve hydraulic equations for one time step.
+        求解一个时间步的水力方程。
 
         Args:
-            step: Current simulation step
-            boundary_conditions: Boundary conditions {object_id: {metrics_code: value}}
+            step: 当前仿真步
+            boundary_conditions: 边界条件 {object_id: {metrics_code: value}}
 
         Returns:
-            Computed state {object_id: {metrics_code: value}}
+            计算得到的状态 {object_id: {metrics_code: value}}
         """
         logger.debug(f"Solving hydraulic equations for step {step}")
 
@@ -80,7 +78,7 @@ class HydraulicSolver:
         results = {}
         for object_id, state in self.state.items():
             # 示例：简单水位计算
-            # water_level = f(inflow, outflow, gate_opening, ...)
+            # 示例公式：water_level = f(inflow, outflow, gate_opening, ...)
 
             # 带有少量动态特征的模拟计算
             water_level = state['water_level'] + 0.01 * (step % 10)

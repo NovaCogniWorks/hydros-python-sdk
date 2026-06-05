@@ -1,9 +1,8 @@
 """
-Production-oriented central scheduling Agent example.
+面向生产的中央调度智能体示例。
 
-This example intentionally keeps business logic thin so the SDK default
-CentralSchedulingAgent path can handle rolling MPC, MpcResultReport publishing,
-and agent-command dispatch.
+本示例刻意保持业务逻辑轻量，让 SDK 默认 CentralSchedulingAgent 路径负责
+滚动 MPC、MpcResultReport 发布和智能体指令分派。
 """
 
 import logging
@@ -25,10 +24,9 @@ logger = logging.getLogger(__name__)
 
 class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
     """
-    Minimal production central Agent implementation.
+    最小化的生产中央智能体实现。
 
-    It does not override on_optimization(), so the SDK base class will execute
-    the Java-equivalent rolling MPC path.
+    它不覆盖 on_optimization()，因此 SDK 基类会执行与 Java 等价的滚动 MPC 路径。
     """
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)

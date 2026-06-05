@@ -1,4 +1,4 @@
-"""ODD 驱动分层 DMPC 原型的核心包。"""
+"""核心包，用于 ODD 驱动分层 DMPC 原型。"""
 
 import os
 from pathlib import Path

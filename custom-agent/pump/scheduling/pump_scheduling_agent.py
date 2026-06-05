@@ -222,7 +222,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.odd_demand_plan,
             self.runtime,
             self.flow_service,
-            pd.DataFrame() # this will be updated in on_optimization
+            pd.DataFrame() # 后续会在 on_optimization 中更新
         )
         
         # 预先计算所有泵站的流量分配表，避免在首次 rolling optimization 时产生卡顿
@@ -240,10 +240,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         
         # 首先打印 _metrics_data_cache 包含的组件数据
-        # cache_dump = []
-        # for key, data in self._metrics_data_cache.latest_metrics.items():
-        #     cache_dump.append(f"  {key}: {data}")
-        # logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
+        # 调试示例：cache_dump = []
+        # 调试示例：for key, data in self._metrics_data_cache.latest_metrics.items():
+        # 调试示例：    cache_dump.append(f"  {key}: {data}")
+        # 调试示例：logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
         
         self._lazy_init_odd_mpc()
         
@@ -420,7 +420,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
         self.observers.update(
             prev_basin_levels=basin_levels,
-            next_basin_levels=basin_levels, # for test_mpc simplicity, we don't have prev
+            next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
             actual_flows=station_flows,
             demand_row=demand_row,
             prev_basin_volumes=None,
@@ -584,7 +584,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 
                 old_op = station_memory.unit_openings.get(uid, 0.0)
                 new_op = action.unit_openings.get(uid, 0.0)
-                if abs(new_op - old_op) > 0.0: # simplified threshold
+                if abs(new_op - old_op) > 0.0: # 简化阈值
                     station_memory.time_since_adjust[uid] = 0
                 else:
                     station_memory.time_since_adjust[uid] += 1
@@ -610,7 +610,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             action = actions[sid]
             st_list = [action.unit_status.get(u, 0) for u in self.available_units_map[sid]]
             op_list = [action.unit_openings.get(u, 0.0) for u in self.available_units_map[sid]]
-            eff_list = [0.0] * len(st_list) # mock effs
+            eff_list = [0.0] * len(st_list) # 模拟效率
             lower_res[sid] = {
                 "status": [st_list],
                 "openings": [op_list],
@@ -658,21 +658,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             # 下发机组开度 / 叶片角，去掉机组启停状态
             for uid, op in action.unit_openings.items():
                 st = action.unit_status.get(uid, 0)
-                # target_value是叶片角（100是关机）
+                # 控制值 target_value 是叶片角（100 是关机）
                 target_value = 100.0 if st == 0 else float(op)
 
                 # 当前配置中 uid 本身就是真实的 pump object_id
                 unit_object_id = uid
 
-                # # target_agent_code从TargetAgentResolver获取
-                # target_agent_code = None
-                # if unit_object_id is not None:
-                #     agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
-                #     if agent_instance:
-                #         target_agent_code = agent_instance.agent_code
+                # 目标智能体编码 target_agent_code 可从 TargetAgentResolver 获取
+                # 示例：target_agent_code = None
+                # 示例：if unit_object_id is not None:
+                # 示例：    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                # 示例：    if agent_instance:
+                # 示例：        target_agent_code = agent_instance.agent_code
 
-                # if unit_object_id is None or target_agent_code is None:
-                #     raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
+                # 示例：if unit_object_id is None or target_agent_code is None:
+                # 示例：    raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
 
                 commands.append({
                     "target_agent_code": "ONTOLOGY_SIMULATION_AGENT",
@@ -705,7 +705,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
             # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
             # 例如更新模型的边界约束:
-            # self.on_boundary_condition_update([obj_ts])
+            # 可按需调用：self.on_boundary_condition_update([obj_ts])
             
             # 打印部分数据供调试
             if obj_ts.time_series:

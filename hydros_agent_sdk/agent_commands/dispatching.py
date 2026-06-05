@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class ControlCommandDispatcher:
-    """发送 agent command，或先转换旧的 dict 控制意图再发送。"""
+    """发送智能体指令，或先转换旧的 dict 控制意图再发送。"""
 
     def __init__(
         self,

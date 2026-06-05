@@ -1,10 +1,9 @@
 """
-Ontology Simulation Agent Example
+本体仿真智能体示例。
 
-This example demonstrates how to implement a concrete ontology-based simulation agent
-using the OntologySimulationAgent base class.
+本示例展示如何使用 OntologySimulationAgent 基类实现一个具体的本体仿真智能体。
 
-The agent performs ontology-based water network simulation with rule-based logic.
+该智能体通过基于规则的逻辑执行本体驱动水网仿真。
 """
 
 import logging
@@ -78,14 +77,14 @@ logger = logging.getLogger(__name__)
 
 class MyOntologySimulationAgent(OntologySimulationAgent):
     """
-    Concrete implementation of ontology simulation agent.
+    本体仿真智能体的具体实现。
 
-    This agent:
-    1. Loads water network topology
-    2. Initializes ontology rule engine
-    3. Executes ontology-based simulation at each tick
-    4. Handles boundary condition updates
-    5. Outputs metrics via MQTT
+    该智能体会：
+    1. 加载水网拓扑
+    2. 初始化本体规则引擎
+    3. 在每个 tick 执行基于本体的仿真
+    4. 处理边界条件更新
+    5. 通过 MQTT 输出指标
     """
 
     def __init__(
@@ -120,9 +119,9 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
     def _initialize_ontology_model(self):
         """
-        Initialize ontology model with error handling.
+        带错误处理地初始化本体模型。
 
-        This method initializes the ontology rule engine with the loaded topology.
+        该方法使用已加载拓扑初始化本体规则引擎。
         """
         logger.info("Initializing ontology model...")
 
@@ -176,13 +175,13 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
     def _execute_ontology_simulation(self, step: int) -> List[MqttMetrics]:
         """
-        Execute ontology-based simulation step with comprehensive error handling.
+        带完整错误处理地执行基于本体的仿真步。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         logger.info(f"Executing ontology simulation for step {step}")
 
@@ -234,13 +233,13 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
     def _collect_boundary_conditions(self, step: int) -> Dict[int, Dict[str, float]]:
         """
-        Collect boundary conditions from time series cache.
+        从时序缓存采集边界条件。
 
         Args:
-            step: Current simulation step
+            step: 当前仿真步
 
         Returns:
-            Boundary conditions {object_id: {metrics_code: value}}
+            边界条件 {object_id: {metrics_code: value}}
         """
         boundary_conditions = {}
 
@@ -277,13 +276,13 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
         results: Dict[int, Dict[str, float]]
     ) -> List[MqttMetrics]:
         """
-        Convert reasoning results to metrics list.
+        将推理结果转换为指标列表。
 
         Args:
-            results: Reasoning results {object_id: {metrics_code: value}}
+            results: 推理结果 {object_id: {metrics_code: value}}
 
         Returns:
-            List of MqttMetrics objects
+            MqttMetrics 对象列表
         """
         metrics_list = []
 
@@ -311,7 +310,7 @@ class MyOntologySimulationAgent(OntologySimulationAgent):
 
 def main():
     """
-    Main entry point for ontology simulation agent service.
+    本体仿真智能体服务主入口。
     """
     # 获取脚本目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
