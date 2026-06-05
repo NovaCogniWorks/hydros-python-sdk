@@ -470,7 +470,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         z_f_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_front_levels.items() if refs}
         z_b_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_back_levels.items() if refs}
         h_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_heads.items() if refs}
+        
+        total_target_volume = self.system_config.target_avg_flow_last_station * self.system_config.horizon_hours
+        remaining_target = max(total_target_volume - float(self.cumulative_last_station_flow), 0.0)
+        
         logger.info(
+            f"目标={total_target_volume:.2f}, 剩余目标={remaining_target:.2f}\n"
             f"上层预测(首步): 流量={q_next}, 预测前池={z_f_next}, 预测后池={z_b_next}, 预测扬程={h_next}"
         )
         

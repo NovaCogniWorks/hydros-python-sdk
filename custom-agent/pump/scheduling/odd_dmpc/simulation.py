@@ -1476,11 +1476,7 @@ class ClosedLoopSimulation:
         decisions,
         hist_unit_status,
     ) -> None:
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            self._log("未安装 matplotlib，跳过绘图步骤。")
-            return
+        import matplotlib.pyplot as plt
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
         n_stations = len(station_ids)
@@ -1695,11 +1691,7 @@ class ClosedLoopSimulation:
         plt.close(fig)
 
     def _plot_results(self, history: pd.DataFrame) -> None:
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            self._log("未安装 matplotlib，跳过总结绘图。")
-            return
+        import matplotlib.pyplot as plt
 
         time_col = "time_hours" if "time_hours" in history.columns else "hour"
         station_ids = self.system_config.station_ids
