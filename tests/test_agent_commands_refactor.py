@@ -1424,6 +1424,84 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result.details[1].object_id, 102)
         self.assertEqual(result.details[1].target_value, 2.3)
 
+    def test_mpc_result_reporter_builds_customize_report(self):
+        context = SimulationContext(biz_scene_instance_id="scene-014-customize-report")
+        source = build_agent_instance("agent-014-customize-report", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+
+        report = MpcResultReporter().build_customize_report(
+            source_agent_instance=source,
+            mpc_task_state=state,
+            horizon_control_step=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    control_device_list=[
+                        ControlDeviceResult(
+                            device_type="Gate",
+                            object_id=101,
+                            device_id=501,
+                            value=0.45,
+                        )
+                    ],
+                )
+            ],
+            plan_type="CUSTOMIZE",
+        )
+
+        self.assertIsInstance(report, MpcResultReport)
+        self.assertEqual(report.context.biz_scene_instance_id, "scene-014-customize-report")
+        self.assertEqual(report.source_agent_instance.agent_id, "agent-014-customize-report")
+        self.assertEqual(len(report.mpc_results), 1)
+        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
+        self.assertEqual(report.mpc_results[0].details[0].object_id, 101)
+        self.assertEqual(report.mpc_results[0].details[0].device_id, 501)
+
+    def test_mpc_result_reporter_publishes_customize_report(self):
+        context = SimulationContext(biz_scene_instance_id="scene-014-customize-publish")
+        source = build_agent_instance("agent-014-customize-publish", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+        enqueued = []
+        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+
+        with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
+            report = reporter.publish_customize_report(
+                source_agent_instance=source,
+                mpc_task_state=state,
+                horizon_control_step=[
+                    HorizonControlStep(
+                        horizon_step=1,
+                        control_device_list=[
+                            ControlDeviceResult(
+                                device_type="Gate",
+                                object_id=101,
+                                device_id=501,
+                                value=0.45,
+                            )
+                        ],
+                    )
+                ],
+                plan_type="CUSTOMIZE",
+            )
+
+        self.assertIs(enqueued[0], report)
+        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
+        log_output = "\n".join(logs.output)
+        self.assertIn("MPC customize result report prepared for coordinator", log_output)
+        self.assertIn("MPC customize result report enqueued to coordinator", log_output)
+        self.assertIn(report.command_id, log_output)
+        self.assertIn("result_count=1", log_output)
+        self.assertIn("detail_count=1", log_output)
+
     def test_mpc_result_reporter_accepts_renamed_predicted_result_fields(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014-renamed-fields",
