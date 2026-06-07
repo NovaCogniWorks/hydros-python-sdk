@@ -1370,6 +1370,60 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(attributes["front_water_level"], 2.1)
         self.assertEqual(attributes["back_water_level"], 1.9)
 
+    def test_mpc_result_reporter_builds_single_result_from_horizon_control_steps(self):
+        context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+
+        result = MpcResultReporter.build_result(
+            mpc_task_state=state,
+            horizon_control_step=[
+                HorizonControlStep(
+                    horizon_step=1,
+                    control_device_list=[
+                        ControlDeviceResult(
+                            device_type="Gate",
+                            object_id=101,
+                            device_id=501,
+                            value=0.45,
+                        )
+                    ],
+                    predicted_result_list=[
+                        PredictedResult(
+                            object_type="Canal",
+                            object_id=102,
+                            front_water_level=2.1,
+                            target_water_level=2.3,
+                            back_water_level=1.9,
+                            total_flow=33.0,
+                        )
+                    ],
+                )
+            ],
+            plan_type="OPTIMAL",
+            loss=0.12,
+            gate_operations=1,
+            gate_amplitude=0.4,
+        )
+
+        self.assertEqual(result.biz_scene_instance_id, "scene-014-single-result")
+        self.assertEqual(result.step, 4)
+        self.assertEqual(result.plan_type, "OPTIMAL")
+        self.assertEqual(result.loss, 0.12)
+        self.assertEqual(result.gate_operations, 1)
+        self.assertEqual(result.gate_amplitude, 0.4)
+        self.assertEqual(len(result.details), 2)
+        self.assertEqual(result.details[0].command_type, "OPENING")
+        self.assertEqual(result.details[0].object_id, 101)
+        self.assertEqual(result.details[0].device_id, 501)
+        self.assertEqual(result.details[1].command_type, "WATER_LEVEL")
+        self.assertEqual(result.details[1].object_id, 102)
+        self.assertEqual(result.details[1].target_value, 2.3)
+
     def test_mpc_result_reporter_accepts_renamed_predicted_result_fields(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014-renamed-fields",
