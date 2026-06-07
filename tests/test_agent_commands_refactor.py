@@ -1182,7 +1182,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "control_device_list": [
                                 {
                                     "device_type": "Gate",
-                                    "object_id": 501,
+                                    "device_id": 501,
                                     "value": 0.8,
                                 }
                             ],
@@ -1192,7 +1192,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "control_device_list": [
                                 {
                                     "device_type": "Gate",
-                                    "object_id": 502,
+                                    "device_id": 502,
                                     "value": 0.7,
                                 }
                             ],
@@ -1202,7 +1202,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "control_device_list": [
                                 {
                                     "device_type": "Gate",
-                                    "object_id": 503,
+                                    "device_id": 503,
                                     "value": 0.6,
                                 }
                             ],
@@ -1253,9 +1253,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("plan_types=OPTIMAL", log_output)
         self.assertNotIn('"sensor_data"', log_output)
         self.assertNotIn('"object_id": 9001', log_output)
-        self.assertNotIn('"object_id": 501', log_output)
-        self.assertNotIn('"object_id": 502', log_output)
-        self.assertNotIn('"object_id": 503', log_output)
+        self.assertNotIn('"device_id": 501', log_output)
+        self.assertNotIn('"device_id": 502', log_output)
+        self.assertNotIn('"device_id": 503', log_output)
 
     def assert_snake_case_keys(self, value):
         if isinstance(value, dict):
@@ -1331,15 +1331,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            node_id=101,
-                            object_id=501,
+                            object_id=101,
+                            device_id=501,
                             value=0.45,
                         )
                     ],
                     predicted_result_list=[
                         PredictedResult(
-                            device_type="Canal",
-                            node_id=102,
+                            object_type="Canal",
+                            object_id=102,
                             front_water_level=2.1,
                             target_water_level=2.3,
                             back_water_level=1.9,
@@ -1393,8 +1393,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         "horizon_step": 1,
                         "predicted_result_list": [
                             {
-                                "device_type": "Canal",
-                                "node_id": 31400,
+                                "object_type": "Canal",
+                                "object_id": 31400,
                                 "front_water_level": 63.0,
                                 "target_water_level": 63.12,
                                 "back_water_level": 62.8,
@@ -1412,7 +1412,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].target_water_level, 63.12)
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
         self.assertEqual(detail["command_type"], "WATER_LEVEL")
-        self.assertEqual(detail["node_id"], 31400)
+        self.assertEqual(detail["object_id"], 31400)
         self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
         attributes = json.loads(detail["attributes"])
@@ -1436,7 +1436,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=501,
+                            device_id=501,
                             value=0.45,
                         )
                     ],
@@ -1446,7 +1446,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=502,
+                            device_id=502,
                             value=0.55,
                         )
                     ],
@@ -1456,7 +1456,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=503,
+                            device_id=503,
                             value=0.65,
                         )
                     ],
@@ -1510,8 +1510,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=501,
-                            object_name="Gate 501",
+                            device_id=501,
+                            device_name="Gate 501",
                             value=0.45,
                         )
                     ],
@@ -1627,8 +1627,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=20601,
-                            object_name="Gate 20601",
+                            device_id=20601,
+                            device_name="Gate 20601",
                             value=1.68,
                         )
                     ],
@@ -1722,8 +1722,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     control_device_list=[
                         ControlDeviceResult(
                             device_type="Gate",
-                            object_id=20601,
-                            object_name="Gate 20601",
+                            device_id=20601,
+                            device_name="Gate 20601",
                             value=1.68,
                         )
                     ],
@@ -1828,15 +1828,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     horizon_controls=[
                         HorizonControlStep(
                             horizon_step=1,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=501, value=0.45)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=501, value=0.45)],
                         ),
                         HorizonControlStep(
                             horizon_step=2,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=502, value=0.55)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=502, value=0.55)],
                         ),
                         HorizonControlStep(
                             horizon_step=3,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=503, value=0.65)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=503, value=0.65)],
                         ),
                     ],
                 )
@@ -1886,15 +1886,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     horizon_controls=[
                         HorizonControlStep(
                             horizon_step=1,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=501, value=0.45)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=501, value=0.45)],
                         ),
                         HorizonControlStep(
                             horizon_step=2,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=502, value=0.55)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=502, value=0.55)],
                         ),
                         HorizonControlStep(
                             horizon_step=3,
-                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=503, value=0.65)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", device_id=503, value=0.65)],
                         ),
                     ],
                 )

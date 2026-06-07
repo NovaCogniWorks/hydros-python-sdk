@@ -27,18 +27,18 @@ class SensorData(HydroBaseModel):
 
 class ControlDeviceResult(HydroBaseModel):
     device_type: Optional[str] = None
-    node_id: Optional[int] = None
-    node_name: Optional[str] = None
     object_id: Optional[int] = None
     object_name: Optional[str] = None
+    device_id: Optional[int] = None
+    device_name: Optional[str] = None
     value: Optional[float] = None
     counts: Optional[int] = None
 
 
 class PredictedResult(HydroBaseModel):
-    device_type: Optional[str] = None
-    node_id: Optional[int] = None
-    node_name: Optional[str] = None
+    object_type: Optional[str] = None
+    object_id: Optional[int] = None
+    object_name: Optional[str] = None
     front_water_level: Optional[float] = None
     target_water_level: Optional[float] = None
     back_water_level: Optional[float] = None

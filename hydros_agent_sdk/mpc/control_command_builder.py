@@ -105,20 +105,20 @@ class MpcControlCommandBuilder:
             for control_device_result in first_control.control_device_list or []:
                 if control_device_result.value is None:
                     logger.debug(
-                        "Skip MPC device opening without value: objectId=%s, deviceType=%s",
-                        control_device_result.object_id,
+                        "Skip MPC device opening without value: deviceId=%s, deviceType=%s",
+                        control_device_result.device_id,
                         control_device_result.device_type,
                     )
                     continue
 
                 target_agent = self.resolve_target_agent_for_object(
-                    control_device_result.object_id,
+                    control_device_result.device_id,
                     control_device_result.device_type,
                 )
                 if target_agent is None:
                     logger.warning(
-                        "Cannot resolve target agent for MPC control: objectId=%s, deviceType=%s",
-                        control_device_result.object_id,
+                        "Cannot resolve target agent for MPC control: deviceId=%s, deviceType=%s",
+                        control_device_result.device_id,
                         control_device_result.device_type,
                     )
                     continue
@@ -129,8 +129,8 @@ class MpcControlCommandBuilder:
                             command_id=generate_agent_command_id(),
                             source=self.source_agent,
                             target=target_agent,
-                            object_id=control_device_result.object_id,
-                            object_name=control_device_result.object_name,
+                            object_id=control_device_result.device_id,
+                            object_name=control_device_result.device_name,
                             object_type=control_device_result.device_type,
                             gate_opening=control_device_result.value,
                             need_ack_reply=True,
@@ -142,8 +142,8 @@ class MpcControlCommandBuilder:
                             command_id=generate_agent_command_id(),
                             source=self.source_agent,
                             target=target_agent,
-                            object_id=control_device_result.node_id,
-                            object_name=control_device_result.node_name,
+                            object_id=control_device_result.object_id,
+                            object_name=control_device_result.object_name,
                             object_type=control_device_result.device_type,
                             value=control_device_result.value,
                             need_ack_reply=True,
