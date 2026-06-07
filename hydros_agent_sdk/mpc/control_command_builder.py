@@ -102,37 +102,37 @@ class MpcControlCommandBuilder:
                 continue
 
             first_control = response.horizon_controls[0]
-            for device_opening in first_control.opening_list or []:
-                if device_opening.value is None:
+            for control_device_result in first_control.control_device_list or []:
+                if control_device_result.value is None:
                     logger.debug(
                         "Skip MPC device opening without value: objectId=%s, deviceType=%s",
-                        device_opening.object_id,
-                        device_opening.device_type,
+                        control_device_result.object_id,
+                        control_device_result.device_type,
                     )
                     continue
 
                 target_agent = self.resolve_target_agent_for_object(
-                    device_opening.object_id,
-                    device_opening.device_type,
+                    control_device_result.object_id,
+                    control_device_result.device_type,
                 )
                 if target_agent is None:
                     logger.warning(
                         "Cannot resolve target agent for MPC control: objectId=%s, deviceType=%s",
-                        device_opening.object_id,
-                        device_opening.device_type,
+                        control_device_result.object_id,
+                        control_device_result.device_type,
                     )
                     continue
 
-                if device_opening.device_type == "Gate":
+                if control_device_result.device_type == "Gate":
                     control_commands.append(
                         HydroDirectGateOpeningRequest(
                             command_id=generate_agent_command_id(),
                             source=self.source_agent,
                             target=target_agent,
-                            object_id=device_opening.object_id,
-                            object_name=device_opening.object_name,
-                            object_type=device_opening.device_type,
-                            gate_opening=device_opening.value,
+                            object_id=control_device_result.object_id,
+                            object_name=control_device_result.object_name,
+                            object_type=control_device_result.device_type,
+                            gate_opening=control_device_result.value,
                             need_ack_reply=True,
                         )
                     )
@@ -142,10 +142,10 @@ class MpcControlCommandBuilder:
                             command_id=generate_agent_command_id(),
                             source=self.source_agent,
                             target=target_agent,
-                            object_id=device_opening.node_id,
-                            object_name=device_opening.node_name,
-                            object_type=device_opening.device_type,
-                            value=device_opening.value,
+                            object_id=control_device_result.node_id,
+                            object_name=control_device_result.node_name,
+                            object_type=control_device_result.device_type,
+                            value=control_device_result.value,
                             need_ack_reply=True,
                         )
                     )

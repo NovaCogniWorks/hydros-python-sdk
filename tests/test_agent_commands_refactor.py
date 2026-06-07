@@ -24,11 +24,11 @@ from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import (
-    DeviceOpening,
+    ControlDeviceResult,
     HorizonControlStep,
     MpcOptimizeResponse,
     SensorData,
-    TargetNode,
+    PredictedResult,
 )
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
@@ -1179,7 +1179,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     "horizon_controls": [
                         {
                             "horizon_step": 1,
-                            "opening_list": [
+                            "control_device_list": [
                                 {
                                     "device_type": "Gate",
                                     "object_id": 501,
@@ -1189,7 +1189,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         },
                         {
                             "horizon_step": 2,
-                            "opening_list": [
+                            "control_device_list": [
                                 {
                                     "device_type": "Gate",
                                     "object_id": 502,
@@ -1199,7 +1199,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         },
                         {
                             "horizon_step": 3,
-                            "opening_list": [
+                            "control_device_list": [
                                 {
                                     "device_type": "Gate",
                                     "object_id": 503,
@@ -1328,21 +1328,21 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             node_id=101,
                             object_id=501,
                             value=0.45,
                         )
                     ],
-                    target_node_list=[
-                        TargetNode(
+                    predicted_result_list=[
+                        PredictedResult(
                             device_type="Canal",
                             node_id=102,
-                            water_level=2.1,
+                            front_water_level=2.1,
                             target_water_level=2.3,
-                            out_water_level=1.9,
+                            back_water_level=1.9,
                             total_flow=33.0,
                         )
                     ],
@@ -1364,15 +1364,21 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][0]["command_type"], "OPENING")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
+        attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
+        self.assertEqual(attributes["front_water_level"], 2.1)
+        self.assertEqual(attributes["back_water_level"], 1.9)
 
-    def test_mpc_result_reporter_accepts_java_target_water_value_alias(self):
+    def test_mpc_result_reporter_accepts_renamed_predicted_result_fields(self):
         context = SimulationContext(
-            biz_scene_instance_id="scene-014-java-alias",
-            tenant=Tenant(tenant_id="tenant-014"),
-            biz_scenario=BizScenario(biz_scenario_id="scenario-014"),
-            waterway=Waterway(waterway_id="waterway-014"),
+            biz_scene_instance_id="scene-014-renamed-fields",
+            tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
+            biz_scenario=BizScenario(
+                biz_scenario_id="scenario-014",
+                biz_scenario_name="Scenario",
+            ),
+            waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
-        source = build_agent_instance("agent-014-java-alias", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        source = build_agent_instance("agent-014-renamed-fields", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
         state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
@@ -1385,12 +1391,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "horizon_controls": [
                     {
                         "horizon_step": 1,
-                        "target_node_list": [
+                        "predicted_result_list": [
                             {
                                 "device_type": "Canal",
                                 "node_id": 31400,
-                                "water_level": 63.0,
-                                "target_water_value": 63.12,
+                                "front_water_level": 63.0,
+                                "target_water_level": 63.12,
+                                "back_water_level": 62.8,
                             }
                         ],
                     }
@@ -1402,10 +1409,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         payload = report.model_dump(by_alias=True)
         detail = payload["mpc_results"][0]["details"][0]
 
-        self.assertEqual(response.horizon_controls[0].target_node_list[0].target_water_level, 63.12)
+        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].target_water_level, 63.12)
+        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
         self.assertEqual(detail["command_type"], "WATER_LEVEL")
         self.assertEqual(detail["node_id"], 31400)
+        self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
+        attributes = json.loads(detail["attributes"])
+        self.assertEqual(attributes["front_water_level"], 63.0)
+        self.assertEqual(attributes["back_water_level"], 62.8)
 
     def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
@@ -1421,8 +1433,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=501,
                             value=0.45,
@@ -1431,8 +1443,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 ),
                 HorizonControlStep(
                     horizon_step=2,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=502,
                             value=0.55,
@@ -1441,8 +1453,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 ),
                 HorizonControlStep(
                     horizon_step=3,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=503,
                             value=0.65,
@@ -1495,8 +1507,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=501,
                             object_name="Gate 501",
@@ -1612,8 +1624,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=20601,
                             object_name="Gate 20601",
@@ -1707,8 +1719,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             horizon_controls=[
                 HorizonControlStep(
                     horizon_step=1,
-                    opening_list=[
-                        DeviceOpening(
+                    control_device_list=[
+                        ControlDeviceResult(
                             device_type="Gate",
                             object_id=20601,
                             object_name="Gate 20601",
@@ -1816,15 +1828,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     horizon_controls=[
                         HorizonControlStep(
                             horizon_step=1,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=501, value=0.45)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=501, value=0.45)],
                         ),
                         HorizonControlStep(
                             horizon_step=2,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=502, value=0.55)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=502, value=0.55)],
                         ),
                         HorizonControlStep(
                             horizon_step=3,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=503, value=0.65)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=503, value=0.65)],
                         ),
                     ],
                 )
@@ -1874,15 +1886,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     horizon_controls=[
                         HorizonControlStep(
                             horizon_step=1,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=501, value=0.45)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=501, value=0.45)],
                         ),
                         HorizonControlStep(
                             horizon_step=2,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=502, value=0.55)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=502, value=0.55)],
                         ),
                         HorizonControlStep(
                             horizon_step=3,
-                            opening_list=[DeviceOpening(device_type="Gate", object_id=503, value=0.65)],
+                            control_device_list=[ControlDeviceResult(device_type="Gate", object_id=503, value=0.65)],
                         ),
                     ],
                 )

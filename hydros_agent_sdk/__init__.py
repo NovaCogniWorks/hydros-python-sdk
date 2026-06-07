@@ -104,7 +104,7 @@ from hydros_agent_sdk.transport import (
     Transport,
 )
 from hydros_agent_sdk.mpc import (
-    DeviceOpening,
+    ControlDeviceResult,
     HorizonControlStep,
     MetricsDataCache,
     MpcConfigResolver,
@@ -116,7 +116,7 @@ from hydros_agent_sdk.mpc import (
     MpcResult,
     MpcResultDetail,
     SensorData,
-    TargetNode,
+    PredictedResult,
 )
 from hydros_agent_sdk.mpc.reporter import MpcResultReporter
 
@@ -217,7 +217,7 @@ __all__ = [
     "PublishRecord",
     "Transport",
     "MqttMetricsPublisher",
-    "DeviceOpening",
+    "ControlDeviceResult",
     "HorizonControlStep",
     "MetricsDataCache",
     "MqttMetricsSubscriber",
@@ -231,7 +231,7 @@ __all__ = [
     "MpcResultDetail",
     "MpcResultReporter",
     "SensorData",
-    "TargetNode",
+    "PredictedResult",
 
     # 工厂和多智能体支持
     "generate_agent_instance_id",

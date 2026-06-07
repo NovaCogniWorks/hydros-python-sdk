@@ -3,19 +3,19 @@ from .config import MpcConfigResolver, MpcRuntimeConfig
 from .control_command_builder import MpcControlCommandBuilder
 from .metrics_data_cache import MetricsDataCache
 from .models import (
-    DeviceOpening,
+    ControlDeviceResult,
     HorizonControlStep,
     MpcOptimizeRequest,
     MpcOptimizeResponse,
     MpcResult,
     MpcResultDetail,
     SensorData,
-    TargetNode,
+    PredictedResult,
 )
 from .rolling_runtime import MpcRollingRuntime
 
 __all__ = [
-    "DeviceOpening",
+    "ControlDeviceResult",
     "HorizonControlStep",
     "MpcOptimizeRequest",
     "MpcOptimizeResponse",
@@ -29,5 +29,5 @@ __all__ = [
     "MpcResultDetail",
     "MpcRollingRuntime",
     "SensorData",
-    "TargetNode",
+    "PredictedResult",
 ]

@@ -9,11 +9,11 @@ from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationConte
 from hydros_agent_sdk.utils import generate_coordination_command_id
 
 from .models import (
-    DeviceOpening,
+    ControlDeviceResult,
     MpcOptimizeResponse,
     MpcResult,
     MpcResultDetail,
-    TargetNode,
+    PredictedResult,
 )
 
 if TYPE_CHECKING:
@@ -96,10 +96,10 @@ class MpcResultReporter:
         for response in responses or []:
             details: List[MpcResultDetail] = []
             for control in response.horizon_controls or []:
-                for device_opening in control.opening_list or []:
-                    details.append(cls._device_opening_to_detail(device_opening, control.horizon_step))
-                for target_node in control.target_node_list or []:
-                    details.append(cls._target_node_to_detail(target_node, control.horizon_step))
+                for control_device_result in control.control_device_list or []:
+                    details.append(cls._control_device_to_detail(control_device_result, control.horizon_step))
+                for predicted_result in control.predicted_result_list or []:
+                    details.append(cls._predicted_result_to_detail(predicted_result, control.horizon_step))
 
             results.append(
                 MpcResult(
@@ -118,37 +118,37 @@ class MpcResultReporter:
         return results
 
     @staticmethod
-    def _device_opening_to_detail(
-        device_opening: DeviceOpening,
+    def _control_device_to_detail(
+        control_device_result: ControlDeviceResult,
         horizon_step: Optional[int],
     ) -> MpcResultDetail:
         return MpcResultDetail(
             horizon_step=horizon_step,
             command_type=MPC_OPERATION_OPENING,
-            device_type=device_opening.device_type,
-            node_id=device_opening.node_id,
-            object_id=device_opening.object_id,
-            value=device_opening.value,
+            device_type=control_device_result.device_type,
+            node_id=control_device_result.node_id,
+            object_id=control_device_result.object_id,
+            value=control_device_result.value,
         )
 
     @staticmethod
-    def _target_node_to_detail(
-        target_node: TargetNode,
+    def _predicted_result_to_detail(
+        predicted_result: PredictedResult,
         horizon_step: Optional[int],
     ) -> MpcResultDetail:
         attributes = {
-            "water_level": target_node.water_level,
-            "out_water_level": target_node.out_water_level,
-            "target_water_level": target_node.target_water_level,
-            "total_flow": target_node.total_flow,
+            "front_water_level": predicted_result.front_water_level,
+            "back_water_level": predicted_result.back_water_level,
+            "target_water_level": predicted_result.target_water_level,
+            "total_flow": predicted_result.total_flow,
         }
         return MpcResultDetail(
             horizon_step=horizon_step,
             command_type=MPC_OPERATION_WATER_LEVEL,
-            device_type=target_node.device_type,
-            node_id=target_node.node_id,
-            value=target_node.water_level,
-            target_value=target_node.target_water_level,
+            device_type=predicted_result.device_type,
+            node_id=predicted_result.node_id,
+            value=predicted_result.front_water_level,
+            target_value=predicted_result.target_water_level,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
 

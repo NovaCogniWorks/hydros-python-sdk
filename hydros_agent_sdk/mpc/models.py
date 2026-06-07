@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import AliasChoices, Field
+from pydantic import Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 
@@ -25,7 +25,7 @@ class SensorData(HydroBaseModel):
     attributes: Optional[str] = _payload_field("attributes")
 
 
-class DeviceOpening(HydroBaseModel):
+class ControlDeviceResult(HydroBaseModel):
     device_type: Optional[str] = None
     node_id: Optional[int] = None
     node_name: Optional[str] = None
@@ -35,25 +35,21 @@ class DeviceOpening(HydroBaseModel):
     counts: Optional[int] = None
 
 
-class TargetNode(HydroBaseModel):
+class PredictedResult(HydroBaseModel):
     device_type: Optional[str] = None
     node_id: Optional[int] = None
     node_name: Optional[str] = None
-    water_level: Optional[float] = None
-    target_water_level: Optional[float] = Field(
-        default=None,
-        validation_alias=AliasChoices("target_water_level", "target_water_value"),
-        serialization_alias="target_water_level",
-    )
-    out_water_level: Optional[float] = None
+    front_water_level: Optional[float] = None
+    target_water_level: Optional[float] = None
+    back_water_level: Optional[float] = None
     total_flow: Optional[float] = None
     inflow: Optional[float] = None
 
 
 class HorizonControlStep(HydroBaseModel):
     horizon_step: Optional[int] = None
-    opening_list: List[DeviceOpening] = Field(default_factory=list)
-    target_node_list: List[TargetNode] = Field(default_factory=list)
+    control_device_list: List[ControlDeviceResult] = Field(default_factory=list)
+    predicted_result_list: List[PredictedResult] = Field(default_factory=list)
 
 
 class MpcOptimizeRequest(HydroBaseModel):
