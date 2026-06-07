@@ -12,6 +12,7 @@ from .models import (
     SensorData,
     PredictedResult,
 )
+from .mpc_result_factory import MpcResultFactory
 from .rolling_runtime import MpcRollingRuntime
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "MpcRuntimeConfig",
     "MpcResult",
     "MpcResultDetail",
+    "MpcResultFactory",
     "MpcRollingRuntime",
     "SensorData",
     "PredictedResult",

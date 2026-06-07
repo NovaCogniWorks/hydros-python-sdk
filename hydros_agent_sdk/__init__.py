@@ -115,6 +115,7 @@ from hydros_agent_sdk.mpc import (
     MpcRuntimeConfig,
     MpcResult,
     MpcResultDetail,
+    MpcResultFactory,
     SensorData,
     PredictedResult,
 )
@@ -229,6 +230,7 @@ __all__ = [
     "MpcRuntimeConfig",
     "MpcResult",
     "MpcResultDetail",
+    "MpcResultFactory",
     "MpcResultReporter",
     "SensorData",
     "PredictedResult",

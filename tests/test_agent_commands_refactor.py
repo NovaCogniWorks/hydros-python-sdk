@@ -1362,6 +1362,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["tenant_id"], "tenant-014")
         self.assertEqual(payload["mpc_results"][0]["biz_scenario_id"], "scenario-014")
         self.assertEqual(payload["mpc_results"][0]["details"][0]["command_type"], "OPENING")
+        self.assertEqual(payload["mpc_results"][0]["details"][0]["object_id"], 101)
+        self.assertEqual(payload["mpc_results"][0]["details"][0]["device_id"], 501)
         self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
         attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
@@ -1479,9 +1481,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
         self.assertNotIn('"command_type":"mpc_result_report"', log_output)
-        self.assertNotIn('"object_id":501', log_output)
-        self.assertNotIn('"object_id":502', log_output)
-        self.assertNotIn('"object_id":503', log_output)
+        self.assertNotIn('"device_id":501', log_output)
+        self.assertNotIn('"device_id":502', log_output)
+        self.assertNotIn('"device_id":503', log_output)
 
     def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
         state_manager = AgentStateManager()
@@ -1854,9 +1856,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
         self.assertNotIn('"command_type":"mpc_result_report"', log_output)
-        self.assertNotIn('"object_id":501', log_output)
-        self.assertNotIn('"object_id":502', log_output)
-        self.assertNotIn('"object_id":503', log_output)
+        self.assertNotIn('"device_id":501', log_output)
+        self.assertNotIn('"device_id":502', log_output)
+        self.assertNotIn('"device_id":503', log_output)
 
     def test_coordination_client_truncates_mpc_result_report_when_enqueued(self):
         state_manager = AgentStateManager()
@@ -1909,9 +1911,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn('"command_type":"mpc_result_report"', log_output)
         self.assertIn('"result_count":1', log_output)
         self.assertIn('"detail_count":3', log_output)
-        self.assertNotIn('"object_id":501', log_output)
-        self.assertNotIn('"object_id":502', log_output)
-        self.assertNotIn('"object_id":503', log_output)
+        self.assertNotIn('"device_id":501', log_output)
+        self.assertNotIn('"device_id":502', log_output)
+        self.assertNotIn('"device_id":503', log_output)
 
     def test_central_scheduling_agent_generates_java_style_command_id(self):
         with patch("hydros_agent_sdk.utils.id_generator.datetime") as mock_datetime, \

@@ -77,8 +77,8 @@ class MpcResultDetail(HydroBaseModel):
     horizon_step: Optional[int] = None
     command_type: Optional[str] = None
     device_type: Optional[str] = None
-    node_id: Optional[int] = None
     object_id: Optional[int] = None
+    device_id: Optional[int] = None
     value: Optional[float] = None
     target_value: Optional[float] = None
     horizon_time: Optional[str] = None

@@ -126,8 +126,8 @@ class MpcResultReporter:
             horizon_step=horizon_step,
             command_type=MPC_OPERATION_OPENING,
             device_type=control_device_result.device_type,
-            node_id=control_device_result.object_id,
-            object_id=control_device_result.device_id,
+            object_id=control_device_result.object_id,
+            device_id=control_device_result.device_id,
             value=control_device_result.value,
         )
 
