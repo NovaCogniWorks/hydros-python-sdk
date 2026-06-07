@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MPC_OPERATION_OPENING = "OPENING"
+MPC_DEVICE_CONTROL = "OPENING"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
 
 
@@ -213,7 +213,7 @@ class MpcResultReporter:
     ) -> MpcResultDetail:
         return MpcResultDetail(
             horizon_step=horizon_step,
-            command_type=MPC_OPERATION_OPENING,
+            command_type=MPC_DEVICE_CONTROL,
             device_type=control_device_result.device_type,
             object_id=control_device_result.object_id,
             device_id=control_device_result.device_id,
