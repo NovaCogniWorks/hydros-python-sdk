@@ -80,15 +80,6 @@ class MpcResultReporter:
         report = self.build_report(source_agent_instance, mpc_task_state, responses)
         if report is None:
             return None
-        logger.info(
-            "MPC result report prepared for coordinator: biz_scene_instance_id=%s, "
-            "step=%s, command_id=%s, result_count=%s, detail_count=%s",
-            mpc_task_state.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
-            report.command_id,
-            len(report.mpc_results),
-            self._count_details(report),
-        )
 
         client = self.sim_coordination_client or getattr(source_agent_instance, "sim_coordination_client", None)
         if client is None:
@@ -124,15 +115,6 @@ class MpcResultReporter:
         )
         if report is None:
             return None
-        logger.info(
-            "MPC customize result report prepared for coordinator: biz_scene_instance_id=%s, "
-            "step=%s, command_id=%s, result_count=%s, detail_count=%s",
-            mpc_task_state.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
-            report.command_id,
-            len(report.mpc_results),
-            self._count_details(report),
-        )
 
         client = self.sim_coordination_client or getattr(source_agent_instance, "sim_coordination_client", None)
         if client is None:
