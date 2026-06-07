@@ -8,7 +8,6 @@
 import logging
 import os
 import sys
-import json
 import pandas as pd
 from typing import Optional, List, Dict, Any
 
@@ -19,10 +18,9 @@ if _SCRIPT_DIR not in sys.path:
 from hydros_agent_sdk import (
     SimCoordinationClient, HydroAgentFactory, MultiAgentCallback,
     load_env_config, load_agent_config, ErrorCodes, handle_agent_errors,
-    DeviceValueTypeEnum, HydroObjectType, generate_coordination_command_id
+    DeviceValueTypeEnum, HydroObjectType
 )
 from hydros_agent_sdk.agents import CentralSchedulingAgent
-from hydros_agent_sdk.mpc.models import MpcResult, MpcResultDetail
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
 
@@ -619,12 +617,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         }
             
         self.mpc_output = {"upper": upper_res, "lower": lower_res}
-        self._publish_odd_mpc_result(
-            step=step,
-            upper_plan=upper_plan,
-            lower_res=lower_res,
-            actions=actions,
-        )
         
         # Plotting Support
         if not hasattr(self, "plot_tracker"):
@@ -684,207 +676,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
         return commands
-
-    def _publish_odd_mpc_result(self, step: int, upper_plan, lower_res: Dict[str, Any], actions: Dict[Any, Any]) -> None:
-        """将 ODD MPC 结果通过 mpc_result_report 上报给 coordinator。"""
-        details = self._build_odd_mpc_result_details(upper_plan, actions)
-        if not details:
-            logger.warning(
-                "PUMP ODD MPC result report skipped: no details, biz_scene_instance_id=%s, step=%s",
-                self.context.biz_scene_instance_id,
-                step,
-            )
-            return
-
-        result = MpcResult(
-            biz_scene_instance_id=self.context.biz_scene_instance_id,
-            waterway_id=self._context_waterway_id(),
-            tenant_id=self._context_tenant_id(),
-            biz_scenario_id=self._context_biz_scenario_id(),
-            step=step,
-            plan_type="PUMP_ODD_DMPC",
-            details=details,
-            attributes=json.dumps(
-                {
-                    "lower": lower_res,
-                    "station_ids": list(actions.keys()),
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            ),
-        )
-        report = MpcResultReport(
-            command_id=generate_coordination_command_id(),
-            context=self.context,
-            source_agent_instance=self,
-            mpc_results=[result],
-            broadcast=True,
-        )
-
-        client = getattr(self, "sim_coordination_client", None)
-        if client is None:
-            logger.warning(
-                "PUMP ODD MPC result report built but no coordination client is available: "
-                "biz_scene_instance_id=%s, step=%s, detail_count=%s",
-                self.context.biz_scene_instance_id,
-                step,
-                len(details),
-            )
-            return
-
-        client.enqueue(report)
-        logger.info(
-            "PUMP ODD MPC result report enqueued to coordinator: "
-            "biz_scene_instance_id=%s, step=%s, command_id=%s, detail_count=%s",
-            self.context.biz_scene_instance_id,
-            step,
-            report.command_id,
-            len(details),
-        )
-
-    def _build_odd_mpc_result_details(self, upper_plan, actions: Dict[Any, Any]) -> List[MpcResultDetail]:
-        details: List[MpcResultDetail] = []
-        for station_id in self.system_config.station_ids:
-            action = actions.get(station_id)
-            if action is None:
-                continue
-
-            details.append(self._build_station_water_level_detail(station_id, upper_plan, action))
-            details.append(self._build_station_water_flow_detail(station_id, upper_plan, action))
-            details.extend(self._build_unit_blade_angle_details(station_id, action))
-        return details
-
-    def _build_station_water_level_detail(self, station_id: Any, upper_plan, action: Any) -> MpcResultDetail:
-        water_level = self._float_or_none(getattr(action, "predicted_front_level", None))
-        out_water_level = self._float_or_none(getattr(action, "predicted_back_level", None))
-        target_water_level = self._first_float_from_mapping(
-            getattr(upper_plan, "station_back_levels", {}),
-            station_id,
-        )
-        target_front_level = self._first_float_from_mapping(
-            getattr(upper_plan, "station_front_levels", {}),
-            station_id,
-        )
-        total_flow = self._float_or_none(getattr(action, "selected_flow", None))
-
-        attributes = {
-            "water_level": water_level,
-            "out_water_level": out_water_level,
-            "target_water_level": target_water_level,
-            "target_front_level": target_front_level,
-            "total_flow": total_flow,
-            "mode": getattr(action, "mode", None),
-        }
-        return MpcResultDetail(
-            horizon_step=0,
-            command_type="WATER_LEVEL",
-            device_type="PUMP_STATION",
-            object_id=self._int_or_none(station_id),
-            value=water_level,
-            target_value=target_water_level,
-            attributes=json.dumps(
-                attributes,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            ),
-        )
-
-    def _build_station_water_flow_detail(self, station_id: Any, upper_plan, action: Any) -> MpcResultDetail:
-        total_flow = self._float_or_none(getattr(action, "selected_flow", None))
-        target_flow = self._first_float_from_mapping(
-            getattr(upper_plan, "flow_refs", {}),
-            station_id,
-        )
-        attributes = {
-            "total_flow": total_flow,
-            "target_flow": target_flow,
-            "water_level": self._float_or_none(getattr(action, "predicted_front_level", None)),
-            "out_water_level": self._float_or_none(getattr(action, "predicted_back_level", None)),
-            "mode": getattr(action, "mode", None),
-        }
-        return MpcResultDetail(
-            horizon_step=0,
-            command_type="WATER_FLOW",
-            device_type="PUMP_STATION",
-            object_id=self._int_or_none(station_id),
-            value=total_flow,
-            target_value=target_flow,
-            attributes=json.dumps(
-                attributes,
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            ),
-        )
-
-    def _build_unit_blade_angle_details(self, station_id: Any, action: Any) -> List[MpcResultDetail]:
-        details: List[MpcResultDetail] = []
-        unit_openings = getattr(action, "unit_openings", {}) or {}
-        unit_status = getattr(action, "unit_status", {}) or {}
-        selected_flow = self._float_or_none(getattr(action, "selected_flow", None))
-        for unit_id, opening in unit_openings.items():
-            status = int(unit_status.get(unit_id, 0) or 0)
-            blade_angle = 100.0 if status == 0 else self._float_or_none(opening)
-            details.append(
-                MpcResultDetail(
-                    horizon_step=0,
-                    command_type="OPENING",
-                    device_type=HydroObjectType.PUMP,
-                    object_id=self._int_or_none(unit_id),
-                    value=round(blade_angle, 2) if blade_angle is not None else None,
-                    attributes=json.dumps(
-                        {
-                            "station_id": station_id,
-                            "metric": "blade_angle",
-                            "unit_status": status,
-                            "selected_flow": selected_flow,
-                            "mode": getattr(action, "mode", None),
-                        },
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        default=str,
-                    ),
-                )
-            )
-        return details
-
-    @staticmethod
-    def _first_float_from_mapping(mapping: Any, key: Any) -> Optional[float]:
-        if mapping is None:
-            return None
-        values = mapping.get(key) if hasattr(mapping, "get") else None
-        if isinstance(values, (list, tuple)) and values:
-            return PumpCentralSchedulingAgent._float_or_none(values[0])
-        return PumpCentralSchedulingAgent._float_or_none(values)
-
-    @staticmethod
-    def _float_or_none(value: Any) -> Optional[float]:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _int_or_none(value: Any) -> Optional[int]:
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _context_tenant_id(self) -> Optional[str]:
-        return self.context.tenant.tenant_id if self.context.tenant else None
-
-    def _context_biz_scenario_id(self) -> Optional[str]:
-        return self.context.biz_scenario.biz_scenario_id if self.context.biz_scenario else None
-
-    def _context_waterway_id(self) -> Optional[str]:
-        return self.context.waterway.waterway_id if self.context.waterway else None
 
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)

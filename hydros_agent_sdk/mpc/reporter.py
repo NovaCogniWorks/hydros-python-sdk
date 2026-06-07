@@ -214,9 +214,9 @@ class MpcResultReporter:
         return MpcResultDetail(
             horizon_step=horizon_step,
             command_type=MPC_DEVICE_CONTROL,
-            device_type=control_device_result.device_type,
-            object_id=control_device_result.object_id,
-            device_id=control_device_result.device_id,
+            object_type=control_device_result.device_type,
+            node_id=control_device_result.object_id,
+            object_id=control_device_result.device_id,
             value=control_device_result.value,
         )
 
@@ -234,7 +234,7 @@ class MpcResultReporter:
         return MpcResultDetail(
             horizon_step=horizon_step,
             command_type=MPC_OPERATION_WATER_LEVEL,
-            device_type=predicted_result.object_type,
+            object_type=predicted_result.object_type,
             object_id=predicted_result.object_id,
             value=predicted_result.front_water_level,
             target_value=predicted_result.target_water_level,
