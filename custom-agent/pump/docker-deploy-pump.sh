@@ -14,10 +14,39 @@ MQTT_BROKER_PORT="${MQTT_BROKER_PORT:-}"
 MQTT_TOPIC="${MQTT_TOPIC:-}"
 MQTT_USERNAME="${MQTT_USERNAME:-}"
 MQTT_PASSWORD="${MQTT_PASSWORD:-}"
-HYDROS_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-outflowplan scheduling}}"
+DEFAULT_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-outflowplan scheduling}}"
+HYDROS_AGENT_START_ARGS="${DEFAULT_AGENT_START_ARGS}"
 PORT="${PORT:-8015}"
 DEBUG_PORT="${DEBUG_PORT:-}"
 LOG_VOLUME="${LOG_VOLUME:-${CONTAINER_NAME}-logs}"
+
+if [ "$#" -gt 0 ]; then
+    HAS_AGENT_ARG=false
+    SKIP_NEXT=false
+    for arg in "$@"; do
+        if [ "${SKIP_NEXT}" = true ]; then
+            SKIP_NEXT=false
+            continue
+        fi
+
+        case "${arg}" in
+            --debug-port)
+                SKIP_NEXT=true
+                ;;
+            -*)
+                ;;
+            *)
+                HAS_AGENT_ARG=true
+                ;;
+        esac
+    done
+
+    if [ "${HAS_AGENT_ARG}" = true ]; then
+        HYDROS_AGENT_START_ARGS="$*"
+    else
+        HYDROS_AGENT_START_ARGS="$* ${DEFAULT_AGENT_START_ARGS}"
+    fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
