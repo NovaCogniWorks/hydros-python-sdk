@@ -119,7 +119,7 @@ from hydros_agent_sdk.mpc import (
     SensorData,
     PredictedResult,
 )
-from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 
 # 导入错误处理
 from hydros_agent_sdk.error_codes import (

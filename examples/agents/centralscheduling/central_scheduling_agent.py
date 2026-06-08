@@ -40,7 +40,7 @@ class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
 
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
-            self.agent_command_gateway.start()
+            self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
 
@@ -54,7 +54,7 @@ class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
                 broadcast=False,
             )
         except Exception:
-            self.agent_command_gateway.shutdown()
+            self._agent_command_gateway.shutdown()
             raise
 
     def _subscribe_configured_field_metrics(self) -> None:
@@ -97,7 +97,7 @@ class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating production central scheduling agent: %s", self.agent_id)
 
-        self.agent_command_gateway.shutdown()
+        self._agent_command_gateway.shutdown()
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
         object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)

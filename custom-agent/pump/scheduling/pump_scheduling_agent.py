@@ -109,7 +109,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.state_manager.add_local_agent(self)
 
             # 5. 启动 agent command 客户端，后面就能直接发指令
-            self.agent_command_gateway.start()
+            self._agent_command_gateway.start()
 
             logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
 
@@ -127,7 +127,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             )
         except Exception:
             # 初始化失败就把客户端收掉，别把半拉资源留住
-            self.agent_command_gateway.shutdown()
+            self._agent_command_gateway.shutdown()
             raise
 
 
@@ -659,7 +659,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 目标智能体编码 target_agent_code 可从 TargetAgentResolver 获取
                 # 示例：target_agent_code = None
                 # 示例：if unit_object_id is not None:
-                # 示例：    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                # 示例：    agent_instance = self._target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
                 # 示例：    if agent_instance:
                 # 示例：        target_agent_code = agent_instance.agent_code
 
@@ -678,7 +678,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 按照用户要求，生成 MpcResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
-        from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+        from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep
 
         try:
@@ -857,7 +857,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
         # 清理资源
-        self.agent_command_gateway.shutdown()
+        self._agent_command_gateway.shutdown()
         self._optimization_model = None
         
         # 从状态管理器中注销

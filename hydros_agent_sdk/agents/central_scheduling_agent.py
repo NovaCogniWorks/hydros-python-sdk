@@ -17,9 +17,8 @@ from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilde
 from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
 from hydros_agent_sdk.mpc.models import SensorData
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
-from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
@@ -234,30 +233,6 @@ class CentralSchedulingAgent(TickableAgent):
         """
         pass
 
-    @property
-    def agent_command_gateway(self) -> AgentCommandGateway:
-        return self._agent_command_gateway
-
-    @property
-    def target_agent_resolver(self) -> TargetAgentResolver:
-        return self._target_agent_resolver
-
-    @property
-    def control_command_builder(self) -> MpcControlCommandBuilder:
-        return self._control_command_builder
-
-    @property
-    def control_command_dispatcher(self) -> ControlCommandDispatcher:
-        return self._control_command_dispatcher
-
-    @property
-    def mpc_rolling_runtime(self) -> MpcRollingRuntime:
-        return self._mpc_rolling_runtime
-
-    def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
-        self._mpc_planning_client = self._mpc_optimization_service.get_or_create_mpc_planning_client()
-        return self._mpc_planning_client
-
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
         执行中央调度步进。
@@ -326,11 +301,7 @@ class CentralSchedulingAgent(TickableAgent):
         if not responses:
             return None
 
-        return self.control_command_builder.build_from_mpc_responses(responses)
-
-    def list_mpc_sensor_data(self, mpc_task_state: Optional[MpcTaskState] = None) -> List[SensorData]:
-        """按 MPC 服务要求的 SensorDTO 形态返回现地指标。"""
-        return self._mpc_optimization_service.list_sensor_data(self, mpc_task_state)
+        return self._control_command_builder.build_from_mpc_responses(responses)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

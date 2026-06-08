@@ -134,7 +134,7 @@ class PowerSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"PowerSchedulingAgent created: {agent_id}")
 
     def _planning_horizon_steps(self) -> int:
-        return self.mpc_rolling_runtime.get_roll_steps()
+        return self._mpc_rolling_runtime.get_roll_steps()
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:

@@ -229,8 +229,8 @@ def main():
         hydros_cluster_id="local", hydros_node_id="local"
     )
     # 覆盖方法以避免 SDK 日志过于嘈杂
-    agent.control_command_dispatcher.send_command = lambda cmd: None
-    agent.control_command_dispatcher.build_station_target_value_request = lambda **kwargs: "mock_request"
+    agent._control_command_dispatcher.send_command = lambda cmd: None
+    agent._control_command_dispatcher.build_station_target_value_request = lambda **kwargs: "mock_request"
     
     # 初始化逻辑
     agent._init_pump_system()
