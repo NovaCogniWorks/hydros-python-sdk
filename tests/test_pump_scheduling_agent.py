@@ -13,6 +13,7 @@ class MockClient:
     def __init__(self):
         self.state_manager = self
         self.mqtt_client = Mock()
+        self.topic = "test/topic"
     def send_command(self, req): pass
     def subscribe(self, topic): pass
     def init_task(self, ctx, agents): pass

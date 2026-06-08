@@ -10,7 +10,7 @@ from hydros_agent_sdk.utils import generate_coordination_command_id
 
 from .models import (
     ControlObjectResult,
-    HorizonControlStep,
+    HorizonStep,
     MpcOptimizeResponse,
     MpcResult,
     MpcResultDetail,
@@ -51,21 +51,21 @@ class MpcResultReporter:
 
     def build_customize_report(
         self,
-        source_agent_instance: HydroAgentInstance,
-        mpc_task_state: "MpcTaskState",
-        horizon_control_step: List[HorizonControlStep],
+        source_agent_instance: Optional[HydroAgentInstance],
+        mpc_task_state: Optional["MpcTaskState"],
+        horizon_step: List[HorizonStep],
         plan_type: Optional[str] = None,
     ) -> Optional[MpcResultReport]:
         result = self.build_customize_results(
             mpc_task_state=mpc_task_state,
-            horizon_control_step=horizon_control_step,
+            horizon_step=horizon_step,
             plan_type=plan_type,
         )
         if result is None:
             return None
         return MpcResultReport(
             command_id=generate_coordination_command_id(),
-            context=source_agent_instance.context,
+            context=source_agent_instance.context if source_agent_instance else None,
             source_agent_instance=source_agent_instance,
             mpc_results=[result],
             broadcast=True,
@@ -110,15 +110,15 @@ class MpcResultReporter:
 
     def publish_customize_report(
         self,
-        source_agent_instance: HydroAgentInstance,
-        mpc_task_state: "MpcTaskState",
-        horizon_control_step: List[HorizonControlStep],
+        source_agent_instance: Optional[HydroAgentInstance],
+        mpc_task_state: Optional["MpcTaskState"],
+        horizon_step: List[HorizonStep],
         plan_type: Optional[str] = None,
     ) -> Optional[MpcResultReport]:
         report = self.build_customize_report(
             source_agent_instance=source_agent_instance,
             mpc_task_state=mpc_task_state,
-            horizon_control_step=horizon_control_step,
+            horizon_step=horizon_step,
             plan_type=plan_type,
         )
         if report is None:
@@ -163,7 +163,7 @@ class MpcResultReporter:
             results.append(
                 cls.build_customize_results(
                     mpc_task_state=mpc_task_state,
-                    horizon_control_step=response.horizon_controls,
+                    horizon_step=response.horizon_controls,
                     plan_type=response.plan_type,
                     loss=response.loss,
                     gate_operations=response.gate_operations,
@@ -175,27 +175,27 @@ class MpcResultReporter:
     @classmethod
     def build_customize_results(
         cls,
-        mpc_task_state: "MpcTaskState",
-        horizon_control_step: List[HorizonControlStep],
+        mpc_task_state: Optional["MpcTaskState"],
+        horizon_step: List[HorizonStep],
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,
         gate_operations: Optional[int] = None,
         gate_amplitude: Optional[float] = None,
     ) -> MpcResult:
-        context = mpc_task_state.context
+        context = mpc_task_state.context if mpc_task_state else None
         details: List[MpcResultDetail] = []
-        for control in horizon_control_step or []:
+        for control in horizon_step or []:
             for control_object_result in control.control_object_list or []:
                 details.append(cls._control_object_to_detail(control_object_result, control.horizon_step))
             for predicted_result in control.predicted_result_list or []:
                 details.append(cls._predicted_result_to_detail(predicted_result, control.horizon_step))
 
         return MpcResult(
-            biz_scene_instance_id=context.biz_scene_instance_id,
-            waterway_id=cls._context_waterway_id(context),
-            tenant_id=cls._context_tenant_id(context),
-            biz_scenario_id=cls._context_biz_scenario_id(context),
-            step=mpc_task_state.current_step,
+            biz_scene_instance_id=context.biz_scene_instance_id if context else "",
+            waterway_id=cls._context_waterway_id(context) if context else None,
+            tenant_id=cls._context_tenant_id(context) if context else None,
+            biz_scenario_id=cls._context_biz_scenario_id(context) if context else None,
+            step=mpc_task_state.current_step if mpc_task_state else 0,
             plan_type=plan_type,
             loss=loss,
             gate_operations=gate_operations,
@@ -206,8 +206,8 @@ class MpcResultReporter:
     @classmethod
     def build_result(
         cls,
-        mpc_task_state: "MpcTaskState",
-        horizon_control_step: List[HorizonControlStep],
+        mpc_task_state: Optional["MpcTaskState"],
+        horizon_step: List[HorizonStep],
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,
         gate_operations: Optional[int] = None,
@@ -215,7 +215,7 @@ class MpcResultReporter:
     ) -> MpcResult:
         return cls.build_customize_results(
             mpc_task_state=mpc_task_state,
-            horizon_control_step=horizon_control_step,
+            horizon_step=horizon_step,
             plan_type=plan_type,
             loss=loss,
             gate_operations=gate_operations,
@@ -246,6 +246,7 @@ class MpcResultReporter:
             "back_water_level": predicted_result.back_water_level,
             "final_target_water_level": predicted_result.final_target_water_level,
             "out_flow": predicted_result.out_flow,
+            "efficiency": predicted_result.efficiency,
         }
         return MpcResultDetail(
             horizon_step=horizon_step,

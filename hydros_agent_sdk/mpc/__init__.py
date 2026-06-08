@@ -4,7 +4,7 @@ from .control_command_builder import MpcControlCommandBuilder
 from .metrics_data_cache import MetricsDataCache
 from .models import (
     ControlObjectResult,
-    HorizonControlStep,
+    HorizonStep,
     MpcOptimizeRequest,
     MpcOptimizeResponse,
     MpcResult,
@@ -17,7 +17,7 @@ from .rolling_runtime import MpcRollingRuntime
 
 __all__ = [
     "ControlObjectResult",
-    "HorizonControlStep",
+    "HorizonStep",
     "MpcOptimizeRequest",
     "MpcOptimizeResponse",
     "MpcConfigResolver",

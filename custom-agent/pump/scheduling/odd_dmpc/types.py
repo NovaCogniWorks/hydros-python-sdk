@@ -375,6 +375,7 @@ class ControlAction:
     predicted_unit_openings: Dict[int, List[float]] = field(default_factory=dict)
     predicted_unit_flows: Dict[int, List[float]] = field(default_factory=dict)
     predicted_unit_status: Dict[int, List[int]] = field(default_factory=dict)
+    predicted_unit_efficiencies: Dict[int, List[float]] = field(default_factory=dict)
     candidate_plans: List[Dict[str, object]] = field(default_factory=list)
 
     @property
