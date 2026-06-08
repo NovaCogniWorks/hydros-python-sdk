@@ -25,14 +25,14 @@ class SensorData(HydroBaseModel):
     attributes: Optional[str] = _payload_field("attributes")
 
 
-class ControlDeviceResult(HydroBaseModel):
-    device_type: Optional[str] = None
+class ControlObjectResult(HydroBaseModel):
+    object_type: Optional[str] = None
+    node_id: Optional[int] = None
+    node_name: Optional[str] = None
     object_id: Optional[int] = None
     object_name: Optional[str] = None
-    device_id: Optional[int] = None
-    device_name: Optional[str] = None
-    value: Optional[float] = None
-    counts: Optional[int] = None
+    target_value: Optional[float] = None
+    target_value_type: Optional[str] = None
 
 
 class PredictedResult(HydroBaseModel):
@@ -40,15 +40,14 @@ class PredictedResult(HydroBaseModel):
     object_id: Optional[int] = None
     object_name: Optional[str] = None
     front_water_level: Optional[float] = None
-    target_water_level: Optional[float] = None
     back_water_level: Optional[float] = None
-    total_flow: Optional[float] = None
-    inflow: Optional[float] = None
+    final_target_water_level: Optional[float] = None
+    out_flow: Optional[float] = None
 
 
 class HorizonControlStep(HydroBaseModel):
     horizon_step: Optional[int] = None
-    control_device_list: List[ControlDeviceResult] = Field(default_factory=list)
+    control_object_list: List[ControlObjectResult] = Field(default_factory=list)
     predicted_result_list: List[PredictedResult] = Field(default_factory=list)
 
 

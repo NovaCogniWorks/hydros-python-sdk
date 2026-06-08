@@ -9,7 +9,7 @@ from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationConte
 from hydros_agent_sdk.utils import generate_coordination_command_id
 
 from .models import (
-    ControlDeviceResult,
+    ControlObjectResult,
     HorizonControlStep,
     MpcOptimizeResponse,
     MpcResult,
@@ -185,8 +185,8 @@ class MpcResultReporter:
         context = mpc_task_state.context
         details: List[MpcResultDetail] = []
         for control in horizon_control_step or []:
-            for control_device_result in control.control_device_list or []:
-                details.append(cls._control_device_to_detail(control_device_result, control.horizon_step))
+            for control_object_result in control.control_object_list or []:
+                details.append(cls._control_object_to_detail(control_object_result, control.horizon_step))
             for predicted_result in control.predicted_result_list or []:
                 details.append(cls._predicted_result_to_detail(predicted_result, control.horizon_step))
 
@@ -223,17 +223,17 @@ class MpcResultReporter:
         )
 
     @staticmethod
-    def _control_device_to_detail(
-        control_device_result: ControlDeviceResult,
+    def _control_object_to_detail(
+        control_object_result: ControlObjectResult,
         horizon_step: Optional[int],
     ) -> MpcResultDetail:
         return MpcResultDetail(
             horizon_step=horizon_step,
-            command_type=MPC_DEVICE_CONTROL,
-            object_type=control_device_result.device_type,
-            node_id=control_device_result.object_id,
-            object_id=control_device_result.device_id,
-            value=control_device_result.value,
+            command_type=control_object_result.target_value_type or MPC_DEVICE_CONTROL,
+            node_id=control_object_result.node_id,
+            object_type=control_object_result.object_type,
+            object_id=control_object_result.object_id,
+            target_value=control_object_result.target_value,
         )
 
     @staticmethod
@@ -244,8 +244,8 @@ class MpcResultReporter:
         attributes = {
             "front_water_level": predicted_result.front_water_level,
             "back_water_level": predicted_result.back_water_level,
-            "target_water_level": predicted_result.target_water_level,
-            "total_flow": predicted_result.total_flow,
+            "final_target_water_level": predicted_result.final_target_water_level,
+            "out_flow": predicted_result.out_flow,
         }
         return MpcResultDetail(
             horizon_step=horizon_step,
@@ -253,7 +253,7 @@ class MpcResultReporter:
             object_type=predicted_result.object_type,
             object_id=predicted_result.object_id,
             value=predicted_result.front_water_level,
-            target_value=predicted_result.target_water_level,
+            target_value=predicted_result.final_target_water_level,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
 

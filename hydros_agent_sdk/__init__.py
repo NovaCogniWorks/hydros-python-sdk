@@ -104,7 +104,7 @@ from hydros_agent_sdk.transport import (
     Transport,
 )
 from hydros_agent_sdk.mpc import (
-    ControlDeviceResult,
+    ControlObjectResult,
     HorizonControlStep,
     MetricsDataCache,
     MpcConfigResolver,
@@ -218,7 +218,7 @@ __all__ = [
     "PublishRecord",
     "Transport",
     "MqttMetricsPublisher",
-    "ControlDeviceResult",
+    "ControlObjectResult",
     "HorizonControlStep",
     "MetricsDataCache",
     "MqttMetricsSubscriber",
