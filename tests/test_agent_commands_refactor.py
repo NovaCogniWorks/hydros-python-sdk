@@ -1369,7 +1369,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
         attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
         self.assertEqual(attributes["front_water_level"], 2.1)
-        self.assertEqual(attributes["back_water_level"], 1.9)
+        self.assertEqual(attributes["out_water_level"], 1.9)
 
     def test_mpc_result_reporter_builds_single_result_from_horizon_control_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
@@ -1556,7 +1556,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(detail["target_value"], 63.12)
         attributes = json.loads(detail["attributes"])
         self.assertEqual(attributes["front_water_level"], 63.0)
-        self.assertEqual(attributes["back_water_level"], 62.8)
+        self.assertEqual(attributes["out_water_level"], 62.8)
 
     def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")

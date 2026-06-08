@@ -91,6 +91,14 @@ class MpcResultReporter:
                 self._count_details(report),
             )
             return report
+        logger.info(
+            "MPC result report prepared for coordinator: "
+            "command_id=%s, biz_scene_instance_id=%s, result_count=%s, detail_count=%s",
+            report.command_id,
+            report.context.biz_scene_instance_id if report.context else None,
+            len(report.mpc_results),
+            self._count_details(report),
+        )
         client.enqueue(report)
         logger.info(
             "MPC result report enqueued to coordinator: command_id=%s, result_count=%s, detail_count=%s",
@@ -126,6 +134,14 @@ class MpcResultReporter:
                 self._count_details(report),
             )
             return report
+        logger.info(
+            "MPC customize result report prepared for coordinator: "
+            "command_id=%s, biz_scene_instance_id=%s, result_count=%s, detail_count=%s",
+            report.command_id,
+            report.context.biz_scene_instance_id if report.context else None,
+            len(report.mpc_results),
+            self._count_details(report),
+        )
         client.enqueue(report)
         logger.info(
             "MPC customize result report enqueued to coordinator: command_id=%s, result_count=%s, detail_count=%s",
