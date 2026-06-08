@@ -576,7 +576,7 @@ class SimCoordinationClient:
                 )
                 self._handle_incoming_message(command)
                 duration_ms = (time.monotonic() - started_at) * 1000
-                logger.info(
+                logger.debug(
                     "Inbound command handled: type=%s, id=%s, context=%s, handlerDurationMs=%.2f, worker=%s",
                     command.command_type,
                     command.command_id,
@@ -652,7 +652,7 @@ class SimCoordinationClient:
         handler = self.handlers.get(command.command_type)
         if handler:
             try:
-                logger.info(
+                logger.debug(
                     "MQTT command accepted: type=%s, id=%s, context=%s, eventType=%s, handler=%s",
                     command.command_type,
                     command.command_id,
