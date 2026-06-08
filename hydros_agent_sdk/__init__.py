@@ -134,9 +134,7 @@ from hydros_agent_sdk.error_handling import (
     AgentErrorContext,
     validate_request,
 )
-from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 from hydros_agent_sdk.protocol.system_commands import (
-    HydroCommandLogReportRequest,
     SystemCmd,
     SystemCommand,
     SystemCommandRequest,
@@ -162,19 +160,12 @@ from hydros_agent_sdk.agent_commands import (
     HydroTargetWaterLevelResponse,
     build_ack_reply,
     DeviceValueTypeEnum,
-    AgentCommandLogOperations,
-    AgentCommandLogSnapshot,
-    AgentCommandLogStats,
     AgentCommandEnvelope,
     AgentCommandHandler,
     AgentCommandHandlerRegistry,
-    AgentCommandLogEntry,
-    AgentCommandLogStore,
-    SqliteAgentCommandLogStore,
     AgentCommandQueueService,
     AgentCommandRuntime,
     AgentCommandClient,
-    HydroCommandLogReportScheduler,
 )
 
 __all__ = [
@@ -269,8 +260,6 @@ __all__ = [
     "SystemCommand",
     "SystemCommandRequest",
     "SystemCommandResponse",
-    "CommandLogDTO",
-    "HydroCommandLogReportRequest",
 
     # 智能体指令运行时
     "AgentHydroCmd",
@@ -292,19 +281,12 @@ __all__ = [
     "HydroTargetWaterLevelResponse",
     "build_ack_reply",
     "DeviceValueTypeEnum",
-    "AgentCommandLogOperations",
-    "AgentCommandLogSnapshot",
-    "AgentCommandLogStats",
     "AgentCommandEnvelope",
     "AgentCommandHandler",
     "AgentCommandHandlerRegistry",
-    "AgentCommandLogEntry",
-    "AgentCommandLogStore",
-    "SqliteAgentCommandLogStore",
     "AgentCommandQueueService",
     "AgentCommandRuntime",
     "AgentCommandClient",
-    "HydroCommandLogReportScheduler",
 
     # 工具类
     "HydroObjectUtilsV2",

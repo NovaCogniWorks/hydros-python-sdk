@@ -4,7 +4,7 @@ Hydros Agent SDK 的系统命令模型。
 
 from __future__ import annotations
 
-from typing import List, Literal, Optional
+from typing import Optional
 
 from pydantic import Field
 
@@ -12,7 +12,6 @@ from hydros_agent_sdk.utils import generate_system_command_id
 
 from .base import HydroBaseModel
 from .models import CommandStatus
-from hydros_agent_sdk.agent_commands.models import CommandLogDTO
 
 
 class SystemCmd(HydroBaseModel):
@@ -46,10 +45,3 @@ class SystemCommandResponse(SystemCommand):
     error_code: Optional[str] = None
     error_detail: Optional[str] = None
 
-
-class HydroCommandLogReportRequest(SystemCommandRequest):
-    """智能体命令日志批量上报请求。"""
-
-    command_type: Literal["agent_command_logs_report_request"] = "agent_command_logs_report_request"
-    agent_logs: List[CommandLogDTO] = Field(default_factory=list)
-    system_id: Optional[str] = None

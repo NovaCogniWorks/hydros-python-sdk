@@ -149,7 +149,6 @@
 ### P1：目录放置不合理
 
 - SDK 包内不再允许放 `env.properties`。`load_env_config()` 默认从当前应用目录向上查找最近的 `env.properties`；环境配置只能放在示例、定制 Agent 目录或部署配置中。
-- `hydros_agent_sdk/dto_model/command_log_dto.py` 仅允许作为兼容导出。`CommandLogDTO` 本体归属 `hydros_agent_sdk/agent_commands/models/`，新代码必须从新位置导入。
 - 泵站 MPC 回放/调试脚本已从 `custom-agent/pump/scheduling/test_mpc.py`、`custom-agent/pump/scheduling/test_mpc_debug.py` 迁移到 `tests/pump_mpc/`，生产调度目录不再放 `test_*.py` 调试脚本。
 - `examples/logs/`、`__pycache__/`、`*.pyc`、`output/` 等运行产物不属于源码结构，不应作为开发依据，也不应进入提交。
 

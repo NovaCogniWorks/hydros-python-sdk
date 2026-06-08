@@ -18,7 +18,6 @@ from hydros_agent_sdk.agent_commands.models import (
     AgentCommandResponse,
     HydroCommandReceivedAckReply,
 )
-from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogEntry, AgentCommandLogStore
 
 from .execution_service import AgentCommandExecutionService
 from .routing import AgentCommandRoutePlanner
@@ -33,7 +32,6 @@ class AgentCommandQueueService:
     def __init__(
         self,
         handler_registry: AgentCommandHandlerRegistry,
-        command_log_store: AgentCommandLogStore,
         state_manager,
         sender: Callable[[AgentCommand], None],
         pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
@@ -41,7 +39,6 @@ class AgentCommandQueueService:
         max_workers: int = 8,
     ):
         self.handler_registry = handler_registry
-        self.command_log_store = command_log_store
         self.state_manager = state_manager
         self.sender = sender
         self.pending_retry_delay_ms = pending_retry_delay_ms
@@ -56,8 +53,6 @@ class AgentCommandQueueService:
         )
         self.execution_service = AgentCommandExecutionService(
             handler_registry=self.handler_registry,
-            command_log_store=self.command_log_store,
-            state_manager=self.state_manager,
             enqueue_command=self._command_queue.put,
             max_workers=self.max_workers,
         )
@@ -82,35 +77,22 @@ class AgentCommandQueueService:
     def enqueue_incoming(self, command: AgentCommand) -> None:
         """从这里接收 MQTT 收到的命令。"""
         command.auth()
-        current_node_id = self._get_current_node_id()
 
         if isinstance(command, AgentCommandRequest):
             if not self.route_planner.should_execute_locally(command):
                 logger.debug("忽略非本地 request: type=%s id=%s", command.command_type, command.command_id)
                 return
             command.command_status = CommandStatus.INIT
-            self.command_log_store.save_command_log(self._build_log_entry(command, current_node_id))
             self._command_queue.put(command)
             return
 
         if isinstance(command, HydroCommandReceivedAckReply):
-            if self.route_planner.should_track_inbound(command):
-                self.command_log_store.update_command_acked(command.command_id, current_node_id)
-            else:
+            if not self.route_planner.should_track_inbound(command):
                 logger.debug("忽略非本地 ACK: type=%s id=%s", command.command_type, command.command_id)
             return
 
         if isinstance(command, AgentCommandResponse):
-            if self.route_planner.should_track_inbound(command):
-                self.command_log_store.update_command_result(
-                    command.command_id,
-                    current_node_id,
-                    command.command_status or CommandStatus.FAILED,
-                    command.model_dump_json(by_alias=True),
-                    command.error_code,
-                    command.error_message,
-                )
-            else:
+            if not self.route_planner.should_track_inbound(command):
                 logger.debug("忽略非本地 response: type=%s id=%s", command.command_type, command.command_id)
             return
 
@@ -119,11 +101,9 @@ class AgentCommandQueueService:
     def enqueue_outbound(self, command: AgentCommand) -> None:
         """本地业务代码想发命令，就从这里进。"""
         command.auth()
-        current_node_id = self._get_current_node_id()
 
         if isinstance(command, AgentCommandRequest):
             command.command_status = command.command_status or CommandStatus.INIT
-            self.command_log_store.save_command_log(self._build_log_entry(command, current_node_id))
 
         self._command_queue.put(command)
 
@@ -164,35 +144,3 @@ class AgentCommandQueueService:
             return
 
         logger.debug("跳过无法路由的命令: type=%s id=%s", command.command_type, command.command_id)
-
-    def _get_current_node_id(self) -> str:
-        return self.state_manager.get_node_id() or "UNKNOWN"
-
-    def _build_log_entry(self, command: AgentCommandRequest, source_id: str) -> AgentCommandLogEntry:
-        source_is_local = bool(command.source and self.state_manager.is_local_agent(command.source))
-        target_is_local = bool(command.target and self.state_manager.is_local_agent(command.target))
-        context = command.context
-        tenant_id = str(context.tenant.tenant_id) if context.tenant and context.tenant.tenant_id else None
-        biz_scenario_id = (
-            str(context.biz_scenario.biz_scenario_id)
-            if context.biz_scenario and context.biz_scenario.biz_scenario_id
-            else None
-        )
-
-        return AgentCommandLogEntry(
-            command_id=command.command_id,
-            source_id=source_id,
-            tenant_id=tenant_id,
-            biz_scenario_id=biz_scenario_id,
-            biz_scene_instance_id=context.biz_scene_instance_id,
-            command_type=command.command_type,
-            command_request=command.model_dump_json(by_alias=True),
-            source_agent_id=command.source.agent_id if command.source else None,
-            source_agent_name=command.source.agent_name if command.source else None,
-            target_agent_id=command.target.agent_id if command.target else None,
-            target_agent_name=command.target.agent_name if command.target else None,
-            need_ack_reply=command.need_ack_reply,
-            acked=command.acked,
-            command_status=command.command_status,
-            source_type="LOCAL" if source_is_local and target_is_local else "REMOTE",
-        )

@@ -9,11 +9,10 @@ import logging
 import time
 import warnings
 from threading import Event
-from typing import Callable, Optional, Sequence, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 import paho.mqtt.client as mqtt
 
-from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.topics import HydrosTopics
 
@@ -117,49 +116,6 @@ class AgentCommandClient:
         predicate: Optional[Callable[[AgentCommand], bool]],
     ) -> None:
         self.runtime.set_pending_command_predicate(predicate)
-
-    def find_unreported_command_logs(self, limit: int = 100):
-        return self.runtime.find_unreported_command_logs(limit=limit)
-
-    def report_unreported_command_logs(self, consumer, limit: int = 100):
-        return self.runtime.report_unreported_command_logs(consumer=consumer, limit=limit)
-
-    def find_unacked_command_logs(self, limit: int = 100):
-        return self.runtime.find_unacked_command_logs(limit=limit)
-
-    def find_incomplete_command_logs(
-        self,
-        statuses: Optional[Sequence[CommandStatus]] = None,
-        limit: int = 100,
-    ):
-        return self.runtime.find_incomplete_command_logs(statuses=statuses, limit=limit)
-
-    def replay_incomplete_requests(
-        self,
-        statuses: Sequence[CommandStatus] = (CommandStatus.INIT,),
-        limit: int = 100,
-    ):
-        return self.runtime.replay_incomplete_requests(statuses=statuses, limit=limit)
-
-    def collect_command_log_snapshot(
-        self,
-        limit: int = 100,
-        incomplete_statuses: Sequence[CommandStatus] = (CommandStatus.INIT, CommandStatus.PROCESSING),
-    ):
-        return self.runtime.collect_command_log_snapshot(
-            limit=limit,
-            incomplete_statuses=incomplete_statuses,
-        )
-
-    def collect_command_log_stats(
-        self,
-        limit: int = 100,
-        incomplete_statuses: Sequence[CommandStatus] = (CommandStatus.INIT, CommandStatus.PROCESSING),
-    ):
-        return self.runtime.collect_command_log_stats(
-            limit=limit,
-            incomplete_statuses=incomplete_statuses,
-        )
 
     @property
     def runtime(self) -> "AgentCommandRuntime":

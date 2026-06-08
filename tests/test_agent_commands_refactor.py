@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -16,7 +17,6 @@ from hydros_agent_sdk.agent_commands import (
     HydroDirectGateOpeningResponse,
 )
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
-from hydros_agent_sdk.agent_commands.runtime.testing import wait_command_completed
 from hydros_agent_sdk.agents import CentralSchedulingAgent
 from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -407,9 +407,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertIsNotNone(runtime)
         self.assertIsNotNone(client._runtime)
-        self.assertTrue(os.path.exists(os.path.join("data", "agent_data.db")))
+        self.assertFalse(os.path.exists(os.path.join("data", "agent_data.db")))
 
-    def test_runtime_serializes_biz_scenario_id_as_string(self):
+    def test_runtime_executes_command_without_persistence_side_effect(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -431,20 +431,30 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sender=lambda command: None,
             max_workers=1,
         )
+        completed_event = Event()
 
-        runtime.send_command(
-            HydroDirectGateOpeningRequest(
-                command_id="cmd-010",
-                source=source,
-                target=target,
-                gate_opening=0.42,
+        class RecordingDirectGateHandler(DirectGateHandler):
+            def execute(self, request: HydroDirectGateOpeningRequest) -> HydroDirectGateOpeningResponse:
+                response = super().execute(request)
+                completed_event.set()
+                return response
+
+        runtime.register_handler(RecordingDirectGateHandler())
+
+        runtime.start()
+        try:
+            runtime.send_command(
+                HydroDirectGateOpeningRequest(
+                    command_id="cmd-010",
+                    source=source,
+                    target=target,
+                    gate_opening=0.42,
+                )
             )
-        )
 
-        entry = runtime.log_store.find_command_log_by_request_id("cmd-010", "node-a")
-        self.assertIsNotNone(entry)
-        self.assertEqual(entry.biz_scenario_id, "biz-scenario-010")
-        self.assertIsInstance(entry.biz_scenario_id, str)
+            self.assertTrue(completed_event.wait(timeout=2.0))
+        finally:
+            runtime.stop()
 
     def test_runtime_can_restart_after_stop(self):
         state_manager = AgentStateManager()
@@ -463,9 +473,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sender=sent_commands.append,
             max_workers=1,
         )
-        runtime.register_handler(DirectGateHandler())
+        completed = []
+        completed_event = Event()
+
+        class RecordingDirectGateHandler(DirectGateHandler):
+            def execute(self, request: HydroDirectGateOpeningRequest) -> HydroDirectGateOpeningResponse:
+                response = super().execute(request)
+                completed.append(response)
+                completed_event.set()
+                return response
+
+        runtime.register_handler(RecordingDirectGateHandler())
 
         def send_and_wait(command_id: str, gate_opening: float):
+            completed_event.clear()
             runtime.send_command(
                 HydroDirectGateOpeningRequest(
                     command_id=command_id,
@@ -474,14 +495,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     gate_opening=gate_opening,
                 )
             )
-            entry = wait_command_completed(runtime, command_id, timeout_seconds=2.0)
-            self.assertEqual(entry.command_status, CommandStatus.SUCCEED)
-            self.assertIsNotNone(entry.command_response)
+            self.assertTrue(completed_event.wait(timeout=2.0))
+            self.assertEqual(completed[-1].command_id, command_id)
+            self.assertEqual(completed[-1].command_status, CommandStatus.SUCCEED)
 
         runtime.start()
         send_and_wait("cmd-003a", 0.12)
         runtime.stop()
-        self.assertTrue(os.path.exists(os.path.join("data", "agent_data.db")))
+        self.assertFalse(os.path.exists(os.path.join("data", "agent_data.db")))
 
         runtime.start()
         send_and_wait("cmd-003b", 0.24)

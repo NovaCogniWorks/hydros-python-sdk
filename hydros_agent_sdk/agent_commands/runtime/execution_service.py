@@ -16,8 +16,6 @@ from hydros_agent_sdk.agent_commands.models import (
     AgentCommandRequest,
     build_ack_reply,
 )
-from hydros_agent_sdk.agent_commands.persistence import AgentCommandLogStore
-
 from .handlers import AgentCommandHandler
 from .registry import AgentCommandHandlerRegistry
 
@@ -26,19 +24,15 @@ logger = logging.getLogger(__name__)
 
 
 class AgentCommandExecutionService:
-    """把本地 handler 执行、状态更新和响应回写集中起来。"""
+    """把本地 handler 执行和响应回写集中起来。"""
 
     def __init__(
         self,
         handler_registry: AgentCommandHandlerRegistry,
-        command_log_store: AgentCommandLogStore,
-        state_manager,
         enqueue_command: Callable[[AgentCommand], None],
         max_workers: int = 8,
     ):
         self.handler_registry = handler_registry
-        self.command_log_store = command_log_store
-        self.state_manager = state_manager
         self.enqueue_command = enqueue_command
         self.max_workers = max_workers
 
@@ -68,14 +62,12 @@ class AgentCommandExecutionService:
 
     def _run_handler(self, handler: AgentCommandHandler, request: AgentCommandRequest) -> None:
         command_id = request.command_id
-        current_node_id = self._get_current_node_id()
 
         with self._lock:
             self._inflight_requests[command_id] = request
 
         try:
             request.command_status = CommandStatus.PROCESSING
-            self.command_log_store.update_command_status(command_id, current_node_id, CommandStatus.PROCESSING)
 
             if request.need_ack_reply and request.source is not None:
                 self.enqueue_command(build_ack_reply(request))
@@ -93,15 +85,4 @@ class AgentCommandExecutionService:
             with self._lock:
                 self._inflight_requests.pop(command_id, None)
 
-        self.command_log_store.update_command_result(
-            command_id,
-            current_node_id,
-            response.command_status or CommandStatus.FAILED,
-            response.model_dump_json(by_alias=True),
-            response.error_code,
-            response.error_message,
-        )
         self.enqueue_command(response)
-
-    def _get_current_node_id(self) -> str:
-        return self.state_manager.get_node_id() or "UNKNOWN"

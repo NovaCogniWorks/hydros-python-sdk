@@ -29,7 +29,6 @@ from .commands import (
 )
 from .device_value_types import DeviceValueTypeEnum
 from .types import ALL_AGENT_COMMAND_TYPES, AgentCommandTypes
-from .command_log_dto import CommandLogDTO
 
 __all__ = [
     "HydroCmd",
@@ -56,5 +55,4 @@ __all__ = [
     "HydroTargetWaterLevelResponse",
     "build_ack_reply",
     "DeviceValueTypeEnum",
-    "CommandLogDTO",
 ]
