@@ -29,6 +29,23 @@ def test_launcher_cli_parses_explicit_agent_names_without_business_expansion():
     assert not options.all_requested
 
 
+def test_launcher_cli_parses_system_default_central_opt_in():
+    class DiscoveryService:
+        def discover_all(self):
+            return ["scheduling"]
+
+    cli = LauncherCli(DiscoveryService())
+
+    options = cli.parse([
+        "multi_agent_launcher.py",
+        "--enable-system-central-scheduling-agent",
+        "scheduling",
+    ])
+
+    assert options.agent_names == ["scheduling"]
+    assert options.enable_system_central_scheduling_agent
+
+
 def test_multi_agent_coordinator_runs_generic_registration_flow():
     class Callback:
         def __init__(self):
@@ -112,7 +129,7 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
     assert not coordinator.running
 
 
-def test_registration_service_registers_system_default_central_scheduling_agent(monkeypatch):
+def test_registration_service_does_not_register_system_default_central_scheduling_agent_by_default(monkeypatch):
     class FakeAgent:
         pass
 
@@ -157,6 +174,64 @@ def test_registration_service_registers_system_default_central_scheduling_agent(
 
     callback = Callback()
     service = AgentFactoryRegistrationService(ModuleLoader(), "/tmp/hydros-agents/env.properties")
+
+    env_config, registered_agents = service.register_agents(callback, ["scheduling"])
+
+    assert env_config == {"hydros_cluster_id": "cluster", "hydros_node_id": "node"}
+    assert callback.registered[0][0] == "CENTRAL_SCHEDULING_AGENT_PUMP"
+    assert callback.system_default_env_config is None
+    assert [agent.agent_code for agent in registered_agents] == ["CENTRAL_SCHEDULING_AGENT_PUMP"]
+
+
+def test_registration_service_registers_system_default_central_scheduling_agent_when_enabled(monkeypatch):
+    class FakeAgent:
+        pass
+
+    class ModuleLoader:
+        def load(self, agent_name):
+            assert agent_name == "scheduling"
+            return SimpleNamespace(
+                name="scheduling",
+                agent_class=FakeAgent,
+                script_dir="/tmp/hydros-agents/scheduling",
+                agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+                agent_type="CENTRAL_SCHEDULING_AGENT_PUMP",
+                agent_display_name="泵站调度智能体",
+            )
+
+    class Callback:
+        def __init__(self):
+            self.registered = []
+            self.system_default_env_config = None
+
+        def register_agent_factory(self, agent_code, agent_factory):
+            self.registered.append((agent_code, agent_factory))
+
+        def register_system_default_central_scheduling_agent(self, env_config):
+            self.system_default_env_config = env_config
+            self.registered.append(("CENTRAL_SCHEDULING_AGENT", "system-default-factory"))
+
+    monkeypatch.setattr(
+        support_module,
+        "load_env_config",
+        lambda _env_file: {"hydros_cluster_id": "cluster", "hydros_node_id": "node"},
+    )
+    monkeypatch.setattr(
+        support_module,
+        "HydroAgentFactory",
+        lambda agent_class, config_file, env_config: {
+            "agent_class": agent_class,
+            "config_file": config_file,
+            "env_config": env_config,
+        },
+    )
+
+    callback = Callback()
+    service = AgentFactoryRegistrationService(
+        ModuleLoader(),
+        "/tmp/hydros-agents/env.properties",
+        register_default_central_scheduling_agent=True,
+    )
 
     env_config, registered_agents = service.register_agents(callback, ["scheduling"])
 
