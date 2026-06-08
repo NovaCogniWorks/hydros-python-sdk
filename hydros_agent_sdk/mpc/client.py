@@ -83,7 +83,7 @@ class MpcPlanningClient:
             response = self._opener(request, self.timeout_seconds)
             payload_bytes = response.read()
             raw_payload_text = payload_bytes.decode("utf-8", errors="replace")
-            logger.info("MPC optimization raw response received: bytes=%s", len(payload_bytes))
+            logger.info("MPC optimization raw response received: raw_payload_text=%s", raw_payload_text)
         except HTTPError as exc:
             logger.error(
                 "MPC planning service returned HTTP %s, response=%s",
