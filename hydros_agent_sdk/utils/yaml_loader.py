@@ -27,6 +27,8 @@ try:
 except ImportError:
     yaml = None
 
+from hydros_agent_sdk.version import SDK_USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 
@@ -89,7 +91,7 @@ class YamlLoader:
 
             # 创建带有合适 header 的请求。
             request = Request(encoded_url)
-            request.add_header('User-Agent', 'Hydros-Agent-SDK/0.1.6')
+            request.add_header('User-Agent', SDK_USER_AGENT)
 
             with urlopen(request, timeout=timeout) as response:
                 content = response.read().decode('utf-8')

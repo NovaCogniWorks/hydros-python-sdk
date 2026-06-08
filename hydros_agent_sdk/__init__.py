@@ -4,6 +4,7 @@ Hydros Agent SDK。
 Hydros 生态的官方 Python SDK，提供仿真智能体协调和 MQTT 协议支持。
 """
 
+from hydros_agent_sdk.version import SDK_USER_AGENT, __version__, get_sdk_version
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.context_manager import (
@@ -176,9 +177,11 @@ from hydros_agent_sdk.agent_commands import (
     HydroCommandLogReportScheduler,
 )
 
-__version__ = "0.1.6"
-
 __all__ = [
+    "__version__",
+    "get_sdk_version",
+    "SDK_USER_AGENT",
+
     # 核心客户端和回调
     "SimCoordinationClient",
     "SimCoordinationCallback",

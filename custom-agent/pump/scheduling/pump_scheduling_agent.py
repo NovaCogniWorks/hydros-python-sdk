@@ -764,12 +764,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             )
 
         try:
+            mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
             reporter = MpcResultReporter(sim_coordination_client=self.sim_coordination_client)
             reporter.publish_customize_report(
                 source_agent_instance=self,
-                mpc_task_state=None,
+                mpc_task_state= mpc_task_state,
                 horizon_step=horizon_step_list,
-                plan_type="ROLLING"
+                plan_type="optimal"
             )
         except Exception as e:
             logger.error(f"MPC customize report publish failed: {e}")
