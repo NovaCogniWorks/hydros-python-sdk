@@ -57,6 +57,7 @@ class LauncherOptions:
     debug_enabled: bool = False
     debug_wait: bool = True
     debug_port: int = 5678
+    enable_system_central_scheduling_agent: bool = False
     list_only: bool = False
     show_help: bool = False
     all_requested: bool = False
@@ -340,14 +341,12 @@ class AgentFactoryRegistrationService:
         self,
         module_loader: AgentModuleLoader,
         env_file: str,
-        register_system_default_central_scheduling_agent: bool = True,
+        register_default_central_scheduling_agent: bool = False,
         logger: Optional[logging.Logger] = None,
     ):
         self.module_loader = module_loader
         self.env_file = env_file
-        self.register_system_default_central_scheduling_agent = (
-            register_system_default_central_scheduling_agent
-        )
+        self.register_default_central_scheduling_agent = register_default_central_scheduling_agent
         self.logger = logger or logging.getLogger(__name__)
 
     def register_agents(
@@ -384,7 +383,7 @@ class AgentFactoryRegistrationService:
             self.logger.info("  Cluster ID: %s", env_config["hydros_cluster_id"])
             self.logger.info("  Node ID: %s", env_config["hydros_node_id"])
 
-        if self.register_system_default_central_scheduling_agent:
+        if self.register_default_central_scheduling_agent:
             callback.register_system_default_central_scheduling_agent(env_config)
             if not any(
                 agent.agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
@@ -576,6 +575,7 @@ class LauncherCli:
         debug_enabled = "--debug" in argv
         debug_wait = "--debug-nowait" not in argv
         debug_port = self._parse_debug_port(argv)
+        enable_system_central = "--enable-system-central-scheduling-agent" in argv
 
         if "--list" in argv:
             return LauncherOptions(
@@ -583,6 +583,7 @@ class LauncherCli:
                 debug_enabled=debug_enabled,
                 debug_wait=debug_wait,
                 debug_port=debug_port,
+                enable_system_central_scheduling_agent=enable_system_central,
                 list_only=True,
             )
 
@@ -600,6 +601,7 @@ class LauncherCli:
             debug_enabled=debug_enabled,
             debug_wait=debug_wait,
             debug_port=debug_port,
+            enable_system_central_scheduling_agent=enable_system_central,
             all_requested=all_requested,
         )
 
@@ -628,6 +630,8 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
     --debug            - 启用远程调试模式 (debugpy)
     --debug-port PORT  - 指定调试端口 (默认: 5678)
     --debug-nowait     - 不等待调试器连接，直接启动
+    --enable-system-central-scheduling-agent
+                       - 显式注册 SDK 内置 CENTRAL_SCHEDULING_AGENT（默认不注册）
     --full-log         - 使用完整日志格式（生产环境），默认使用简化格式
     --help             - 显示帮助信息
 
@@ -733,6 +737,7 @@ class MultiAgentCoordinator:
         log_file: str,
         module_loader: Optional[AgentModuleLoader] = None,
         registration_service: Optional[AgentFactoryRegistrationService] = None,
+        register_default_central_scheduling_agent: bool = False,
         client_factory: Optional[CoordinationClientFactory] = None,
         startup_reporter: Optional[LauncherStartupReporter] = None,
         callback_factory: Optional[Any] = None,
@@ -750,6 +755,7 @@ class MultiAgentCoordinator:
         self.registration_service = registration_service or AgentFactoryRegistrationService(
             module_loader=module_loader,
             env_file=env_file,
+            register_default_central_scheduling_agent=register_default_central_scheduling_agent,
             logger=self.logger,
         )
         self.client_factory = client_factory or CoordinationClientFactory()
@@ -930,6 +936,7 @@ class MultiAgentLauncherApp:
             env_file=self.env_file,
             log_file=self.log_file,
             module_loader=services.module_loader,
+            register_default_central_scheduling_agent=options.enable_system_central_scheduling_agent,
             logger=self.logger,
         )
         runtime = LauncherRuntime(coordinator, logger=self.logger)
