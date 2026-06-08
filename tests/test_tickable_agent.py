@@ -65,7 +65,7 @@ def test_tickable_agent_can_be_instantiated():
     )
 
     assert agent.current_step == 0
-    assert agent.get_time_series_value(1, "water_level") is None
+    assert agent.time_series_cache.get_value(1, "water_level", agent.current_step) is None
 
 
 def test_tickable_agent_exposes_runtime_context():
