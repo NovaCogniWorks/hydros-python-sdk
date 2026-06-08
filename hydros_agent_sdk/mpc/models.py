@@ -43,9 +43,10 @@ class PredictedResult(HydroBaseModel):
     back_water_level: Optional[float] = None
     final_target_water_level: Optional[float] = None
     out_flow: Optional[float] = None
+    efficiency: Optional[float] = None
 
 
-class HorizonControlStep(HydroBaseModel):
+class HorizonStep(HydroBaseModel):
     horizon_step: Optional[int] = None
     control_object_list: List[ControlObjectResult] = Field(default_factory=list)
     predicted_result_list: List[PredictedResult] = Field(default_factory=list)
@@ -69,7 +70,7 @@ class MpcOptimizeResponse(HydroBaseModel):
     loss: Optional[float] = None
     gate_operations: Optional[int] = None
     gate_amplitude: Optional[float] = None
-    horizon_controls: List[HorizonControlStep] = Field(default_factory=list)
+    horizon_controls: List[HorizonStep] = Field(default_factory=list)
 
 
 class MpcResultDetail(HydroBaseModel):

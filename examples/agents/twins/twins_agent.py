@@ -262,7 +262,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
 
                     for metrics_code in bc_metrics:
                         # 从时间序列缓存获取值
-                        value = self.get_time_series_value(
+                        value = self.time_series_cache.get_value(
                             child.object_id,
                             metrics_code,
                             step

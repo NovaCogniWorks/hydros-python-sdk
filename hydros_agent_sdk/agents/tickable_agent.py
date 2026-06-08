@@ -15,12 +15,8 @@ from hydros_agent_sdk.runtime.time_series_cache import TimeSeriesCache
 from hydros_agent_sdk.transport.mqtt_metrics_publisher import MqttMetricsPublisher
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
-    SimTaskInitRequest,
-    SimTaskInitResponse,
     TickCmdRequest,
     TickCmdResponse,
-    SimTaskTerminateRequest,
-    SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
 )
@@ -61,7 +57,7 @@ class TickableAgent(BaseHydroAgent):
 
     子类可覆盖：
     - on_time_series_data_update(): 处理边界条件更新
-    - send_metrics(): 通过 MQTT 发送指标数据
+    - on_boundary_condition_update(): 响应缓存后的边界条件变化
     """
 
     def __init__(
@@ -124,26 +120,6 @@ class TickableAgent(BaseHydroAgent):
         """返回该智能体是否参与仿真 tick 分派。"""
         return True
 
-    @abstractmethod
-    def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
-        """
-        初始化智能体。
-
-        子类应完成：
-        1. 使用 self.load_agent_configuration(request) 加载智能体配置
-        2. 按需加载水网拓扑
-        3. 初始化仿真状态
-        4. 注册到状态管理器
-        5. 返回 SimTaskInitResponse
-
-        Args:
-            request: 任务初始化请求
-
-        Returns:
-            任务初始化响应
-        """
-        pass
-
     def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
         处理仿真 tick。
@@ -171,7 +147,7 @@ class TickableAgent(BaseHydroAgent):
 
             # 通过 MQTT 发送指标数据
             if metrics_list:
-                self.send_metrics_batch(metrics_list)
+                self.metrics_publisher.publish_batch(metrics_list)
                 logger.info(f"Sent {len(metrics_list)} metrics for step {request.step}")
 
             response = ResponseFactory.tick_succeed(self, request)
@@ -200,24 +176,6 @@ class TickableAgent(BaseHydroAgent):
 
         Returns:
             要通过 MQTT 发送的 MqttMetrics 对象列表，或 None
-        """
-        pass
-
-    @abstractmethod
-    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        """
-        终止智能体并清理资源。
-
-        子类应完成：
-        1. 清理仿真状态
-        2. 从状态管理器注销
-        3. 返回 SimTaskTerminateResponse
-
-        Args:
-            request: 任务终止请求
-
-        Returns:
-            任务终止响应
         """
         pass
 
@@ -274,36 +232,6 @@ class TickableAgent(BaseHydroAgent):
             time_series_list: 已更新的时序数据列表
         """
         pass
-
-    def get_time_series_value(
-        self,
-        object_id: int,
-        metrics_code: str,
-        step: Optional[int] = None
-    ) -> Optional[float]:
-        """
-        从缓存获取时序值。
-
-        Args:
-            object_id: 对象 ID
-            metrics_code: 指标编码
-            step: 仿真步（默认使用当前步）
-
-        Returns:
-            时序值；未找到时返回 None
-        """
-        # 未指定时使用当前步
-        target_step = step if step is not None else self._current_step
-        return self.time_series_cache.get_value(object_id, metrics_code, target_step)
-
-    def send_metrics_batch(self, metrics_list: List[MqttMetrics]):
-        """
-        通过 MQTT 批量发送指标数据。
-
-        Args:
-            metrics_list: 要发送的 MqttMetrics 对象列表
-        """
-        return self.metrics_publisher.publish_batch(metrics_list)
 
     @property
     def current_step(self) -> int:

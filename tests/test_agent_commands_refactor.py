@@ -30,7 +30,7 @@ from hydros_agent_sdk.mpc.models import (
     SensorData,
     PredictedResult,
 )
-from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
     MpcResultReport,
@@ -110,7 +110,7 @@ class CentralSchedulingAgentForTest(CentralSchedulingAgent):
         return None
 
     def on_init(self, request: SimTaskInitRequest):
-        self.agent_command_gateway.start()
+        self._agent_command_gateway.start()
         return SimTaskInitResponse(
             context=self.context,
             command_id=request.command_id,
@@ -126,7 +126,7 @@ class CentralSchedulingAgentForTest(CentralSchedulingAgent):
         return self.optimization_result
 
     def on_terminate(self, request: SimTaskTerminateRequest):
-        self.agent_command_gateway.shutdown()
+        self._agent_command_gateway.shutdown()
         return SimTaskTerminateResponse(
             context=self.context,
             command_id=request.command_id,
@@ -532,7 +532,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             mock_client_cls.return_value = mock_client
 
             agent.on_init(request)
-            agent.agent_command_gateway.send_command(Mock())
+            agent._agent_command_gateway.send_command(Mock())
             agent.on_terminate(SimTaskTerminateRequest(command_id="term-004", context=context))
 
             mock_client_cls.assert_called_once_with(
@@ -573,8 +573,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         target = build_agent_instance("target-006", "PUMP_AGENT_001", "node-b", context)
 
-        with patch.object(agent.control_command_builder, "get_sibling_agent_instance", return_value=target):
-            request = agent.control_command_builder.build_station_target_value_request(
+        with patch.object(agent._control_command_builder, "get_sibling_agent_instance", return_value=target):
+            request = agent._control_command_builder.build_station_target_value_request(
                 target_agent_code="PUMP_AGENT_001",
                 target_command_type=DeviceValueTypeEnum.GATE_OPENING.code,
                 target_value=1.25,
@@ -622,14 +622,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         }
         pump_request = Mock(name="pump_request")
         with patch.object(
-            agent.control_command_dispatcher,
+            agent._control_command_dispatcher,
             "build_station_target_value_request",
             return_value=pump_request,
         ) as build_request, patch.object(
-            agent.control_command_dispatcher,
+            agent._control_command_dispatcher,
             "send_command",
         ) as send_command:
-            agent.control_command_dispatcher.dispatch([control_command])
+            agent._control_command_dispatcher.dispatch([control_command])
 
         build_request.assert_called_once_with(
             target_agent_code="PUMP_AGENT_001",
@@ -767,7 +767,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         self.assertEqual(agent.optimization_steps, [5])
-        runtime = agent.mpc_rolling_runtime
+        runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
         self.assertEqual(runtime.mpc_task_state.start_step, 5)
         self.assertEqual(runtime.mpc_task_state.current_step, 5)
@@ -808,7 +808,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertEqual(response.command_status, CommandStatus.FAILED)
-        self.assertIsNone(agent.mpc_rolling_runtime.mpc_task_state)
+        self.assertIsNone(agent._mpc_rolling_runtime.mpc_task_state)
 
     def test_central_scheduling_agent_prefers_scenario_sim_agent_properties(self):
         state_manager = AgentStateManager()
@@ -850,7 +850,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
-        runtime = agent.mpc_rolling_runtime
+        runtime = agent._mpc_rolling_runtime
         self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 60)
         self.assertEqual(runtime.mpc_task_state.total_steps, 36)
 
@@ -891,7 +891,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
-        runtime = agent.mpc_rolling_runtime
+        runtime = agent._mpc_rolling_runtime
         self.assertEqual(runtime.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
         self.assertEqual(
             runtime.mpc_task_state.target_and_constrain_config_url,
@@ -927,7 +927,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-before", context=context, step=0))
         self.assertEqual(agent.optimization_steps, [0])
-        runtime = agent.mpc_rolling_runtime
+        runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
         self.assertEqual(runtime.mpc_task_state.start_step, 0)
 
@@ -973,7 +973,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-disabled", context=context, step=0))
 
         self.assertEqual(agent.optimization_steps, [])
-        self.assertFalse(agent.mpc_rolling_runtime.is_mpc_optimizing_on_the_loop())
+        self.assertFalse(agent._mpc_rolling_runtime.is_mpc_optimizing_on_the_loop())
 
     def test_mpc_config_resolver_reads_mpc_service_base_url_from_environment(self):
         with patch.dict(
@@ -1061,7 +1061,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         agent = factory.create_agent(sim_client, context)
-        client = agent.get_or_create_mpc_planning_client()
+        client = agent._mpc_optimization_service.get_or_create_mpc_planning_client()
 
         self.assertIsNotNone(client)
         self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
@@ -1707,7 +1707,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         sent_commands = []
 
-        with patch.object(agent.control_command_dispatcher, "send_command", side_effect=sent_commands.append):
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
             agent.on_time_series_data_update(
                 build_time_series_update_request(context, command_id="ts-update-015", auto_schedule_at_step=1)
             )
@@ -1825,7 +1825,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         sent_commands = []
 
-        with patch.object(agent.control_command_dispatcher, "send_command", side_effect=sent_commands.append):
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
             agent.on_time_series_data_update(
                 build_time_series_update_request(context, command_id="ts-update-015-managed", auto_schedule_at_step=1)
             )
@@ -1923,7 +1923,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         sent_commands = []
 
-        with patch.object(agent.control_command_dispatcher, "send_command", side_effect=sent_commands.append):
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
             agent.on_time_series_data_update(
                 build_time_series_update_request(
                     context,
@@ -2197,7 +2197,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_node_id="node-a",
         )
 
-        self.assertIs(agent.target_agent_resolver.get_sibling_agent_instance("SOURCE_AGENT"), sibling)
+        self.assertIs(agent._target_agent_resolver.get_sibling_agent_instance("SOURCE_AGENT"), sibling)
 
         terminate_request = SimTaskTerminateRequest(command_id="term-005", context=context)
         callback.on_task_terminate(terminate_request)

@@ -13,6 +13,7 @@ class MockClient:
     def __init__(self):
         self.state_manager = self
         self.mqtt_client = Mock()
+        self.topic = "test/topic"
     def send_command(self, req): pass
     def subscribe(self, topic): pass
     def init_task(self, ctx, agents): pass
@@ -33,7 +34,7 @@ class TestPumpSchedulingAgent(unittest.TestCase):
         self.agent.properties["mpc_config_url"] = "custom-agent/pump/data/config_xhh.yaml"
         mock_agent = Mock()
         mock_agent.agent_code = "mock_station_code"
-        self.agent.target_agent_resolver.resolve_target_agent_for_object = Mock(return_value=mock_agent)
+        self.agent._target_agent_resolver.resolve_target_agent_for_object = Mock(return_value=mock_agent)
         self.agent._lazy_init_odd_mpc()
 
     def test_rolling_optimization(self):

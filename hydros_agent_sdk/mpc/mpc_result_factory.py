@@ -30,10 +30,11 @@ class MpcResultFactory:
     def build_predicted_result(
         object_id: int,
         object_type: str,
-        front_water_level: float,
-        final_target_water_level: float,
-        back_water_level: float,
-        out_flow: float,
+        front_water_level: float | None,
+        final_target_water_level: float | None,
+        back_water_level: float | None,
+        out_flow: float | None,
+        efficiency: float | None = None,
     ) -> PredictedResult:
         return PredictedResult(
             object_id=object_id,
@@ -42,4 +43,5 @@ class MpcResultFactory:
             final_target_water_level=final_target_water_level,
             back_water_level=back_water_level,
             out_flow=out_flow,
+            efficiency=efficiency,
         )

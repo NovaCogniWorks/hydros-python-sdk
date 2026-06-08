@@ -11,7 +11,7 @@ from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
-from hydros_agent_sdk.mpc.reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger(__name__)

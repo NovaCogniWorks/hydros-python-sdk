@@ -79,6 +79,10 @@ class LocalController:
                 unit_id: [int(memory.unit_status.get(unit_id, 0))] * self.runtime.control_horizon_lower
                 for unit_id in memory.unit_status
             },
+            predicted_unit_efficiencies={
+                unit_id: [0.0] * self.runtime.control_horizon_lower
+                for unit_id in memory.unit_status
+            },
             candidate_plans=[],
         )
 
@@ -137,6 +141,7 @@ class LocalController:
                 predicted_unit_openings={unit_id: list(values) for unit_id, values in plan["predicted_unit_openings"].items()},
                 predicted_unit_flows={unit_id: list(values) for unit_id, values in plan["predicted_unit_flows"].items()},
                 predicted_unit_status={unit_id: list(values) for unit_id, values in plan["predicted_unit_status"].items()},
+                predicted_unit_efficiencies={unit_id: list(values) for unit_id, values in plan["predicted_unit_efficiencies"].items()},
                 candidate_plans=list(plan["candidate_plans"]),
             )
 
@@ -219,6 +224,7 @@ class LocalController:
             predicted_unit_openings={unit_id: list(values) for unit_id, values in best["predicted_unit_openings"].items()},
             predicted_unit_flows={unit_id: list(values) for unit_id, values in best["predicted_unit_flows"].items()},
             predicted_unit_status={unit_id: list(values) for unit_id, values in best["predicted_unit_status"].items()},
+            predicted_unit_efficiencies={unit_id: list(values) for unit_id, values in best["predicted_unit_efficiencies"].items()},
             candidate_plans=candidate_plans,
         )
 
@@ -257,6 +263,7 @@ class LocalController:
         predicted_unit_openings = {unit_id: [] for unit_id in available_ids}
         predicted_unit_flows = {unit_id: [] for unit_id in available_ids}
         predicted_unit_status = {unit_id: [] for unit_id in available_ids}
+        predicted_unit_efficiencies = {unit_id: [] for unit_id in available_ids}
         for step, row in enumerate(selected_rows):
             target_flow = float(transfer_bundle.reference_flow[step])
             normalized_flow_errors.append(abs(float(row.flow) - target_flow) / max(abs(target_flow), 1.0))
@@ -272,6 +279,10 @@ class LocalController:
                 predicted_unit_openings[unit_id].append(float(row.unit_openings.get(unit_id, 0.0)))
                 predicted_unit_flows[unit_id].append(float(row.unit_flows.get(unit_id, 0.0)))
                 predicted_unit_status[unit_id].append(int(row.unit_status.get(unit_id, 0)))
+                flow_u = float(row.unit_flows.get(unit_id, 0.0))
+                head_step = float(transfer_bundle.reference_head[step])
+                eff_u = float(self.flow_service.get_unit_model(station_ctx.station_id, unit_id).predict_efficiency(flow_u, head_step)) if flow_u > 0 else 0.0
+                predicted_unit_efficiencies[unit_id].append(eff_u)
 
         level_prediction = self._predict_station_response(
             station_ctx=station_ctx,
@@ -319,6 +330,7 @@ class LocalController:
             "predicted_unit_openings": predicted_unit_openings,
             "predicted_unit_flows": predicted_unit_flows,
             "predicted_unit_status": predicted_unit_status,
+            "predicted_unit_efficiencies": predicted_unit_efficiencies,
             "candidate_plans": candidate_plans,
         }
 
@@ -447,6 +459,7 @@ class LocalController:
         step_total_flows: List[float] = []
         step_avg_openings: List[float] = []
         step_avg_efficiencies: List[float] = []
+        step_unit_efficiencies: List[Dict[int, float]] = []
 
         for step in range(horizon):
             target_flow = float(transfer_bundle.reference_flow[step])
@@ -466,6 +479,7 @@ class LocalController:
             step_total_flows.append(float(optimized["total_flow"]))
             step_avg_openings.append(float(np.mean([optimized["openings"][unit_id] for unit_id in active_ids])))
             step_avg_efficiencies.append(float(optimized["avg_efficiency"]))
+            step_unit_efficiencies.append(optimized["unit_efficiencies"])
             previous_openings = optimized["openings"]
 
         step0_openings = {unit_id: 0.0 for unit_id in available_ids}
@@ -478,11 +492,13 @@ class LocalController:
         predicted_unit_openings = {unit_id: [] for unit_id in available_ids}
         predicted_unit_flows = {unit_id: [] for unit_id in available_ids}
         predicted_unit_status = {unit_id: [] for unit_id in available_ids}
+        predicted_unit_efficiencies = {unit_id: [] for unit_id in available_ids}
         for step in range(horizon):
             for unit_id in available_ids:
                 predicted_unit_openings[unit_id].append(float(step_openings[step].get(unit_id, 0.0)))
                 predicted_unit_flows[unit_id].append(float(step_unit_flows[step].get(unit_id, 0.0)))
                 predicted_unit_status[unit_id].append(int(step_unit_status[step].get(unit_id, 0)))
+                predicted_unit_efficiencies[unit_id].append(float(step_unit_efficiencies[step].get(unit_id, 0.0)))
 
         normalized_flow_errors = []
         for step in range(horizon):
@@ -545,6 +561,7 @@ class LocalController:
             "predicted_unit_openings": predicted_unit_openings,
             "predicted_unit_flows": predicted_unit_flows,
             "predicted_unit_status": predicted_unit_status,
+            "predicted_unit_efficiencies": predicted_unit_efficiencies,
         }
 
     def _predict_station_response(
@@ -668,6 +685,7 @@ class LocalController:
 
         openings: Dict[int, float] = {}
         unit_flows: Dict[int, float] = {}
+        unit_efficiencies: Dict[int, float] = {}
         efficiencies: List[float] = []
         total_flow = 0.0
         for unit_id, opening in zip(active_unit_ids, result.x):
@@ -678,13 +696,16 @@ class LocalController:
             flow_value = float(predicted_flow)
             openings[unit_id] = opening_value
             unit_flows[unit_id] = flow_value
-            efficiencies.append(float(unit_models[unit_id].predict_efficiency(flow_value, head)))
+            eff = float(unit_models[unit_id].predict_efficiency(flow_value, head))
+            efficiencies.append(eff)
+            unit_efficiencies[unit_id] = eff
             total_flow += flow_value
 
         avg_efficiency = float(np.mean(efficiencies)) if efficiencies else 0.0
         return {
             "openings": openings,
             "unit_flows": unit_flows,
+            "unit_efficiencies": unit_efficiencies,
             "total_flow": float(total_flow),
             "avg_efficiency": avg_efficiency,
         }

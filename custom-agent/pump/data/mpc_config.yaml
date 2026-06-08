@@ -338,8 +338,8 @@ global_params:
   rho: 1000
   g: 9.81
 flow_depart:
-  step_q: 4.0
-  step_h: 0.5
+  step_q: 2.0
+  step_h: 0.3
   data_dir: data
   output_dir: output
 scheduling:

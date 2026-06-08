@@ -109,7 +109,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.state_manager.add_local_agent(self)
 
             # 5. 启动 agent command 客户端，后面就能直接发指令
-            self.agent_command_gateway.start()
+            self._agent_command_gateway.start()
 
             logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
 
@@ -127,7 +127,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             )
         except Exception:
             # 初始化失败就把客户端收掉，别把半拉资源留住
-            self.agent_command_gateway.shutdown()
+            self._agent_command_gateway.shutdown()
             raise
 
 
@@ -659,7 +659,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 目标智能体编码 target_agent_code 可从 TargetAgentResolver 获取
                 # 示例：target_agent_code = None
                 # 示例：if unit_object_id is not None:
-                # 示例：    agent_instance = self.target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
+                # 示例：    agent_instance = self._target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
                 # 示例：    if agent_instance:
                 # 示例：        target_agent_code = agent_instance.agent_code
 
@@ -675,6 +675,107 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 })
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
+        
+        # 按照用户要求，生成 MpcResultReport 并发送
+        from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
+        from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+        from hydros_agent_sdk.mpc.models import HorizonStep
+
+        try:
+            first_sid = self.system_config.station_ids[0]
+            plan_len = len(actions[first_sid].predicted_openings)
+        except Exception:
+            plan_len = 10
+        
+        horizon_step_list = []
+        for i in range(plan_len):
+            control_object_list = []
+            predicted_result_list = []
+            
+            for sid in self.system_config.station_ids:
+                st_action = actions[sid]
+                
+                # 全站水位预测从 upper_plan 中取
+                st_front = upper_plan.station_front_levels[sid][i] if sid in upper_plan.station_front_levels and i < len(upper_plan.station_front_levels[sid]) else None
+                st_back = upper_plan.station_back_levels[sid][i] if sid in upper_plan.station_back_levels and i < len(upper_plan.station_back_levels[sid]) else None
+                
+                # 单机组预测与控制
+                for uid, op in st_action.unit_openings.items():
+                    # 控制量（叶片角）
+                    st = st_action.unit_status.get(uid, 0)
+                    target_value = 100.0 if st == 0 else float(op)
+                    
+                    control_object_list.append(
+                        MpcResultFactory.build_control_object_result(
+                            object_id=uid,
+                            target_value=target_value,
+                            object_type="叶片角"
+                        )
+                    )
+                    
+                    # 单机组预测流量和效率
+                    u_flow_list = st_action.predicted_unit_flows.get(uid, [])
+                    u_eff_list = getattr(st_action, "predicted_unit_efficiencies", {}).get(uid, [])
+                    u_flow_val = float(u_flow_list[i]) if i < len(u_flow_list) else None
+                    u_eff_val = float(u_eff_list[i]) if i < len(u_eff_list) else None
+                    
+                    # 根据用户要求，单机组水位从全局水位取
+                    predicted_result_list.append(
+                        MpcResultFactory.build_predicted_result(
+                            object_id=uid,
+                            object_type="PUMP_UNIT",
+                            front_water_level=st_front,
+                            final_target_water_level=None,
+                            back_water_level=st_back,
+                            out_flow=u_flow_val,
+                            efficiency=u_eff_val
+                        )
+                    )
+                
+                # 全站级预测
+                if i == 0:
+                    st_flow = float(st_action.selected_flow)
+                else:
+                    ref_flow_list = upper_plan.flow_refs.get(sid, [])
+                    st_flow = float(ref_flow_list[i]) if i < len(ref_flow_list) else None
+                
+                # 全站平均效率预测
+                st_eff_list = getattr(st_action, "predicted_efficiencies", [])
+                st_eff_val = float(st_eff_list[i]) if i < len(st_eff_list) else None
+
+                predicted_result_list.append(
+                    MpcResultFactory.build_predicted_result(
+                        object_id=sid,
+                        object_type="PUMP_STATION",
+                        front_water_level=st_front,
+                        final_target_water_level=None,
+                        back_water_level=st_back,
+                        out_flow=st_flow,
+                        efficiency=st_eff_val
+                    )
+                )
+
+            horizon_step_list.append(
+                HorizonStep(
+                    horizon_step=i,
+                    control_object_list=control_object_list,
+                    predicted_result_list=predicted_result_list
+                )
+            )
+
+        try:
+            reporter = MpcResultReporter(sim_coordination_client=self.sim_coordination_client)
+            reporter.publish_customize_report(
+                source_agent_instance=self,
+                mpc_task_state=None,
+                horizon_step=horizon_step_list,
+                plan_type="ROLLING"
+            )
+        except Exception as e:
+            logger.error(f"MPC customize report publish failed: {e}")
+            import traceback
+            traceback.print_exc()
+
         return commands
 
 
@@ -756,7 +857,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
         # 清理资源
-        self.agent_command_gateway.shutdown()
+        self._agent_command_gateway.shutdown()
         self._optimization_model = None
         
         # 从状态管理器中注销
