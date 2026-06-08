@@ -709,7 +709,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         MpcResultFactory.build_control_object_result(
                             object_id=uid,
                             target_value=target_value,
-                            object_type="叶片角"
+                            object_type=HydroObjectType.PUMP,
+                            target_value_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
                         )
                     )
                     
@@ -757,7 +758,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
             horizon_step_list.append(
                 HorizonStep(
-                    horizon_step=i,
+                    horizon_step=i + 1,
                     control_object_list=control_object_list,
                     predicted_result_list=predicted_result_list
                 )

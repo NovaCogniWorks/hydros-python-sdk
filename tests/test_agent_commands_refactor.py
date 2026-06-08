@@ -25,7 +25,7 @@ from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
-    HorizonControlStep,
+    HorizonStep,
     MpcOptimizeResponse,
     SensorData,
     PredictedResult,
@@ -1329,7 +1329,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             gate_operations=1,
             gate_amplitude=0.4,
             horizon_controls=[
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1378,7 +1378,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(attributes["final_target_water_level"], 2.3)
         self.assertEqual(attributes["out_flow"], 33.0)
 
-    def test_mpc_result_reporter_builds_single_result_from_horizon_control_steps(self):
+    def test_mpc_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
         state = MpcTaskState(
             context=context,
@@ -1389,8 +1389,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         result = MpcResultReporter.build_result(
             mpc_task_state=state,
-            horizon_control_step=[
-                HorizonControlStep(
+            horizon_step=[
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1449,8 +1449,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         report = MpcResultReporter().build_customize_report(
             source_agent_instance=source,
             mpc_task_state=state,
-            horizon_control_step=[
-                HorizonControlStep(
+            horizon_step=[
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1491,8 +1491,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             report = reporter.publish_customize_report(
                 source_agent_instance=source,
                 mpc_task_state=state,
-                horizon_control_step=[
-                    HorizonControlStep(
+                horizon_step=[
+                    HorizonStep(
                         horizon_step=1,
                         control_object_list=[
                             ControlObjectResult(
@@ -1584,7 +1584,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         response = MpcOptimizeResponse(
             plan_type="OPTIMAL",
             horizon_controls=[
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1596,7 +1596,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         )
                     ],
                 ),
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=2,
                     control_object_list=[
                         ControlObjectResult(
@@ -1608,7 +1608,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         )
                     ],
                 ),
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=3,
                     control_object_list=[
                         ControlObjectResult(
@@ -1664,7 +1664,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         mpc_response = MpcOptimizeResponse(
             plan_type="optimal",
             horizon_controls=[
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1783,7 +1783,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         mpc_response = MpcOptimizeResponse(
             plan_type="optimal",
             horizon_controls=[
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1880,7 +1880,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         mpc_response = MpcOptimizeResponse(
             plan_type="optimal",
             horizon_controls=[
-                HorizonControlStep(
+                HorizonStep(
                     horizon_step=1,
                     control_object_list=[
                         ControlObjectResult(
@@ -1991,7 +1991,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 MpcOptimizeResponse(
                     plan_type="OPTIMAL",
                     horizon_controls=[
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=1,
                             control_object_list=[
                                 ControlObjectResult(
@@ -2003,7 +2003,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                 )
                             ],
                         ),
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=2,
                             control_object_list=[
                                 ControlObjectResult(
@@ -2015,7 +2015,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                 )
                             ],
                         ),
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=3,
                             control_object_list=[
                                 ControlObjectResult(
@@ -2073,7 +2073,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 MpcOptimizeResponse(
                     plan_type="OPTIMAL",
                     horizon_controls=[
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=1,
                             control_object_list=[
                                 ControlObjectResult(
@@ -2085,7 +2085,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                 )
                             ],
                         ),
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=2,
                             control_object_list=[
                                 ControlObjectResult(
@@ -2097,7 +2097,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                 )
                             ],
                         ),
-                        HorizonControlStep(
+                        HorizonStep(
                             horizon_step=3,
                             control_object_list=[
                                 ControlObjectResult(

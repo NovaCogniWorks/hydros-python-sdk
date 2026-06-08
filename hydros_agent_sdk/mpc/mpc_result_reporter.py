@@ -20,7 +20,7 @@ from .models import (
 if TYPE_CHECKING:
     from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
 MPC_DEVICE_CONTROL = "OPENING"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
@@ -53,7 +53,7 @@ class MpcResultReporter:
         self,
         source_agent_instance: Optional[HydroAgentInstance],
         mpc_task_state: Optional["MpcTaskState"],
-        horizon_step: List[HorizonStep],
+        horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
     ) -> Optional[MpcResultReport]:
         result = self.build_customize_results(
@@ -112,7 +112,7 @@ class MpcResultReporter:
         self,
         source_agent_instance: Optional[HydroAgentInstance],
         mpc_task_state: Optional["MpcTaskState"],
-        horizon_step: List[HorizonStep],
+        horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
     ) -> Optional[MpcResultReport]:
         report = self.build_customize_report(
@@ -176,7 +176,7 @@ class MpcResultReporter:
     def build_customize_results(
         cls,
         mpc_task_state: Optional["MpcTaskState"],
-        horizon_step: List[HorizonStep],
+        horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,
         gate_operations: Optional[int] = None,
@@ -207,7 +207,7 @@ class MpcResultReporter:
     def build_result(
         cls,
         mpc_task_state: Optional["MpcTaskState"],
-        horizon_step: List[HorizonStep],
+        horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,
         gate_operations: Optional[int] = None,
