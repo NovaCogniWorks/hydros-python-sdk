@@ -15,9 +15,8 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandEnvelope,
     AgentCommandHandler,
     AgentCommandRuntime,
-    HydroDirectGateOpeningRequest,
-    HydroDirectGateOpeningResponse,
     HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agents import CentralSchedulingAgent
@@ -86,20 +85,21 @@ def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: 
     )
 
 
-class DirectGateHandler(AgentCommandHandler[HydroDirectGateOpeningRequest, HydroDirectGateOpeningResponse]):
+class StationTargetValueHandler(AgentCommandHandler[HydroStationTargetValueRequest, HydroStationTargetValueResponse]):
     def get_command(self) -> str:
-        return "direct_gate_opening_request"
+        return "update_station_target_value_request"
 
     @property
     def response_type(self):
-        return HydroDirectGateOpeningResponse
+        return HydroStationTargetValueResponse
 
-    def execute(self, request: HydroDirectGateOpeningRequest) -> HydroDirectGateOpeningResponse:
-        return HydroDirectGateOpeningResponse.from_request(
+    def execute(self, request: HydroStationTargetValueRequest) -> HydroStationTargetValueResponse:
+        return HydroStationTargetValueResponse.from_request(
             request,
             command_status=CommandStatus.SUCCEED,
             success=True,
-            final_gate_opening=request.gate_opening,
+            target_value_type=request.target_value_type,
+            target_value=request.target_value,
         )
 
 
@@ -274,16 +274,19 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         envelope = AgentCommandEnvelope(
             command={
                 "command_id": "cmd-001",
-                "command_type": "direct_gate_opening_request",
+                "command_type": "update_station_target_value_request",
                 "source": source.model_dump(mode="json"),
                 "target": target.model_dump(mode="json"),
-                "gate_opening": 0.75,
+                "object_id": 501,
+                "object_type": "Gate",
+                "target_value_type": "gate_opening",
+                "target_value": 0.75,
             }
         )
 
-        self.assertIsInstance(envelope.command, HydroDirectGateOpeningRequest)
+        self.assertIsInstance(envelope.command, HydroStationTargetValueRequest)
         self.assertEqual(envelope.command.command_id, "cmd-001")
-        self.assertAlmostEqual(envelope.command.gate_opening, 0.75)
+        self.assertAlmostEqual(envelope.command.target_value, 0.75)
 
     def test_context_repository_keeps_instance_state_isolated(self):
         context = SimulationContext(biz_scene_instance_id="scene-repository")
@@ -366,10 +369,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         remote_target = build_agent_instance("target-002", "TARGET_AGENT", "node-remote", context)
         payload = {
             "command_id": "cmd-002",
-            "command_type": "direct_gate_opening_request",
+            "command_type": "update_station_target_value_request",
             "source": source.model_dump(mode="json"),
             "target": remote_target.model_dump(mode="json"),
-            "gate_opening": 0.31,
+            "object_id": 501,
+            "object_type": "Gate",
+            "target_value_type": "gate_opening",
+            "target_value": 0.31,
         }
 
         client._on_message(None, None, SimpleNamespace(payload=json.dumps(payload).encode("utf-8")))
@@ -437,22 +443,25 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         completed_event = Event()
 
-        class RecordingDirectGateHandler(DirectGateHandler):
-            def execute(self, request: HydroDirectGateOpeningRequest) -> HydroDirectGateOpeningResponse:
+        class RecordingStationTargetValueHandler(StationTargetValueHandler):
+            def execute(self, request: HydroStationTargetValueRequest) -> HydroStationTargetValueResponse:
                 response = super().execute(request)
                 completed_event.set()
                 return response
 
-        runtime.register_handler(RecordingDirectGateHandler())
+        runtime.register_handler(RecordingStationTargetValueHandler())
 
         runtime.start()
         try:
             runtime.send_command(
-                HydroDirectGateOpeningRequest(
+                HydroStationTargetValueRequest(
                     command_id="cmd-010",
                     source=source,
                     target=target,
-                    gate_opening=0.42,
+                    object_id=501,
+                    object_type="Gate",
+                    target_value_type="gate_opening",
+                    target_value=0.42,
                 )
             )
 
@@ -480,23 +489,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         completed = []
         completed_event = Event()
 
-        class RecordingDirectGateHandler(DirectGateHandler):
-            def execute(self, request: HydroDirectGateOpeningRequest) -> HydroDirectGateOpeningResponse:
+        class RecordingStationTargetValueHandler(StationTargetValueHandler):
+            def execute(self, request: HydroStationTargetValueRequest) -> HydroStationTargetValueResponse:
                 response = super().execute(request)
                 completed.append(response)
                 completed_event.set()
                 return response
 
-        runtime.register_handler(RecordingDirectGateHandler())
+        runtime.register_handler(RecordingStationTargetValueHandler())
 
-        def send_and_wait(command_id: str, gate_opening: float):
+        def send_and_wait(command_id: str, target_value: float):
             completed_event.clear()
             runtime.send_command(
-                HydroDirectGateOpeningRequest(
+                HydroStationTargetValueRequest(
                     command_id=command_id,
                     source=source,
                     target=target,
-                    gate_opening=gate_opening,
+                    object_id=501,
+                    object_type="Gate",
+                    target_value_type="gate_opening",
+                    target_value=target_value,
                 )
             )
             self.assertTrue(completed_event.wait(timeout=2.0))
