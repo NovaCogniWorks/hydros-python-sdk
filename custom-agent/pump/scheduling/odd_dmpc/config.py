@@ -107,6 +107,24 @@ def _inline_table_to_frame(table: InlineTableConfig, label: str) -> pd.DataFrame
     return normalized.reset_index(drop=True)
 
 
+def build_demand_plan_columns(system_config: SystemConfig) -> List[str]:
+    columns: List[str] = []
+    station_ids = system_config.station_ids
+    for upstream_station_id, downstream_station_id in zip(station_ids[:-1], station_ids[1:]):
+        columns.append(f"station{upstream_station_id}-station{downstream_station_id}")
+    return columns
+
+
+def build_zero_demand_plan(
+    system_config: SystemConfig,
+    length: Optional[int] = None,
+) -> pd.DataFrame:
+    resolved_length = int(length if length is not None else system_config.horizon_hours)
+    resolved_length = max(resolved_length, 1)
+    columns = build_demand_plan_columns(system_config)
+    return pd.DataFrame(0.0, index=range(resolved_length), columns=columns)
+
+
 def _extract_runtime_overrides(
     payload: Mapping[str, object],
     valid_fields: Collection[str],
@@ -257,9 +275,7 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
         stations.append(_build_station_config(station_payload))
     pools = [PoolConfig(**pool) for pool in payload["canal_pools"]]
     data_files = payload.get("data_files", {})
-    raw_demand_plan = data_files.get("demand_plan", "data/inflow-demand-plan.xlsx")
     raw_boundary_level = data_files.get("boundary_level", "data/boundary-level.xlsx")
-    demand_plan_path = raw_demand_plan if isinstance(raw_demand_plan, str) else None
     boundary_level_path = raw_boundary_level if isinstance(raw_boundary_level, str) else None
     hydro_model_path = data_files.get("hydro_model")
     topology = _build_topology_config(payload, stations)
@@ -278,30 +294,11 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
         flow_depart_data_dir=payload["flow_depart"]["data_dir"],
         flow_depart_output_dir=payload["flow_depart"]["output_dir"],
         source_config_path=str(config_path),
-        demand_plan_path=demand_plan_path,
-        demand_plan_inline=_build_inline_table_config(raw_demand_plan) if not isinstance(raw_demand_plan, str) else None,
         hydro_model_path=hydro_model_path,
         boundary_level_path=boundary_level_path,
         boundary_level_inline=_build_inline_table_config(raw_boundary_level) if not isinstance(raw_boundary_level, str) else None,
         topology=topology,
     )
-
-
-def load_demand_plan(
-    data_path: Optional[str] = "data/inflow-demand-plan.xlsx",
-    inline_table: Optional[InlineTableConfig] = None,
-) -> pd.DataFrame:
-    if inline_table is not None:
-        return _inline_table_to_frame(inline_table, "demand_plan")
-    if data_path is None:
-        raise ValueError("Demand plan source is not configured")
-    df = pd.read_excel(data_path)
-    if df.empty:
-        raise ValueError(f"Demand plan is empty: {data_path}")
-    normalized = df.copy()
-    for column in normalized.columns:
-        normalized[column] = pd.to_numeric(normalized[column], errors="raise")
-    return normalized.reset_index(drop=True)
 
 
 def load_boundary_level_plan(
@@ -353,12 +350,10 @@ def _runtime_context_from_payload(
     path: Path,
     demand_path: Optional[str] = None
 ) -> Dict[str, object]:
+    del demand_path
     system_config = _system_config_from_payload(payload, path)
     runtime = _runtime_from_payload(payload)
-    demand_plan = load_demand_plan(
-        demand_path or system_config.demand_plan_path,
-        inline_table=system_config.demand_plan_inline if demand_path is None else None,
-    )
+    demand_plan = build_zero_demand_plan(system_config)
     output_dir = Path(runtime.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     return {

@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath("custom-agent/pump/scheduling"))
 from hydros_agent_sdk.protocol.commands import CommandStatus, TimeSeriesDataUpdateRequest
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
-from odd_dmpc.config import load_runtime_context_from_payload
+from odd_dmpc.config import build_zero_demand_plan, load_runtime_context_from_payload
 from odd_dmpc.observers import DisturbanceObserverBank
 from pump_scheduling_agent import PumpCentralSchedulingAgent
 
@@ -100,6 +100,18 @@ class TestPumpDynamicDemandPlan(unittest.TestCase):
 
         self.assertAlmostEqual(estimate[1], 0.0)
         self.assertAlmostEqual(estimate[2], 0.0)
+
+    def test_runtime_context_uses_zero_demand_plan_instead_of_configured_file(self):
+        with open("custom-agent/pump/data/config_xhh.yaml", "r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle)
+
+        runtime_context = load_runtime_context_from_payload(payload)
+        system_config = runtime_context["system_config"]
+        demand_plan = runtime_context["demand_plan"]
+
+        expected = build_zero_demand_plan(system_config)
+        self.assertListEqual(list(demand_plan.columns), list(expected.columns))
+        self.assertTrue(demand_plan.equals(expected))
 
 
 if __name__ == "__main__":
