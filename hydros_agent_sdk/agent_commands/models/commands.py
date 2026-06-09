@@ -101,8 +101,8 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
     ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST
     object_id: Optional[int] = None
     object_type: Optional[str] = None
-    target_value_type: Optional[str] = None
     target_value: Optional[Any] = None
+    target_value_type: Optional[str] = None
 
 
 @register_agent_command

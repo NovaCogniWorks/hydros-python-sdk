@@ -8,11 +8,9 @@ from typing import Any, Callable, List, Optional
 from hydros_agent_sdk.agent_commands.models import (
     AgentCommand,
     DeviceValueTypeEnum,
-    DisturbanceNodeWaterFlowRequest,
-    HydroDirectGateOpeningRequest,
     HydroStationTargetValueRequest,
 )
-from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
+from hydros_agent_sdk.mpc.models import ControlObjectResult, MpcOptimizeResponse
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
 from hydros_agent_sdk.utils import generate_agent_command_id
 
@@ -103,11 +101,12 @@ class MpcControlCommandBuilder:
 
             first_control = response.horizon_controls[0]
             for control_object_result in first_control.control_object_list or []:
-                if control_object_result.target_value is None:
+                if self._is_incomplete_control_object(control_object_result):
                     logger.debug(
-                        "Skip MPC object control without target value: objectId=%s, objectType=%s",
+                        "Skip incomplete MPC object control: objectId=%s, objectType=%s, targetValueType=%s",
                         control_object_result.object_id,
                         control_object_result.object_type,
+                        control_object_result.target_value_type,
                     )
                     continue
 
@@ -123,32 +122,19 @@ class MpcControlCommandBuilder:
                     )
                     continue
 
-                if control_object_result.object_type == "Gate":
-                    control_commands.append(
-                        HydroDirectGateOpeningRequest(
-                            command_id=generate_agent_command_id(),
-                            source=self.source_agent,
-                            target=target_agent,
-                            object_id=control_object_result.object_id,
-                            object_name=control_object_result.object_name,
-                            object_type=control_object_result.object_type,
-                            gate_opening=control_object_result.target_value,
-                            need_ack_reply=True,
-                        )
+                control_commands.append(
+                    HydroStationTargetValueRequest(
+                        command_id=generate_agent_command_id(),
+                        context=self.source_agent.context,
+                        source=self.source_agent,
+                        target=target_agent,
+                        object_id=control_object_result.object_id,
+                        object_type=control_object_result.object_type,
+                        target_value=control_object_result.target_value,
+                        target_value_type=control_object_result.target_value_type,
+                        need_ack_reply=True,
                     )
-                else:
-                    control_commands.append(
-                        DisturbanceNodeWaterFlowRequest(
-                            command_id=generate_agent_command_id(),
-                            source=self.source_agent,
-                            target=target_agent,
-                            object_id=control_object_result.node_id,
-                            object_name=control_object_result.node_name,
-                            object_type=control_object_result.object_type,
-                            value=control_object_result.target_value,
-                            need_ack_reply=True,
-                        )
-                    )
+                )
 
         logger.info(
             "Built %s control commands from %s MPC responses",
@@ -156,3 +142,12 @@ class MpcControlCommandBuilder:
             len(responses or []),
         )
         return control_commands
+
+    @staticmethod
+    def _is_incomplete_control_object(control_object_result: ControlObjectResult) -> bool:
+        return (
+            control_object_result.object_id is None
+            or control_object_result.object_type is None
+            or control_object_result.target_value is None
+            or control_object_result.target_value_type is None
+        )

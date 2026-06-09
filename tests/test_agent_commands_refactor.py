@@ -15,6 +15,7 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandRuntime,
     HydroDirectGateOpeningRequest,
     HydroDirectGateOpeningResponse,
+    HydroStationTargetValueRequest,
 )
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.agents import CentralSchedulingAgent
@@ -1743,10 +1744,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(reporter.published), 1)
         self.assertEqual(reporter.published[0]["source"], agent)
         self.assertEqual(len(sent_commands), 1)
-        self.assertIsInstance(sent_commands[0], HydroDirectGateOpeningRequest)
+        self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
         self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015")
         self.assertEqual(sent_commands[0].object_id, 501)
-        self.assertEqual(sent_commands[0].gate_opening, 0.45)
+        self.assertEqual(sent_commands[0].object_type, "Gate")
+        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
+        self.assertEqual(sent_commands[0].target_value, 0.45)
 
     def test_central_scheduling_agent_resolves_mpc_target_from_managed_top_objects(self):
         state_manager = AgentStateManager()
@@ -1856,10 +1859,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             )
 
         self.assertEqual(len(sent_commands), 1)
-        self.assertIsInstance(sent_commands[0], HydroDirectGateOpeningRequest)
+        self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
         self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015_MANAGED")
         self.assertEqual(sent_commands[0].object_id, 20601)
-        self.assertEqual(sent_commands[0].gate_opening, 1.68)
+        self.assertEqual(sent_commands[0].object_type, "Gate")
+        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
+        self.assertEqual(sent_commands[0].target_value, 1.68)
 
     def test_central_scheduling_agent_resolves_mpc_target_from_parent_object_mapping(self):
         state_manager = AgentStateManager()
@@ -1958,10 +1963,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             )
 
         self.assertEqual(len(sent_commands), 1)
-        self.assertIsInstance(sent_commands[0], HydroDirectGateOpeningRequest)
+        self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
         self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015_PARENT")
         self.assertEqual(sent_commands[0].object_id, 20601)
-        self.assertEqual(sent_commands[0].gate_opening, 1.68)
+        self.assertEqual(sent_commands[0].object_type, "Gate")
+        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
+        self.assertEqual(sent_commands[0].target_value, 1.68)
 
     def test_coordination_client_sends_local_mpc_result_report(self):
         state_manager = AgentStateManager()
