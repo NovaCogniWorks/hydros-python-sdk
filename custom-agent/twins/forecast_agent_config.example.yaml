@@ -1,0 +1,106 @@
+﻿biz_scenario:
+  biz_scenario_id: 100008
+  biz_scenario_name: 京石段-数字孪生智能体
+waterway:
+  waterway_id: 50
+  waterway_name: 京石段
+hydro_environment_type: NORMAL
+agents:
+  - agent_code: TWINS_SIMULATION_AGENT_demo001
+    agent_type: TWINS_SIMULATION_AGENT
+    agent_name: IDZ数字孪生智能体
+    agent_configuration_url: http://47.97.1.45:9000/hydros/mdm/京石段/agents/idz_test/agent_config.yaml
+  - agent_code: CHANNEL_AGENT
+    agent_type: CHANNEL_AGENT
+    agent_name: 渠池智能体
+    agent_configuration_url: http://47.97.1.45:9000/hydros/mdm/京石段/agents/channel/agent_config.yaml
+auto_hydro_events:
+  - hydro_event_type: TIME_SERIES_DATA_UPDATED
+    hydro_event_id: EVENTTIME_SERIES_DATA_UPDATED_WEATHER_001
+    hydro_event_name: 天气预报事件
+    auto_schedule_at_step: -1
+    hydro_event_source_type: WEATHER_FORECAST
+    hydro_event_source: EVENTWEATHER_FORECAST_SOURCE_001
+    hydro_event_description: 系统预制的暴雨事件
+    object_time_series:
+      - time_series_name: 天气预报旁侧入流流量时间序列
+        object_id: 1012
+        object_type: UnifiedCanal
+        object_name: QD-6
+        metrics_code: water_flow
+        time_series:
+          - step: 600
+            value: 26.51391526
+          - step: 720
+            value: 28.81300714
+    priority: HIGH
+    valid: true
+    auto_hydro_event_enable: true
+    hydro_environment_type: NORMAL
+  - hydro_event_type: TIME_SERIES_DATA_UPDATED
+    hydro_event_id: EVENTTIME_SERIES_DATA_UPDATED_WATER_USE_001
+    hydro_event_name: 用水计划事件
+    auto_schedule_at_step: -1
+    hydro_event_source_type: WATER_USE
+    hydro_event_source: EVENTWATER_USE_SOURCE_001
+    hydro_event_description: 系统预制的用水计划
+    object_time_series:
+      - time_series_name: 用水计划流量时间序列
+        object_id: 1040
+        object_type: CrossSection
+        object_name: QD-5#断面#001
+        metrics_code: planned_outflow
+        time_series:
+          - step: 600
+            value: 12.0
+          - step: 720
+            value: 15.5
+    priority: HIGH
+    valid: true
+    auto_hydro_event_enable: true
+    hydro_environment_type: NORMAL
+  - hydro_event_type: DEVICE_STATUS_CHANGE
+    hydro_event_id: TS_DEFAULT_DEVICE_STATUS_CHAGNE_001
+    hydro_event_name: 应急检修事件
+    auto_schedule_at_step: 10
+    hydro_event_source_type: DEVICE_STATUS_CHANGE
+    hydro_event_source: EVENTDEVICE_STATUS_CHANGE_SOURCE_001
+    hydro_event_description: 模拟设备故障
+    object_time_series:
+      - time_series_name: 应急检修设备状态变化时间序列
+        object_id: 1041
+        object_type: Gate
+        object_name: ZM1-节制闸#1
+        metrics_code: device_status_change
+        time_series:
+          - step: 10
+            value: 1
+          - step: 20
+            value: 0
+    priority: HIGH
+    valid: true
+    auto_hydro_event_enable: true
+    hydro_environment_type: NORMAL
+auto_schedule_event_enabled: false
+hydros_objects_modeling_url: 'http://47.97.1.45:9000/hydros/mdm/京石段/hydro_modeling/objects.yaml'
+biz_scene_configuration_url: 'http://47.97.1.45:9000/hydros/mdm/scenarios/100008.yaml'
+sim_agent_properties:
+  total_steps: 1200
+  sim_step_size: 60
+  output_step_size: 3600
+  biz_start_time: 2025/01/01 00:00:00
+  roll_steps: 10
+  output_future_steps: 20
+default_rendering_objects:
+  - object_id: 1041
+    object_type: Gate
+    object_name: 'ZM1-节制闸#1'
+  - object_id: 1053
+    object_type: Gate
+    object_name: 'ZM2-节制闸#2'
+  - object_id: 1040
+    object_type: CrossSection
+    object_name: 'QD-5#断面#001'
+  - object_id: 1052
+    object_type: Gate
+    object_name: 'ZM2-节制闸#1'

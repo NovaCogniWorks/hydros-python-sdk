@@ -280,9 +280,15 @@ class HydraulicSolver:
         if station_state is None:
             return None
 
+        station_h_i_t = float(getattr(station_state, 'h_i_t', 0.0))
+        station_hat_h_i_t = float(getattr(station_state, 'hat_h_i_t', 0.0))
+        boundary_h_i_t = station_h_i_t
+        if boundary_type == 'downstream' and boundary_h_i_t == 0.0 and station_hat_h_i_t != 0.0:
+            boundary_h_i_t = station_hat_h_i_t
+
         boundary = BoundaryState(
-            h_i_t=float(getattr(station_state, 'h_i_t', 0.0)),
-            hat_h_i_t=float(getattr(station_state, 'hat_h_i_t', 0.0)),
+            h_i_t=boundary_h_i_t,
+            hat_h_i_t=station_hat_h_i_t,
             Inflow_i_t=float(getattr(station_state, 'inflow_i_t', 0.0)),
             qtot_i_t=float(getattr(station_state, 'qtot_i_t', 0.0)),
             boundary_id=str((override or {}).get('id') or node_id),
@@ -318,6 +324,7 @@ class HydraulicSolver:
 
         alias_map = {
             'upstream_water_level': 'h_i_t',
+            'downstream_water_level': 'h_i_t',
             'water_level': 'h_i_t',
             'inflow': 'Inflow_i_t',
             'inflow_i_t': 'Inflow_i_t',
@@ -341,8 +348,17 @@ class HydraulicSolver:
                     continue
                 for metric_code, value in metric_values.items():
                     target_attr = alias_map.get(metric_code, metric_code)
-                    if hasattr(boundary, target_attr) and value is not None:
-                        setattr(boundary, target_attr, float(value))
+                    if not hasattr(boundary, target_attr) or value is None:
+                        continue
+
+                    numeric_value = float(value)
+                    setattr(boundary, target_attr, numeric_value)
+
+                    if (
+                        boundary_name == 'downstream_boundary'
+                        and target_attr == 'h_i_t'
+                    ):
+                        boundary.hat_h_i_t = numeric_value
 
     def _apply_control_conditions(
         self,

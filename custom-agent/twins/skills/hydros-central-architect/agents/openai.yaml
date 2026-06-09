@@ -1,0 +1,7 @@
+﻿interface:
+  display_name: "Hydros 中央架构专家"
+  short_description: "面向 hydros 水网业务、多智能体协同与 Python SDK 设计的高级架构 skill。"
+  default_prompt: "Use $hydros-central-architect 分析 hydros 中央智能体、多智能体协同链路或 Python SDK 架构设计问题。"
+
+policy:
+  allow_implicit_invocation: true

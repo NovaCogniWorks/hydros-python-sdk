@@ -88,6 +88,7 @@ python pump_outflow_plan_agent.py
 
 **Protocol Models** (`protocol/`)
 - `models.py`: Core data models (SimulationContext, HydroAgentInstance, etc.)
+  `HydroAgentInstance` includes `agent_instance_status` and `agent_status`
 - `commands.py`: Command/response definitions (SimTaskInitRequest, TickCmdRequest, etc.)
 - `events.py`: Event definitions (TimeSeriesDataChangedEvent, etc.)
 - All models use Pydantic for validation and serialization

@@ -83,6 +83,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     DEFAULT_BOUNDARY_METRICS: ClassVar[List[str]] = [
         'inflow',
         'upstream_water_level',
+        'downstream_water_level',
         'water_flow',
         'water_level',
     ]
@@ -94,6 +95,7 @@ class MyTwinsSimulationAgent(TwinsSimulationAgent):
     DEFAULT_BOUNDARY_ALIASES: ClassVar[Dict[str, str]] = {
         'inflow': 'Inflow_i_t',
         'upstream_water_level': 'h_i_t',
+        'downstream_water_level': 'h_i_t',
         'weather_forecast': 'Inflow_i_t',
         'weather_inflow': 'Inflow_i_t',
         'forecast_inflow': 'Inflow_i_t',
