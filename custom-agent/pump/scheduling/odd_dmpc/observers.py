@@ -125,19 +125,32 @@ class DisturbanceObserverBank:
             q_in = float(actual_flows[upstream_station_id])
             q_out = float(actual_flows[downstream_station_id])
             nominal_disturbance = float(demand_row.get(str(pair["demand_column"]), 0.0))
-            if prev_basin_profiles is not None and next_basin_profiles is not None:
+            if (
+                prev_basin_profiles is not None
+                and next_basin_profiles is not None
+                and pool_id in prev_basin_profiles
+                and pool_id in next_basin_profiles
+            ):
                 storage_flow = (
                     float(next_basin_profiles[pool_id].reported_volume) - 
                     float(prev_basin_profiles[pool_id].reported_volume)
                 ) / dt_seconds
-            elif prev_basin_volumes is not None and next_basin_volumes is not None:
+            elif (
+                prev_basin_volumes is not None
+                and next_basin_volumes is not None
+                and pool_id in prev_basin_volumes
+                and pool_id in next_basin_volumes
+            ):
                 storage_flow = (
                     float(next_basin_volumes[pool_id]) - float(prev_basin_volumes[pool_id])
                 ) / dt_seconds
             else:
                 actual_delta = float(next_basin_levels[level_key] - prev_basin_levels[level_key])
                 storage_flow = areas[pool_id] * actual_delta / dt_seconds
-            inferred = storage_flow - (q_in - q_out + nominal_disturbance)
+            # 当前平台接入路径里，渠道平衡式采用:
+            # storage = q_in - q_out - nominal_disturbance - hidden_disturbance
+            # 因此 hidden_disturbance 需要按同一符号约定反推，避免把已计划的来水/分水重新估成扰动。
+            inferred = (q_in - q_out - nominal_disturbance) - storage_flow
             old = float(self.estimates[pool_id])
             corrected = old + self.runtime.observer_gain * (inferred - old)
             smoothed = self.runtime.observer_smoothing * old + (1.0 - self.runtime.observer_smoothing) * corrected
