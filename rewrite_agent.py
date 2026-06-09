@@ -29,8 +29,7 @@ lazy_init_code = """
         context = load_runtime_context(config_path)
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
-        
-        self.odd_demand_plan = context["demand_plan"]
+        self.odd_demand_plan = __import__("pandas").DataFrame()
         
         self.flow_service = FlowDepartService(self.system_config, config_path=config_path)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)

@@ -179,7 +179,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
-        # self.odd_demand_plan = context["demand_plan"]
         self._init_dynamic_demand_plan()
         
         self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
