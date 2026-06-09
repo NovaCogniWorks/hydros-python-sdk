@@ -179,7 +179,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
-        self.odd_demand_plan = context["demand_plan"]
+        # self.odd_demand_plan = context["demand_plan"]
+        self._init_dynamic_demand_plan()
         
         self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
@@ -227,6 +228,28 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 self.flow_service.get_optimal_table(station.id, available_ids)
         logger.info("========== 所有泵站流量分配表初始化完成 ==========")
 
+    def _init_dynamic_demand_plan(self):
+        """
+        初始化动态入流用水计划，替代原基于 Excel 文件的 demand_plan
+        """
+        import pandas as pd
+        
+        horizon = self.system_config.horizon_hours
+        # 初始化一个具备足够长度的全 0 DataFrame (比如 horizon * 10 步)
+        # 实际 on_time_series_data_update 时，如果数据超出此长度，将会动态扩展
+        init_length = max(horizon * 10, 1000)
+        
+        # 构建 disturbance_node 与 column 映射，并初始列
+        self._disturbance_node_to_col = {}
+        columns = []
+        for segment in self.system_config.topology.channel_segments:
+            if getattr(segment, "disturbance_node", None):
+                col_name = f"station{segment.upstream_station_id}-station{segment.downstream_station_id}"
+                self._disturbance_node_to_col[str(segment.disturbance_node)] = col_name
+                if col_name not in columns:
+                    columns.append(col_name)
+                    
+        self.odd_demand_plan = pd.DataFrame(0.0, index=range(init_length), columns=columns)
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -792,18 +815,53 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
-        # 2. 遍历并处理数据
-        for obj_ts in event.object_time_series:
-            logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")
+        
+        event_source_type = getattr(event, "hydro_event_source_type", "")
+        is_water_use = False
+        if event_source_type:
+            val = getattr(event_source_type, "value", event_source_type)
+            if isinstance(val, str) and val.upper() == "WATER_USE":
+                is_water_use = True
+
+        if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
+            current_step = getattr(self, "last_opt_step", 0)
             
-            # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
-            # 例如更新模型的边界约束:
-            # 可按需调用：self.on_boundary_condition_update([obj_ts])
-            
-            # 打印部分数据供调试
-            if obj_ts.time_series:
-                first_val = obj_ts.time_series[0]
-                logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+            for obj_ts in event.object_time_series:
+                logger.info(f"处理 WATER_USE 用水计划数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
+                col_name = self._disturbance_node_to_col.get(str(obj_ts.object_id))
+                if not col_name:
+                    logger.warning(f"未能将 object_id={obj_ts.object_id} 匹配到拓扑中的 disturbance_node")
+                    continue
+                    
+                if not obj_ts.time_series:
+                    continue
+                    
+                for idx, ts_val in enumerate(obj_ts.time_series):
+                    target_idx = current_step + idx
+                    
+                    # 动态扩展 DataFrame
+                    if target_idx >= len(self.odd_demand_plan):
+                        import pandas as pd
+                        expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
+                        new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
+                        self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
+                        
+                    self.odd_demand_plan.loc[target_idx, col_name] += float(ts_val.value)
+                    
+            logger.info(f"已成功将 WATER_USE 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
+        else:
+            # 2. 遍历并处理数据
+            for obj_ts in event.object_time_series:
+                logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")
+                
+                # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
+                # 例如更新模型的边界约束:
+                # 可按需调用：self.on_boundary_condition_update([obj_ts])
+                
+                # 打印部分数据供调试
+                if obj_ts.time_series:
+                    first_val = obj_ts.time_series[0]
+                    logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
 
         # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(
