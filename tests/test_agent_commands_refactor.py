@@ -1392,6 +1392,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][0]["object_id"], 501)
         self.assertEqual(payload["mpc_results"][0]["details"][0]["target_value"], 0.45)
         self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["node_id"], 102)
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["object_id"], 0)
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
         attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
         self.assertEqual(attributes["front_water_level"], 2.1)
@@ -1454,7 +1456,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result.details[0].target_value, 0.45)
         self.assertEqual(result.details[1].command_type, "WATER_LEVEL")
         self.assertEqual(result.details[1].object_type, "Canal")
-        self.assertEqual(result.details[1].object_id, 102)
+        self.assertEqual(result.details[1].node_id, 102)
+        self.assertEqual(result.details[1].object_id, 0)
         self.assertEqual(result.details[1].target_value, 2.3)
 
     def test_mpc_result_reporter_builds_customize_report(self):
@@ -1584,7 +1587,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
         self.assertEqual(detail["command_type"], "WATER_LEVEL")
         self.assertEqual(detail["object_type"], "Canal")
-        self.assertEqual(detail["object_id"], 31400)
+        self.assertEqual(detail["node_id"], 31400)
+        self.assertEqual(detail["object_id"], 0)
         self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
         attributes = json.loads(detail["attributes"])
