@@ -792,7 +792,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
-        
         # 2. 遍历并处理数据
         for obj_ts in event.object_time_series:
             logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")

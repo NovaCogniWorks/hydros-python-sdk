@@ -16,11 +16,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from hydros_agent_sdk import (
-    SimCoordinationClient,
-    HydroAgentFactory,
-    MultiAgentCallback,
     load_env_config,
-    load_agent_config,
     ErrorCodes,
     handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
 )
@@ -279,77 +275,3 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             source_agent_instance=self,
             broadcast=False
         )
-
-
-class CentralSchedulingAgentFactory(HydroAgentFactory):
-    """
-    中央调度智能体工厂类。用于动态创建智能体实例。
-    """
-
-    def create_agent(
-        self,
-        sim_coordination_client: SimCoordinationClient,
-        agent_id: str,
-        agent_code: str,
-        agent_type: str,
-        agent_name: str,
-        context: SimulationContext,
-        hydros_cluster_id: str,
-        hydros_node_id: str,
-        **kwargs
-    ):
-        """创建一个新的中央调度智能体实例。"""
-        return PumpCentralSchedulingAgent(
-            sim_coordination_client=sim_coordination_client,
-            agent_id=agent_id,
-            agent_code=agent_code,
-            agent_type=agent_type,
-            agent_name=agent_name,
-            context=context,
-            hydros_cluster_id=hydros_cluster_id,
-            hydros_node_id=hydros_node_id,
-            **kwargs
-        )
-
-
-def main():
-    """主入口函数。"""
-    logger.info("=" * 60)
-    logger.info("中央调度智能体示例程序启动")
-    logger.info("=" * 60)
-    
-    try:
-        # 加载环境和智能体配置
-        env_config = load_env_config()
-        agent_config = load_agent_config()
-
-        # 创建协调客户端
-        client = SimCoordinationClient(
-            broker_url=env_config['mqtt_broker_url'],
-            broker_port=env_config['mqtt_broker_port'],
-            topic=env_config['mqtt_topic'],
-            callback=MultiAgentCallback(CentralSchedulingAgentFactory()),
-            hydros_cluster_id=env_config.get('hydros_cluster_id', 'default'),
-            hydros_node_id=env_config.get('hydros_node_id', 'local')
-        )
-
-        # 连接到 MQTT 代理
-        client.connect()
-        logger.info("智能体已连接并进入就绪状态")
-
-        # 保持运行
-        try:
-            while True:
-                import time
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("正在退出...")
-            client.disconnect()
-
-    except Exception as e:
-        logger.error(f"启动失败: {e}", exc_info=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

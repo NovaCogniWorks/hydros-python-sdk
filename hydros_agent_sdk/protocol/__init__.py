@@ -2,6 +2,7 @@
 Hydros 协议包导出。
 """
 
+from .hydro_event_type import AgentEventType
 from .commands import (
     AgentInstanceStatusReport,
     CommandUnion,

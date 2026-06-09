@@ -140,6 +140,7 @@ from hydros_agent_sdk.protocol.system_commands import (
     SystemCommandRequest,
     SystemCommandResponse,
 )
+from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
 from hydros_agent_sdk.agent_commands import (
     HydroCmd as AgentHydroCmd,
     AgentCommand,
@@ -260,6 +261,7 @@ __all__ = [
     "SystemCommand",
     "SystemCommandRequest",
     "SystemCommandResponse",
+    "AgentEventType",
 
     # 智能体指令运行时
     "AgentHydroCmd",
