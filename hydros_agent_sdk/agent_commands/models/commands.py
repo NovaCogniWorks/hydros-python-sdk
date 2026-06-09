@@ -21,28 +21,6 @@ from .types import AgentCommandTypes
 
 
 @register_agent_command
-class DisturbanceNodeWaterFlowRequest(AgentCommandRequest):
-    """分水口流量调整请求。"""
-
-    command_type: Literal[
-        "disturbance_node_water_flow_request"
-    ] = AgentCommandTypes.AGTCMD_DISTURBANCE_NODE_WATER_FLOW_REQUEST
-    object_id: Optional[int] = None
-    object_name: Optional[str] = None
-    object_type: Optional[str] = None
-    value: float
-
-
-@register_agent_command
-class DisturbanceNodeWaterFlowResponse(AgentCommandResponse):
-    """分水口流量调整响应。"""
-
-    command_type: Literal[
-        "disturbance_node_water_flow_response"
-    ] = AgentCommandTypes.AGTCMD_DISTURBANCE_NODE_WATER_FLOW_RESPONSE
-
-
-@register_agent_command
 class HydroCommandReceivedAckReply(AgentCommand):
     """收到请求后的 ACK 回执。"""
 
@@ -56,25 +34,6 @@ class HydroCommandReceivedAckReply(AgentCommand):
             source=request.target,
             target=request.source,
         )
-
-
-@register_agent_command
-class HydroDirectGateOpeningRequest(AgentCommandRequest):
-    """直接调闸门开度请求。"""
-
-    command_type: Literal["direct_gate_opening_request"] = AgentCommandTypes.AGTCMD_GATE_OPENING_REQUEST
-    object_id: Optional[int] = None
-    object_name: Optional[str] = None
-    object_type: Optional[str] = None
-    gate_opening: float
-
-
-@register_agent_command
-class HydroDirectGateOpeningResponse(AgentCommandResponse):
-    """直接调闸门开度响应。"""
-
-    command_type: Literal["direct_gate_opening_response"] = AgentCommandTypes.AGTCMD_GATE_OPENING_RESPONSE
-    final_gate_opening: Optional[float] = None
 
 
 @register_agent_command
@@ -128,25 +87,6 @@ class HydroStationTargetValueResponse(AgentCommandResponse):
     ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_RESPONSE
     target_value_type: Optional[str] = None
     target_value: Optional[Any] = None
-
-
-@register_agent_command
-class HydroTargetWaterLevelRequest(AgentCommandRequest):
-    """目标水位更新请求。"""
-
-    command_type: Literal[
-        "update_target_water_level_request"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_TARGET_WATER_LEVEL_REQUEST
-    target_water_level: float
-
-
-@register_agent_command
-class HydroTargetWaterLevelResponse(AgentCommandResponse):
-    """目标水位更新响应。"""
-
-    command_type: Literal[
-        "update_target_water_level_response"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_TARGET_WATER_LEVEL_RESPONSE
 
 
 class AgentCommandEnvelope(HydroBaseModel):
