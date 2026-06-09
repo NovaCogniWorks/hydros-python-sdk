@@ -301,6 +301,7 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
     )
 
 
+
 def load_boundary_level_plan(
     data_path: Optional[str] = "data/boundary-level.xlsx",
     inline_table: Optional[InlineTableConfig] = None,
@@ -353,12 +354,11 @@ def _runtime_context_from_payload(
     del demand_path
     system_config = _system_config_from_payload(payload, path)
     runtime = _runtime_from_payload(payload)
-    demand_plan = build_zero_demand_plan(system_config)
+
     output_dir = Path(runtime.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     return {
         "system_config": system_config,
-        "demand_plan": demand_plan,
         "runtime": runtime,
     }
 
