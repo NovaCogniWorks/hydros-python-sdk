@@ -508,7 +508,7 @@ class SimCoordinationClient:
         item = InboundCommand(command=command, received_at=time.monotonic(), queue_name=queue_name)
         try:
             target_queue.put_nowait(item)
-            logger.info(
+            logger.debug(
                 "Inbound command enqueued: type=%s, id=%s, context=%s, queue=%s, queueSize=%s",
                 command.command_type,
                 command.command_id,
@@ -565,7 +565,7 @@ class SimCoordinationClient:
             started_at = time.monotonic()
             command = item.command
             try:
-                logger.info(
+                logger.debug(
                     "Inbound command handling started: type=%s, id=%s, context=%s, queue=%s, queueWaitMs=%.2f, worker=%s",
                     command.command_type,
                     command.command_id,
