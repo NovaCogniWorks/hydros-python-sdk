@@ -179,10 +179,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
-        self._reference_demand_plan = context["demand_plan"].copy()
-        self._init_dynamic_demand_plan(
-            payload.get("service_mapping", {}).get("disturbance_sensors", [])
-        )
+        # self.odd_demand_plan = context["demand_plan"]
+        self._init_dynamic_demand_plan()
         
         self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
@@ -230,115 +228,27 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 self.flow_service.get_optimal_table(station.id, available_ids)
         logger.info("========== 所有泵站流量分配表初始化完成 ==========")
 
-    def _register_disturbance_plan_key(self, raw_key: Any, col_name: str) -> None:
-        if raw_key is None:
-            return
-        key = str(raw_key).strip()
-        if not key:
-            return
-        self._disturbance_node_to_col[key] = col_name
-
-    def _infer_dynamic_demand_sign(self, col_name: str, disturbance_label: str) -> float:
-        reference_plan = getattr(self, "_reference_demand_plan", None)
-        if isinstance(reference_plan, pd.DataFrame) and col_name in reference_plan.columns:
-            non_zero = reference_plan[col_name][reference_plan[col_name].abs() > 1.0e-9]
-            if not non_zero.empty:
-                return 1.0 if float(non_zero.iloc[0]) > 0.0 else -1.0
-
-        label = str(disturbance_label or "")
-        if any(token in label for token in ("入水", "来水", "补水", "回水")):
-            return -1.0
-        if any(token in label for token in ("分水", "取水", "用水", "耗水", "出水")):
-            return 1.0
-        return 1.0
-
-    def _normalize_dynamic_demand_value(self, col_name: str, raw_value: float) -> float:
-        value = float(raw_value)
-        sign_hint = getattr(self, "_dynamic_demand_sign_by_col", {}).get(col_name)
-        if sign_hint is None or abs(value) <= 1.0e-9:
-            return value
-        if value * float(sign_hint) >= 0.0:
-            return value
-        return abs(value) * float(sign_hint)
-
-    def _resolve_target_plan_index(
-        self,
-        current_step: int,
-        fallback_offset: int,
-        ts_step: Optional[int],
-    ) -> int:
-        base_index = max(int(current_step), 0)
-        if ts_step is None:
-            return base_index + fallback_offset
-        try:
-            parsed_step = int(ts_step)
-        except (TypeError, ValueError):
-            return base_index + fallback_offset
-        if parsed_step < 0:
-            return base_index + fallback_offset
-        if parsed_step >= base_index:
-            return parsed_step
-        return base_index + parsed_step
-
-    def _lookup_disturbance_plan_column(self, object_id: Any, object_name: Optional[str]) -> Optional[str]:
-        for raw_key in (object_id, object_name):
-            if raw_key is None:
-                continue
-            col_name = self._disturbance_node_to_col.get(str(raw_key).strip())
-            if col_name:
-                return col_name
-        return None
-
-    def _init_dynamic_demand_plan(self, disturbance_sensors: Optional[List[Dict[str, Any]]] = None):
+    def _init_dynamic_demand_plan(self):
         """
         初始化动态入流用水计划，替代原基于 Excel 文件的 demand_plan
         """
+        import pandas as pd
+        
         horizon = self.system_config.horizon_hours
+        # 初始化与总长度相同的全 0 DataFrame
         init_length = horizon
-
+        
+        # 构建 disturbance_node 与 column 映射，并初始列
         self._disturbance_node_to_col = {}
-        self._dynamic_demand_sign_by_col = {}
         columns = []
-        sensor_by_pool_id: Dict[int, Dict[str, Any]] = {}
-        for sensor in disturbance_sensors or []:
-            try:
-                pool_id = int(sensor.get("pool_id"))
-            except (TypeError, ValueError):
-                continue
-            sensor_by_pool_id[pool_id] = dict(sensor)
-
-        ordered_pool_ids = list(self.system_config.pool_ids)
         for segment in self.system_config.topology.channel_segments:
             if getattr(segment, "disturbance_node", None):
                 col_name = f"station{segment.upstream_station_id}-station{segment.downstream_station_id}"
+                self._disturbance_node_to_col[str(segment.disturbance_node)] = col_name
                 if col_name not in columns:
                     columns.append(col_name)
-                self._dynamic_demand_sign_by_col[col_name] = self._infer_dynamic_demand_sign(
-                    col_name,
-                    str(segment.disturbance_node),
-                )
-                self._register_disturbance_plan_key(segment.disturbance_node, col_name)
-
-        for pool_index, pool_id in enumerate(ordered_pool_ids, start=1):
-            sensor = sensor_by_pool_id.get(int(pool_id))
-            if not sensor:
-                continue
-            if pool_index > len(columns):
-                continue
-            col_name = columns[pool_index - 1]
-            self._register_disturbance_plan_key(sensor.get("object_id"), col_name)
-            self._register_disturbance_plan_key(sensor.get("node_id"), col_name)
-            self._register_disturbance_plan_key(sensor.get("node_name"), col_name)
-            self._register_disturbance_plan_key(sensor.get("object_name"), col_name)
-
+                    
         self.odd_demand_plan = pd.DataFrame(0.0, index=range(init_length), columns=columns)
-        self._sync_dynamic_demand_plan()
-
-    def _sync_dynamic_demand_plan(self) -> None:
-        if hasattr(self, "upper_scheduler"):
-            self.upper_scheduler.demand_plan = self.odd_demand_plan
-        if hasattr(self, "plot_tracker"):
-            self.plot_tracker.demand_plan = self.odd_demand_plan
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -516,34 +426,30 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             pool_levels=pool_levels
         )
         
-        prev_observation = getattr(self, "last_observation", None)
-        prev_opt_step = getattr(self, "last_opt_step", None)
-        if prev_observation is not None and prev_opt_step is not None and step > prev_opt_step:
-            step_hours = (step - prev_opt_step) * float(self.system_config.dt_hours)
-            if step_hours <= 0:
-                step_hours = float(self.system_config.dt_hours)
-            demand_row = self.odd_demand_plan.iloc[min(max(prev_opt_step, 0), len(self.odd_demand_plan) - 1)]
-            self.observers.update(
-                prev_basin_levels=prev_observation.basin_levels,
-                next_basin_levels=observation.basin_levels,
-                actual_flows=observation.station_flows,
-                demand_row=demand_row,
-                prev_basin_volumes=prev_observation.basin_volumes,
-                next_basin_volumes=observation.basin_volumes,
-                prev_basin_profiles=prev_observation.basin_profiles,
-                next_basin_profiles=observation.basin_profiles,
-                defer_visibility=False,
-                step_hours=step_hours,
-                pool_areas=prev_observation.pool_areas,
-            )
-        elif prev_observation is None:
-            logger.info("首个滚动步暂无上一时刻观测，跳过扰动观察器更新。")
-        else:
-            logger.info(
-                "当前滚动步未推进，跳过扰动观察器更新: "
-                f"step={step}, last_opt_step={prev_opt_step}"
-            )
+        # 计算观测器使用的时间步长
+        # 每次调用optimization的间隔按系统配置的 dt_hours 计算
+        last_opt_step = getattr(self, "last_opt_step", step - 1)
+        step_hours = (step - last_opt_step) * float(self.system_config.dt_hours)
+        if step_hours <= 0:
+            step_hours = float(self.system_config.dt_hours)  # 避免首次调用时为0
+        self.last_opt_step = step
 
+        # 上层调度器
+        demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
+        self.observers.update(
+            prev_basin_levels=basin_levels,
+            next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
+            actual_flows=station_flows,
+            demand_row=demand_row,
+            prev_basin_volumes=None,
+            next_basin_volumes=None,
+            prev_basin_profiles=None,
+            next_basin_profiles=None,
+            defer_visibility=False,
+            step_hours=step_hours,
+            pool_areas=pool_areas,
+        )
+        
         # 边界计划
         boundary_levels_dict = {}
         for node in self.system_config.topology.boundary_nodes:
@@ -560,7 +466,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
         self.upper_scheduler.boundary_level_plan = boundary_level_plan
-        self._sync_dynamic_demand_plan()
         
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
@@ -899,9 +804,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             import traceback
             traceback.print_exc()
 
-        self.last_observation = observation
-        self.last_opt_step = step
-
         return commands
 
 
@@ -933,38 +835,25 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
             for obj_ts in event.object_time_series:
                 logger.info(f"处理 WEATHER_FORECAST 天气预报数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
-                col_name = self._lookup_disturbance_plan_column(obj_ts.object_id, obj_ts.object_name)
+                col_name = self._disturbance_node_to_col.get(str(obj_ts.object_id))
                 if not col_name:
-                    logger.warning(
-                        "未能将天气预报对象匹配到拓扑中的 disturbance_node: "
-                        f"object_id={obj_ts.object_id}, object_name={obj_ts.object_name}"
-                    )
+                    logger.warning(f"未能将 object_id={obj_ts.object_id} 匹配到拓扑中的 disturbance_node")
                     continue
                     
                 if not obj_ts.time_series:
                     continue
                     
                 for idx, ts_val in enumerate(obj_ts.time_series):
-                    target_idx = self._resolve_target_plan_index(
-                        current_step=current_step,
-                        fallback_offset=idx,
-                        ts_step=getattr(ts_val, "step", None),
-                    )
+                    target_idx = current_step + idx
                     
                     # 动态扩展 DataFrame
                     if target_idx >= len(self.odd_demand_plan):
+                        import pandas as pd
                         expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
                         new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
                         self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
-
-                    normalized_value = self._normalize_dynamic_demand_value(col_name, float(ts_val.value))
-                    if abs(normalized_value - float(ts_val.value)) > 1.0e-9:
-                        logger.info(
-                            "按 demand_plan 既有符号约定调整天气预报值: "
-                            f"column={col_name}, raw={float(ts_val.value):.3f}, normalized={normalized_value:.3f}"
-                        )
-                    self.odd_demand_plan.loc[target_idx, col_name] = normalized_value
-            self._sync_dynamic_demand_plan()
+                        
+                    self.odd_demand_plan.loc[target_idx, col_name] += float(ts_val.value)
                     
             logger.info(f"已成功将 WEATHER_FORECAST 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
         else:
