@@ -1,158 +1,7 @@
 project: 三座串联梯级泵站调度优化
 description: Three cascaded pump stations scheduling optimization
 data_files:
-  demand_plan:
-    columns:
-    - station1-station2
-    - station2-station3
-    rows:
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 25.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - -20.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-    - - 0.0
-      - 0.0
-  boundary_level:
+ boundary_level:
     columns:
     - 洪泽湖
     - 骆马湖
@@ -339,7 +188,7 @@ global_params:
   g: 9.81
 flow_depart:
   step_q: 2.0
-  step_h: 0.3
+  step_h: 0.2
   data_dir: data
   output_dir: output
 scheduling:
@@ -347,18 +196,18 @@ scheduling:
   dt_hours: 1
   target_avg_flow_last_station: 50
 runtime:
-  odd:
-    odd1_flow_tolerance: 0
-    odd1_level_tolerance: 0
-    odd3_flow_tolerance: 0
-    odd3_level_tolerance: 0
-    odd2_fit_threshold: 0.9
   # odd:
-  #   odd1_flow_tolerance: 4
-  #   odd1_level_tolerance: 0.15
-  #   odd3_flow_tolerance: 8
-  #   odd3_level_tolerance: 0.8
+  #   odd1_flow_tolerance: 0
+  #   odd1_level_tolerance: 0
+  #   odd3_flow_tolerance: 0
+  #   odd3_level_tolerance: 0
   #   odd2_fit_threshold: 0.9
+  odd:
+    odd1_flow_tolerance: 4
+    odd1_level_tolerance: 0.15
+    odd3_flow_tolerance: 8
+    odd3_level_tolerance: 0.8
+    odd2_fit_threshold: 0.9
   search:
     head_search_tolerance: 0.35
     flow_search_tolerance: 8.0
