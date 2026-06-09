@@ -147,7 +147,11 @@ class MpcControlCommandBuilder:
     def _is_incomplete_control_object(control_object_result: ControlObjectResult) -> bool:
         return (
             control_object_result.object_id is None
-            or control_object_result.object_type is None
+            or not MpcControlCommandBuilder._has_text(control_object_result.object_type)
             or control_object_result.target_value is None
-            or control_object_result.target_value_type is None
+            or not MpcControlCommandBuilder._has_text(control_object_result.target_value_type)
         )
+
+    @staticmethod
+    def _has_text(value: Optional[str]) -> bool:
+        return value is not None and bool(value.strip())

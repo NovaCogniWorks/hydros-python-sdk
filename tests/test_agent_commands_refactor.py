@@ -6,6 +6,8 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from pydantic import ValidationError
+
 from hydros_agent_sdk import HydroObjectType, generate_agent_command_id, get_default_env_config_path, load_env_config
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.agent_commands import (
@@ -24,6 +26,7 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
+from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     HorizonStep,
@@ -609,6 +612,89 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(request.target.agent_code, "PUMP_AGENT_001")
         self.assertEqual(request.target_value_type, DeviceValueTypeEnum.GATE_OPENING.code)
         self.assertEqual(request.target_value, 1.25)
+
+    def test_station_target_value_request_requires_target_fields(self):
+        valid_request = HydroStationTargetValueRequest(
+            command_id=generate_agent_command_id(),
+            object_type="Gate",
+            target_value_type="gate_opening",
+            target_value=0.0,
+        )
+
+        self.assertEqual(valid_request.object_type, "Gate")
+        self.assertEqual(valid_request.target_value_type, "gate_opening")
+        self.assertEqual(valid_request.target_value, 0.0)
+
+        invalid_payloads = [
+            {
+                "command_id": generate_agent_command_id(),
+                "target_value_type": "gate_opening",
+                "target_value": 1.0,
+            },
+            {
+                "command_id": generate_agent_command_id(),
+                "object_type": " ",
+                "target_value_type": "gate_opening",
+                "target_value": 1.0,
+            },
+            {
+                "command_id": generate_agent_command_id(),
+                "object_type": "Gate",
+                "target_value": 1.0,
+            },
+            {
+                "command_id": generate_agent_command_id(),
+                "object_type": "Gate",
+                "target_value_type": " ",
+                "target_value": 1.0,
+            },
+            {
+                "command_id": generate_agent_command_id(),
+                "object_type": "Gate",
+                "target_value_type": "gate_opening",
+                "target_value": None,
+            },
+        ]
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValidationError):
+                    HydroStationTargetValueRequest(**payload)
+
+    def test_mpc_command_builder_skips_blank_station_target_fields(self):
+        context = SimulationContext(biz_scene_instance_id="scene-007")
+        source = build_agent_instance("source-007", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+        resolver = Mock()
+        builder = MpcControlCommandBuilder(
+            source_agent=source,
+            get_sibling_agent_instance=Mock(),
+            resolve_target_agent_for_object=resolver,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        ControlObjectResult(
+                            object_id=501,
+                            object_type=" ",
+                            target_value_type="gate_opening",
+                            target_value=0.45,
+                        ),
+                        ControlObjectResult(
+                            object_id=502,
+                            object_type="Gate",
+                            target_value_type=" ",
+                            target_value=0.5,
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        self.assertEqual(builder.build_from_mpc_responses([response]), [])
+        resolver.assert_not_called()
 
     def test_control_command_dispatcher_sends_control_commands(self):
         state_manager = AgentStateManager()

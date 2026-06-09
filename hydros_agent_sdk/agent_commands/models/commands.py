@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 
@@ -100,9 +100,23 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
         "update_station_target_value_request"
     ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST
     object_id: Optional[int] = None
-    object_type: Optional[str] = None
-    target_value: Optional[Any] = None
-    target_value_type: Optional[str] = None
+    object_type: str = Field(..., min_length=1)
+    target_value: Any
+    target_value_type: str = Field(..., min_length=1)
+
+    @field_validator("object_type", "target_value_type")
+    @classmethod
+    def _required_text_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("字段不能为空")
+        return value
+
+    @field_validator("target_value")
+    @classmethod
+    def _target_value_not_none(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("target_value 不能为空")
+        return value
 
 
 @register_agent_command
