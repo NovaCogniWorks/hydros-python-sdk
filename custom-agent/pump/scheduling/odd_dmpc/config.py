@@ -354,10 +354,12 @@ def _runtime_context_from_payload(
     del demand_path
     system_config = _system_config_from_payload(payload, path)
     runtime = _runtime_from_payload(payload)
+    demand_plan = build_zero_demand_plan(system_config)
 
     output_dir = Path(runtime.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     return {
+        "demand_plan": demand_plan,
         "system_config": system_config,
         "runtime": runtime,
     }

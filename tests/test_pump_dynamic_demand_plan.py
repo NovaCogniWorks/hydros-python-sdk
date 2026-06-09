@@ -13,6 +13,7 @@ from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
 from odd_dmpc.config import build_zero_demand_plan, load_runtime_context_from_payload
 from odd_dmpc.observers import DisturbanceObserverBank
+from odd_dmpc.types import StationMemory
 from pump_scheduling_agent import PumpCentralSchedulingAgent
 
 
@@ -112,6 +113,28 @@ class TestPumpDynamicDemandPlan(unittest.TestCase):
         expected = build_zero_demand_plan(system_config)
         self.assertListEqual(list(demand_plan.columns), list(expected.columns))
         self.assertTrue(demand_plan.equals(expected))
+
+    def test_live_station_state_sync_updates_memory_flow_and_active_units(self):
+        station_id = self.agent.system_config.station_ids[0]
+        available_units = self.agent.available_units_map[station_id]
+        self.agent.station_memories[station_id] = StationMemory(
+            active_unit_ids=[],
+            unit_openings={unit_id: 0.0 for unit_id in available_units},
+            unit_status={unit_id: 0 for unit_id in available_units},
+            time_since_adjust={unit_id: 999 for unit_id in available_units},
+            time_since_switch={unit_id: 999 for unit_id in available_units},
+            last_selected_flow=0.0,
+            mode="ODD1",
+        )
+        live_memory = self.agent.station_memories[station_id]
+        live_memory.unit_status[available_units[0]] = 1
+        if len(available_units) > 1:
+            live_memory.unit_status[available_units[1]] = 1
+
+        self.agent._sync_station_memory_from_live_state(station_id, total_flow=42.5)
+
+        self.assertListEqual(live_memory.active_unit_ids, available_units[:2])
+        self.assertAlmostEqual(live_memory.last_selected_flow, 42.5)
 
 
 if __name__ == "__main__":

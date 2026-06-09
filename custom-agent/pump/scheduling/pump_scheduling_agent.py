@@ -277,6 +277,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             return -1.0
         return 1.0
 
+    def _sync_station_memory_from_live_state(self, station_id: int, total_flow: float) -> None:
+        if station_id not in self.station_memories:
+            return
+        station_memory = self.station_memories[station_id]
+        station_memory.active_unit_ids = [
+            unit_id
+            for unit_id, status in station_memory.unit_status.items()
+            if int(status) == 1
+        ]
+        station_memory.last_selected_flow = float(total_flow)
+
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
@@ -400,6 +411,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             station_back_levels[sid] = float(b_val)
             station_heads[sid] = float(b_val) - float(f_val)
             station_flows[sid] = total_q
+            self._sync_station_memory_from_live_state(sid, total_q)
             
         logger.info("从 _metrics_data_cache 获取的各泵机组原始数据:\n" + "\n".join(pump_data_logs))
                 
