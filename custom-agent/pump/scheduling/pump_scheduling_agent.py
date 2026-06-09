@@ -436,9 +436,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 上层调度器
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
+        prev_levels = getattr(self, "prev_basin_levels", basin_levels)
+        
         self.observers.update(
-            prev_basin_levels=basin_levels,
-            next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
+            prev_basin_levels=prev_levels,
+            next_basin_levels=basin_levels,
             actual_flows=station_flows,
             demand_row=demand_row,
             prev_basin_volumes=None,
@@ -664,11 +666,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             transfer_bundles=transfer_bundles
         )
         
-        # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
 
-
         from hydros_agent_sdk.agent_commands.models.device_value_types import DeviceValueTypeEnum
+        
+        # 保存当前水位供下一步观察器计算差值使用
+        self.prev_basin_levels = basin_levels.copy()
 
         for sid in self.system_config.station_ids:
             action = actions[sid]
