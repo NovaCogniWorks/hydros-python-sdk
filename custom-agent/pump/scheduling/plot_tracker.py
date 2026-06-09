@@ -85,8 +85,17 @@ class PlotHistoryTracker:
         # Build lower prediction plan
         lower_prediction_plan = {}
         for station_id in self.system_config.station_ids:
-            reference_flow = [float(f) for f in upper_plan.flow_refs[station_id]]
-            lower_prediction_plan[station_id] = [actions[station_id].selected_flow] + reference_flow[1:]
+            pred_unit_flows = getattr(actions[station_id], 'predicted_unit_flows', {})
+            if pred_unit_flows:
+                unit_ids = list(pred_unit_flows.keys())
+                if unit_ids:
+                    num_steps = len(pred_unit_flows[unit_ids[0]])
+                    total_flows = [sum(pred_unit_flows[u][i] for u in unit_ids) for i in range(num_steps)]
+                    lower_prediction_plan[station_id] = total_flows
+                else:
+                    lower_prediction_plan[station_id] = [actions[station_id].selected_flow]
+            else:
+                lower_prediction_plan[station_id] = [actions[station_id].selected_flow]
             
         # Call plot
         self._plot_step(
@@ -124,12 +133,30 @@ class PlotHistoryTracker:
         n_points = min(self.hours, len(self.demand_plan))
         times = np.arange(n_points, dtype=float)
         pool_ids = list(self.system_config.pool_ids)
+        station_ids = list(self.system_config.station_ids)
+        
         demand_series = {}
         rain_series = {pool_id: [] for pool_id in pool_ids}
-        # Simplified for plot since we don't have the environment hidden plan
+        
+        # Determine mapping from pool_id to demand column based on topology
+        # Assuming channel between station_i and station_i+1 corresponds to pool_id 
+        for idx, (up_id, down_id) in enumerate(zip(station_ids[:-1], station_ids[1:]), start=1):
+            pool_id = pool_ids[idx - 1] if idx - 1 < len(pool_ids) else idx
+            demand_column = f"station{up_id}-station{down_id}"
+            if demand_column in self.demand_plan.columns:
+                series_vals = self.demand_plan[demand_column].values[:n_points]
+                if len(series_vals) < n_points:
+                    series_vals = np.pad(series_vals, (0, n_points - len(series_vals)), 'edge')
+                demand_series[pool_id] = np.asarray(series_vals, dtype=float)
+            else:
+                demand_series[pool_id] = np.zeros(n_points, dtype=float)
+                
+        # Fill any unmapped pools
         for pool_id in pool_ids:
-            demand_series[pool_id] = np.zeros(n_points, dtype=float)
+            if pool_id not in demand_series:
+                demand_series[pool_id] = np.zeros(n_points, dtype=float)
             rain_series[pool_id] = np.zeros(n_points, dtype=float)
+            
         return times, demand_series, {pool_id: np.asarray(values, dtype=float) for pool_id, values in rain_series.items()}
 
     def _current_mode_summary(self, actions) -> str:

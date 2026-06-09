@@ -520,13 +520,13 @@ def simulate_basin_trajectory(
                         raise ValueError(f"缺少 pool_id={pool_id} 的渠道表面积 (pool_area) 数据，无法推演水位。")
                     pool_area = float(resolved_pool_areas[pool_id])
                     levels[level_key] = float(
-                        levels.get(level_key, 0.0) + (upstream_flow - downstream_flow + demand) * dt_seconds / pool_area
+                        levels.get(level_key, 0.0) + (upstream_flow - downstream_flow - demand) * dt_seconds / pool_area
                     )
                 else:
                     profile = profile_states[pool_id]
                     profile_states[pool_id] = _project_profile_to_volume(
                         profile,
-                        _profile_total_volume(profile) + (upstream_flow - downstream_flow + demand) * dt_seconds,
+                        _profile_total_volume(profile) + (upstream_flow - downstream_flow - demand) * dt_seconds,
                     )
                     margin = runtime.basin_clip_margin_b1 if pool_id == 1 else runtime.basin_clip_margin_b2
                     min_level, max_level = _pool_level_clip_bounds(
