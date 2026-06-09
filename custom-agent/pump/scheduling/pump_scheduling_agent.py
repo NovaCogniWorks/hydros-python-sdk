@@ -249,6 +249,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     columns.append(col_name)
                     
         self.odd_demand_plan = pd.DataFrame(0.0, index=range(init_length), columns=columns)
+        self._sync_dynamic_demand_plan()
+
+    def _sync_dynamic_demand_plan(self) -> None:
+        if hasattr(self, "upper_scheduler"):
+            self.upper_scheduler.demand_plan = self.odd_demand_plan
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -426,30 +431,34 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             pool_levels=pool_levels
         )
         
-        # 计算观测器使用的时间步长
-        # 每次调用optimization的间隔按系统配置的 dt_hours 计算
-        last_opt_step = getattr(self, "last_opt_step", step - 1)
-        step_hours = (step - last_opt_step) * float(self.system_config.dt_hours)
-        if step_hours <= 0:
-            step_hours = float(self.system_config.dt_hours)  # 避免首次调用时为0
-        self.last_opt_step = step
+        prev_observation = getattr(self, "last_observation", None)
+        prev_opt_step = getattr(self, "last_opt_step", None)
+        if prev_observation is not None and prev_opt_step is not None and step > prev_opt_step:
+            step_hours = (step - prev_opt_step) * float(self.system_config.dt_hours)
+            if step_hours <= 0:
+                step_hours = float(self.system_config.dt_hours)
+            demand_row = self.odd_demand_plan.iloc[min(max(prev_opt_step, 0), len(self.odd_demand_plan) - 1)]
+            self.observers.update(
+                prev_basin_levels=prev_observation.basin_levels,
+                next_basin_levels=observation.basin_levels,
+                actual_flows=observation.station_flows,
+                demand_row=demand_row,
+                prev_basin_volumes=prev_observation.basin_volumes,
+                next_basin_volumes=observation.basin_volumes,
+                prev_basin_profiles=prev_observation.basin_profiles,
+                next_basin_profiles=observation.basin_profiles,
+                defer_visibility=False,
+                step_hours=step_hours,
+                pool_areas=prev_observation.pool_areas,
+            )
+        elif prev_observation is None:
+            logger.info("首个滚动步暂无上一时刻观测，跳过扰动观察器更新。")
+        else:
+            logger.info(
+                "当前滚动步未推进，跳过扰动观察器更新: "
+                f"step={step}, last_opt_step={prev_opt_step}"
+            )
 
-        # 上层调度器
-        demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
-        self.observers.update(
-            prev_basin_levels=basin_levels,
-            next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
-            actual_flows=station_flows,
-            demand_row=demand_row,
-            prev_basin_volumes=None,
-            next_basin_volumes=None,
-            prev_basin_profiles=None,
-            next_basin_profiles=None,
-            defer_visibility=False,
-            step_hours=step_hours,
-            pool_areas=pool_areas,
-        )
-        
         # 边界计划
         boundary_levels_dict = {}
         for node in self.system_config.topology.boundary_nodes:
@@ -466,6 +475,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from odd_dmpc.environment import _boundary_plan_from_snapshot
         boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
         self.upper_scheduler.boundary_level_plan = boundary_level_plan
+        self._sync_dynamic_demand_plan()
         
         horizon = max(int(self.system_config.horizon_hours - step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
@@ -804,6 +814,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             import traceback
             traceback.print_exc()
 
+        self.last_observation = observation
+        self.last_opt_step = step
+
         return commands
 
 
@@ -853,7 +866,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
                         self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
                         
-                    self.odd_demand_plan.loc[target_idx, col_name] += float(ts_val.value)
+                    self.odd_demand_plan.loc[target_idx, col_name] = float(ts_val.value)
+            self._sync_dynamic_demand_plan()
                     
             logger.info(f"已成功将 WEATHER_FORECAST 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
         else:
