@@ -820,14 +820,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
         
-        from hydros_agent_sdk.protocol.hydro_event_type import HydroEventSourceType
+        from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         
         event_source_type = getattr(event, "hydro_event_source_type", "")
         is_weather_forecast = False
         if event_source_type:
             val = getattr(event_source_type, "value", event_source_type)
             # 兼容从枚举读取或是字符串比较
-            if val == getattr(HydroEventSourceType, "WEATHER_FORECAST", "WEATHER_FORECAST") or val == "WEATHER_FORECAST":
+            if val == getattr(AgentEventType, "WEATHER_FORECAST", "WEATHER_FORECAST") or val == "WEATHER_FORECAST":
                 is_weather_forecast = True
 
         if is_weather_forecast and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
