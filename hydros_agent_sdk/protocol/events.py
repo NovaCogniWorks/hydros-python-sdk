@@ -28,11 +28,11 @@ class TimeSeriesDataChangedEvent(HydroEvent):
     hydro_event_type: Union[
         Literal["TIME_SERIES_DATA_UPDATED"],
         Literal["TimeSeriesDataChangedEvent"],
-    ] = AgentEventType.TIME_SERIES_DATA_UPDATED.value
+    ] = AgentEventType.TIME_SERIES_DATA_UPDATED
     object_time_series: List[ObjectTimeSeries] = Field(default_factory=list)
 
 class OutflowTimeSeriesDataChangedEvent(HydroEvent):
-    hydro_event_type: Literal["OUTFLOW_TIME_SERIES_DATA_UPDATED"] = AgentEventType.OUTFLOW_TIME_SERIES_DATA_UPDATED.value
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES_DATA_UPDATED"] = AgentEventType.OUTFLOW_TIME_SERIES_DATA_UPDATED
     object_type: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("object_type", "objectType")
@@ -43,7 +43,7 @@ class OutflowTimeSeriesDataChangedEvent(HydroEvent):
     )
 
 class OutflowTimeSeriesEvent(HydroEvent):
-    hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = AgentEventType.OUTFLOW_TIME_SERIES.value
+    hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = AgentEventType.OUTFLOW_TIME_SERIES
     event_content_url: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("event_content_url", "eventContentUrl")
