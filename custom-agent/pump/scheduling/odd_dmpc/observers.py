@@ -150,7 +150,7 @@ class DisturbanceObserverBank:
             # 当前平台接入路径里，渠道平衡式采用:
             # storage = q_in - q_out - nominal_disturbance - hidden_disturbance
             # 因此 hidden_disturbance 需要按同一符号约定反推，避免把已计划的来水/分水重新估成扰动。
-            inferred = (q_in - q_out - nominal_disturbance) - storage_flow
+            inferred = (q_in - q_out + nominal_disturbance) - storage_flow
             old = float(self.estimates[pool_id])
             corrected = old + self.runtime.observer_gain * (inferred - old)
             smoothed = self.runtime.observer_smoothing * old + (1.0 - self.runtime.observer_smoothing) * corrected
