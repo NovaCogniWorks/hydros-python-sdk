@@ -235,9 +235,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         import pandas as pd
         
         horizon = self.system_config.horizon_hours
-        # 初始化一个具备足够长度的全 0 DataFrame (比如 horizon * 10 步)
-        # 实际 on_time_series_data_update 时，如果数据超出此长度，将会动态扩展
-        init_length = max(horizon * 10, 1000)
+        # 初始化与总长度相同的全 0 DataFrame
+        init_length = horizon
         
         # 构建 disturbance_node 与 column 映射，并初始列
         self._disturbance_node_to_col = {}
@@ -255,13 +254,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
         
+        self._lazy_init_odd_mpc()
+        
+        max_step = self.system_config.horizon_hours
+        if step >= max_step:
+            logger.info(f"当前 step ({step}) 已达到或超过系统配置的最大步数 ({max_step})，跳过本次优化。")
+            return []
+            
         # 首先打印 _metrics_data_cache 包含的组件数据
         # 调试示例：cache_dump = []
         # 调试示例：for key, data in self._metrics_data_cache.latest_metrics.items():
         # 调试示例：    cache_dump.append(f"  {key}: {data}")
         # 调试示例：logger.info(f"当前 _metrics_data_cache 中的所有最新组件数据:\n" + "\n".join(cache_dump))
-        
-        self._lazy_init_odd_mpc()
         
         from odd_dmpc.types import EnvironmentObservation, StationMemory
         from odd_dmpc.local_controller import StationControlContext
@@ -816,18 +820,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
         
+        from hydros_agent_sdk.protocol.hydro_event_type import HydroEventSourceType
+        
         event_source_type = getattr(event, "hydro_event_source_type", "")
-        is_water_use = False
+        is_weather_forecast = False
         if event_source_type:
             val = getattr(event_source_type, "value", event_source_type)
-            if isinstance(val, str) and val.upper() == "WATER_USE":
-                is_water_use = True
+            # 兼容从枚举读取或是字符串比较
+            if val == getattr(HydroEventSourceType, "WEATHER_FORECAST", "WEATHER_FORECAST") or val == "WEATHER_FORECAST":
+                is_weather_forecast = True
 
-        if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
+        if is_weather_forecast and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
             current_step = getattr(self, "last_opt_step", 0)
             
             for obj_ts in event.object_time_series:
-                logger.info(f"处理 WATER_USE 用水计划数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
+                logger.info(f"处理 WEATHER_FORECAST 天气预报数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
                 col_name = self._disturbance_node_to_col.get(str(obj_ts.object_id))
                 if not col_name:
                     logger.warning(f"未能将 object_id={obj_ts.object_id} 匹配到拓扑中的 disturbance_node")
@@ -848,7 +855,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         
                     self.odd_demand_plan.loc[target_idx, col_name] += float(ts_val.value)
                     
-            logger.info(f"已成功将 WATER_USE 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
+            logger.info(f"已成功将 WEATHER_FORECAST 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
         else:
             # 2. 遍历并处理数据
             for obj_ts in event.object_time_series:
