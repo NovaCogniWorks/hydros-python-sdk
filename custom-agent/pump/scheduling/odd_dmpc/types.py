@@ -159,6 +159,8 @@ class SystemConfig:
     flow_depart_data_dir: str
     flow_depart_output_dir: str
     source_config_path: str = "data/config.yaml"
+    demand_plan_path: Optional[str] = "data/inflow-demand-plan.xlsx"
+    demand_plan_inline: Optional[InlineTableConfig] = None
     hydro_model_path: Optional[str] = "hydro_model.json"
     boundary_level_path: Optional[str] = "data/boundary-level.xlsx"
     boundary_level_inline: Optional[InlineTableConfig] = None

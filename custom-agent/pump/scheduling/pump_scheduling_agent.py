@@ -135,7 +135,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             return
             
         import os
-        from odd_dmpc.config import build_zero_demand_plan, load_runtime_context_from_payload
+        from odd_dmpc.config import load_runtime_context_from_payload
         from odd_dmpc.flow_service import FlowDepartService
         from odd_dmpc.local_controller import LocalController
         from odd_dmpc.observers import DisturbanceObserverBank
@@ -179,7 +179,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
-        self._init_dynamic_demand_plan(build_zero_demand_plan)
+        # self.odd_demand_plan = context["demand_plan"]
+        self._init_dynamic_demand_plan()
         
         self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
@@ -227,24 +228,27 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 self.flow_service.get_optimal_table(station.id, available_ids)
         logger.info("========== 所有泵站流量分配表初始化完成 ==========")
 
-    def _init_dynamic_demand_plan(self, build_zero_demand_plan):
+    def _init_dynamic_demand_plan(self):
         """
         初始化动态入流用水计划，替代原基于 Excel 文件的 demand_plan
         """
+        import pandas as pd
+        
+        horizon = self.system_config.horizon_hours
+        # 初始化与总长度相同的全 0 DataFrame
+        init_length = horizon
+        
         # 构建 disturbance_node 与 column 映射，并初始列
         self._disturbance_node_to_col = {}
+        columns = []
         for segment in self.system_config.topology.channel_segments:
             if getattr(segment, "disturbance_node", None):
                 col_name = f"station{segment.upstream_station_id}-station{segment.downstream_station_id}"
                 self._disturbance_node_to_col[str(segment.disturbance_node)] = col_name
-        self.odd_demand_plan = build_zero_demand_plan(self.system_config)
-        self._sync_dynamic_demand_plan()
-
-    def _sync_dynamic_demand_plan(self) -> None:
-        if hasattr(self, "upper_scheduler"):
-            self.upper_scheduler.demand_plan = self.odd_demand_plan
-        if hasattr(self, "plot_tracker"):
-            self.plot_tracker.demand_plan = self.odd_demand_plan
+                if col_name not in columns:
+                    columns.append(col_name)
+                    
+        self.odd_demand_plan = pd.DataFrame(0.0, index=range(init_length), columns=columns)
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -848,7 +852,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
                         new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
                         self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
-                        self._sync_dynamic_demand_plan()
                         
                     self.odd_demand_plan.loc[target_idx, col_name] += float(ts_val.value)
                     
