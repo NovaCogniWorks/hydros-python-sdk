@@ -137,7 +137,7 @@ class DisturbanceObserverBank:
             else:
                 actual_delta = float(next_basin_levels[level_key] - prev_basin_levels[level_key])
                 storage_flow = areas[pool_id] * actual_delta / dt_seconds
-            inferred = storage_flow - (q_in - q_out - nominal_disturbance)
+            inferred = storage_flow - (q_in - q_out + nominal_disturbance)
             old = float(self.estimates[pool_id])
             corrected = old + self.runtime.observer_gain * (inferred - old)
             smoothed = self.runtime.observer_smoothing * old + (1.0 - self.runtime.observer_smoothing) * corrected
