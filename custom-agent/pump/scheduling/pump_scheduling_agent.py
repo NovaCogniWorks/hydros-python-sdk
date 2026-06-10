@@ -207,6 +207,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.cumulative_last_station_flow = 0.0
         self.station_memories = {}
         
+        self.total_startup_count = 0
+        self.total_shutdown_count = 0
+        self.total_blade_adjust_count = 0
+        
         self.station_sensors = payload.get("service_mapping", {}).get("station_sensors", [])
         
         self.odd_initialized = True
@@ -634,15 +638,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             new_active_ids = []
             for uid, st in action.unit_status.items():
                 if st == 1: new_active_ids.append(uid)
-                if st != station_memory.unit_status.get(uid, 0):
+                old_st = station_memory.unit_status.get(uid, 0)
+                if st != old_st:
                     station_memory.time_since_switch[uid] = 0
+                    if st == 1 and old_st == 0:
+                        self.total_startup_count += 1
+                    elif st == 0 and old_st == 1:
+                        self.total_shutdown_count += 1
                 else:
                     station_memory.time_since_switch[uid] += 1
                 
                 old_op = station_memory.unit_openings.get(uid, 0.0)
                 new_op = action.unit_openings.get(uid, 0.0)
-                if abs(new_op - old_op) > 0.0: # 简化阈值
+                if abs(new_op - old_op) > getattr(self.runtime, 'opening_change_threshold', 0.0):
                     station_memory.time_since_adjust[uid] = 0
+                    self.total_blade_adjust_count += 1
                 else:
                     station_memory.time_since_adjust[uid] += 1
                     
@@ -869,6 +879,23 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.error(f"MPC customize report publish failed: {e}")
             import traceback
             traceback.print_exc()
+
+        if step >= self.system_config.horizon_hours - 1:
+            delivered = self.cumulative_last_station_flow
+            target_flow_hour = float(self.system_config.target_avg_flow_last_station) * float(self.system_config.horizon_hours)
+            target_volume = target_flow_hour * 3600.0
+            actual_volume = delivered * 3600.0
+            completion_ratio = delivered / max(target_flow_hour, 1e-9)
+            
+            logger.info("")
+            logger.info("========== 仿真汇总 ==========")
+            logger.info(f"模拟时长: {self.system_config.horizon_hours}")
+            logger.info(f"末站目标调水量(m3): {target_volume:.3f}")
+            logger.info(f"末站实际调水量(m3): {actual_volume:.3f}")
+            logger.info(f"完成率: {completion_ratio:.3f}")
+            logger.info(f"叶片调节总次数: {self.total_blade_adjust_count}")
+            logger.info(f"启机总次数: {self.total_startup_count}")
+            logger.info(f"停机总次数: {self.total_shutdown_count}")
 
         return commands
 
