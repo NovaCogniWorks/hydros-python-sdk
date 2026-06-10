@@ -83,7 +83,7 @@ class MpcPlanningClient:
             response = self._opener(request, self.timeout_seconds)
             payload_bytes = response.read()
             raw_payload_text = payload_bytes.decode("utf-8", errors="replace")
-            logger.info("MPC optimization raw response received: raw_payload_text=%s", raw_payload_text)
+            logger.info("MPC optimization raw response received")
         except HTTPError as exc:
             logger.error(
                 "MPC planning service returned HTTP %s, response=%s",
@@ -156,6 +156,7 @@ class MpcPlanningClient:
             sensor_data=normalized_sensor_data,
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
             include_diversion=include_diversion,
+            horizon_interval_seconds=mpc_task_state.output_step_size,
         )
 
     @staticmethod

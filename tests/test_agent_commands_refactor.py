@@ -240,6 +240,7 @@ def register_sim_agent_properties(
     context: SimulationContext,
     roll_steps: int = 3,
     total_steps: int = 20,
+    output_step_size: int | None = 7200,
     topology: WaterwayTopology | None = None,
 ) -> None:
     ContextManager.create(
@@ -249,6 +250,7 @@ def register_sim_agent_properties(
             sim_agent_properties=SimAgentProperties(
                 roll_steps=roll_steps,
                 total_steps=total_steps,
+                output_step_size=output_step_size,
             )
         ),
     )
@@ -893,6 +895,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(runtime.mpc_task_state.current_step, 5)
         self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 3)
         self.assertEqual(runtime.mpc_task_state.total_steps, 20)
+        self.assertEqual(runtime.mpc_task_state.output_step_size, 7200)
         self.assertEqual(runtime.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
         self.assertEqual(runtime.mpc_task_state.target_and_constrain_config_url, "http://config/control.yaml")
         self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
@@ -950,6 +953,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 sim_agent_properties=SimAgentProperties(
                     roll_steps=60,
                     total_steps=36,
+                    output_step_size=1800,
                 )
             ),
         )
@@ -973,6 +977,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         runtime = agent._mpc_rolling_runtime
         self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 60)
         self.assertEqual(runtime.mpc_task_state.total_steps, 36)
+        self.assertEqual(runtime.mpc_task_state.output_step_size, 1800)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()
@@ -988,7 +993,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-config-alias")
-        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20, output_step_size=None)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-011-config-alias",
@@ -1003,6 +1008,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             {
                 "mpc_config_url": "http://config/mpc.yaml",
                 "target_and_constrain_config_url": "http://config/control.yaml",
+                "output_step_size": "3600",
             }
         )
 
@@ -1017,6 +1023,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             runtime.mpc_task_state.target_and_constrain_config_url,
             "http://config/control.yaml",
         )
+        self.assertEqual(runtime.mpc_task_state.output_step_size, 3600)
 
     def test_central_scheduling_agent_can_opt_into_tick_auto_start_and_rolls(self):
         state_manager = AgentStateManager()
@@ -1216,6 +1223,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             rolling_interval_steps=3,
             start_step=10,
             current_step=15,
+            output_step_size=7200,
             mpc_config_url="http://config/mpc.yaml",
             target_and_constrain_config_url="http://config/control.yaml",
         )
@@ -1269,6 +1277,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["step_index"], 15)
         self.assertEqual(payload["mpc_config_url"], "http://config/mpc.yaml")
         self.assertEqual(payload["control_config_url"], "http://config/control.yaml")
+        self.assertEqual(payload["horizon_interval_seconds"], 7200)
         self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
         self.assertEqual(payload["sensor_data"][0]["object_id"], 9001)
         self.assertEqual(payload["sensor_data"][0]["metrics_code"], "water_level")
