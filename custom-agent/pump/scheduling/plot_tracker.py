@@ -30,6 +30,9 @@ class PlotHistoryTracker:
         self.hist_odd_level_errors = {sid: [] for sid in self.system_config.station_ids}
         self.hist_unit_status = []
         
+        self.hist_modes = {sid: [] for sid in self.system_config.station_ids}
+        self.hist_ref_flows = {sid: [] for sid in self.system_config.station_ids}
+        
         # We need a mock runtime or just create a dict for odd boundaries
         self.odd1_flow_tolerance = 0.5
         self.odd3_flow_tolerance = 2.0
@@ -46,6 +49,11 @@ class PlotHistoryTracker:
             # Flow
             flow = float(observation.station_flows[station_id])
             self.hist_flows[station_id].append(flow)
+            
+            # Modes and Refs
+            self.hist_modes[station_id].append(actions[station_id].mode if hasattr(actions[station_id], 'mode') else "UNKNOWN")
+            ref_flow = upper_plan.flow_refs[station_id][0] if station_id in upper_plan.flow_refs and len(upper_plan.flow_refs[station_id]) > 0 else 0.0
+            self.hist_ref_flows[station_id].append(float(ref_flow))
             
             # Levels
             back = float(observation.station_back_levels[station_id])
@@ -409,3 +417,46 @@ class PlotHistoryTracker:
         logger = logging.getLogger(__name__)
         logger.info(f"已生成在线单步状态图: {step_plot_path.absolute()}")
         plt.close(fig)
+
+    def generate_summary_plot(self):
+        records = []
+        first_station_id = self.system_config.station_ids[0] if self.system_config.station_ids else None
+        
+        for i, t in enumerate(self.hist_times):
+            for st_id in self.system_config.station_ids:
+                row = {
+                    "station_id": st_id,
+                    "time_hours": t,
+                    "ref_flow": self.hist_ref_flows[st_id][i],
+                    "actual_flow": self.hist_flows[st_id][i],
+                    "actual_back_level": self.hist_back_levels[st_id][i],
+                    "actual_front_level": self.hist_front_levels[st_id][i],
+                    "mode": self.hist_modes[st_id][i],
+                    "actual_upper_flow_error": self.hist_upper_flow_errors[st_id][i],
+                    "actual_lower_flow_error": self.hist_lower_flow_errors[st_id][i],
+                }
+                if st_id == first_station_id:
+                    for pid in self.system_config.pool_ids:
+                        row[f"disturbance_estimate_pool_{pid}"] = self.hist_disturbances[pid][i]
+                records.append(row)
+                
+        if not records:
+            import logging
+            logging.getLogger(__name__).warning("没有历史记录，无法生成汇总图")
+            return
+            
+        history_df = pd.DataFrame(records)
+        
+        # 使用 simulation._plot_results
+        from odd_dmpc.simulation import ClosedLoopSimulation
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("开始生成到达最大步数时的汇总图 (使用 _plot_results)...")
+        # 兼容 simulation._plot_results 内部所需的 self.system_config 等属性
+        # 因为 PlotHistoryTracker 刚好具备所有必需的属性，我们可以直接传入 self
+        try:
+            ClosedLoopSimulation._plot_results(self, history_df)
+            logger.info(f"汇总图生成完成，保存在: {self.output_dir.absolute()}")
+        except Exception as e:
+            logger.error(f"生成汇总图失败: {e}", exc_info=True)
+

@@ -301,6 +301,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         max_step = self.system_config.horizon_hours
         if step >= max_step:
             logger.info(f"当前 step ({step}) 已达到或超过系统配置的最大步数 ({max_step})，跳过本次优化。")
+            if not getattr(self, "_summary_plot_generated", False):
+                if hasattr(self, 'plot_tracker') and hasattr(self.plot_tracker, 'generate_summary_plot'):
+                    self.plot_tracker.generate_summary_plot()
+                self._summary_plot_generated = True
             return []
             
         # 首先打印 _metrics_data_cache 包含的组件数据
