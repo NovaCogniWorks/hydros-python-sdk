@@ -234,6 +234,7 @@ class MpcResultReporter:
             object_type=control_object_result.object_type,
             object_id=control_object_result.object_id,
             target_value=control_object_result.target_value,
+            value=control_object_result.target_value,
         )
 
     @staticmethod
