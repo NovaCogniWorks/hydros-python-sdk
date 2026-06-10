@@ -49,30 +49,58 @@ class LocalController:
             config_path=system_config.source_config_path,
         )
 
-    def hold_action(self, station_id: int, memory: StationMemory, mode: str = "ODD1") -> ControlAction:
+    def hold_action(
+        self, 
+        station_ctx: StationControlContext, 
+        transfer_bundle: TransferBundle, 
+        memory: StationMemory, 
+        mode: str = "ODD1"
+    ) -> ControlAction:
+        station_id = station_ctx.station_id
         avg_opening = self._average_opening(memory.unit_status, memory.unit_openings)
+        
+        level_prediction = self._predict_station_response(
+            station_ctx=station_ctx,
+            transfer_bundle=transfer_bundle,
+            station_flow_plan=[memory.last_selected_flow] * self.runtime.control_horizon_lower,
+        )
+        
+        active_count = max(1, sum(1 for st in memory.unit_status.values() if st == 1))
+        avg_flow = float(memory.last_selected_flow) / active_count
+        unit_flows = {u: (avg_flow if st == 1 else 0.0) for u, st in memory.unit_status.items()}
+        
+        unit_models = self.flow_service.get_unit_models(station_id)
+        current_head = float(level_prediction["predicted_head"])
+        eff_dict = {}
+        for u, st in memory.unit_status.items():
+            if st == 1 and u in unit_models:
+                eff_dict[u] = float(unit_models[u].interpolate_efficiency(current_head, memory.unit_openings.get(u, 0.0)))
+            else:
+                eff_dict[u] = 0.0
+        avg_eff = float(__import__("numpy").mean([eff for eff in eff_dict.values() if eff > 0])) if any(eff > 0 for eff in eff_dict.values()) else 0.0
+
         return ControlAction(
             station_id=station_id,
             mode=mode,
             selected_flow=float(memory.last_selected_flow),
             unit_status=memory.unit_status.copy(),
             unit_openings=memory.unit_openings.copy(),
-            unit_flows={unit_id: 0.0 for unit_id in memory.unit_status},
+            unit_flows=unit_flows,
             fit_score=0.0 if mode != "ODD1" else 1.0,
             objective=0.0,
             predicted_flow_error=0.0,
-            predicted_level_error=0.0,
-            predicted_back_level=None,
-            predicted_front_level=None,
-            predicted_head=None,
+            predicted_level_error=float(level_prediction["normalized_level_error"]),
+            predicted_back_level=float(level_prediction["predicted_back_level"]),
+            predicted_front_level=float(level_prediction["predicted_front_level"]),
+            predicted_head=float(level_prediction["predicted_head"]),
             predicted_openings=[avg_opening] * self.runtime.control_horizon_lower,
-            predicted_efficiencies=[],
+            predicted_efficiencies=[avg_eff] * self.runtime.control_horizon_lower,
             predicted_unit_openings={
                 unit_id: [float(memory.unit_openings.get(unit_id, 0.0))] * self.runtime.control_horizon_lower
                 for unit_id in memory.unit_status
             },
             predicted_unit_flows={
-                unit_id: [0.0] * self.runtime.control_horizon_lower
+                unit_id: [unit_flows[unit_id]] * self.runtime.control_horizon_lower
                 for unit_id in memory.unit_status
             },
             predicted_unit_status={
@@ -80,7 +108,7 @@ class LocalController:
                 for unit_id in memory.unit_status
             },
             predicted_unit_efficiencies={
-                unit_id: [0.0] * self.runtime.control_horizon_lower
+                unit_id: [eff_dict[unit_id]] * self.runtime.control_horizon_lower
                 for unit_id in memory.unit_status
             },
             candidate_plans=[],
@@ -97,14 +125,14 @@ class LocalController:
     ) -> ControlAction:
         del upstream_prediction, disturbance_forecast
         if mode == "ODD1":
-            return self.hold_action(station_ctx.station_id, station_memory, mode="ODD1")
+            return self.hold_action(station_ctx, transfer_bundle, station_memory, mode="ODD1")
         if mode == "ODD3":
             plan = self._solve_odd3_from_cache(
                 station_ctx=station_ctx,
                 transfer_bundle=transfer_bundle,
             )
             if plan is None:
-                action = self.hold_action(station_ctx.station_id, station_memory, mode="ODD3")
+                action = self.hold_action(station_ctx, transfer_bundle, station_memory, mode="ODD3")
                 action.candidate_plans = [
                     {
                         "active_unit_ids": [],
@@ -151,7 +179,7 @@ class LocalController:
             current_active_unit_ids=station_memory.active_unit_ids,
         )
         if not candidate_sets:
-            return self.hold_action(station_ctx.station_id, station_memory, mode=mode)
+            return self.hold_action(station_ctx, transfer_bundle, station_memory, mode=mode)
 
         best = None
         candidate_plans = []
@@ -201,7 +229,7 @@ class LocalController:
                 best = plan
 
         if best is None:
-            action = self.hold_action(station_ctx.station_id, station_memory, mode=mode)
+            action = self.hold_action(station_ctx, transfer_bundle, station_memory, mode=mode)
             action.candidate_plans = candidate_plans
             return action
 
