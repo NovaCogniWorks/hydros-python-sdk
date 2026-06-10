@@ -8,6 +8,9 @@ import pandas as pd
 
 from .environment import _chain_pairs, _level_keys, _ordered_station_ids
 from .types import PoolProfileState, RuntimeParameters, SystemConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -147,11 +150,19 @@ class DisturbanceObserverBank:
             else:
                 actual_delta = float(next_basin_levels[level_key] - prev_basin_levels[level_key])
                 storage_flow = areas[pool_id] * actual_delta / dt_seconds
-            # 当前平台接入路径里，渠道平衡式采用:
-            # storage = q_in - q_out - nominal_disturbance - hidden_disturbance
-            # 其中 planned inflow 会以负 demand 表示，因此反推 hidden disturbance 时
-            # 需要继续减 nominal_disturbance，不能加回去。
-            inferred = (q_in - q_out - nominal_disturbance) - storage_flow
+            # 根据最新约定，demand 计划表中正号代表来水(流入)，负号代表分水(流出)。
+            # 渠道平衡式采用: storage_flow = q_in - q_out + nominal_disturbance + hidden_disturbance
+            # 因此反推未知流入 (hidden_disturbance) 时采用如下公式：
+            inferred = storage_flow - (q_in - q_out + nominal_disturbance)
+            
+            logger.info(
+                f"误差观察器计算 Pool {pool_id} 扰动:\n"
+                f"  实际流入(q_in)={q_in:.3f}, 实际流出(q_out)={q_out:.3f}, 计划需水(nominal)={nominal_disturbance:.3f}\n"
+                f"  理论已知流量差(q_in - q_out + nominal)={(q_in - q_out + nominal_disturbance):.3f}\n"
+                f"  实际蓄水量变化率(storage_flow)={storage_flow:.3f}\n"
+                f"  反推瞬时未知扰动(inferred)={inferred:.3f}"
+            )
+            
             old = float(self.estimates[pool_id])
             corrected = old + self.runtime.observer_gain * (inferred - old)
             smoothed = self.runtime.observer_smoothing * old + (1.0 - self.runtime.observer_smoothing) * corrected
