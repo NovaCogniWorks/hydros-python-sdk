@@ -1993,6 +1993,7 @@ class ClosedLoopSimulation:
         plt.close(fig)
 
     def _plot_results(self, history: pd.DataFrame) -> None:
+        import matplotlib.pyplot as plt
         time_col = "time_hours" if "time_hours" in history.columns else "hour"
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
