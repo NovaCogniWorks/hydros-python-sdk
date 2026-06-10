@@ -478,7 +478,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.last_opt_step = step
 
         # 上层调度器
+        logger.info(f"完整的需水计划表 (step={step}):\n{self.odd_demand_plan.to_string()}")
         demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
+        logger.info(f"误差观察器扰动计算时用到的需水计划值 (step={step}):\n{demand_row}")
         self.observers.update(
             prev_basin_levels=basin_levels,
             next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
@@ -518,6 +520,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             f"准备调用 Upper Scheduler (step={step}):\n"
             f"  各个渠道的误差观察器估计值: {observer_est}"
         )
+        upper_plan_range = self.odd_demand_plan.iloc[step: step + horizon] if step < len(self.odd_demand_plan) else self.odd_demand_plan.iloc[-1:]
+        logger.info(f"上层规划计算时用的需水计划值 (step={step} to {step+horizon-1}):\n{upper_plan_range.to_string()}")
+        
         upper_plan = self.upper_scheduler.solve(
             now=step,
             env_snapshot=observation,
@@ -593,6 +598,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 reference_front=reference_front_level[0],
             )
             decisions[station_id] = decision
+            
+            lower_plan_range = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
+            logger.info(f"下层计算时用的需水计划值 S{station_id} (step={step}):\n{lower_plan_range}")
             
             ctx = StationControlContext(
                 station_id=station_id,
