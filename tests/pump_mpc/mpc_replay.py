@@ -311,6 +311,45 @@ def main():
         }
         plot_step(step + 1, steps, results_hist, predictions, db_config)
         
+    # ---------- 仿真汇总 ----------
+    target_vol = 80.0 * steps * dt
+    actual_vol = sum(results_hist['q3']) * dt
+    
+    blade_adjust_cnt = 0
+    startup_cnt = 0
+    shutdown_cnt = 0
+    
+    for hist_ang in [results_hist['ang1'], results_hist['ang2'], results_hist['ang3']]:
+        if not hist_ang: continue
+        num_units = len(hist_ang[0])
+        for u in range(num_units):
+            prev_status = 0
+            prev_ang = 0.0
+            for s in range(steps):
+                curr_ang = hist_ang[s][u]
+                curr_status = 1 if curr_ang > 0 else 0
+                if prev_status == 0 and curr_status == 1:
+                    startup_cnt += 1
+                elif prev_status == 1 and curr_status == 0:
+                    shutdown_cnt += 1
+                
+                if curr_status == 1 and prev_status == 1:
+                    if abs(curr_ang - prev_ang) > 1e-3:
+                        blade_adjust_cnt += 1
+                        
+                prev_status = curr_status
+                prev_ang = curr_ang
+
+    print("")
+    print("========== 仿真汇总 ==========")
+    print(f"模拟时长: {steps * dt / 3600.0:.1f} h")
+    print(f"末站目标调水量(m3): {target_vol:.3f}")
+    print(f"末站实际调水量(m3): {actual_vol:.3f}")
+    print(f"完成率: {actual_vol / target_vol if target_vol > 0 else 0:.3f}")
+    print(f"叶片调节总次数: {blade_adjust_cnt}")
+    print(f"启机总次数: {startup_cnt}")
+    print(f"停机总次数: {shutdown_cnt}")
+
     print(f"\nSimulation complete. {steps} frames plotted in output/frames/")
 
 if __name__ == "__main__":
