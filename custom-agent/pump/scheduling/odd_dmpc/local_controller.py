@@ -69,12 +69,15 @@ class LocalController:
         avg_flow = float(memory.last_selected_flow) / active_count
         unit_flows = {u: (avg_flow if st == 1 else 0.0) for u, st in memory.unit_status.items()}
         
-        unit_models = self.flow_service.get_unit_models(station_id)
         current_head = float(level_prediction["predicted_head"])
         eff_dict = {}
         for u, st in memory.unit_status.items():
-            if st == 1 and u in unit_models:
-                eff_dict[u] = float(unit_models[u].interpolate_efficiency(current_head, memory.unit_openings.get(u, 0.0)))
+            if st == 1:
+                try:
+                    u_model = self.flow_service.get_unit_model(station_id, u)
+                    eff_dict[u] = float(u_model.predict_efficiency(unit_flows[u], current_head))
+                except Exception:
+                    eff_dict[u] = 0.0
             else:
                 eff_dict[u] = 0.0
         avg_eff = float(__import__("numpy").mean([eff for eff in eff_dict.values() if eff > 0])) if any(eff > 0 for eff in eff_dict.values()) else 0.0
