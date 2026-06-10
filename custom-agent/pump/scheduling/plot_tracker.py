@@ -199,10 +199,6 @@ class PlotHistoryTracker:
             y=0.99,
         )
         times_hist = np.asarray(hist_times, dtype=float)
-        plan_len = len(lower_prediction_plan[station_ids[0]]) if station_ids else 0
-        upper_len = len(upper_plan.flow_refs[station_ids[0]]) if station_ids else 0
-        times_plan = current_time_hours + np.arange(plan_len, dtype=float) * lower_step_hours
-        times_upper = current_time_hours + np.arange(upper_len, dtype=float) * float(self.system_config.dt_hours)
         
         station_palette = plt.cm.tab10(np.linspace(0.2, 0.9, max(n_stations, 1)))
         cmap_cycle = [plt.cm.Blues, plt.cm.Greens, plt.cm.Reds, plt.cm.Purples, plt.cm.Oranges, plt.cm.Greys]
@@ -218,11 +214,17 @@ class PlotHistoryTracker:
             station = self.system_config.station_by_id[station_id]
             action = actions[station_id]
             
+            st_plan_len = len(lower_prediction_plan[station_id])
+            st_times_plan = current_time_hours + np.arange(st_plan_len, dtype=float) * lower_step_hours
+            st_upper_len = len(upper_plan.flow_refs.get(station_id, []))
+            st_times_upper = current_time_hours + np.arange(st_upper_len, dtype=float) * float(self.system_config.dt_hours)
+            
             # 1. Flow
             ax_flow = fig.add_subplot(gs[idx, 0])
             ax_flow.plot(times_hist, hist_flows[station_id], color=color, linestyle="-", label="Actual Q")
-            ax_flow.plot(times_plan, lower_prediction_plan[station_id], color=color, linestyle="--", alpha=0.5, label="Lower Pred")
-            ax_flow.step(times_upper, upper_plan.flow_refs[station_id], color=color, linestyle=":", where="post", alpha=0.8, label="Upper Plan")
+            ax_flow.plot(st_times_plan, lower_prediction_plan[station_id], color=color, linestyle="--", alpha=0.5, label="Lower Pred")
+            if st_upper_len > 0:
+                ax_flow.step(st_times_upper, upper_plan.flow_refs[station_id], color=color, linestyle=":", where="post", alpha=0.8, label="Upper Plan")
             ax_flow.set_title(f"S{station_id} Flow")
             ax_flow.set_ylabel("Flow (m3/s)")
             ax_flow.set_xlim([0, self.hours])
@@ -240,7 +242,9 @@ class PlotHistoryTracker:
             pred_back_arr = np.array(upper_plan.station_back_levels.get(station_id, []))
             pred_front_arr = np.array(upper_plan.station_front_levels.get(station_id, []))
             if pred_back_arr.size > 0 and pred_front_arr.size > 0:
-                ax_head.step(times_upper, pred_back_arr - pred_front_arr, color=color, linestyle=":", alpha=0.8, where="post", label="Pred Head")
+                h_len = min(pred_back_arr.size, pred_front_arr.size)
+                h_times = current_time_hours + np.arange(h_len, dtype=float) * float(self.system_config.dt_hours)
+                ax_head.step(h_times, pred_back_arr[:h_len] - pred_front_arr[:h_len], color=color, linestyle=":", alpha=0.8, where="post", label="Pred Head")
                 
             ax_head.set_title(f"S{station_id} Head")
             ax_head.set_ylabel("Head (m)")
@@ -251,7 +255,7 @@ class PlotHistoryTracker:
             # 3. Efficiency
             ax_eff = fig.add_subplot(gs[idx, 2])
             ax_eff.plot(times_hist, hist_efficiencies[station_id], color=color, linestyle="-", label="Efficiency %")
-            ax_eff.plot(times_plan, self._predicted_series(action.predicted_efficiencies, hist_efficiencies[station_id], len(times_plan)), color=color, linestyle="--", alpha=0.5, label="Pred Eff")
+            ax_eff.plot(st_times_plan, self._predicted_series(action.predicted_efficiencies, hist_efficiencies[station_id], len(st_times_plan)), color=color, linestyle="--", alpha=0.5, label="Pred Eff")
             ax_eff.set_title(f"S{station_id} Efficiency")
             ax_eff.set_ylabel("Eff (%)")
             ax_eff.set_xlim([0, self.hours])
@@ -264,10 +268,10 @@ class PlotHistoryTracker:
             palette_st = station_palettes[station_id]
             for u_idx, unit in enumerate(station.units):
                 actual_angles = [step_data[station_id][unit.name]["Opening"] for step_data in hist_unit_status]
-                pred_angles = [float(action.unit_openings.get(unit.id, 0.0))] * len(times_plan)
+                pred_angles = [float(action.unit_openings.get(unit.id, 0.0))] * len(st_times_plan)
                 u_color = palette_st[u_idx]
                 ax_angle.plot(times_hist, actual_angles, color=u_color, label=f"U{unit.id} Actual")
-                ax_angle.plot(times_plan, pred_angles, "--", color=u_color, alpha=0.55)
+                ax_angle.plot(st_times_plan, pred_angles, "--", color=u_color, alpha=0.55)
             ax_angle.set_title(f"S{station_id} Blade Angles")
             ax_angle.set_ylabel("Angle")
             ax_angle.set_xlim([0, self.hours])
@@ -384,9 +388,13 @@ class PlotHistoryTracker:
                 ax_pool.plot(times_hist, hist_front_levels[dn_st_id], color=p_color, linestyle="--", alpha=0.7, label=f"Actual Z_dn (S{dn_st_id} front)")
                 
             if up_st_id in upper_plan.station_back_levels and len(upper_plan.station_back_levels[up_st_id]) > 0:
-                ax_pool.step(times_upper, upper_plan.station_back_levels[up_st_id], color=p_color, linestyle=":", alpha=0.6, where="post", label=f"Pred Z_up (S{up_st_id})")
+                arr = upper_plan.station_back_levels[up_st_id]
+                t_arr = current_time_hours + np.arange(len(arr), dtype=float) * float(self.system_config.dt_hours)
+                ax_pool.step(t_arr, arr, color=p_color, linestyle=":", alpha=0.6, where="post", label=f"Pred Z_up (S{up_st_id})")
             if dn_st_id in upper_plan.station_front_levels and len(upper_plan.station_front_levels[dn_st_id]) > 0:
-                ax_pool.step(times_upper, upper_plan.station_front_levels[dn_st_id], color=p_color, linestyle="-.", alpha=0.6, where="post", label=f"Pred Z_dn (S{dn_st_id})")
+                arr = upper_plan.station_front_levels[dn_st_id]
+                t_arr = current_time_hours + np.arange(len(arr), dtype=float) * float(self.system_config.dt_hours)
+                ax_pool.step(t_arr, arr, color=p_color, linestyle="-.", alpha=0.6, where="post", label=f"Pred Z_dn (S{dn_st_id})")
                 
             ax_pool.set_title(f"Pool {segment.id} Level (S{up_st_id} -> S{dn_st_id})")
             ax_pool.set_ylabel("Level (m)")
