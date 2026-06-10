@@ -75,6 +75,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         初始化智能体。该方法在任务启动时被调用。
         """
         logger.info(f"正在初始化智能体: {self.agent_id}")
+        self._internal_opt_step = 0
 
         try:
             # 1. 加载智能体配置 (从 agent.properties)
@@ -294,7 +295,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
-        logger.info(f"========== 开启第 {step} 步滚动优化 ==========")
+        current_step = getattr(self, "_internal_opt_step", 0)
+        logger.info(f"========== 开启第 {current_step} 步滚动优化 (外部触发 step={step}) ==========")
+        step = current_step
+        self._internal_opt_step = current_step + 1
         
         self._lazy_init_odd_mpc()
         
@@ -936,7 +940,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 is_weather_forecast = True
 
         if is_weather_forecast and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
-            current_step = getattr(self, "last_opt_step", 0)
+            current_step = getattr(self, "_internal_opt_step", 0)
             
             for obj_ts in event.object_time_series:
                 logger.info(f"处理 WEATHER_FORECAST 天气预报数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
@@ -971,6 +975,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     target_idx = getattr(ts_val, "step", None)
                     if target_idx is None:
                         target_idx = current_step + idx
+                    else:
+                        target_idx = current_step + int(target_idx)
                     target_idx = int(target_idx)
                     
                     # 动态扩展 DataFrame
