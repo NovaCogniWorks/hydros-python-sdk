@@ -665,14 +665,41 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         lower_res = {}
         for sid in self.system_config.station_ids:
             action = actions[sid]
-            st_list = [action.unit_status.get(u, 0) for u in self.available_units_map[sid]]
-            op_list = [action.unit_openings.get(u, 0.0) for u in self.available_units_map[sid]]
-            eff_list = [0.0] * len(st_list) # 模拟效率
+            horizon_len = len(action.predicted_openings) if getattr(action, "predicted_openings", None) else 1
+            if horizon_len == 0:
+                horizon_len = 1
+                
+            status_seq, openings_seq, effs_seq, total_q_seq = [], [], [], []
+            unit_ids = self.available_units_map[sid]
+            
+            for step_idx in range(horizon_len):
+                st_list = [
+                    action.predicted_unit_status.get(u, [0]*horizon_len)[step_idx] if getattr(action, "predicted_unit_status", None) else action.unit_status.get(u, 0)
+                    for u in unit_ids
+                ]
+                op_list = [
+                    action.predicted_unit_openings.get(u, [0.0]*horizon_len)[step_idx] if getattr(action, "predicted_unit_openings", None) else action.unit_openings.get(u, 0.0)
+                    for u in unit_ids
+                ]
+                eff_list = [
+                    action.predicted_unit_efficiencies.get(u, [0.0]*horizon_len)[step_idx] if getattr(action, "predicted_unit_efficiencies", None) else 0.0
+                    for u in unit_ids
+                ]
+                if getattr(action, "predicted_unit_flows", None):
+                    t_q = sum(action.predicted_unit_flows.get(u, [0.0]*horizon_len)[step_idx] for u in unit_ids)
+                else:
+                    t_q = action.selected_flow
+                
+                status_seq.append(st_list)
+                openings_seq.append(op_list)
+                effs_seq.append(eff_list)
+                total_q_seq.append(t_q)
+                
             lower_res[sid] = {
-                "status": [st_list],
-                "openings": [op_list],
-                "effs": [eff_list],
-                "total_q": [action.selected_flow]
+                "status": status_seq,
+                "openings": openings_seq,
+                "effs": effs_seq,
+                "total_q": total_q_seq
             }
             
         # 格式化 upper_res
