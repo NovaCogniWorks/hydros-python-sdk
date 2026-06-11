@@ -1,8 +1,8 @@
 """
-Message filtering logic for MQTT command dispatcher.
+MQTT 指令分派器的消息过滤逻辑。
 
-This module implements message filtering similar to the Java implementation in
-SimCoordinationSlave.messageArrived() and AgentCommonService.isActiveToTaskSimCommand().
+本模块实现与 Java 侧 SimCoordinationSlave.messageArrived()
+和 AgentCommonService.isActiveToTaskSimCommand() 类似的消息过滤。
 """
 
 import logging
@@ -12,20 +12,18 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimCoordinationRequest,
     AgentInstanceStatusReport,
+    MpcResultReport,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
-
-# Backward compatibility alias
-AgentContextManager = AgentStateManager
 
 logger = logging.getLogger(__name__)
 
 
 class MessageFilter:
     """
-    Filters incoming MQTT messages based on agent context and message type.
+    基于智能体上下文和消息类型过滤传入的 MQTT 消息。
 
-    This implements the filtering logic from Java's:
+    这里实现 Java 侧如下逻辑：
     - SimCoordinationSlave.messageArrived() (line 241-249)
     - AgentCommonService.isActiveToTaskSimCommand()
     - SimCoordinationSlave.isReceived() (line 286-301)
@@ -36,9 +34,9 @@ class MessageFilter:
 
     def is_active_to_task_sim_command(self, sim_command: SimCommand) -> bool:
         """
-        Check if the command should be processed based on active contexts.
+        根据活跃上下文检查该指令是否应被处理。
 
-        This implements the Java logic:
+        这里实现如下 Java 逻辑：
         ```java
         @Override
         public boolean isActiveToTaskSimCommand(SimCommand simCommand) {
@@ -55,17 +53,17 @@ class MessageFilter:
         ```
 
         Args:
-            sim_command: The command to check
+            sim_command: 要检查的指令
 
         Returns:
-            True if the command should be processed, False if it should be filtered out
+            指令应处理时返回 True，应过滤时返回 False
         """
-        # Always accept task init requests
+        # 始终接受任务初始化请求
         if isinstance(sim_command, SimTaskInitRequest):
             logger.debug(f"Accepting SimTaskInitRequest: {sim_command.command_id}")
             return True
 
-        # Check if the command's context is active
+        # 检查指令上下文是否处于活跃状态
         if hasattr(sim_command, 'context') and sim_command.context:
             has_context = self.context_manager.has_active_context(sim_command.context)
             if has_context:
@@ -77,15 +75,15 @@ class MessageFilter:
                            f"{sim_command.context.biz_scene_instance_id}")
                 return False
 
-        # No context or not active
+        # 没有上下文或上下文不活跃
         logger.debug(f"Filtering out command {sim_command.command_type}: no active context")
         return False
 
     def is_received(self, sim_command: SimCommand) -> bool:
         """
-        Check if a received message should be processed.
+        检查收到的消息是否应被处理。
 
-        This implements the Java logic from SimCoordinationSlave.isReceived() (line 286-301):
+        这里实现 SimCoordinationSlave.isReceived() 中的 Java 逻辑（line 286-301）：
         ```java
         private boolean isReceived(SimCommand simCommand) {
             if (simCommand instanceof SimCoordinationRequest) {
@@ -105,27 +103,27 @@ class MessageFilter:
         ```
 
         Args:
-            sim_command: The command to check
+            sim_command: 要检查的指令
 
         Returns:
-            True if the message should be processed, False otherwise
+            消息应处理时返回 True，否则返回 False
         """
-        # Always receive requests
+        # 始终接收请求
         if isinstance(sim_command, SimCoordinationRequest):
             logger.debug(f"Receiving request: {sim_command.command_type}")
             return True
 
-        # For AgentInstanceStatusReport, only receive from remote agents
-        if isinstance(sim_command, AgentInstanceStatusReport):
+        # 显式报告只接收远端智能体发出的消息
+        if isinstance(sim_command, (AgentInstanceStatusReport, MpcResultReport)):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:
-                logger.debug(f"Receiving AgentInstanceStatusReport from remote agent: {sim_command.command_type}")
+                logger.debug(f"Receiving report from remote agent: {sim_command.command_type}")
                 return True
             else:
-                logger.debug(f"Filtering out AgentInstanceStatusReport from local agent: {sim_command.command_type}")
+                logger.debug(f"Filtering out report from local agent: {sim_command.command_type}")
                 return False
 
-        # For SimTaskInitResponse, only receive from remote agents
+        # 任务初始化响应只接收远端智能体发出的消息
         if isinstance(sim_command, SimTaskInitResponse):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:
@@ -135,36 +133,36 @@ class MessageFilter:
                 logger.debug(f"Filtering out SimTaskInitResponse from local agent: {sim_command.command_type}")
                 return False
 
-        # Default: don't receive other message types
+        # 默认不接收其他消息类型
         logger.debug(f"Filtering out message (not in receive list): {sim_command.command_type}")
         return False
 
     def should_process_message(self, sim_command: SimCommand) -> bool:
         """
-        Combined filter: check both active context and receive filters.
+        组合过滤：同时检查活跃上下文过滤和接收过滤。
 
-        This combines the two filters from Java's messageArrived():
-        1. isActiveToTaskSimCommand() - filter by active context
-        2. isReceived() - filter by message source
+        这里组合 Java messageArrived() 中的两个过滤：
+        1. isActiveToTaskSimCommand() - 按活跃上下文过滤
+        2. isReceived() - 按消息来源过滤
 
         Args:
-            sim_command: The command to check
+            sim_command: 要检查的指令
 
         Returns:
-            True if the message should be processed, False if it should be filtered out
+            消息应处理时返回 True，应过滤时返回 False
         """
-        # First filter: check if active to task
+        # 第一层过滤：检查是否属于活跃任务
         if not self.is_active_to_task_sim_command(sim_command):
-            logger.info(f"Message filtered (inactive context): {sim_command.command_type}, "
-                       f"command_id={sim_command.command_id}")
+            logger.debug(f"Message filtered (inactive context): {sim_command.command_type}, "
+                         f"command_id={sim_command.command_id}")
             return False
 
-        # Second filter: check if should be received
+        # 第二层过滤：检查是否应接收
         if not self.is_received(sim_command):
-            logger.info(f"Message filtered (local source): {sim_command.command_type}, "
-                       f"command_id={sim_command.command_id}")
+            logger.debug(f"Message filtered (local source): {sim_command.command_type}, "
+                         f"command_id={sim_command.command_id}")
             return False
 
-        # Passed both filters
+        # 通过两层过滤
         logger.debug(f"Message accepted: {sim_command.command_type}, command_id={sim_command.command_id}")
         return True

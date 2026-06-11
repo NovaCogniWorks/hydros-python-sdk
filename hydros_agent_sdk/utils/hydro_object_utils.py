@@ -1,9 +1,8 @@
 """
-Utility class for loading and parsing water network topology objects from YAML.
+用于从 YAML 加载和解析水网拓扑对象的工具类。
 
-This module provides functionality similar to the Java HydroObjectUtilsV2 class,
-allowing Python agents to load complex water network topology objects and properties
-from YAML configuration files.
+本模块提供类似 Java HydroObjectUtilsV2 的能力，让 Python 智能体可以从
+YAML 配置文件加载复杂水网拓扑对象和属性。
 """
 
 import logging
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class HydroObjectType(str, Enum):
-    """Enumeration of hydro object types."""
+    """水利对象类型枚举。"""
     GATE_STATION = "GateStation"
     DIVERSION_POINT = "DiversionPoint"
     CROSS_SECTION = "CrossSection"
@@ -33,7 +32,7 @@ class HydroObjectType(str, Enum):
 
 
 class MetricsCodes(str, Enum):
-    """Enumeration of metrics codes for hydro objects."""
+    """水利对象指标编码枚举。"""
     WATER_LEVEL = "water_level"
     WATER_FLOW = "water_flow"
     GATE_OPENING = "gate_opening"
@@ -43,14 +42,14 @@ class MetricsCodes(str, Enum):
 
 class SimpleChildObject(BaseModel):
     """
-    Represents a child object (cross-section, gate, sensor) under a parent hydro object.
+    表示父级水利对象下的子对象（断面、闸门、传感器等）。
 
     Attributes:
-        object_id: Unique identifier for the child object
-        object_type: Type of the child object
-        object_name: Display name of the child object
-        params: Custom parameters for the child object
-        metrics: List of associated metrics codes
+        object_id: 子对象唯一标识
+        object_type: 子对象类型
+        object_name: 子对象展示名称
+        params: 子对象自定义参数
+        metrics: 关联指标编码列表
     """
     object_id: int = Field(alias='objectId')
     object_type: str = Field(alias='objectType')
@@ -65,15 +64,15 @@ class SimpleChildObject(BaseModel):
 
 class TopHydroObject(BaseModel):
     """
-    Represents a top-level hydro object in the waterway.
+    表示水道中的顶层水利对象。
 
     Attributes:
-        object_id: Unique identifier for the object
-        object_type: Type of the object (e.g., GateStation, Channel)
-        object_name: Display name of the object
-        params: Custom parameters for the object
-        children: List of child objects (cross-sections, gates, sensors)
-        km_pos: Kilometer position in the waterway
+        object_id: 对象唯一标识
+        object_type: 对象类型（例如 GateStation、Channel）
+        object_name: 对象展示名称
+        params: 对象自定义参数
+        children: 子对象列表（断面、闸门、传感器等）
+        km_pos: 对象在水道中的千米位置
     """
     object_id: int = Field(alias='objectId')
     object_type: str = Field(alias='objectType')
@@ -89,25 +88,25 @@ class TopHydroObject(BaseModel):
 
 class WaterwayTopology(BaseModel):
     """
-    Represents the complete waterway network structure with topology relationships.
+    表示带拓扑关系的完整水道网络结构。
 
-    This class maintains the waterway topology with optimization indices for:
-    - Child-to-parent mapping
-    - Upstream/downstream relationships
-    - Object caching for fast lookups
+    该类维护水道拓扑，并为以下场景建立优化索引：
+    - 子对象到父对象映射
+    - 上下游关系
+    - 用于快速查找的对象缓存
 
     Attributes:
-        top_objects: List of top-level hydro objects
-        child_to_parent_map: Maps child object IDs to parent object IDs
-        upstream_map: Maps each object to its upstream neighbors
-        downstream_map: Maps each object to its downstream neighbors
+        top_objects: 顶层水利对象列表
+        child_to_parent_map: 子对象 ID 到父对象 ID 的映射
+        upstream_map: 每个对象到其上游邻居的映射
+        downstream_map: 每个对象到其下游邻居的映射
     """
     top_objects: List[TopHydroObject] = Field(default_factory=list, alias='topObjects')
     child_to_parent_map: Dict[int, int] = Field(default_factory=dict, alias='childToParentMap')
     upstream_map: Dict[int, List[int]] = Field(default_factory=dict, alias='upstreamMap')
     downstream_map: Dict[int, List[int]] = Field(default_factory=dict, alias='downstreamMap')
 
-    # Internal cache for fast object lookups
+    # 用于快速对象查找的内部缓存
     _object_cache: Dict[int, Any] = {}
 
     class Config:
@@ -116,13 +115,13 @@ class WaterwayTopology(BaseModel):
 
     def get_top_object(self, top_object_id: int) -> Optional[TopHydroObject]:
         """
-        Get a top-level object by its ID.
+        按 ID 获取顶层对象。
 
         Args:
-            top_object_id: The ID of the top-level object
+            top_object_id: 顶层对象 ID
 
         Returns:
-            The TopHydroObject if found, None otherwise
+            找到时返回 TopHydroObject，否则返回 None
         """
         for obj in self.top_objects:
             if obj.object_id == top_object_id:
@@ -131,25 +130,25 @@ class WaterwayTopology(BaseModel):
 
     def get_object(self, object_id: int) -> Optional[Any]:
         """
-        Get any object (parent or child) by its ID with caching.
+        按 ID 获取任意对象（父对象或子对象），并使用缓存加速。
 
         Args:
-            object_id: The ID of the object
+            object_id: 对象 ID
 
         Returns:
-            The object if found, None otherwise
+            找到时返回对象，否则返回 None
         """
-        # Check cache first
+        # 优先检查缓存
         if object_id in self._object_cache:
             return self._object_cache[object_id]
 
-        # Search in top objects
+        # 在顶层对象中查找
         for top_obj in self.top_objects:
             if top_obj.object_id == object_id:
                 self._object_cache[object_id] = top_obj
                 return top_obj
 
-            # Search in children
+            # 在子对象中查找
             for child in top_obj.children:
                 if child.object_id == object_id:
                     self._object_cache[object_id] = child
@@ -159,13 +158,13 @@ class WaterwayTopology(BaseModel):
 
     def get_top_object_by_child_id(self, child_object_id: int) -> Optional[TopHydroObject]:
         """
-        Find the parent top-level object of a child object.
+        查找子对象所属的父级顶层对象。
 
         Args:
-            child_object_id: The ID of the child object
+            child_object_id: 子对象 ID
 
         Returns:
-            The parent TopHydroObject if found, None otherwise
+            找到时返回父级 TopHydroObject，否则返回 None
         """
         parent_id = self.child_to_parent_map.get(child_object_id)
         if parent_id is not None:
@@ -174,13 +173,13 @@ class WaterwayTopology(BaseModel):
 
     def is_child_object(self, object_id: int) -> bool:
         """
-        Check if an object ID corresponds to a child object.
+        检查对象 ID 是否对应子对象。
 
         Args:
-            object_id: The ID to check
+            object_id: 要检查的 ID
 
         Returns:
-            True if it's a child object, False otherwise
+            是子对象时返回 True，否则返回 False
         """
         return object_id in self.child_to_parent_map
 
@@ -190,26 +189,26 @@ class WaterwayTopology(BaseModel):
         child_object_types: Optional[Set[str]] = None
     ) -> List[Any]:
         """
-        Filter objects by managed IDs and child object types.
+        按托管对象 ID 和子对象类型过滤对象。
 
         Args:
-            agent_managed_top_object_ids: Set of top-level object IDs to filter by
-            child_object_types: Set of child object types to include
+            agent_managed_top_object_ids: 用于过滤的顶层对象 ID 集合
+            child_object_types: 要包含的子对象类型集合
 
         Returns:
-            List of filtered objects
+            过滤后的对象列表
         """
         result = []
 
         for top_obj in self.top_objects:
-            # Filter by managed IDs if specified
+            # 如果指定了 managed IDs，则按其过滤
             if agent_managed_top_object_ids and top_obj.object_id not in agent_managed_top_object_ids:
                 continue
 
-            # Add top object
+            # 添加顶层对象
             result.append(top_obj)
 
-            # Add filtered children
+            # 添加过滤后的子对象
             if child_object_types:
                 for child in top_obj.children:
                     if child.object_type in child_object_types:
@@ -221,13 +220,13 @@ class WaterwayTopology(BaseModel):
 
     def find_neighbors(self, any_object_id: int) -> Dict[str, List[int]]:
         """
-        Get upstream and downstream neighbors of an object.
+        获取对象的上下游邻居。
 
         Args:
-            any_object_id: The ID of the object
+            any_object_id: 对象 ID
 
         Returns:
-            Dictionary with 'upstream' and 'downstream' lists of neighbor IDs
+            包含 upstream 和 downstream 邻居 ID 列表的字典
         """
         return {
             'upstream': self.upstream_map.get(any_object_id, []),
@@ -237,14 +236,13 @@ class WaterwayTopology(BaseModel):
 
 class HydroObjectUtilsV2:
     """
-    Utility class for loading and parsing water network topology objects from YAML.
+    用于从 YAML 加载和解析水网拓扑对象的工具类。
 
-    This class provides functionality similar to the Java HydroObjectUtilsV2,
-    allowing agents to load complex water network topology objects and properties
-    from YAML configuration files hosted on remote servers.
+    该类提供类似 Java HydroObjectUtilsV2 的能力，让智能体可以从远端服务器
+    托管的 YAML 配置文件加载复杂水网拓扑对象和属性。
 
-    Example usage:
-        # Load topology with specific parameters and metrics
+    使用示例：
+        # 加载包含指定参数和指标的拓扑
         params = {'max_opening', 'min_opening'}
         topology = HydroObjectUtilsV2.build_waterway_topology(
             modeling_yml_uri='http://example.com/objects.yaml',
@@ -252,30 +250,30 @@ class HydroObjectUtilsV2:
             with_metrics_code=True
         )
 
-        # Access top-level objects
+        # 访问顶层对象
         for obj in topology.top_objects:
             print(f"Object: {obj.object_name} ({obj.object_type})")
 
-        # Find object by ID
+        # 按 ID 查找对象
         obj = topology.get_object(1018)
     """
 
     @staticmethod
     def load_remote_yaml(url: str) -> Dict[str, Any]:
         """
-        Load YAML content from a remote URL.
+        从远端 URL 加载 YAML 内容。
 
         Args:
-            url: The URL of the YAML file
+            url: YAML 文件 URL
 
         Returns:
-            Parsed YAML content as a dictionary
+            解析后的 YAML 字典
 
         Raises:
-            Exception: If the URL cannot be accessed or YAML cannot be parsed
+            Exception: URL 无法访问或 YAML 无法解析时抛出
         """
         try:
-            # Handle non-ASCII characters in URL
+            # 处理 URL 中的非 ASCII 字符
             parsed_url = urllib.parse.urlparse(url)
             encoded_path = urllib.parse.quote(parsed_url.path.encode('utf-8'))
             encoded_url = urllib.parse.urlunparse((
@@ -303,39 +301,46 @@ class HydroObjectUtilsV2:
     @staticmethod
     def parse_objects(
         topology_model_config_url: str,
-        param_keys: Optional[Set[str]] = None
+        param_keys: Optional[Set[str]] = None,
+        yaml_data: Optional[Dict[str, Any]] = None,
     ) -> List[TopHydroObject]:
         """
-        Parse hydro objects from YAML configuration.
+        从 YAML 配置解析水利对象。
 
         Args:
-            topology_model_config_url: URL of the YAML configuration file
-            param_keys: Set of parameter keys to include (None = include all)
+            topology_model_config_url: YAML 配置文件 URL
+            param_keys: 要包含的参数键集合（None 表示全部包含）
 
         Returns:
-            List of parsed TopHydroObject instances
+            解析后的 TopHydroObject 实例列表
         """
-        yaml_data = HydroObjectUtilsV2.load_remote_yaml(topology_model_config_url)
+        if yaml_data is None:
+            yaml_data = HydroObjectUtilsV2.load_remote_yaml(topology_model_config_url)
 
-        # Extract objects and cross_sections
+        # 提取 objects 和 cross_sections
         objects_list = yaml_data.get('objects', [])
         cross_sections_list = yaml_data.get('cross_sections', [])
 
-        # Build cross_sections map for efficient lookup
-        cross_sections_map = {cs['id']: cs for cs in cross_sections_list}
+        # 构建 cross_sections 映射以便高效查找
+        cross_sections_map = {}
+        for cs in cross_sections_list:
+            cs_id = cs.get('id')
+            if cs_id is None:
+                continue
+            cross_sections_map[cs_id] = cs
 
         logger.info(f"Parsing {len(objects_list)} objects from YAML")
 
         top_objects = []
 
         for obj_data in objects_list:
-            # Extract basic properties
+            # 提取基础属性
             object_id = obj_data.get('id')
             object_type = obj_data.get('type')
             object_name = obj_data.get('name', '')
             km_pos = obj_data.get('km_pos')
 
-            # Filter parameters if param_keys specified
+            # 如果指定 param_keys，则过滤参数
             params = {}
             if 'parameters' in obj_data:
                 obj_params = obj_data['parameters']
@@ -344,20 +349,29 @@ class HydroObjectUtilsV2:
                 else:
                     params = obj_params.copy()
 
-            # Process children
+            # 处理 children
             children = []
 
-            # Process cross_section_children
+            # 处理 cross_section_children
             cross_section_children = obj_data.get('cross_section_children', [])
             for cs_child in cross_section_children:
-                child_id = cs_child.get('id')
-                child_type = cs_child.get('type', 'CrossSection')
-                child_name = cs_child.get('name', '')
+                section_ref = cs_child.get('section_ref', {})
+                child_id = section_ref.get('id')
+                if child_id is None:
+                    logger.warning(
+                        "Skip cross section child without id: parentObjectId=%s, child=%s",
+                        object_id,
+                        cs_child,
+                    )
+                    continue
 
-                # Get parameters from cross_sections map
+                child_type = 'CrossSection'
+                child_name = section_ref.get('name', '')
+
+                # 从 cross_sections 映射获取参数
                 child_params = {}
-                if child_id in cross_sections_map:
-                    cs_data = cross_sections_map[child_id]
+                cs_data = cross_sections_map.get(child_id)
+                if cs_data is not None:
                     if 'parameters' in cs_data:
                         cs_params = cs_data['parameters']
                         if param_keys:
@@ -374,14 +388,22 @@ class HydroObjectUtilsV2:
                 )
                 children.append(child_obj)
 
-            # Process device_children
+            # 处理 device_children
             device_children = obj_data.get('device_children', [])
             for dev_child in device_children:
                 child_id = dev_child.get('id')
+                if child_id is None:
+                    logger.warning(
+                        "Skip device child without id: parentObjectId=%s, child=%s",
+                        object_id,
+                        dev_child,
+                    )
+                    continue
+
                 child_type = dev_child.get('type', 'Device')
                 child_name = dev_child.get('name', '')
 
-                # Filter parameters
+                # 过滤参数
                 child_params = {}
                 if 'parameters' in dev_child:
                     dev_params = dev_child['parameters']
@@ -399,7 +421,7 @@ class HydroObjectUtilsV2:
                 )
                 children.append(child_obj)
 
-            # Create top object
+            # 创建顶层对象
             top_obj = TopHydroObject(
                 objectId=object_id,
                 objectType=object_type,
@@ -419,11 +441,11 @@ class HydroObjectUtilsV2:
         with_metrics_code: bool = False
     ) -> None:
         """
-        Append metrics codes to child objects.
+        为子对象追加指标编码。
 
         Args:
-            top_objects: List of top-level objects to process
-            with_metrics_code: Whether to generate metrics codes
+            top_objects: 要处理的顶层对象列表
+            with_metrics_code: 是否生成指标编码
         """
         if not with_metrics_code:
             return
@@ -434,7 +456,7 @@ class HydroObjectUtilsV2:
             for child in top_obj.children:
                 metrics = []
 
-                # Add metrics based on child object type
+                # 根据子对象类型添加指标
                 if child.object_type == HydroObjectType.CROSS_SECTION:
                     metrics.extend([
                         MetricsCodes.WATER_LEVEL,
@@ -459,25 +481,25 @@ class HydroObjectUtilsV2:
         yaml_data: Dict[str, Any]
     ) -> tuple[Dict[int, int], Dict[int, List[int]], Dict[int, List[int]]]:
         """
-        Build topology indices for child-to-parent, upstream, and downstream relationships.
+        构建子到父、上游和下游关系的拓扑索引。
 
         Args:
-            top_objects: List of top-level objects
-            yaml_data: Original YAML data containing connections
+            top_objects: 顶层对象列表
+            yaml_data: 包含连接关系的原始 YAML 数据
 
         Returns:
-            Tuple of (child_to_parent_map, upstream_map, downstream_map)
+            (child_to_parent_map, upstream_map, downstream_map) 元组
         """
         child_to_parent_map = {}
         upstream_map = {}
         downstream_map = {}
 
-        # Build child-to-parent map
+        # 构建子对象到父对象的映射
         for top_obj in top_objects:
             for child in top_obj.children:
                 child_to_parent_map[child.object_id] = top_obj.object_id
 
-        # Build upstream/downstream maps from connections
+        # 根据 connections 构建上下游映射
         connections = yaml_data.get('connections', [])
         for conn in connections:
             from_obj = conn.get('from', {})
@@ -487,7 +509,7 @@ class HydroObjectUtilsV2:
             to_id = to_obj.get('id')
 
             if from_id and to_id:
-                # from_id -> to_id means from_id is upstream of to_id
+                # 映射关系 from_id -> to_id 表示 from_id 位于 to_id 上游
                 if to_id not in upstream_map:
                     upstream_map[to_id] = []
                 upstream_map[to_id].append(from_id)
@@ -508,19 +530,19 @@ class HydroObjectUtilsV2:
         with_metrics_code: bool = False
     ) -> WaterwayTopology:
         """
-        Build complete waterway topology from YAML configuration.
+        从 YAML 配置构建完整水道拓扑。
 
-        This is the main entry point for loading water network topology.
+        这是加载水网拓扑的主入口。
 
         Args:
-            modeling_yml_uri: URL of the YAML configuration file
-            param_keys: Set of parameter keys to include (None = include all)
-            with_metrics_code: Whether to generate metrics codes for child objects
+            modeling_yml_uri: YAML 配置文件 URL
+            param_keys: 要包含的参数键集合（None 表示全部包含）
+            with_metrics_code: 是否为子对象生成指标编码
 
         Returns:
-            WaterwayTopology object containing the complete topology
+            包含完整拓扑的 WaterwayTopology 对象
 
-        Example:
+        示例：
             >>> params = {'max_opening', 'min_opening'}
             >>> topology = HydroObjectUtilsV2.build_waterway_topology(
             ...     'http://example.com/objects.yaml',
@@ -531,20 +553,24 @@ class HydroObjectUtilsV2:
         """
         logger.info(f"Building waterway topology from: {modeling_yml_uri}")
 
-        # Load YAML data
+        # 加载 YAML 数据
         yaml_data = HydroObjectUtilsV2.load_remote_yaml(modeling_yml_uri)
 
-        # Parse objects
-        top_objects = HydroObjectUtilsV2.parse_objects(modeling_yml_uri, param_keys)
+        # 解析对象
+        top_objects = HydroObjectUtilsV2.parse_objects(
+            modeling_yml_uri,
+            param_keys,
+            yaml_data=yaml_data,
+        )
 
-        # Append metrics codes if requested
+        # 如有需要则追加指标编码
         HydroObjectUtilsV2.append_with_metrics_codes(top_objects, with_metrics_code)
 
-        # Build topology indices
+        # 构建拓扑索引
         child_to_parent_map, upstream_map, downstream_map = \
             HydroObjectUtilsV2.build_topology_indices(top_objects, yaml_data)
 
-        # Create topology object
+        # 创建拓扑对象
         topology = WaterwayTopology(
             topObjects=top_objects,
             childToParentMap=child_to_parent_map,
@@ -559,12 +585,12 @@ class HydroObjectUtilsV2:
     @classmethod
     def from_url(cls, url: str) -> WaterwayTopology:
         """
-        Convenience method to load topology from URL with default settings.
+        使用默认设置从 URL 加载拓扑的便捷方法。
 
         Args:
-            url: URL of the YAML configuration file
+            url: YAML 配置文件 URL
 
         Returns:
-            WaterwayTopology object
+            WaterwayTopology 对象
         """
         return cls.build_waterway_topology(url, with_metrics_code=True)

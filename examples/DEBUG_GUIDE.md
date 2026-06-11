@@ -29,7 +29,7 @@ pip install debugpy
 
 # 或者使用 Python 直接启动
 cd examples
-python multi_agent_launcher.py --debug twins ontology
+./start_agents.sh --debug twins ontology
 ```
 
 你会看到类似输出：
@@ -135,7 +135,7 @@ VS Code launch.json configuration:
 ### 3.1 直接运行调试
 
 1. 打开 PyCharm
-2. 右键点击 `twins_agent.py` 或 `multi_agent_launcher.py`
+2. 右键点击 `twins_agent.py` 或使用 `examples/start_agents.sh`
 3. 选择 "Debug 'twins_agent'"
 4. 设置断点，开始调试
 
@@ -144,7 +144,7 @@ VS Code launch.json configuration:
 1. Run → Edit Configurations
 2. 添加 "Python" 配置
 3. 设置：
-   - Script path: `examples/multi_agent_launcher.py`
+   - Script path: `examples/start_agents.sh`
    - Parameters: `twins ontology`
    - Working directory: `examples/`
    - Environment variables: `PYTHONPATH=<project_root>`
@@ -177,7 +177,7 @@ breakpoint()
 
 ```bash
 cd examples
-python multi_agent_launcher.py twins
+./start_agents.sh twins
 ```
 
 ### 4.3 pdb 常用命令

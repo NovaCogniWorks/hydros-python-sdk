@@ -1,17 +1,17 @@
 """
-Error handling decorators and utilities for Hydros Agent SDK.
+Hydros Agent SDK 错误处理装饰器和工具。
 
-This module provides decorators and utilities for handling errors in agent methods,
-automatically converting exceptions to appropriate error responses.
+本模块提供用于处理智能体方法错误的装饰器和工具函数，
+可自动将异常转换为合适的错误响应。
 
-Usage:
+用法：
     from hydros_agent_sdk.error_handling import handle_agent_errors
 
     class MyAgent(TickableAgent):
         @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
         def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
-            # Your initialization logic
-            # Any exception will be caught and converted to error response
+            # 你的初始化逻辑
+            # 任何异常都会被捕获并转换为错误响应
             pass
 """
 
@@ -25,7 +25,7 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 
 logger = logging.getLogger(__name__)
 
-# Type variable for decorated function
+# 被装饰函数的类型变量
 F = TypeVar('F', bound=Callable[..., Any])
 
 
@@ -35,65 +35,65 @@ def handle_agent_errors(
     include_traceback: bool = True
 ) -> Callable[[F], F]:
     """
-    Decorator for handling errors in agent methods.
+    用于处理智能体方法错误的装饰器。
 
-    This decorator catches exceptions in agent methods and converts them to
-    appropriate error responses with proper error codes and messages.
+    该装饰器会捕获智能体方法中的异常，并将其转换为带有合适错误码
+    和错误消息的响应。
 
     Args:
-        error_code: The ErrorCode to use for this method
-        agent_name_attr: Attribute name to get agent name from (default: "agent_code")
-        include_traceback: Whether to include traceback in error message (default: True)
+        error_code: 当前方法使用的 ErrorCode
+        agent_name_attr: 用于获取智能体名称的属性名（默认 "agent_code"）
+        include_traceback: 错误消息中是否包含 traceback（默认 True）
 
     Returns:
-        Decorated function that handles errors
+        已具备错误处理能力的装饰后函数
 
-    Example:
+    示例：
         @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
         def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
-            # Your logic here
+            # 你的逻辑写在这里
             pass
 
         @handle_agent_errors(ErrorCodes.AGENT_TICK_FAILURE)
         def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
-            # Your logic here
+            # 你的逻辑写在这里
             pass
     """
     def decorator(func: F) -> F:
         @wraps(func)
         def wrapper(self, request, *args, **kwargs):
             try:
-                # Execute the original function
+                # 执行原始函数
                 return func(self, request, *args, **kwargs)
 
             except Exception as e:
-                # Get agent name
+                # 获取智能体名称
                 agent_name = getattr(self, agent_name_attr, "UnknownAgent")
 
-                # Format error message
+                # 格式化错误消息
                 error_detail = str(e)
                 if include_traceback:
                     error_detail = f"{error_detail}\n{traceback.format_exc()}"
 
                 error_message = error_code.format_message(agent_name, error_detail)
 
-                # Log the error
+                # 记录错误日志
                 logger.error(
                     f"Error in {func.__name__} for agent {agent_name}: {error_message}",
                     exc_info=True
                 )
 
-                # Determine response class from function name
+                # 根据函数名判断响应类
                 response_class = _get_response_class(func.__name__)
 
                 if response_class is None:
-                    # If we can't determine response class, re-raise
+                    # 如果无法判断响应类，则重新抛出
                     logger.error(f"Cannot determine response class for {func.__name__}, re-raising exception")
                     raise
 
-                # Create error response
+                # 创建错误响应
                 try:
-                    # Pre-populate required fields for specific response types to pass Pydantic validation
+                    # 为特定响应类型预填必填字段，以通过 Pydantic 校验
                     extra_fields = {}
                     if func.__name__ == "on_init" or response_class.__name__ == "SimTaskInitResponse":
                         extra_fields["created_agent_instances"] = []
@@ -116,7 +116,7 @@ def handle_agent_errors(
                         f"Failed to create error response: {response_error}",
                         exc_info=True
                     )
-                    # Re-raise original exception if we can't create response
+                    # 如果无法创建响应，则重新抛出原始异常
                     raise e
 
         return wrapper  # type: ignore
@@ -125,13 +125,13 @@ def handle_agent_errors(
 
 def _get_response_class(method_name: str):
     """
-    Get response class based on method name.
+    根据方法名获取响应类。
 
     Args:
-        method_name: Name of the method (e.g., "on_init", "on_tick")
+        method_name: 方法名称（例如 "on_init", "on_tick"）
 
     Returns:
-        Response class or None if not found
+        响应类；未找到时返回 None
     """
     from hydros_agent_sdk.protocol.commands import (
         SimTaskInitResponse,
@@ -161,25 +161,24 @@ def safe_execute(
     **kwargs
 ) -> tuple[bool, Any, Optional[str]]:
     """
-    Safely execute a function and return success status with result or error.
+    安全执行函数，并返回成功状态、结果或错误。
 
-    This is a utility function for executing code blocks that might fail,
-    without using decorators.
+    这是一个用于执行可能失败代码块的工具函数，适合不使用装饰器的场景。
 
     Args:
-        func: Function to execute
-        error_code: ErrorCode to use if function fails
-        agent_name: Name of the agent (for error messages)
-        *args: Arguments to pass to function
-        **kwargs: Keyword arguments to pass to function
+        func: 要执行的函数
+        error_code: 函数失败时使用的 ErrorCode
+        agent_name: 智能体名称（用于错误消息）
+        *args: 传给函数的位置参数
+        **kwargs: 传给函数的关键字参数
 
     Returns:
-        Tuple of (success, result, error_message)
-        - success: True if function executed successfully
-        - result: Return value of function (or None if failed)
-        - error_message: Formatted error message (or None if succeeded)
+        (success, result, error_message) 元组
+        - success: 函数成功执行时为 True
+        - result: 函数返回值（失败时为 None）
+        - error_message: 格式化后的错误消息（成功时为 None）
 
-    Example:
+    示例：
         success, topology, error_msg = safe_execute(
             HydroObjectUtilsV2.build_waterway_topology,
             ErrorCodes.TOPOLOGY_LOAD_FAILURE,
@@ -209,12 +208,11 @@ def safe_execute(
 
 class AgentErrorContext:
     """
-    Context manager for handling errors in agent code blocks.
+    用于处理智能体代码块错误的上下文管理器。
 
-    This provides a more flexible way to handle errors in specific code blocks
-    without using decorators.
+    它提供一种更灵活的方式来处理特定代码块中的错误，无需使用装饰器。
 
-    Example:
+    示例：
         with AgentErrorContext(
             ErrorCodes.TOPOLOGY_LOAD_FAILURE,
             agent_name="MyAgent"
@@ -238,12 +236,12 @@ class AgentErrorContext:
         include_traceback: bool = True
     ):
         """
-        Initialize error context.
+        初始化错误上下文。
 
         Args:
-            error_code: ErrorCode to use for errors in this context
-            agent_name: Name of the agent
-            include_traceback: Whether to include traceback in error message
+            error_code: 当前上下文出现错误时使用的 ErrorCode
+            agent_name: 智能体名称
+            include_traceback: 错误消息中是否包含 traceback
         """
         self.error_code = error_code
         self.agent_name = agent_name
@@ -253,17 +251,17 @@ class AgentErrorContext:
         self.exception: Optional[Exception] = None
 
     def __enter__(self):
-        """Enter context."""
+        """进入上下文。"""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit context and handle any exception."""
+        """退出上下文并处理可能出现的异常。"""
         if exc_type is not None:
-            # An exception occurred
+            # 出现异常
             self.has_error = True
             self.exception = exc_val
 
-            # Format error message
+            # 格式化错误消息
             error_detail = str(exc_val)
             if self.include_traceback:
                 error_detail = f"{error_detail}\n{traceback.format_exc()}"
@@ -273,13 +271,13 @@ class AgentErrorContext:
                 error_detail
             )
 
-            # Log the error
+            # 记录错误日志
             logger.error(
                 f"Error in AgentErrorContext for {self.agent_name}: {self.error_message}",
                 exc_info=True
             )
 
-            # Suppress the exception (return True)
+            # 抑制异常（返回 True）
             return True
 
         return False
@@ -291,19 +289,19 @@ def validate_request(
     agent_name: str = "UnknownAgent"
 ) -> tuple[bool, Optional[str]]:
     """
-    Validate that a request has all required fields.
+    校验请求是否包含全部必填字段。
 
     Args:
-        request: Request object to validate
-        required_fields: List of required field names
-        agent_name: Name of the agent (for error messages)
+        request: 要校验的请求对象
+        required_fields: 必填字段名称列表
+        agent_name: 智能体名称（用于错误消息）
 
     Returns:
-        Tuple of (is_valid, error_message)
-        - is_valid: True if all required fields are present
-        - error_message: Error message if validation failed (None if valid)
+        (is_valid, error_message) 元组
+        - is_valid: 全部必填字段存在时为 True
+        - error_message: 校验失败时的错误消息（校验通过时为 None）
 
-    Example:
+    示例：
         is_valid, error_msg = validate_request(
             request,
             ['context', 'agent_list'],

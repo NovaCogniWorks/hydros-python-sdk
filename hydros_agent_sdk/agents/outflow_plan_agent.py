@@ -6,10 +6,11 @@
 """
 
 import logging
-from typing import Optional, List
+from typing import Optional
 from abc import abstractmethod
 
-from .tickable_agent import TickableAgent, MqttMetrics
+from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -18,14 +19,11 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     OutflowTimeSeriesRequest,
-    OutflowTimeSeriesResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
-    ObjectTimeSeries,
 )
 
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
@@ -33,7 +31,7 @@ from hydros_agent_sdk.utils import HydroObjectUtilsV2
 logger = logging.getLogger(__name__)
 
 
-class OutflowPlanAgent(TickableAgent):
+class OutflowPlanAgent(BaseHydroAgent):
     """
     事件驱动型的外发流量计划智能体。
 
@@ -79,7 +77,7 @@ class OutflowPlanAgent(TickableAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentStatus = AgentStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.EVENT_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -96,7 +94,7 @@ class OutflowPlanAgent(TickableAgent):
             context: 仿真上下文
             hydros_cluster_id: 集群 ID
             hydros_node_id: 节点 ID
-            agent_biz_status: 初始业务状态
+            agent_status: 初始业务状态
             drive_mode: 智能体驱动模式（默认：EVENT_DRIVEN）
             agent_configuration_url: 可选的配置 URL
             **kwargs: 其他关键字参数
@@ -110,7 +108,7 @@ class OutflowPlanAgent(TickableAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
@@ -122,6 +120,10 @@ class OutflowPlanAgent(TickableAgent):
         self._topology = None
 
         logger.info(f"OutflowPlanAgent initialized: {self.agent_id}")
+
+    def supports_tick_command(self) -> bool:
+        """出流计划由水利事件触发，而不是由仿真 tick 触发。"""
+        return False
 
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
@@ -161,18 +163,9 @@ class OutflowPlanAgent(TickableAgent):
         logger.info(f"Outflow plan agent initialized successfully: {self.agent_id}")
 
         # 将智能体状态更新为 ACTIVE
-        object.__setattr__(self, 'agent_biz_status', AgentBizStatus.ACTIVE)
+        object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
-        # 返回响应
-        return SimTaskInitResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            created_agent_instances=[self],
-            managed_top_objects={},
-            broadcast=False
-        )
+        return ResponseFactory.init_succeed(self, request)
 
     def _initialize_planning_models(self):
         """初始化外发流量计划模型。"""
@@ -186,17 +179,22 @@ class OutflowPlanAgent(TickableAgent):
 
         logger.info("Planning models initialized")
 
-    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
+    def on_tick(self, request: TickCmdRequest) -> TickCmdResponse:
         """
-        执行基于本体的仿真步骤。由于该智能体是事件驱动的，通常返回 None。
+        事件驱动智能体不参与仿真步进。
 
         参数:
-            request: 步进指令请求
+            request: 步进指令请求。
 
         返回:
-            要通过 MQTT 发送的 MqttMetrics 对象列表
+            成功响应；正常多 Agent 分发会通过 supports_tick_command() 跳过本智能体。
         """
-        return None
+        logger.debug(
+            "Ignoring tick for event-driven outflow plan agent: step=%s, commandId=%s",
+            request.step,
+            request.command_id,
+        )
+        return ResponseFactory.tick_succeed(self, request)
 
     @abstractmethod
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):

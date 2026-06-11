@@ -17,6 +17,12 @@ PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 # 设置 PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
+# 优先使用项目虚拟环境，避免系统 Python 缺少 SDK 依赖
+PYTHON_EXEC="${PROJECT_ROOT}/.venv/bin/python"
+if [ ! -x "$PYTHON_EXEC" ]; then
+    PYTHON_EXEC="python3"
+fi
+
 # 显示帮助信息
 show_help() {
     echo -e "${GREEN}Hydros Agent 启动脚本${NC}"
@@ -31,20 +37,23 @@ show_help() {
     echo "  -d, --debug         启用远程调试模式 (debugpy)"
     echo "  --debug-port PORT   指定调试端口 (默认: 5678)"
     echo "  --debug-nowait      不等待调试器连接，直接启动"
+    echo "  --enable-system-central-scheduling-agent"
+    echo "                      显式注册 SDK 内置 CENTRAL_SCHEDULING_AGENT"
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  outflowplan         Power Agent"
-    echo "  pump                Pump Agent"
+    echo "  outflowplan         Pump Outflow Plan Agent"
     echo "  scheduling          Scheduling Agent"
     echo ""
     echo "示例:"
-    echo "  $0 outflowplan               # 启动 power agent"
-    echo "  $0 outflowplan pump          # 在同一进程中启动 power 和 pump agents"
+    echo "  $0 outflowplan               # 启动出流计划智能体"
+    echo "  $0 outflowplan scheduling    # 在同一进程中启动出流计划和调度智能体"
     echo "  $0 --all                    # 启动所有 agents"
     echo "  $0 --logs                   # 查看日志"
-    echo "  $0 --debug outflowplan       # 启用调试模式启动 power agent"
-    echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
+    echo "  $0 --debug outflowplan       # 启用调试模式启动出流计划智能体"
+    echo "  $0 -d outflowplan scheduling # 启用调试模式启动多个 agents"
+    echo "  $0 --enable-system-central-scheduling-agent outflowplan scheduling"
+    echo "                               # 注册 SDK 内置中央调度，并启动默认泵站 agents"
     echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
     echo ""
     echo "调试模式:"
@@ -67,19 +76,14 @@ list_agents() {
     echo -e "${GREEN}可用的 Agents:${NC}"
     echo ""
 
-    if [ -f "${SCRIPT_DIR}/outflowplan/power_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Power Agent"
-        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_agent.py"
+    if [ -f "${SCRIPT_DIR}/outflowplan/pump_outflow_plan_agent.py" ]; then
+        echo -e "  ${BLUE}outflowplan${NC} - Pump Outflow Plan Agent"
+        echo "                 路径: ${SCRIPT_DIR}/outflowplan/pump_outflow_plan_agent.py"
     fi
 
-    if [ -f "${SCRIPT_DIR}/pump/outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}pump${NC}       - Pump Agent"
-        echo "                 路径: ${SCRIPT_DIR}/pump/outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/scheduling/scheduling_agent.py" ]; then
+    if [ -f "${SCRIPT_DIR}/scheduling/pump_scheduling_agent.py" ]; then
         echo -e "  ${BLUE}scheduling${NC} - Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/scheduling/scheduling_agent.py"
+        echo "                 路径: ${SCRIPT_DIR}/scheduling/pump_scheduling_agent.py"
     fi
 
     echo ""
@@ -136,6 +140,12 @@ view_logs() {
 
 # 主函数
 main() {
+    if [ $# -eq 0 ] && [ -n "${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}" ]; then
+        DEFAULT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}"
+        read -r -a DEFAULT_ARGS <<< "$DEFAULT_START_ARGS"
+        set -- "${DEFAULT_ARGS[@]}"
+    fi
+
     # 解析参数
     if [ $# -eq 0 ]; then
         show_help
@@ -196,7 +206,7 @@ main() {
     echo ""
 
     # 调用 Python 启动器
-    python3 "${SCRIPT_DIR}/multi_agent_launcher.py" "${PYTHON_ARGS[@]}"
+    "$PYTHON_EXEC" "${SCRIPT_DIR}/multi_agent_launcher.py" "${PYTHON_ARGS[@]}"
 }
 
 # 运行主函数

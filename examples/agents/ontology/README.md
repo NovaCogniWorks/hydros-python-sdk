@@ -45,7 +45,7 @@ python ontology_agent.py
 
 # Or run with multi-agent launcher
 cd ../..
-python multi_agent_launcher.py ontology
+./start_agents.sh ontology
 ```
 
 ## Customization Guide

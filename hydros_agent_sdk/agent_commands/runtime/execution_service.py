@@ -1,0 +1,88 @@
+"""
+智能体指令处理器执行服务。
+"""
+
+from __future__ import annotations
+
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from typing import Callable, Dict, Optional
+
+from hydros_agent_sdk.protocol.models import CommandStatus
+
+from hydros_agent_sdk.agent_commands.models import (
+    AgentCommand,
+    AgentCommandRequest,
+    build_ack_reply,
+)
+from .handlers import AgentCommandHandler
+from .registry import AgentCommandHandlerRegistry
+
+
+logger = logging.getLogger(__name__)
+
+
+class AgentCommandExecutionService:
+    """把本地 handler 执行和响应回写集中起来。"""
+
+    def __init__(
+        self,
+        handler_registry: AgentCommandHandlerRegistry,
+        enqueue_command: Callable[[AgentCommand], None],
+        max_workers: int = 8,
+    ):
+        self.handler_registry = handler_registry
+        self.enqueue_command = enqueue_command
+        self.max_workers = max_workers
+
+        self._worker_executor: Optional[ThreadPoolExecutor] = None
+        self._inflight_requests: Dict[str, AgentCommandRequest] = {}
+        self._lock = Lock()
+
+    def start(self) -> None:
+        if self._worker_executor is not None:
+            return
+        self._worker_executor = ThreadPoolExecutor(
+            max_workers=self.max_workers,
+            thread_name_prefix="AgentCmdWorker",
+        )
+
+    def stop(self) -> None:
+        if self._worker_executor is None:
+            return
+        self._worker_executor.shutdown(wait=True)
+        self._worker_executor = None
+
+    def execute(self, request: AgentCommandRequest) -> None:
+        if self._worker_executor is None:
+            raise RuntimeError("AgentCommandExecutionService 尚未启动")
+        handler = self.handler_registry.get_handler(request.command_type)
+        self._worker_executor.submit(self._run_handler, handler, request)
+
+    def _run_handler(self, handler: AgentCommandHandler, request: AgentCommandRequest) -> None:
+        command_id = request.command_id
+
+        with self._lock:
+            self._inflight_requests[command_id] = request
+
+        try:
+            request.command_status = CommandStatus.PROCESSING
+
+            if request.need_ack_reply and request.source is not None:
+                self.enqueue_command(build_ack_reply(request))
+
+            response = handler.execute(request)
+            if response is None:
+                logger.warning("handler 没有返回响应: type=%s id=%s", request.command_type, command_id)
+                return
+
+        except Exception as exc:
+            logger.error("执行 agent command handler 失败: type=%s id=%s", request.command_type, command_id, exc_info=True)
+            response = handler.build_failure_response(request, exc)
+
+        finally:
+            with self._lock:
+                self._inflight_requests.pop(command_id, None)
+
+        self.enqueue_command(response)

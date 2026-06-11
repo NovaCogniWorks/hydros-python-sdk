@@ -372,7 +372,15 @@ class AdvancedAgent(TwinsSimulationAgent):
         # 初始化模型
         self._initialize_model()
 
-        return SimTaskInitResponse(...)
+        return SimTaskInitResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            created_agent_instances=[self],
+            managed_top_objects={},
+            broadcast=False,
+        )
 
     def _initialize_model(self):
         """使用上下文管理器处理模型初始化"""

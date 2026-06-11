@@ -1,3 +1,4 @@
+custom-agent/pump/scheduling/odd_dmpc_origin
 # Python
 __pycache__/
 *.py[cod]
@@ -54,3 +55,6 @@ Thumbs.db
 # Project specific
 *.bak
 *.tmp
+/data/agent_data.db
+/output/
+**/output/

@@ -17,6 +17,12 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # 设置 PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
+# 优先使用项目虚拟环境，避免系统 Python 缺少 SDK 依赖
+PYTHON_EXEC="${PROJECT_ROOT}/.venv/bin/python"
+if [ ! -x "$PYTHON_EXEC" ]; then
+    PYTHON_EXEC="python3"
+fi
+
 # 显示帮助信息
 show_help() {
     echo -e "${GREEN}Hydros Agent 启动脚本${NC}"
@@ -203,12 +209,14 @@ main() {
         exit 1
     fi
 
-    # 使用 Python 启动器启动 agents
+    # 使用 SDK 统一启动器启动 agents
     echo -e "${GREEN}启动 Hydros Agents...${NC}"
     echo ""
 
-    # 调用 Python 启动器
-    python3 "${SCRIPT_DIR}/multi_agent_launcher.py" "${PYTHON_ARGS[@]}"
+    "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
+        --launcher-dir "${SCRIPT_DIR}" \
+        --project-root "${PROJECT_ROOT}" \
+        -- "${PYTHON_ARGS[@]}"
 }
 
 # 运行主函数

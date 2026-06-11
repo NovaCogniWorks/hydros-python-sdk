@@ -6,27 +6,44 @@
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Iterable
 from abc import abstractmethod
 
+from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
+from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
+from hydros_agent_sdk.context_manager import ContextManager
+from hydros_agent_sdk.mpc.client import MpcPlanningClient
+from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
+from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
+from hydros_agent_sdk.mpc.models import SensorData
+from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
+from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
+from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
+from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
     TickCmdRequest,
+    TimeSeriesDataUpdateRequest,
+    TimeSeriesDataUpdateResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
-    CommandStatus,
-    AgentBizStatus,
+    AgentStatus,
     AgentDriveMode,
     ObjectTimeSeries,
 )
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_METRICS_HISTORY_STEPS = 10
 
 
 class CentralSchedulingAgent(TickableAgent):
@@ -38,7 +55,7 @@ class CentralSchedulingAgent(TickableAgent):
     2. 通过 MQTT 订阅接收来自现地设备的实时指标
     3. 处理边界条件更新
     4. 执行 MPC 优化
-    5. 发送智能体间的控制指令（未来实现）
+    5. 通过 agent command 客户端发送智能体间控制指令
 
     核心特性：
     - 滚动时界优化 (MPC)
@@ -58,7 +75,6 @@ class CentralSchedulingAgent(TickableAgent):
             context=simulation_context,
             hydros_cluster_id="cluster_01",
             hydros_node_id="node_01",
-            optimization_horizon=10  # 每 10 个 tick 优化一次
         )
         ```
 
@@ -78,8 +94,7 @@ class CentralSchedulingAgent(TickableAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        optimization_horizon: int = 10,
-        agent_biz_status: AgentBizStatus = AgentBizStatus.INIT,
+        agent_status: AgentStatus = AgentStatus.INIT,
         drive_mode: AgentDriveMode = AgentDriveMode.SIM_TICK_DRIVEN,
         agent_configuration_url: Optional[str] = None,
         **kwargs
@@ -96,12 +111,25 @@ class CentralSchedulingAgent(TickableAgent):
             context: 仿真上下文
             hydros_cluster_id: 集群 ID
             hydros_node_id: 节点 ID
-            optimization_horizon: 滚动优化周期（tick 数）
-            agent_biz_status: 初始业务状态
+            agent_status: 初始业务状态
             drive_mode: 智能体驱动模式（默认：SIM_TICK_DRIVEN）
             agent_configuration_url: 可选的配置 URL
             **kwargs: 其他关键字参数
         """
+        configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
+        configured_target_and_constrain_config_url = kwargs.pop(
+            "target_and_constrain_config_url", None
+        )
+        configured_mpc_service_base_url = kwargs.pop("mpc_service_base_url", None)
+        configured_mpc_request_timeout_seconds = kwargs.pop(
+            "mpc_request_timeout_seconds",
+            None,
+        )
+        configured_mpc_planning_client = kwargs.pop("mpc_planning_client", None)
+        configured_mpc_result_reporter = kwargs.pop("mpc_result_reporter", None)
+        configured_mpc_sensor_provider = kwargs.pop("mpc_sensor_provider", None)
+        configured_object_agent_code_map = kwargs.pop("object_agent_code_map", None)
+
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -111,28 +139,84 @@ class CentralSchedulingAgent(TickableAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            agent_biz_status=agent_biz_status,
+            agent_status=agent_status,
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
         )
 
-        # MPC 配置
-        self._optimization_horizon = optimization_horizon
-        self._last_optimization_step = 0
+        # 相关 MPC 配置
+        self._configured_mpc_service_base_url = configured_mpc_service_base_url
+        self._configured_mpc_request_timeout_seconds = configured_mpc_request_timeout_seconds
+        self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
+            configured_mpc_sensor_provider
+        )
+        self._mpc_planning_client: Optional[MpcPlanningClient] = configured_mpc_planning_client
+        self._mpc_result_reporter: MpcResultReporter = configured_mpc_result_reporter or MpcResultReporter(
+            sim_coordination_client=sim_coordination_client
+        )
+        self._object_agent_code_map: Dict[str, str] = {
+            str(object_id): agent_code
+            for object_id, agent_code in (configured_object_agent_code_map or {}).items()
+        }
+        # 智能体指令客户端按需懒加载
+        self._agent_command_gateway = AgentCommandGateway(
+            sim_coordination_client=sim_coordination_client,
+            hydros_cluster_id=hydros_cluster_id,
+            state_manager=self.state_manager,
+            client_factory=lambda **kwargs: AgentCommandClient(**kwargs),
+        )
+        self._target_agent_resolver = TargetAgentResolver(
+            sim_coordination_client=sim_coordination_client,
+            context=context,
+            object_agent_code_map_getter=lambda: self._object_agent_code_map,
+        )
+        self._control_command_builder = MpcControlCommandBuilder(
+            source_agent=self,
+            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
+            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
+        )
+        self._control_command_dispatcher = ControlCommandDispatcher(
+            send_command=lambda command: self._agent_command_gateway.send_command(command),
+            build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
+        )
 
-        # 优化模型
+        # 优化模型与拓扑
         self._optimization_model = None
         self._topology = None
 
-        # 实时指标缓存（来自现地设备）
-        self._field_metrics_cache: Dict[str, Any] = {}
+        # 现地设备实时指标缓存
+        self._metrics_data_cache = MetricsDataCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
+        self._field_metrics_cache = self._metrics_data_cache.latest_metrics
+        self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
+        self._metrics_subscriber = MqttMetricsSubscriber(
+            mqtt_client=sim_coordination_client.mqtt_client,
+            metrics_data_cache=self._metrics_data_cache,
+        )
 
-        # 用于现地指标的 MQTT 订阅主题
-        self._metrics_subscription_topic = None
+        self._mpc_optimization_service = MpcOptimizationService(
+            properties=self.properties,
+            metrics_data_cache=self._metrics_data_cache,
+            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+            configured_mpc_request_timeout_seconds=self._configured_mpc_request_timeout_seconds,
+            mpc_planning_client=self._mpc_planning_client,
+            mpc_result_reporter=self._mpc_result_reporter,
+            mpc_sensor_provider=self._mpc_sensor_provider,
+        )
+        self._mpc_rolling_runtime = MpcRollingRuntime(
+            context=context,
+            properties=self.properties,
+            optimize_step=self.on_optimization,
+            dispatch_control_commands=self._control_command_dispatcher.dispatch,
+            set_current_step=lambda step: setattr(self, "_current_step", step),
+            get_current_step=lambda: self._current_step,
+            set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
+            configured_mpc_config_url=configured_mpc_config_url,
+            configured_target_and_constrain_config_url=configured_target_and_constrain_config_url,
+            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+        )
 
         logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
-        logger.info(f"Optimization horizon: {self._optimization_horizon} ticks")
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -155,110 +239,20 @@ class CentralSchedulingAgent(TickableAgent):
         """
         pass
 
-    def subscribe_to_field_metrics(self, metrics_topic: str):
-        """
-        订阅 MQTT 主题以获取实时现地指标。
-
-        该方法订阅现地设备发布其实时指标数据的主题。
-
-        参数:
-            metrics_topic: 现地指标的 MQTT 主题
-        """
-        logger.info(f"Subscribing to field metrics topic: {metrics_topic}")
-
-        self._metrics_subscription_topic = metrics_topic
-
-        # 使用 paho-mqtt 正确的方式将特定主题路由到回调
-        self.sim_coordination_client.mqtt_client.message_callback_add(
-            metrics_topic,
-            lambda client, userdata, msg: self._on_field_metrics_received_wrapper(msg)
-        )
-        self.sim_coordination_client.mqtt_client.subscribe(metrics_topic)
-
-        logger.info(f"Subscribed to field metrics: {metrics_topic}")
-
-    def _on_field_metrics_received_wrapper(self, msg):
-        """在调用业务逻辑回调之前解析 MQTT 消息负载的包装器。"""
-        try:
-            import json
-            payload = json.loads(msg.payload.decode("utf-8"))
-            self._on_field_metrics_received(msg.topic, payload)
-        except Exception as e:
-            logger.error(f"Error parsing field metrics payload on {msg.topic}: {e}")
-
-    def _on_field_metrics_received(self, topic: str, payload: Dict[str, Any]):
-        """
-        通过 MQTT 接收现地指标的回调。
-
-        当接收到现地指标时调用此方法。
-        它更新内部缓存以用于优化。
-
-        参数:
-            topic: MQTT 主题
-            payload: 指标负载
-        """
-        logger.debug(f"Received field metrics from topic: {topic}")
-
-        try:
-            # 提取指标信息
-            object_id = payload.get('object_id')
-            metrics_code = payload.get('metrics_code')
-            value = payload.get('value')
-            timestamp = payload.get('timestamp')
-
-            if object_id and metrics_code:
-                cache_key = f"{object_id}_{metrics_code}"
-                self._field_metrics_cache[cache_key] = {
-                    'object_id': object_id,
-                    'metrics_code': metrics_code,
-                    'value': value,
-                    'timestamp': timestamp
-                }
-
-                logger.debug(f"Cached field metrics: {cache_key} = {value}")
-
-        except Exception as e:
-            logger.error(f"Error processing field metrics: {e}", exc_info=True)
-
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
         """
-        执行中央调度步骤。
+        执行中央调度步进。
 
         参数:
             request: 步进指令请求
 
         返回:
-            要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
+            需要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
         """
-        logger.info(f"Central scheduling step {request.step}")
+        logger.debug(f"Central scheduling step {request.step}")
 
         try:
-            # 检查是否应运行优化
-            steps_since_last_optimization = request.step - self._last_optimization_step
-
-            if steps_since_last_optimization >= self._optimization_horizon:
-                logger.info(
-                    f"Executing MPC optimization at step {request.step} "
-                    f"(horizon: {self._optimization_horizon})"
-                )
-
-                # 执行优化
-                control_commands = self.on_optimization(request.step)
-
-                # 更新最后一次优化的步长
-                self._last_optimization_step = request.step
-
-                # 向智能体发送控制指令（未来实现）
-                if control_commands:
-                    self._send_control_commands(control_commands)
-
-                logger.info(f"MPC optimization completed at step {request.step}")
-
-            else:
-                logger.debug(
-                    f"Skipping optimization at step {request.step} "
-                    f"(next optimization at step {self._last_optimization_step + self._optimization_horizon})"
-                )
+            self._mpc_rolling_runtime.on_tick(request.step)
 
             # 返回可选指标
             return None
@@ -267,68 +261,53 @@ class CentralSchedulingAgent(TickableAgent):
             logger.error(f"Error in central scheduling step {request.step}: {e}", exc_info=True)
             return None
 
-    @abstractmethod
-    def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
+    def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
+        """
+        处理时序更新，并激活兼容 Java 侧的滚动 MPC。
+
+        在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建 MpcTaskState
+        的第一个触发点。后续 tick 只会在该激活点之后继续滚动。
+        """
+        logger.debug("Received central scheduling time series update: commandId=%s", request.command_id)
+
+        try:
+            event = request.time_series_data_changed_event
+            if event and event.object_time_series:
+                for time_series in event.object_time_series:
+                    cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
+                    self._time_series_cache[cache_key] = time_series
+                self.on_boundary_condition_update(event.object_time_series)
+
+            self._mpc_rolling_runtime.handle_time_series_changed(event)
+
+            return ResponseFactory.time_series_data_update_succeed(self, request)
+        except Exception as e:
+            logger.error("Error handling central scheduling time series update: %s", e, exc_info=True)
+            return ResponseFactory.time_series_data_update_failed(self, request)
+
+    def on_optimization(self, step: int) -> Optional[List[Any]]:
         """
         执行 MPC 优化逻辑。
 
-        子类必须实现此方法以执行其特定的 MPC 优化逻辑。
+        默认实现会调用独立的 MpcPlanningClient，并通过 MpcResultReporter
+        回传 mpc_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
 
         参数:
             step: 当前仿真步长
 
         返回:
-            发送给智能体的控制指令列表，或 None
-            每个指令字典应包含：target_agent, command_type, parameters
+            需要发送给边缘智能体的控制指令列表，或 None
         """
-        pass
+        mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
+        responses = self._mpc_optimization_service.optimize(
+            self,
+            mpc_task_state,
+            step,
+        )
+        if not responses:
+            return None
 
-    def _send_control_commands(self, control_commands: List[Dict[str, Any]]):
-        """
-        向目标智能体发送控制指令。
-
-        这是未来智能体间指令实现的占位符。
-
-        参数:
-            control_commands: 控制指令列表
-        """
-        logger.info(f"Sending {len(control_commands)} control commands to agents")
-
-        for command in control_commands:
-            target_agent = command.get('target_agent')
-            command_type = command.get('command_type')
-            parameters = command.get('parameters', {})
-
-            logger.info(
-                f"Control command: target={target_agent}, "
-                f"type={command_type}, params={parameters}"
-            )
-
-            # TODO: 实现智能体间指令发送
-            # 这将在未来版本中实现
-
-    def get_field_metrics_value(
-        self,
-        object_id: int,
-        metrics_code: str
-    ) -> Optional[float]:
-        """
-        从缓存中获取现地指标值。
-
-        参数:
-            object_id: 对象 ID
-            metrics_code: 指标代码
-
-        返回:
-            现地指标值，如果未找到则返回 None
-        """
-        cache_key = f"{object_id}_{metrics_code}"
-        metrics_data = self._field_metrics_cache.get(cache_key)
-
-        if metrics_data:
-            return metrics_data.get('value')
-
-        return None
+        return self._control_command_builder.build_from_mpc_responses(responses)
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
@@ -347,7 +326,7 @@ class CentralSchedulingAgent(TickableAgent):
                 f"Boundary condition: object={time_series.object_name}, "
                 f"metrics={time_series.metrics_code}"
             )
-            # TODO: 更新优化模型约束
+            # 待办：更新优化模型约束
 
     def get_metrics_topic(self) -> str:
         """
@@ -377,12 +356,18 @@ class CentralSchedulingAgent(TickableAgent):
         """
         pass
 
-    @property
-    def optimization_horizon(self) -> int:
-        """获取优化时界（tick 数）。"""
-        return self._optimization_horizon
+    def _initialize_model_context(self) -> None:
+        """初始化任务级水利模型上下文，用于对象归属查找。"""
+        if ContextManager.get_context(self.context) is not None:
+            return
 
-    @property
-    def last_optimization_step(self) -> int:
-        """获取最后一次优化步长。"""
-        return self._last_optimization_step
+        hydros_objects_modeling_url = self.properties.get_property("hydros_objects_modeling_url")
+        param_keys = self.properties.get_property("param_keys", None)
+        if isinstance(param_keys, (list, tuple, set)):
+            param_keys = set(param_keys)
+
+        ContextManager.create(
+            context=self.context,
+            hydros_objects_modeling_url=hydros_objects_modeling_url,
+            param_keys=param_keys,
+        )

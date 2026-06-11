@@ -1,16 +1,16 @@
 """
-Error codes for Hydros Agent SDK.
+Hydros Agent SDK 错误码。
 
-This module provides error code definitions and message formatting utilities,
-matching the Java ErrorCodes implementation in hydros-common.
+本模块提供错误码定义和消息格式化工具，与 hydros-common 中的
+Java ErrorCodes 实现保持一致。
 
-Usage:
+用法：
     from hydros_agent_sdk.error_codes import ErrorCodes
 
-    # Format error message
+    # 格式化错误消息
     error_msg = ErrorCodes.SYSTEM_ERROR.format_message("NetworkError", "Connection timeout")
 
-    # Use in response
+    # 在响应中使用
     response = SimTaskInitResponse(
         command_status=CommandStatus.FAILED,
         error_code=ErrorCodes.SYSTEM_ERROR.code,
@@ -24,91 +24,89 @@ from typing import Any
 
 class ErrorCode:
     """
-    Error code with message template.
+    带消息模板的错误码。
 
-    This class represents a single error code with its associated message template.
-    It provides message formatting using Python's str.format() method.
+    该类表示一个错误码及其关联的消息模板，并提供消息格式化能力。
 
     Attributes:
-        code: The error code string (e.g., "SYSTEM_ERROR")
-        message_template: The message template with placeholders (e.g., "Error: {0}")
+        code: 错误码字符串（例如 "SYSTEM_ERROR"）
+        message_template: 带占位符的消息模板（例如 "Error: {0}"）
     """
 
     def __init__(self, code: str, message_template: str):
         """
-        Initialize error code.
+        初始化错误码。
 
         Args:
-            code: Error code string
-            message_template: Message template with {0}, {1}, etc. placeholders
+            code: 错误码字符串
+            message_template: 带 {0}、{1} 等占位符的消息模板
         """
         self.code = code
         self.message_template = message_template
 
     def format_message(self, *args: Any) -> str:
         """
-        Format error message with arguments.
+        使用参数格式化错误消息。
 
-        This method replaces {0}, {1}, etc. placeholders in the message template
-        with the provided arguments.
+        该方法会用传入参数替换消息模板中的 {0}、{1} 等占位符。
 
         Args:
-            *args: Arguments to format into the message template
+            *args: 写入消息模板的参数
 
         Returns:
-            Formatted error message
+            格式化后的错误消息
 
-        Example:
+        示例：
             >>> error = ErrorCode("TEST_ERROR", "Error: {0}, detail: {1}")
             >>> error.format_message("Connection failed", "Timeout")
             'Error: Connection failed, detail: Timeout'
         """
         try:
-            # Replace {0}, {1}, etc. with provided arguments
+            # 使用传入参数替换 {0}、{1} 等占位符
             message = self.message_template
             for i, arg in enumerate(args):
                 message = message.replace(f"{{{i}}}", str(arg))
             return message
         except Exception as e:
-            # Fallback: return template with error info
+            # 兜底：返回带错误信息的模板
             return f"{self.message_template} (format error: {e})"
 
     def __str__(self) -> str:
-        """String representation of error code."""
+        """错误码的字符串表示。"""
         return f"ErrorCode({self.code})"
 
     def __repr__(self) -> str:
-        """Detailed representation of error code."""
+        """错误码的详细表示。"""
         return f"ErrorCode(code='{self.code}', template='{self.message_template}')"
 
 
 class ErrorCodes:
     """
-    Error code definitions for Hydros Agent SDK.
+    Hydros Agent SDK 错误码定义。
 
-    This class provides static error code definitions matching the Java implementation
-    in com.hydros.common.ErrorCodes.
+    该类提供静态错误码定义，并与 com.hydros.common.ErrorCodes 中的
+    Java 实现保持一致。
 
-    Core error codes:
-    - SYSTEM_ERROR: Unknown system failures
-    - INVALID_PARAMS: Invalid parameters
-    - CONFIGURATION_LOAD_FAILURE: Configuration loading failures
-    - DATA_SERIALIZATION_FAILURE: Data serialization failures
+    核心错误码：
+    - SYSTEM_ERROR: 未知系统故障
+    - INVALID_PARAMS: 参数无效
+    - CONFIGURATION_LOAD_FAILURE: 配置加载失败
+    - DATA_SERIALIZATION_FAILURE: 数据序列化失败
 
-    Agent-specific error codes:
-    - AGENT_INIT_FAILURE: Agent initialization failures
-    - AGENT_TICK_FAILURE: Agent tick execution failures
-    - AGENT_TERMINATE_FAILURE: Agent termination failures
-    - TIME_SERIES_UPDATE_FAILURE: Time series data update failures
-    - TOPOLOGY_LOAD_FAILURE: Topology loading failures
-    - SIMULATION_EXECUTION_FAILURE: Simulation execution failures
+    智能体相关错误码：
+    - AGENT_INIT_FAILURE: 智能体初始化失败
+    - AGENT_TICK_FAILURE: 智能体 tick 执行失败
+    - AGENT_TERMINATE_FAILURE: 智能体终止失败
+    - TIME_SERIES_UPDATE_FAILURE: 时序数据更新失败
+    - TOPOLOGY_LOAD_FAILURE: 拓扑加载失败
+    - SIMULATION_EXECUTION_FAILURE: 仿真执行失败
 
-    Usage:
-        # Get error code and format message
+    用法：
+        # 获取错误码并格式化消息
         error_code = ErrorCodes.SYSTEM_ERROR.code
         error_message = ErrorCodes.SYSTEM_ERROR.format_message("NetworkError", "Connection timeout")
 
-        # Use in response
+        # 在响应中使用
         response = TickCmdResponse(
             command_status=CommandStatus.FAILED,
             error_code=error_code,
@@ -117,7 +115,7 @@ class ErrorCodes:
         )
     """
 
-    # ========== Core System Errors ==========
+    # ========== 核心系统错误 ==========
 
     SYSTEM_ERROR = ErrorCode(
         "SYSTEM_ERROR",
@@ -139,7 +137,7 @@ class ErrorCodes:
         "Feature to be implemented in the future: {0}"
     )
 
-    # ========== Configuration Errors ==========
+    # ========== 配置错误 ==========
 
     CONFIGURATION_LOAD_FAILURE = ErrorCode(
         "CONFIGURATION_LOAD_FAILURE",
@@ -156,7 +154,7 @@ class ErrorCodes:
         "Deployment environment information missing: {0}"
     )
 
-    # ========== External Service Errors ==========
+    # ========== 外部服务错误 ==========
 
     CALL_OUTER_SERVICE_FAILURE = ErrorCode(
         "CALL_OUTER_SERVICE_FAILURE",
@@ -173,7 +171,7 @@ class ErrorCodes:
         "Simulation data corrupted, service: {0}, params: {1}"
     )
 
-    # ========== Data Errors ==========
+    # ========== 数据错误 ==========
 
     DATA_NOT_FOUND = ErrorCode(
         "DATA_NOT_FOUND",
@@ -185,7 +183,7 @@ class ErrorCodes:
         "PLC data corrupted, service: {0}, params: {1}"
     )
 
-    # ========== Agent-Specific Errors ==========
+    # ========== 智能体相关错误 ==========
 
     AGENT_INIT_FAILURE = ErrorCode(
         "AGENT_INIT_FAILURE",
@@ -237,7 +235,7 @@ class ErrorCodes:
         "Metrics generation failed: {0}, detail: {1}"
     )
 
-    # ========== Validation Errors ==========
+    # ========== 校验错误 ==========
 
     VALIDATION_ERROR = ErrorCode(
         "VALIDATION_ERROR",
@@ -249,7 +247,7 @@ class ErrorCodes:
         "Missing required field: {0}"
     )
 
-    # ========== State Management Errors ==========
+    # ========== 状态管理错误 ==========
 
     STATE_MANAGER_ERROR = ErrorCode(
         "STATE_MANAGER_ERROR",
@@ -267,7 +265,7 @@ class ErrorCodes:
     )
 
 
-# Convenience function for creating error responses
+# 创建错误响应的便捷函数
 def create_error_response(
     response_class,
     error_code: ErrorCode,
@@ -275,21 +273,20 @@ def create_error_response(
     **kwargs
 ):
     """
-    Create an error response with formatted error message.
+    创建带格式化错误消息的错误响应。
 
-    This is a convenience function for creating response objects with
-    error information.
+    这是一个用于创建带错误信息响应对象的便捷函数。
 
     Args:
-        response_class: The response class to instantiate
-        error_code: The ErrorCode to use
-        *args: Arguments for error message formatting
-        **kwargs: Additional fields for the response
+        response_class: 要实例化的响应类
+        error_code: 要使用的 ErrorCode
+        *args: 用于格式化错误消息的参数
+        **kwargs: 响应的额外字段
 
     Returns:
-        Response instance with error information
+        带错误信息的响应实例
 
-    Example:
+    示例：
         >>> from hydros_agent_sdk.protocol.commands import TickCmdResponse
         >>> from hydros_agent_sdk.protocol.models import CommandStatus
         >>>

@@ -1,21 +1,35 @@
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from pydantic import Field, ConfigDict
+from pydantic import AliasChoices, Field, ConfigDict
 from .base import HydroBaseModel
 
-class AgentBizStatus(str, Enum):
+class AgentStatus(str, Enum):
     """
-    Agent business status enumeration matching Java implementation.
+    匹配 Java 实现的智能体容器管理状态枚举。
     """
     INIT = "INIT"
     IDLE = "IDLE"
     ACTIVE = "ACTIVE"
+    TERMINATED = "TERMINATED"
     FAILED = "FAILED"
+
+class AgentInstanceStatus(str, Enum):
+    """
+    匹配 Java 实现的智能体实例生命周期状态枚举。
+    """
+    INIT = "INIT"
+    READY = "READY"
+    RUNNING = "RUNNING"
+    WAITING = "WAITING"
+    PAUSED = "PAUSED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+    COMPLETED = "COMPLETED"
 
 class AgentDriveMode(str, Enum):
     """
-    Agent drive mode enumeration matching Java implementation.
-    Defines how an agent responds to simulation control signals.
+    匹配 Java 实现的智能体驱动模式枚举。
+    定义智能体如何响应仿真控制信号。
     """
     SIM_TICK_DRIVEN = "SIM_TICK_DRIVEN"  # Tick驱动：响应时钟节拍，同步执行仿真步骤
     EVENT_DRIVEN = "EVENT_DRIVEN"        # 事件驱动：响应特定事件，异步执行处理逻辑
@@ -23,7 +37,7 @@ class AgentDriveMode(str, Enum):
 
 class CommandStatus(str, Enum):
     """
-    Command status enumeration matching Java implementation.
+    匹配 Java 实现的指令状态枚举。
     """
     INIT = "INIT"
     PROCESSING = "PROCESSING"
@@ -32,28 +46,28 @@ class CommandStatus(str, Enum):
 
 class Tenant(HydroBaseModel):
     """
-    Represents tenant information.
+    表示租户信息。
     """
     tenant_id: str
     tenant_name: str
 
 class BizScenario(HydroBaseModel):
     """
-    Represents business scenario information.
+    表示业务场景信息。
     """
     biz_scenario_id: str
     biz_scenario_name: str
 
 class Waterway(HydroBaseModel):
     """
-    Represents waterway information.
+    表示水系信息。
     """
     waterway_id: str
     waterway_name: str
 
 class SimulationContext(HydroBaseModel):
     """
-    Represents the simulation context, used to support multi-task isolation.
+    表示仿真上下文，用于支持多任务隔离。
     """
     biz_scene_instance_id: str
     tenant: Optional[Tenant] = None
@@ -63,7 +77,7 @@ class SimulationContext(HydroBaseModel):
 
 class HydroAgent(HydroBaseModel):
     """
-    Represents an agent definition.
+    表示智能体定义。
     """
     agent_code: str
     agent_type: str
@@ -72,21 +86,67 @@ class HydroAgent(HydroBaseModel):
 
 class HydroAgentInstance(HydroAgent):
     """
-    Represents a running instance of an agent.
+    表示正在运行的智能体实例。
     """
     agent_id: str
     biz_scene_instance_id: str
-    hydros_cluster_id: str
-    hydros_node_id: str
+    cluster_id: str = Field(
+        validation_alias=AliasChoices(
+            "cluster_id",
+            "clusterId",
+            "hydros_cluster_id",
+            "hydrosClusterId",
+        )
+    )
+    node_id: str = Field(
+        validation_alias=AliasChoices(
+            "node_id",
+            "nodeId",
+            "hydros_node_id",
+            "hydrosNodeId",
+        )
+    )
     context: SimulationContext
-    agent_biz_status: AgentBizStatus
+    agent_status: AgentStatus = Field(
+        default=AgentStatus.INIT,
+        validation_alias=AliasChoices(
+            "agent_status",
+            "agentStatus",
+        )
+    )
+    agent_instance_status: AgentInstanceStatus = Field(
+        default=AgentInstanceStatus.INIT,
+        validation_alias=AliasChoices(
+            "agent_instance_status",
+            "agentInstanceStatus",
+        ),
+    )
     drive_mode: AgentDriveMode
+
+    @property
+    def hydros_cluster_id(self) -> str:
+        """兼容旧 SDK 的名称，对应 Java 兼容字段 cluster_id。"""
+        return self.cluster_id
+
+    @hydros_cluster_id.setter
+    def hydros_cluster_id(self, value: str) -> None:
+        self.cluster_id = value
+
+    @property
+    def hydros_node_id(self) -> str:
+        """兼容旧 SDK 的名称，对应 Java 兼容字段 node_id。"""
+        return self.node_id
+
+    @hydros_node_id.setter
+    def hydros_node_id(self, value: str) -> None:
+        self.node_id = value
 
 class TopHydroObject(HydroBaseModel):
     """
-    Represents a top-level hydro object managed by the simulation.
-    Uses flexible schema to accommodate varying object types from the coordinator
-    (e.g., gate stations, channels, etc.) with different nested properties.
+    表示仿真管理的顶层水利对象。
+
+    使用灵活 schema 兼容协调器下发的不同对象类型（例如闸站、渠道等）
+    以及它们不同的嵌套属性。
     """
     model_config = ConfigDict(extra='allow')
 
@@ -99,7 +159,7 @@ class TopHydroObject(HydroBaseModel):
 
 class TimeSeriesValue(HydroBaseModel):
     step: Optional[int] = None
-    time: Optional[Any] = None # Using Any for Date/datetime generic support
+    time: Optional[Any] = None # 使用 Any 兼容 Date/datetime 泛型支持
     value: Optional[float] = None
 
 class ObjectTimeSeries(HydroBaseModel):

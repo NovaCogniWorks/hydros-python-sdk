@@ -1,67 +1,37 @@
 """
-Agent factory for creating agent instances.
+用于创建智能体实例的 agent 工厂。
 
-This module provides the HydroAgentFactory class for creating agent instances
-with standardized ID generation and configuration loading.
+本模块提供 HydroAgentFactory，用于通过标准化 ID 生成和配置加载创建智能体实例。
 """
 
 import os
 import logging
-import random
-import string
-from datetime import datetime
 from typing import Dict, Optional, Type, TypeVar, Generic, TYPE_CHECKING
 from configparser import ConfigParser
 
+from hydros_agent_sdk.utils import generate_agent_instance_id
 from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.agent_constants import (
+    CENTRAL_SCHEDULING_AGENT_TYPE,
+    SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
+)
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
 
 logger = logging.getLogger(__name__)
 
-# Type variable for agent type (must be a BaseHydroAgent subclass)
+# 智能体类型变量（必须是 BaseHydroAgent 子类）
 AgentType = TypeVar('AgentType', bound='BaseHydroAgent')
-
-
-def generate_agent_instance_id(agent_code: str) -> str:
-    """
-    Generate agent instance ID following the Java implementation pattern.
-
-    Format: AGT{yyyyMMddHHmm}{6_random_alphanumeric}_{agent_code}
-    Example: AGT202602040856HZ18NF_TWINS_SIMULATION_AGENT
-
-    This matches the Java implementation:
-    public static String generateAgentInstanceId(HydroAgent hydroAgent) {
-        String timestampStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm"));
-        String randomLetters = RandomStringUtils.secure().nextAlphanumeric(6).toUpperCase();
-        return "AGT" + timestampStr + randomLetters + "_" + hydroAgent.getAgentCode();
-    }
-
-    Args:
-        agent_code: The agent code (e.g., "TWINS_SIMULATION_AGENT")
-
-    Returns:
-        Generated agent instance ID
-    """
-    # Generate timestamp string (yyyyMMddHHmm)
-    timestamp_str = datetime.now().strftime("%Y%m%d%H%M")
-
-    # Generate 6 random alphanumeric characters (uppercase)
-    random_letters = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
-    # Combine: AGT + timestamp + random + _ + agent_code
-    return f"AGT{timestamp_str}{random_letters}_{agent_code}"
 
 
 class HydroAgentFactory(Generic[AgentType]):
     """
-    Factory class for creating Hydro agent instances.
+    创建 Hydro 智能体实例的工厂类。
 
-    This class provides common functionality for all agent factories,
-    including standardized ID generation and configuration loading.
+    该类为全部智能体工厂提供通用能力，包括标准化 ID 生成和配置加载。
 
-    Example:
+    示例：
         factory = HydroAgentFactory(
             agent_class=MyTwinsSimulationAgent,
             config_file="./agent.properties",
@@ -77,12 +47,12 @@ class HydroAgentFactory(Generic[AgentType]):
         env_config: Optional[Dict[str, str]] = None
     ):
         """
-        Initialize factory.
+        初始化工厂。
 
         Args:
-            agent_class: The agent class to instantiate
-            config_file: Path to agent configuration file
-            env_config: Optional environment configuration (if not provided, will be loaded from env.properties)
+            agent_class: 要实例化的智能体类
+            config_file: 智能体配置文件路径
+            env_config: 可选环境配置（未提供时从 env.properties 加载）
         """
         self.agent_class = agent_class
         self.config_file = config_file
@@ -95,35 +65,35 @@ class HydroAgentFactory(Generic[AgentType]):
         context: SimulationContext
     ) -> AgentType:
         """
-        Create a new agent instance.
+        创建新的智能体实例。
 
         Args:
-            sim_coordination_client: MQTT coordination client
-            context: Simulation context
+            sim_coordination_client: MQTT 协调客户端
+            context: 仿真上下文
 
         Returns:
-            New agent instance
+            新的智能体实例
         """
-        # Load agent configuration
+        # 加载智能体配置
         config = self._load_config(self.config_file)
 
-        # Load environment configuration if not provided
+        # 未提供环境配置时自动加载
         if self.env_config is None:
             from hydros_agent_sdk.config_loader import load_env_config
-            # Load from shared env.properties
+            # 从共享 env.properties 加载
             script_dir = os.path.dirname(self.config_file)
             env_file = os.path.join(script_dir, "env.properties")
             self.env_config = load_env_config(env_file)
 
-        # Get hydros_cluster_id and hydros_node_id from env_config (required)
+        # 从 env_config 获取必填的 hydros_cluster_id 和 hydros_node_id
         hydros_cluster_id = self.env_config['hydros_cluster_id']
         hydros_node_id = self.env_config['hydros_node_id']
 
-        # Generate agent ID using the standard pattern
-        # Format: AGT{yyyyMMddHHmm}{6_random_alphanumeric}_{agent_code}
+        # 使用标准模式生成智能体 ID
+        # 格式：AGT{yyyyMMddHHmm}{6_random_alphanumeric}_{agent_code}
         agent_id = generate_agent_instance_id(config['agent_code'])
 
-        # Create agent
+        # 创建智能体
         agent = self.agent_class(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -141,17 +111,17 @@ class HydroAgentFactory(Generic[AgentType]):
 
     def _load_config(self, config_file: str) -> Dict[str, str]:
         """
-        Load agent configuration from properties file.
+        从 properties 文件加载智能体配置。
 
         Args:
-            config_file: Path to configuration file
+            config_file: 配置文件路径
 
         Returns:
-            Configuration dictionary
+            配置字典
 
         Raises:
-            FileNotFoundError: If config file does not exist
-            ValueError: If required properties are missing
+            FileNotFoundError: 配置文件不存在时抛出
+            ValueError: 缺少必填属性时抛出
         """
         if not os.path.exists(config_file):
             raise FileNotFoundError(f"Config file not found: {config_file}")
@@ -159,12 +129,12 @@ class HydroAgentFactory(Generic[AgentType]):
         config = ConfigParser()
 
         try:
-            # Read properties file
+            # 读取 properties 文件
             with open(config_file, 'r') as f:
                 config_string = '[DEFAULT]\n' + f.read()
             config.read_string(config_string)
 
-            # Required properties
+            # 必填属性
             required_props = ['agent_code', 'agent_type', 'agent_name']
             missing_props = []
 
@@ -178,9 +148,9 @@ class HydroAgentFactory(Generic[AgentType]):
                     f"{', '.join(missing_props)}"
                 )
 
-            # Load configuration
-            # Note: hydros_cluster_id and hydros_node_id should NOT be in agent.properties
-            # They are loaded from env.properties
+            # 加载配置
+            # 注意：hydros_cluster_id 和 hydros_node_id 不应放在 agent.properties 中，
+            # 它们从 env.properties 加载。
             return {
                 'agent_code': config.get('DEFAULT', 'agent_code'),
                 'agent_type': config.get('DEFAULT', 'agent_type'),
@@ -190,3 +160,49 @@ class HydroAgentFactory(Generic[AgentType]):
         except Exception as e:
             logger.error(f"Error loading config file: {e}")
             raise
+
+
+class SystemCentralSchedulingAgentFactory:
+    """内置 CENTRAL_SCHEDULING_AGENT 的工厂。"""
+
+    agent_type = CENTRAL_SCHEDULING_AGENT_TYPE
+
+    def __init__(self, env_config: Optional[Dict[str, str]] = None):
+        self.env_config = env_config
+
+    def create_agent(
+        self,
+        sim_coordination_client: 'SimCoordinationClient',
+        context: SimulationContext
+    ):
+        from hydros_agent_sdk.agents import SystemCentralSchedulingAgent
+        from hydros_agent_sdk.runtime import load_runtime_env_settings
+
+        settings = load_runtime_env_settings(env_config=self.env_config)
+        if self.env_config is None:
+            self.env_config = settings.raw
+        hydros_cluster_id = (
+            settings.hydros_cluster_id
+            or sim_coordination_client.state_manager.get_cluster_id()
+            or "default_cluster"
+        )
+        hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
+
+        agent_code = SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
+        agent_id = generate_agent_instance_id(agent_code)
+
+        agent = SystemCentralSchedulingAgent(
+            sim_coordination_client=sim_coordination_client,
+            agent_id=agent_id,
+            agent_code=agent_code,
+            agent_type=self.agent_type,
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id=hydros_cluster_id,
+            hydros_node_id=hydros_node_id,
+            mpc_service_base_url=settings.mpc_service_base_url,
+            mpc_request_timeout_seconds=settings.mpc_request_timeout_seconds,
+        )
+
+        logger.info(f"Created system central scheduling agent: {agent_id}")
+        return agent

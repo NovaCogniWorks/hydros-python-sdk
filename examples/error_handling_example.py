@@ -1,15 +1,15 @@
 """
-Example demonstrating error handling in Hydros agents.
+Hydros 智能体错误处理示例。
 
-This example shows how to use the error handling decorators and utilities
-to properly handle errors and return error responses to the coordinator.
+本示例展示如何使用错误处理装饰器和工具函数来正确处理错误，
+并向协调器返回错误响应。
 """
 
 import logging
 import os
 import sys
 
-# Add project root to path
+# 将项目根目录加入路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -34,7 +34,7 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 from hydros_agent_sdk.utils import HydroObjectUtilsV2
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics, create_mock_metrics
 
-# Setup logging
+# 设置日志
 setup_logging(
     level=logging.INFO,
     hydros_cluster_id="test_cluster",
@@ -47,47 +47,47 @@ logger = logging.getLogger(__name__)
 
 class ErrorHandlingExampleAgent(TwinsSimulationAgent):
     """
-    Example agent demonstrating error handling patterns.
+    展示错误处理模式的示例智能体。
 
-    This agent shows three ways to handle errors:
-    1. Using @handle_agent_errors decorator (recommended)
-    2. Using safe_execute() utility function
-    3. Using AgentErrorContext context manager
+    该智能体展示三种错误处理方式：
+    1. 使用 @handle_agent_errors 装饰器（推荐）
+    2. 使用 safe_execute() 工具函数
+    3. 使用 AgentErrorContext 上下文管理器
     """
 
-    # ========== Method 1: Using @handle_agent_errors decorator ==========
+    # ========== 方法 1：使用 @handle_agent_errors 装饰器 ==========
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
-        Initialize agent with automatic error handling.
+        使用自动错误处理初始化智能体。
 
-        The @handle_agent_errors decorator will:
-        1. Catch any exception
-        2. Format error message with agent name and details
-        3. Create SimTaskInitResponse with FAILED status
-        4. Log the error
-        5. Return error response to coordinator
+        @handle_agent_errors 装饰器会：
+        1. 捕获任意异常
+        2. 使用智能体名称和详情格式化错误消息
+        3. 创建 FAILED 状态的 SimTaskInitResponse
+        4. 记录错误日志
+        5. 向协调器返回错误响应
         """
         logger.info("Initializing agent with error handling...")
 
-        # Load configuration (may raise exception)
+        # 加载配置（可能抛出异常）
         self.load_agent_configuration(request)
 
-        # Load topology (may raise exception)
+        # 加载拓扑（可能抛出异常）
         topology_url = self.properties.get_property('hydros_objects_modeling_url')
         if topology_url:
-            # This will raise exception if URL is invalid or file not found
+            # 当 URL 无效或文件不存在时会抛出异常
             self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
 
-        # Register with state manager
+        # 注册到状态管理器
         self.state_manager.init_task(self.context, [self])
         self.state_manager.add_local_agent(self)
 
-        # Initialize twins model (may raise exception)
+        # 初始化孪生模型（可能抛出异常）
         self._initialize_twins_model()
 
-        # Return success response
+        # 返回成功响应
         return SimTaskInitResponse(
             command_id=request.command_id,
             context=request.context,
@@ -97,18 +97,18 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             managed_top_objects={}
         )
 
-    # ========== Method 2: Using safe_execute() utility ==========
+    # ========== 方法 2：使用 safe_execute() 工具函数 ==========
 
     def _initialize_twins_model(self):
         """
-        Initialize twins model with manual error handling using safe_execute().
+        使用 safe_execute() 手动错误处理来初始化孪生模型。
 
-        This method shows how to use safe_execute() for fine-grained error handling
-        when you need more control than the decorator provides.
+        当需要比装饰器更细粒度的控制时，本方法展示如何使用 safe_execute()
+        进行错误处理。
         """
         logger.info("Initializing twins model...")
 
-        # Example: Load solver with error handling
+        # 示例：带错误处理地加载求解器
         success, solver, error_msg = safe_execute(
             self._create_solver,
             ErrorCodes.MODEL_INITIALIZATION_FAILURE,
@@ -117,32 +117,31 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
 
         if not success:
             logger.error(f"Failed to create solver: {error_msg}")
-            # You can handle the error here or raise it
+            # 可以在这里处理错误，也可以继续抛出
             raise RuntimeError(f"Solver initialization failed: {error_msg}")
 
         self._solver = solver
         logger.info("Twins model initialized successfully")
 
     def _create_solver(self):
-        """Create solver instance (may raise exception)."""
-        # Simulate solver creation
+        """创建求解器实例（可能抛出异常）。"""
+        # 模拟求解器创建
         logger.info("Creating solver...")
-        # In real implementation, this might raise exceptions
+        # 真实实现中，这里可能抛出异常
         return {"type": "hydraulic_solver", "version": "1.0"}
 
-    # ========== Method 3: Using AgentErrorContext context manager ==========
+    # ========== 方法 3：使用 AgentErrorContext 上下文管理器 ==========
 
     @handle_agent_errors(ErrorCodes.AGENT_TICK_FAILURE)
     def _execute_twins_simulation(self, step: int):
         """
-        Execute simulation with context manager error handling.
+        使用上下文管理器错误处理执行仿真。
 
-        This method shows how to use AgentErrorContext for handling errors
-        in specific code blocks.
+        本方法展示如何使用 AgentErrorContext 处理特定代码块中的错误。
         """
         logger.info(f"Executing simulation step {step}...")
 
-        # Use context manager for boundary condition collection
+        # 使用上下文管理器采集边界条件
         with AgentErrorContext(
             ErrorCodes.BOUNDARY_CONDITION_ERROR,
             agent_name=self.agent_code
@@ -151,10 +150,10 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
 
         if ctx.has_error:
             logger.error(f"Failed to collect boundary conditions: {ctx.error_message}")
-            # Return empty results or raise exception
+            # 返回空结果或抛出异常
             return []
 
-        # Use context manager for simulation execution
+        # 使用上下文管理器执行仿真
         with AgentErrorContext(
             ErrorCodes.SIMULATION_EXECUTION_FAILURE,
             agent_name=self.agent_code
@@ -165,7 +164,7 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             logger.error(f"Failed to run simulation: {ctx.error_message}")
             return []
 
-        # Convert results to metrics
+        # 将结果转换为指标
         metrics_list = [
             create_mock_metrics(
                 source_id=self.agent_code,
@@ -183,31 +182,30 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
         return metrics_list
 
     def _run_simulation(self, step: int, boundary_conditions: dict):
-        """Run simulation (may raise exception)."""
+        """运行仿真（可能抛出异常）。"""
         logger.info(f"Running simulation for step {step}...")
-        # Simulate calculation
+        # 模拟计算
         return {
             1001: {"water_level": 5.0 + step * 0.1, "flow": 10.0},
             1002: {"water_level": 4.5 + step * 0.1, "flow": 8.0},
         }
 
-    # ========== Method 4: Manual error handling with create_error_response ==========
+    # ========== 方法 4：使用 create_error_response 手动处理错误 ==========
 
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """
-        Terminate agent with manual error handling.
+        使用手动错误处理终止智能体。
 
-        This method shows how to manually create error responses when you need
-        full control over the error handling logic.
+        当需要完全控制错误处理逻辑时，本方法展示如何手动创建错误响应。
         """
         try:
             logger.info("Terminating agent...")
 
-            # Clean up resources
+            # 清理资源
             self.state_manager.terminate_task(self.context)
             self.state_manager.remove_local_agent(self)
 
-            # Return success response
+            # 返回成功响应
             return SimTaskTerminateResponse(
                 command_id=request.command_id,
                 context=request.context,
@@ -218,7 +216,7 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
         except Exception as e:
             logger.error(f"Error during termination: {e}", exc_info=True)
 
-            # Manually create error response
+            # 手动创建错误响应
             return create_error_response(
                 SimTaskTerminateResponse,
                 ErrorCodes.AGENT_TERMINATE_FAILURE,
@@ -231,37 +229,37 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
 
 
 def demonstrate_error_codes():
-    """Demonstrate error code usage."""
+    """演示错误码用法。"""
     print("\n" + "="*70)
     print("Error Code Examples")
     print("="*70 + "\n")
 
-    # Example 1: Format error message
+    # 示例 1：格式化错误消息
     error_msg = ErrorCodes.SYSTEM_ERROR.format_message("NetworkError", "Connection timeout")
     print(f"1. System Error:\n   {error_msg}\n")
 
-    # Example 2: Configuration error
+    # 示例 2：配置错误
     error_msg = ErrorCodes.CONFIGURATION_LOAD_FAILURE.format_message(
         "agent.properties",
         "File not found"
     )
     print(f"2. Configuration Error:\n   {error_msg}\n")
 
-    # Example 3: Agent initialization error
+    # 示例 3：智能体初始化错误
     error_msg = ErrorCodes.AGENT_INIT_FAILURE.format_message(
         "MyAgent",
         "Failed to load topology"
     )
     print(f"3. Agent Init Error:\n   {error_msg}\n")
 
-    # Example 4: Topology load error
+    # 示例 4：拓扑加载错误
     error_msg = ErrorCodes.TOPOLOGY_LOAD_FAILURE.format_message(
         "http://example.com/topology.yaml",
         "HTTP 404 Not Found"
     )
     print(f"4. Topology Load Error:\n   {error_msg}\n")
 
-    # Example 5: Simulation execution error
+    # 示例 5：仿真执行错误
     error_msg = ErrorCodes.SIMULATION_EXECUTION_FAILURE.format_message(
         "TwinsAgent",
         "Division by zero in hydraulic calculation"
@@ -270,31 +268,31 @@ def demonstrate_error_codes():
 
 
 def demonstrate_error_handling_patterns():
-    """Demonstrate different error handling patterns."""
+    """演示不同错误处理模式。"""
     print("\n" + "="*70)
     print("Error Handling Patterns")
     print("="*70 + "\n")
 
-    # Pattern 1: Using decorator
+    # 模式 1：使用装饰器
     print("Pattern 1: @handle_agent_errors decorator")
     print("  - Automatically catches exceptions")
     print("  - Converts to error response")
     print("  - Logs error with traceback")
     print("  - Best for: Agent lifecycle methods (on_init, on_tick, etc.)\n")
 
-    # Pattern 2: Using safe_execute
+    # 模式 2：使用 safe_execute
     print("Pattern 2: safe_execute() utility")
     print("  - Returns (success, result, error_message) tuple")
     print("  - Allows fine-grained error handling")
     print("  - Best for: Individual operations that might fail\n")
 
-    # Pattern 3: Using context manager
+    # 模式 3：使用上下文管理器
     print("Pattern 3: AgentErrorContext context manager")
     print("  - Catches exceptions in code block")
     print("  - Provides has_error and error_message attributes")
     print("  - Best for: Specific code blocks with error handling\n")
 
-    # Pattern 4: Manual error handling
+    # 模式 4：手动错误处理
     print("Pattern 4: Manual with create_error_response()")
     print("  - Full control over error handling")
     print("  - Manually create error responses")
@@ -306,10 +304,10 @@ if __name__ == "__main__":
     print("Hydros Agent SDK - Error Handling Example")
     print("="*70)
 
-    # Demonstrate error codes
+    # 演示错误码
     demonstrate_error_codes()
 
-    # Demonstrate error handling patterns
+    # 演示错误处理模式
     demonstrate_error_handling_patterns()
 
     print("\n" + "="*70)
@@ -330,13 +328,13 @@ from hydros_agent_sdk import (
 class MyAgent(TwinsSimulationAgent):
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request):
-        # Your initialization logic
-        # Any exception will be caught and converted to error response
+        # 你的初始化逻辑
+        # 任何异常都会被捕获并转换为错误响应
         pass
 
     @handle_agent_errors(ErrorCodes.AGENT_TICK_FAILURE)
     def on_tick(self, request):
-        # Your tick logic
+        # 你的 tick 逻辑
         pass
 
 # 3. Use safe_execute for individual operations

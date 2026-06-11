@@ -1,5 +1,5 @@
 """
-Utility modules for Hydros Agent SDK.
+Hydros Agent SDK 工具模块。
 """
 
 from .hydro_object_utils import (
@@ -10,12 +10,27 @@ from .hydro_object_utils import (
     HydroObjectType,
     MetricsCodes,
 )
+from .id_generator import (
+    generate_agent_instance_id,
+    generate_system_command_id,
+    generate_agent_command_id,
+    generate_coordination_command_id,
+    generate_alert_id,
+    generate_sim_task_id,
+    generate_hydro_event_id,
+    generate_mqtt_client_id,
+    generate_monitor_rule_id,
+    generate_data_series_id,
+    generate_sse_session_id,
+    generate_user_id,
+)
 from .mqtt_metrics import (
     MqttMetrics,
     send_metrics,
     send_metrics_batch,
     create_mock_metrics,
 )
+from .property_parse_utils import PropertyParseUtils
 from .yaml_loader import YamlLoader
 
 __all__ = [
@@ -25,9 +40,22 @@ __all__ = [
     'SimpleChildObject',
     'HydroObjectType',
     'MetricsCodes',
+    'generate_agent_instance_id',
+    'generate_system_command_id',
+    'generate_agent_command_id',
+    'generate_coordination_command_id',
+    'generate_alert_id',
+    'generate_sim_task_id',
+    'generate_hydro_event_id',
+    'generate_mqtt_client_id',
+    'generate_monitor_rule_id',
+    'generate_data_series_id',
+    'generate_sse_session_id',
+    'generate_user_id',
     'MqttMetrics',
     'send_metrics',
     'send_metrics_batch',
     'create_mock_metrics',
+    'PropertyParseUtils',
     'YamlLoader',
 ]

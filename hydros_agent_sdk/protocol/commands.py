@@ -1,10 +1,18 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
 from pydantic import Field, AliasChoices
-from .models import SimulationContext, HydroAgent, HydroAgentInstance, TopHydroObject, CommandStatus
+from .models import (
+    AgentInstanceStatus,
+    SimulationContext,
+    HydroAgent,
+    HydroAgentInstance,
+    TopHydroObject,
+    CommandStatus,
+)
 from .base import HydroBaseModel
+from hydros_agent_sdk.mpc.models import MpcResult
 
-# Constants for Command Types
+# 指令类型常量
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"
 SIMCMD_TASK_INIT_RESPONSE = "task_init_response"
 SIMCMD_TASK_TERMINATE_REQUEST = "task_terminate_request"
@@ -15,13 +23,17 @@ SIMCMD_TIME_SERIES_CALCULATION_REQUEST = "calculation_request"
 SIMCMD_TIME_SERIES_CALCULATION_RESPONSE = "calculation_response"
 SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST = "time_series_data_update_request"
 SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
+SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
+SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
+SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
 SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE = "outflow_time_series_response"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_update_request"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
+SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
 
 class HydroCmd(HydroBaseModel):
     command_id: str
@@ -31,7 +43,7 @@ class SimCommand(HydroCmd):
     context: SimulationContext
     broadcast: bool = False
 
-# --- Base Request/Response ---
+# --- 基础请求/响应 ---
 
 class SimCoordinationRequest(SimCommand):
     pass
@@ -42,7 +54,7 @@ class SimCoordinationResponse(SimCommand):
     error_message: Optional[str] = None
     source_agent_instance: HydroAgentInstance
 
-# --- Specific Commands ---
+# --- 具体指令 ---
 
 class SimTaskInitRequest(SimCoordinationRequest):
     command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
@@ -52,7 +64,7 @@ class SimTaskInitRequest(SimCoordinationRequest):
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
     created_agent_instances: List[HydroAgentInstance]
-    managed_top_objects: Dict[str, List[TopHydroObject]]
+    managed_top_objects: Dict[str, List[TopHydroObject]] = Field(default_factory=dict)
 
 class SimTaskTerminateRequest(SimCoordinationRequest):
     command_type: Literal["task_terminate_request"] = SIMCMD_TASK_TERMINATE_REQUEST
@@ -68,9 +80,10 @@ class TickCmdRequest(SimCoordinationRequest):
 class TickCmdResponse(SimCoordinationResponse):
     command_type: Literal["tick_cmd_response"] = SIMCMD_TICK_CMD_RESPONSE
 
-# --- Time Series Commands ---
+# --- 时间序列指令 ---
 
 from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEvent, OutflowTimeSeriesDataChangedEvent
+from .events import HydroEventUnion
 from .models import ObjectTimeSeries
 
 class TimeSeriesCalculationRequest(SimCoordinationRequest):
@@ -89,6 +102,14 @@ class TimeSeriesDataUpdateRequest(SimCoordinationRequest):
 
 class TimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["time_series_data_update_response"] = SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE
+
+class HydroEventCommand(SimCoordinationRequest):
+    command_type: Literal["hydro_event_command"] = SIMCMD_HYDRO_EVENT_COMMAND
+    target_agent_instance: Optional[HydroAgentInstance] = None
+    payload: HydroEventUnion
+
+class HydroEventAckResponse(SimCoordinationResponse):
+    command_type: Literal["hydro_event_ack_response"] = SIMCMD_HYDRO_EVENT_ACK_RESPONSE
 
 class OutflowTimeSeriesRequest(SimCoordinationRequest):
     command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
@@ -109,39 +130,57 @@ class OutflowTimeSeriesDataUpdateRequest(SimCoordinationRequest):
 class OutflowTimeSeriesDataUpdateResponse(SimCoordinationResponse):
     command_type: Literal["outflow_time_series_data_update_response"] = SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE
 
-# --- Report Commands ---
+class DeviceStatusChangeResponse(SimCoordinationResponse):
+    command_type: Literal["device_status_change_response"] = SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE
+    object_time_series: List[ObjectTimeSeries] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("object_time_series", "objectTimeSeries"),
+    )
+
+# --- 报告指令 ---
 
 class AgentInstanceStatusReport(SimCommand):
     """
-    Report for agent instance status updates.
-    Sent when an agent instance is created or its status changes.
+    智能体实例状态更新报告。
+    在智能体实例创建或状态变化时发送。
     """
     command_type: Literal["report_agent_instance_status"] = SIMCMD_AGENT_INSTANCE_STATUS_REPORT
     source_agent_instance: HydroAgentInstance
-    created_state: str
+    agent_instance_status: AgentInstanceStatus = Field(
+        validation_alias=AliasChoices("agent_instance_status", "agentInstanceStatus")
+    )
     init_result: Optional[Dict[str, Any]] = None
+
+class MpcResultReport(SimCommand):
+    """
+    MPC 优化结果报告。
+    由中央调度智能体发送，并由协调器或数据侧消费。
+    """
+    command_type: Literal["mpc_result_report"] = SIMCMD_MPC_RESULT_REPORT
+    source_agent_instance: HydroAgentInstance
+    mpc_results: List[MpcResult]
 
 class ParameterIdentifiedReport(SimCommand):
     """
-    Report for identified parameters.
-    Sent when an agent identifies new parameters.
+    参数识别结果报告。
+    在智能体识别出新参数时发送。
     """
     command_type: Literal["identified_params_report"] = SIMCMD_IDENTIFIED_PARAMS_REPORT
     source_agent_instance: HydroAgentInstance
-    recognized_params: List[Dict[str, Any]]  # List of IdentifiedParam objects
+    recognized_params: List[Dict[str, Any]]  # IdentifiedParam 对象列表
 
 class HydroAlertUpdatedReport(SimCommand):
     """
-    Report for hydro alert updates.
-    Sent when a hydro alert event occurs.
+    水利告警更新报告。
+    在发生水利告警事件时发送。
     """
     command_type: Literal["report_hydro_alert"] = SIMCMD_HYDRO_ALERT_REPORT
     source_agent_instance: HydroAgentInstance
-    hydro_alert_event: Dict[str, Any]  # HydroAlertEvent object
+    hydro_alert_event: Dict[str, Any]  # HydroAlertEvent 对象
 
-# --- Union for Polymorphic Deserialization ---
+# --- 多态反序列化 Union ---
 
-# Define the Union of all possible command types
+# 定义全部可能指令类型的 Union
 CommandUnion = Union[
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -153,14 +192,18 @@ CommandUnion = Union[
     TimeSeriesCalculationResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    HydroEventCommand,
+    HydroEventAckResponse,
     OutflowTimeSeriesRequest,
     OutflowTimeSeriesResponse,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
+    DeviceStatusChangeResponse,
     AgentInstanceStatusReport,
+    MpcResultReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,
-    # Add other commands here as needed
+    # 后续按需在这里补充其他指令
 ]
 
 def get_command_type(obj: Any) -> Optional[str]:
@@ -170,6 +213,6 @@ def get_command_type(obj: Any) -> Optional[str]:
 
 class SimCommandEnvelope(HydroBaseModel):
     """
-    Wrapper to handle polymorphic deserialization based on command_type.
+    基于 command_type 处理多态反序列化的包装对象。
     """
     command: CommandUnion = Field(discriminator='command_type')
