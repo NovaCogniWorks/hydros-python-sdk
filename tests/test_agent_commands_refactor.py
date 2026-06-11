@@ -1113,12 +1113,35 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "http://mpc.local/hydros/api/v1/mpc/planning/start",
             )
 
+    def test_mpc_config_resolver_reads_mpc_request_timeout_from_environment(self):
+        with patch.dict(
+            os.environ,
+            {"HYDROS_MPC_REQUEST_TIMEOUT_SECONDS": "240"},
+            clear=False,
+        ):
+            self.assertEqual(
+                MpcConfigResolver.get_mpc_request_timeout_seconds(AgentProperties()),
+                240.0,
+            )
+
+    def test_mpc_config_resolver_prefers_agent_property_timeout(self):
+        properties = AgentProperties({"mpc_request_timeout_seconds": "90"})
+
+        self.assertEqual(
+            MpcConfigResolver.get_mpc_request_timeout_seconds(
+                properties,
+                configured_timeout_seconds=240.0,
+            ),
+            90.0,
+        )
+
     def test_runtime_env_settings_centralizes_defaults_and_overrides(self):
         with patch.dict(
             os.environ,
             {
                 "HYDROS_CLUSTER_ID": "env-cluster",
                 "HYDROS_MPC_SERVICE_BASE_URL": "http://mpc.env/hydros/api/v1/mpc/planning/start",
+                "HYDROS_MPC_REQUEST_TIMEOUT_SECONDS": "240",
             },
             clear=True,
         ):
@@ -1127,11 +1150,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     "hydros_cluster_id": "config-cluster",
                     "metrics_topic": "/hydros/data/edges/{hydros_cluster_id}",
                     "mpc_service_base_url": "http://mpc.config/hydros/api/v1/mpc/planning/start",
+                    "mpc_request_timeout_seconds": "120",
                 }
             )
 
         self.assertEqual(settings.hydros_cluster_id, "env-cluster")
         self.assertEqual(settings.mpc_service_base_url, "http://mpc.env/hydros/api/v1/mpc/planning/start")
+        self.assertEqual(settings.mpc_request_timeout_seconds, 240.0)
         self.assertEqual(settings.rendered_metrics_topic(), "/hydros/data/edges/env-cluster")
 
     def test_load_env_config_defaults_to_nearest_application_env_properties(self):
@@ -1148,6 +1173,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         "hydros_cluster_id=test-cluster",
                         "hydros_node_id=test-node",
                         "mpc_service_base_url=http://mpc.local/hydros/api/v1/mpc/planning/start",
+                        "mpc_request_timeout_seconds=180",
                     ]
                 )
             )
@@ -1163,8 +1189,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             load_env_config()["mpc_service_base_url"],
             "http://mpc.local/hydros/api/v1/mpc/planning/start",
         )
+        self.assertEqual(load_env_config()["mpc_request_timeout_seconds"], "180")
 
-    def test_system_central_factory_passes_mpc_service_base_url_from_env_config(self):
+    def test_system_central_factory_passes_mpc_config_from_env_config(self):
         from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
 
         state_manager = AgentStateManager()
@@ -1184,6 +1211,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "hydros_cluster_id": "demo-cluster",
                 "hydros_node_id": "node-a",
                 "mpc_service_base_url": "http://mpc.local/hydros/api/v1/mpc/planning/start",
+                "mpc_request_timeout_seconds": "210",
             }
         )
 
@@ -1192,6 +1220,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertIsNotNone(client)
         self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
+        self.assertEqual(client.timeout_seconds, 210.0)
 
     def test_system_central_factory_can_create_agent_without_env_properties_file(self):
         from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
@@ -1356,7 +1385,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             self.assertNotIn(b'"bizSceneInstanceId"', request.data)
             self.assertNotIn(b'"sensorData"', request.data)
             self.assertNotIn(b'"targets"', request.data)
-            self.assertEqual(timeout_seconds, 150.0)
+            self.assertEqual(timeout_seconds, 200.0)
             return FakeHttpResponse()
 
         client = MpcPlanningClient(

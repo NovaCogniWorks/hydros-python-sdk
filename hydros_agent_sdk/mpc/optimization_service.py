@@ -25,6 +25,7 @@ class MpcOptimizationService:
         properties: AgentProperties,
         metrics_data_cache: MetricsDataCache,
         configured_mpc_service_base_url: Optional[str] = None,
+        configured_mpc_request_timeout_seconds: Optional[float] = None,
         mpc_planning_client: Optional[MpcPlanningClient] = None,
         mpc_result_reporter: Optional[MpcResultReporter] = None,
         mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = None,
@@ -32,6 +33,7 @@ class MpcOptimizationService:
         self.properties = properties
         self.metrics_data_cache = metrics_data_cache
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
+        self.configured_mpc_request_timeout_seconds = configured_mpc_request_timeout_seconds
         self.mpc_planning_client = mpc_planning_client
         self.mpc_result_reporter = mpc_result_reporter or MpcResultReporter()
         self.mpc_sensor_provider = mpc_sensor_provider
@@ -40,13 +42,18 @@ class MpcOptimizationService:
         if self.mpc_planning_client is not None:
             return self.mpc_planning_client
 
-        base_url = MpcConfigResolver.get_mpc_service_base_url(
+        mpc_config = MpcConfigResolver.resolve(
             self.properties,
-            self.configured_mpc_service_base_url,
+            configured_mpc_service_base_url=self.configured_mpc_service_base_url,
+            configured_mpc_request_timeout_seconds=self.configured_mpc_request_timeout_seconds,
         )
+        base_url = mpc_config.mpc_service_base_url
         if not base_url:
             return None
-        self.mpc_planning_client = MpcPlanningClient(base_url=base_url)
+        self.mpc_planning_client = MpcPlanningClient(
+            base_url=base_url,
+            timeout_seconds=mpc_config.mpc_request_timeout_seconds,
+        )
         return self.mpc_planning_client
 
     def list_sensor_data(

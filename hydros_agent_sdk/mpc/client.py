@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from hydros_agent_sdk.mpc.config import DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
 
@@ -28,7 +29,7 @@ class MpcPlanningClient:
     def __init__(
         self,
         base_url: str,
-        timeout_seconds: float = 150.0,
+        timeout_seconds: float = DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS,
         opener: Optional[Callable[[Request, float], Any]] = None,
         require_sensor_data: bool = True,
         empty_sensor_retry_delay_seconds: float = 2.0,

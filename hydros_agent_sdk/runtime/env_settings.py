@@ -31,6 +31,13 @@ def _first_value(*values: Optional[str]) -> Optional[str]:
     return None
 
 
+def _first_float(*values: Optional[str]) -> Optional[float]:
+    value = _first_value(*values)
+    if value is None:
+        return None
+    return float(value)
+
+
 @dataclass(frozen=True)
 class RuntimeEnvSettings:
     """运行时模块共享的部署级设置。"""
@@ -43,6 +50,7 @@ class RuntimeEnvSettings:
     mqtt_topic: Optional[str] = None
     metrics_topic: Optional[str] = None
     mpc_service_base_url: Optional[str] = None
+    mpc_request_timeout_seconds: Optional[float] = None
 
     @classmethod
     def from_config(cls, env_config: Optional[Mapping[str, str]] = None) -> "RuntimeEnvSettings":
@@ -71,6 +79,11 @@ class RuntimeEnvSettings:
                 os.getenv("HYDROS_MPC_SERVICE_BASE_URL"),
                 os.getenv("MPC_SERVICE_BASE_URL"),
                 config.get("mpc_service_base_url"),
+            ),
+            mpc_request_timeout_seconds=_first_float(
+                os.getenv("HYDROS_MPC_REQUEST_TIMEOUT_SECONDS"),
+                os.getenv("MPC_REQUEST_TIMEOUT_SECONDS"),
+                config.get("mpc_request_timeout_seconds"),
             ),
         )
 

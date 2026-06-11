@@ -40,6 +40,23 @@ class FakeMpcResultReporter:
 
 
 class MpcOptimizationServiceTest(unittest.TestCase):
+    def test_creates_planning_client_with_configured_timeout(self):
+        service = MpcOptimizationService(
+            properties=AgentProperties(
+                {
+                    "mpc_service_base_url": "http://mpc.local/hydros/api/v1/mpc/planning/start",
+                    "mpc_request_timeout_seconds": "75",
+                }
+            ),
+            metrics_data_cache=MetricsDataCache(max_steps=3),
+        )
+
+        client = service.get_or_create_mpc_planning_client()
+
+        self.assertIsNotNone(client)
+        self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
+        self.assertEqual(client.timeout_seconds, 75.0)
+
     def test_optimizes_with_cache_sensor_data_and_reports_responses(self):
         context = SimulationContext(biz_scene_instance_id="scene-service")
         source = SimpleNamespace(context=context)
