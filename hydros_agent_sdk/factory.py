@@ -201,6 +201,7 @@ class SystemCentralSchedulingAgentFactory:
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
             mpc_service_base_url=settings.mpc_service_base_url,
+            mpc_request_timeout_seconds=settings.mpc_request_timeout_seconds,
         )
 
         logger.info(f"Created system central scheduling agent: {agent_id}")

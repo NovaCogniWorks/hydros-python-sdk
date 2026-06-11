@@ -63,6 +63,7 @@ class MpcOptimizeRequest(HydroBaseModel):
     fixed_controls: Dict[str, float] = _payload_field("fixed_controls", default_factory=dict)
     multi_profile: bool = _payload_field("multi_profile", default=False)
     include_diversion: bool = _payload_field("include_diversion", default=False)
+    horizon_interval_seconds: Optional[int] = _payload_field("horizon_interval_seconds")
 
 
 class MpcOptimizeResponse(HydroBaseModel):

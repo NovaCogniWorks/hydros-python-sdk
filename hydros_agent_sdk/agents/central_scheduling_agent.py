@@ -121,6 +121,10 @@ class CentralSchedulingAgent(TickableAgent):
             "target_and_constrain_config_url", None
         )
         configured_mpc_service_base_url = kwargs.pop("mpc_service_base_url", None)
+        configured_mpc_request_timeout_seconds = kwargs.pop(
+            "mpc_request_timeout_seconds",
+            None,
+        )
         configured_mpc_planning_client = kwargs.pop("mpc_planning_client", None)
         configured_mpc_result_reporter = kwargs.pop("mpc_result_reporter", None)
         configured_mpc_sensor_provider = kwargs.pop("mpc_sensor_provider", None)
@@ -143,6 +147,7 @@ class CentralSchedulingAgent(TickableAgent):
 
         # 相关 MPC 配置
         self._configured_mpc_service_base_url = configured_mpc_service_base_url
+        self._configured_mpc_request_timeout_seconds = configured_mpc_request_timeout_seconds
         self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
             configured_mpc_sensor_provider
         )
@@ -193,6 +198,7 @@ class CentralSchedulingAgent(TickableAgent):
             properties=self.properties,
             metrics_data_cache=self._metrics_data_cache,
             configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+            configured_mpc_request_timeout_seconds=self._configured_mpc_request_timeout_seconds,
             mpc_planning_client=self._mpc_planning_client,
             mpc_result_reporter=self._mpc_result_reporter,
             mpc_sensor_provider=self._mpc_sensor_provider,

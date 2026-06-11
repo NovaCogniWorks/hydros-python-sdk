@@ -96,6 +96,17 @@ class MpcRollingRuntime:
 
         return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
+    def get_output_step_size(self) -> Optional[int]:
+        """返回每步预测时长，匹配 Java 侧 output_step_size 兜底规则。"""
+        scenario_output_step_size = self._get_scenario_int("output_step_size")
+        if scenario_output_step_size is not None:
+            return scenario_output_step_size
+
+        value = self.properties.get_property("output_step_size", None)
+        if value is None:
+            return None
+        return int(value)
+
     def should_auto_start_mpc_on_tick(self) -> bool:
         """判断 tick 是否可以在时间序列更新到达前激活 MPC。"""
         return PropertyParseUtils.get_bool(
@@ -275,6 +286,7 @@ class MpcRollingRuntime:
             start_step=current_step,
             current_step=current_step,
             total_steps=total_steps,
+            output_step_size=self.get_output_step_size(),
             mpc_config_url=mpc_config.mpc_config_url,
             target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
         )
