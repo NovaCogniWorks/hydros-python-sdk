@@ -185,7 +185,7 @@ class UpperScheduler:
         def get_states_vectorized(x):
             Q = x.reshape((T, N))
             delta_Q = Q[:, :-1] - Q[:, 1:] # (T, N-1)
-            net_flow = delta_Q - demands_mat - dists_mat
+            net_flow = delta_Q + demands_mat + dists_mat
             delta_L = net_flow * c_p # 广播机制
             L_inner = np.cumsum(delta_L, axis=0) + L0[1:-1]
             
@@ -286,7 +286,7 @@ class UpperScheduler:
                     target_pool_level = float(targets.get(str(pair["back_level_key"]), current_pool_level))
                     
                     correction = self._level_correction(target_pool_level, current_pool_level, area)
-                    target_flow = max(downstream_flow + demand_value + disturbance + correction, 0.0)
+                    target_flow = max(downstream_flow - demand_value - disturbance + correction, 0.0)
                 
                 if index == N - 1:
                     head_key_index = min(index, len(level_keys) - 1)

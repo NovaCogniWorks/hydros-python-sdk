@@ -150,16 +150,16 @@ class DisturbanceObserverBank:
             else:
                 actual_delta = float(next_basin_levels[level_key] - prev_basin_levels[level_key])
                 storage_flow = areas[pool_id] * actual_delta / dt_seconds
-            # 当前平台接入路径里，渠道平衡式采用:
-            # storage = q_in - q_out - nominal_disturbance - hidden_disturbance
-            # 其中 planned inflow 会以负 demand 表示，因此反推 hidden disturbance 时
-            # 需要继续减 nominal_disturbance，不能加回去。
-            inferred = (q_in - q_out - nominal_disturbance) - storage_flow
+            # 由于采用了 正=来水(inflow)，负=出水(outflow) 的符号约定：
+            # storage_flow = q_in - q_out + nominal_disturbance + hidden_disturbance
+            # 其中 planned inflow 会以正 demand 表示，因此反推 hidden disturbance 时
+            # 采用的逻辑是：hidden_disturbance = 实际蓄量变化 - 理论已知净流量
+            inferred = storage_flow - (q_in - q_out + nominal_disturbance)
             
             logger.info(
                 f"误差观察器计算 Pool {pool_id} 扰动:\n"
                 f"  实际流入(q_in)={q_in:.3f}, 实际流出(q_out)={q_out:.3f}, 计划需水(nominal)={nominal_disturbance:.3f}\n"
-                f"  理论已知流量差(q_in - q_out - nominal)={(q_in - q_out - nominal_disturbance):.3f}\n"
+                f"  理论已知流量差(q_in - q_out + nominal)={(q_in - q_out + nominal_disturbance):.3f}\n"
                 f"  实际蓄水量变化率(storage_flow)={storage_flow:.3f}\n"
                 f"  反推瞬时未知扰动(inferred)={inferred:.3f}"
             )

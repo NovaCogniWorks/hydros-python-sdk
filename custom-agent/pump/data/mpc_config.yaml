@@ -210,7 +210,7 @@ runtime:
   #   odd2_fit_threshold: 0.9
   odd:
     odd1_flow_tolerance: 4
-    odd1_level_tolerance: 0.15
+    odd1_level_tolerance: 0.3
     odd3_flow_tolerance: 8
     odd3_level_tolerance: 0.8
     odd2_fit_threshold: 0.9
@@ -219,8 +219,8 @@ runtime:
     flow_search_tolerance: 8.0
     candidate_pool_limit: 60
   upper_scheduler:
-    upper_level_correction_gain: 1
-    upper_flow_bias_correction_gain: 0.0
+    upper_level_correction_gain: 0.0
+    upper_flow_bias_correction_gain: 1.0
     upper_mpc_optimization_method: greedy
   lower_controller:
     control_horizon_lower: 10

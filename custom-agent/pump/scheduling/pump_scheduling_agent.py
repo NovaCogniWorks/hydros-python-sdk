@@ -279,8 +279,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     def _disturbance_sensor_sign(self, sensor_name: str) -> float:
         normalized_name = str(sensor_name).strip()
         if "入水" in normalized_name or "来水" in normalized_name:
-            return -1.0
-        return 1.0
+            return 1.0
+        return -1.0
 
     def _sync_station_memory_from_live_state(self, station_id: int, total_flow: float) -> None:
         if station_id not in self.station_memories:
