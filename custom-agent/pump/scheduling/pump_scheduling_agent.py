@@ -267,6 +267,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 key = str(raw_key)
                 self._disturbance_sensor_key_to_col[key] = col_name
                 self._disturbance_sensor_key_to_sign[key] = sign
+        self.global_demand_plan = build_zero_demand_plan(self.system_config, length=200)
         self.odd_demand_plan = build_zero_demand_plan(self.system_config)
         self._sync_dynamic_demand_plan()
 
@@ -297,7 +298,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
         current_step = getattr(self, "_internal_opt_step", 0)
         logger.info(f"========== 开启第 {current_step} 步滚动优化 (外部触发 step={step}) ==========")
-        step = current_step
+        self._outer_step = step
+        
+        if hasattr(self, "global_demand_plan"):
+            horizon = self.system_config.horizon_hours
+            start_idx = step
+            end_idx = step + horizon
+            if end_idx > len(self.global_demand_plan):
+                import pandas as pd
+                expand_len = max(100, end_idx - len(self.global_demand_plan))
+                new_df = pd.DataFrame(0.0, index=range(len(self.global_demand_plan), len(self.global_demand_plan) + expand_len), columns=self.global_demand_plan.columns)
+                self.global_demand_plan = pd.concat([self.global_demand_plan, new_df], ignore_index=True)
+            self.odd_demand_plan = self.global_demand_plan.iloc[start_idx:end_idx].copy().reset_index(drop=True)
+            self._sync_dynamic_demand_plan()
+            
+        step_val = current_step
         self._internal_opt_step = current_step + 1
         
         self._lazy_init_odd_mpc()
@@ -936,8 +951,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         val = getattr(event_source_type, "value", event_source_type) if event_source_type else ""
         is_water_use = (val == getattr(AgentEventType, "WATER_USE", "WATER_USE") or val == "WATER_USE")
 
-        if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
-            current_step = getattr(self, "_internal_opt_step", 0)
+        if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "global_demand_plan"):
+            outer_step = getattr(self, "_outer_step", 0)
             
             for obj_ts in event.object_time_series:
                 raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
@@ -947,47 +962,48 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     str(getattr(obj_ts, "object_name", "")),
                 ]
                 col_name = None
-                sign = 1.0
                 for key in candidate_keys:
                     if not key:
                         continue
                     col_name = self._disturbance_sensor_key_to_col.get(key)
                     if col_name:
-                        sign = float(self._disturbance_sensor_key_to_sign.get(key, 1.0))
                         break
                     col_name = self._disturbance_node_to_col.get(key)
                     if col_name:
-                        sign = self._disturbance_sensor_sign(key)
                         break
                         
                 if col_name:
                     logger.info("==========【时间序列更新 - 并入需水计划(WATER_USE)】==========")
+                    logger.info(f"当前外层步数(outer_step): {outer_step}")
                     logger.info(f"成功将对象匹配到拓扑边界: {obj_ts.object_name} (ID: {obj_ts.object_id}) -> {col_name}")
                     logger.info(f"原始数组序列: {raw_values}")
-                    logger.info("==================================================")
                     
                     if not obj_ts.time_series:
+                        logger.info("==================================================")
                         continue
                         
                     for idx, ts_val in enumerate(obj_ts.time_series):
                         target_idx = getattr(ts_val, "step", None)
                         if target_idx is None:
-                            target_idx = current_step + idx
+                            target_idx = outer_step + idx
                         else:
-                            target_idx = current_step + int(target_idx)
+                            target_idx = outer_step + int(target_idx)
                         target_idx = int(target_idx)
                         
                         # 动态扩展 DataFrame
-                        if target_idx >= len(self.odd_demand_plan):
+                        if target_idx >= len(self.global_demand_plan):
                             import pandas as pd
-                            expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
-                            new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
-                            self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
-                            self._sync_dynamic_demand_plan()
+                            expand_len = max(100, target_idx - len(self.global_demand_plan) + 1)
+                            new_df = pd.DataFrame(0.0, index=range(len(self.global_demand_plan), len(self.global_demand_plan) + expand_len), columns=self.global_demand_plan.columns)
+                            self.global_demand_plan = pd.concat([self.global_demand_plan, new_df], ignore_index=True)
                             
-                        self.odd_demand_plan.loc[target_idx, col_name] += sign * float(ts_val.value)
+                        # 强制正负号转换（反转符号），不设置多余的判断条件
+                        self.global_demand_plan.loc[target_idx, col_name] += -float(ts_val.value)
                         
-                    logger.info(f"已成功将事件并入当前预测范围的用水计划中 (当前步: {current_step})")
+                    logger.info(f"已成功将事件并入当前预测范围的用水计划中 (当前外层步数: {outer_step})")
+                    logger.info("当前外层需水计划表 (global_demand_plan):")
+                    logger.info("\n" + str(self.global_demand_plan.head(outer_step + self.system_config.horizon_hours)))
+                    logger.info("==================================================")
                 else:
                     logger.info("==========【时间序列更新 - 未映射指标】==========")
                     logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新 (未配置到边界扰动映射中)")

@@ -221,7 +221,7 @@ runtime:
   upper_scheduler:
     upper_level_correction_gain: 0.0
     upper_flow_bias_correction_gain: 1.0
-    upper_mpc_optimization_method: nlp
+    upper_mpc_optimization_method: greedy
   lower_controller:
     control_horizon_lower: 10
     opening_change_threshold: 0.0
@@ -253,9 +253,9 @@ runtime:
         '20600': []
       maintenance_fault: {}
   observer:
-    observer_gain: 0.7
+    observer_gain: 0.3
     observer_smoothing: 0.0
-    disturbance_forecast_window_hours: 4.0
+    disturbance_forecast_window_hours: 1.0
     disturbance_forecast_method: hold
   output:
     console_verbose: true
