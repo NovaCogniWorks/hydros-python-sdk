@@ -245,11 +245,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             if getattr(segment, "disturbance_node", None):
                 col_name = f"station{segment.upstream_station_id}-station{segment.downstream_station_id}"
                 self._disturbance_node_to_col[str(segment.disturbance_node)] = col_name
+        self._pool_id_to_col = {}
         for idx, pool_id in enumerate(self.system_config.pool_ids):
             if idx < len(self.system_config.station_ids) - 1:
                 upstream_station_id = self.system_config.station_ids[idx]
                 downstream_station_id = self.system_config.station_ids[idx + 1]
-                pool_id_to_col[int(pool_id)] = f"station{upstream_station_id}-station{downstream_station_id}"
+                self._pool_id_to_col[int(pool_id)] = f"station{upstream_station_id}-station{downstream_station_id}"
+        pool_id_to_col = self._pool_id_to_col
         for sensor in payload.get("service_mapping", {}).get("disturbance_sensors", []):
             if not isinstance(sensor, dict):
                 continue
@@ -554,6 +556,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         upper_plan = self.upper_scheduler.solve(
             now=0,
+            # now=step,  #不要删，之前是step，不确定是否demand plan已经按step到72截好了
             env_snapshot=observation,
             demand_state={"delivered_last_station_total": float(self.cumulative_last_station_flow)},
             available_units_map=self.available_units_map,
@@ -984,6 +987,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     if col_name:
                         break
                     col_name = self._disturbance_node_to_col.get(key)
+                    if not col_name and key.isdigit() and hasattr(self, "_pool_id_to_col"):
+                        col_name = self._pool_id_to_col.get(int(key))
                     if col_name:
                         break
                         
@@ -1037,6 +1042,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 for key in candidate_keys:
                     if not key: continue
                     col_name = self._disturbance_sensor_key_to_col.get(key) or self._disturbance_node_to_col.get(key)
+                    if not col_name and key.isdigit() and hasattr(self, "_pool_id_to_col"):
+                        col_name = self._pool_id_to_col.get(int(key))
                     if col_name: break
                         
                 if col_name:
