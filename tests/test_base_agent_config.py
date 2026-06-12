@@ -194,6 +194,34 @@ class BaseAgentConfigurationTest(unittest.TestCase):
             "https://example.test/power_config.yaml",
         )
 
+    def test_load_agent_configuration_accepts_direct_mpc_config_url_for_central_agent(self):
+        agent = self.build_agent()
+        request = SimTaskInitRequest(
+            command_id="init-003",
+            context=agent.context,
+            agent_list=[
+                HydroAgent(
+                    agent_code=agent.agent_code,
+                    agent_type=agent.agent_type,
+                    agent_name=agent.agent_name,
+                    agent_configuration_url="https://example.test/mpc_config_power.yaml",
+                )
+            ],
+        )
+
+        with patch("hydros_agent_sdk.agent_config.AgentConfigLoader.from_url") as loader:
+            agent.load_agent_configuration(request)
+
+        loader.assert_not_called()
+        self.assertEqual(
+            agent.properties.get_property("mpc_config_url"),
+            "https://example.test/mpc_config_power.yaml",
+        )
+        self.assertEqual(
+            agent.agent_configuration_url,
+            "https://example.test/mpc_config_power.yaml",
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

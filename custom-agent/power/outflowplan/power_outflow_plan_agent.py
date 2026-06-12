@@ -5,23 +5,15 @@
 该智能体通过响应水文事件来执行流量计划计算。
 """
 
+import copy
+import json
 import logging
-import os
-import sys
 from typing import Optional, List
-
-# 将当前目录添加到 Python 路径中
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlparse, urlunparse
+from urllib.request import Request, urlopen
 
 from hydros_agent_sdk import (
-    setup_logging,
-    SimCoordinationClient,
-    HydroAgentFactory,
-    MultiAgentCallback,
-    load_env_config,
-    load_agent_config,
     ErrorCodes,
     handle_agent_errors,
 )
@@ -40,30 +32,10 @@ from hydros_agent_sdk.protocol.models import (
     ObjectTimeSeries,
     TimeSeriesValue,
 )
-
-# 配置日志（仅在直接作为脚本运行时）
-if __name__ == "__main__":
-    EXAMPLES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
-    os.makedirs(LOG_DIR, exist_ok=True)
-
-    try:
-        env_config_path = os.path.join(os.path.dirname(__file__), '..', 'env.properties')
-        env_config = load_env_config(env_config_path)
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-    except Exception:
-        hydros_cluster_id = 'default_cluster'
-        hydros_node_id = os.getenv("HYDROS_NODE_ID", "LOCAL")
-
-    setup_logging(
-        level=logging.INFO,
-        hydros_cluster_id=hydros_cluster_id,
-        hydros_node_id=hydros_node_id,
-        console=True,
-        log_file=os.path.join(LOG_DIR, "hydros.log"),
-        use_rolling=True
-    )
+from hydros_agent_sdk.protocol.events import (
+    OutflowTimeSeriesDataChangedEvent,
+    TimeSeriesDataChangedEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +79,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         # 拓扑对象
         self._topology = None
 
-        logger.info(f"PowerOutflowPlanAgent created: {agent_id}")
+        logger.info(f"MyOutflowPlanAgent created: {agent_id}")
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
@@ -124,8 +96,23 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         logger.info(f"Event: {request.hydro_event}")
 
         try:
-            # 执行下泄计划计算
-            outflow_plans = self._execute_outflow_planning(request.hydro_event)
+            hydro_event = request.hydro_event.model_copy(
+                update={"source_agent_code": self.agent_code}
+            )
+            hydro_event = hydro_event.model_copy(
+                update={
+                    "object_time_series": self._normalize_object_time_series(
+                        hydro_event.object_time_series
+                    )
+                }
+            )
+
+            # 执行出力计划计算
+            outflow_plans = self._normalize_object_time_series(
+                self._resolve_incoming_outflow_plans(hydro_event)
+            )
+            if not outflow_plans:
+                outflow_plans = self._execute_outflow_planning(hydro_event)
 
             logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
 
@@ -135,7 +122,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                 command_id=request.command_id,
                 command_status=CommandStatus.SUCCEED,
                 source_agent_instance=self,
-                hydro_event=request.hydro_event,
+                hydro_event=hydro_event,
                 outflow_time_series_map={"Gate": outflow_plans},
                 broadcast=False
             )
@@ -151,6 +138,97 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         except Exception as e:
             logger.error(f"Error in outflow planning: {e}", exc_info=True)
             raise
+
+    def _resolve_incoming_outflow_plans(self, hydro_event) -> List[ObjectTimeSeries]:
+        object_time_series = list(getattr(hydro_event, "object_time_series", []) or [])
+        if object_time_series:
+            logger.info(
+                "Using object_time_series embedded in OUTFLOW_TIME_SERIES event, count=%s",
+                len(object_time_series),
+            )
+            return object_time_series
+
+        event_content_url = getattr(hydro_event, "event_content_url", None)
+        if not event_content_url:
+            logger.info("OUTFLOW_TIME_SERIES event has no object_time_series or event content URL")
+            return []
+
+        object_time_series = self._load_object_time_series_from_url(event_content_url)
+        if object_time_series:
+            logger.info(
+                "Loaded object_time_series from event URL, count=%s, url=%s",
+                len(object_time_series),
+                event_content_url,
+            )
+        return object_time_series
+
+    def _load_object_time_series_from_url(self, event_content_url: str) -> List[ObjectTimeSeries]:
+        parsed = urlparse(event_content_url)
+        encoded_url = urlunparse(parsed._replace(path=quote(parsed.path)))
+        request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
+
+        try:
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to load outflow event content from %s: %s", event_content_url, exc)
+            return []
+
+        for event_model in (OutflowTimeSeriesDataChangedEvent, TimeSeriesDataChangedEvent):
+            try:
+                parsed_event = event_model.model_validate(payload)
+            except Exception:
+                continue
+            if parsed_event.object_time_series:
+                return parsed_event.object_time_series
+
+        raw_series = payload.get("object_time_series") or payload.get("objectTimeSeries") or []
+        result: List[ObjectTimeSeries] = []
+        for item in raw_series:
+            try:
+                result.append(ObjectTimeSeries.model_validate(item))
+            except Exception:
+                logger.debug("Skipping invalid object_time_series item: %s", item, exc_info=True)
+        return result
+
+    def _normalize_object_time_series(
+        self,
+        object_time_series_list: List[ObjectTimeSeries],
+    ) -> List[ObjectTimeSeries]:
+        normalized: List[ObjectTimeSeries] = []
+
+        for object_time_series in object_time_series_list or []:
+            object_ids = [object_id for object_id in (object_time_series.object_ids or []) if object_id is not None]
+            if not object_ids:
+                normalized.append(object_time_series)
+                continue
+
+            split_count = len(object_ids)
+            for object_id in object_ids:
+                split_time_series = []
+                for time_series_value in object_time_series.time_series or []:
+                    split_value = copy.deepcopy(time_series_value)
+                    if split_value.value is not None:
+                        split_value.value = round(split_value.value / split_count, 6)
+                    split_time_series.append(split_value)
+
+                normalized.append(
+                    object_time_series.model_copy(
+                        update={
+                            "object_id": object_id,
+                            "object_ids": [],
+                            "time_series": split_time_series,
+                        }
+                    )
+                )
+
+        if normalized:
+            logger.info(
+                "Normalized object_time_series for outflow event: input=%s, output=%s",
+                len(object_time_series_list or []),
+                len(normalized),
+            )
+        return normalized
 
     def _execute_outflow_planning(self, hydro_event) -> List[ObjectTimeSeries]:
         """
@@ -245,104 +323,3 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             source_agent_instance=self,
             broadcast=False
         )
-
-
-# ============================================================================
-# 智能体工厂类
-# ============================================================================
-
-class OutflowPlanAgentFactory(HydroAgentFactory):
-    """用于创建外发流量计划智能体实例的工厂。"""
-
-    def create_agent(
-        self,
-        sim_coordination_client: SimCoordinationClient,
-        agent_id: str,
-        agent_code: str,
-        agent_type: str,
-        agent_name: str,
-        context: SimulationContext,
-        hydros_cluster_id: str,
-        hydros_node_id: str,
-        **kwargs
-    ):
-        """创建一个新的外发流量计划智能体实例。"""
-        return PowerOutflowPlanAgent(
-            sim_coordination_client=sim_coordination_client,
-            agent_id=agent_id,
-            agent_code=agent_code,
-            agent_type=agent_type,
-            agent_name=agent_name,
-            context=context,
-            hydros_cluster_id=hydros_cluster_id,
-            hydros_node_id=hydros_node_id,
-            **kwargs
-        )
-
-
-# ============================================================================
-# 主入口
-# ============================================================================
-
-def main():
-    """外发流量计划智能体的主入口函数。"""
-    logger.info("=" * 80)
-    logger.info("Starting Outflow Plan Agent")
-    logger.info("=" * 80)
-
-    try:
-        # 加载配置
-        env_config_path = os.path.join(os.path.dirname(__file__), '..', 'env.properties')
-        env_config = load_env_config(env_config_path)
-        agent_config = load_agent_config()
-
-        # 提取配置参数
-        mqtt_broker_url = env_config['mqtt_broker_url']
-        mqtt_broker_port = env_config['mqtt_broker_port']
-        mqtt_topic = env_config['mqtt_topic']
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-
-        agent_code = agent_config['agent_code']
-        agent_type = agent_config['agent_type']
-        agent_name = agent_config['agent_name']
-
-        logger.info(f"Agent Code: {agent_code}")
-        logger.info(f"Agent Type: {agent_type}")
-        logger.info(f"MQTT Broker: {mqtt_broker_url}:{mqtt_broker_port}")
-        logger.info(f"MQTT Topic: {mqtt_topic}")
-
-        # 创建工厂和回调
-        factory = OutflowPlanAgentFactory()
-        callback = MultiAgentCallback(factory)
-
-        # 创建协调客户端
-        client = SimCoordinationClient(
-            broker_url=mqtt_broker_url,
-            broker_port=mqtt_broker_port,
-            topic=mqtt_topic,
-            callback=callback,
-            hydros_cluster_id=hydros_cluster_id,
-            hydros_node_id=hydros_node_id
-        )
-
-        # 启动连接
-        client.connect()
-        logger.info("Outflow plan agent connected and ready")
-
-        # 保持运行状态
-        try:
-            while True:
-                import time
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
-            client.disconnect()
-
-    except Exception as e:
-        logger.error(f"Failed to start outflow plan agent: {e}", exc_info=True)
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()

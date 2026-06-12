@@ -46,7 +46,20 @@ class OutflowTimeSeriesEvent(HydroEvent):
     hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = AgentEventType.OUTFLOW_TIME_SERIES
     event_content_url: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices("event_content_url", "eventContentUrl")
+        validation_alias=AliasChoices(
+            "event_content_url",
+            "eventContentUrl",
+            "time_series_url",
+            "timeSeriesUrl",
+        )
+    )
+    object_time_series: List[ObjectTimeSeries] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("object_time_series", "objectTimeSeries")
+    )
+    direct_load_time_series: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("direct_load_time_series", "directLoadTimeSeries")
     )
     priority: Optional[str] = None
 
