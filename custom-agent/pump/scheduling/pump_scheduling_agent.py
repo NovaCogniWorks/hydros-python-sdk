@@ -553,7 +553,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"上层规划计算时用的需水计划值 (step={step} to {step+horizon-1}):\n{upper_plan_range.to_string()}")
         
         upper_plan = self.upper_scheduler.solve(
-            now=step,
+            now=0,
             env_snapshot=observation,
             demand_state={"delivered_last_station_total": float(self.cumulative_last_station_flow)},
             available_units_map=self.available_units_map,
@@ -765,6 +765,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 demand_plan=getattr(self, "odd_demand_plan", None),
                 output_dir="output/agent_steps"
             )
+            self.plot_tracker.step_predictions = []
+            
+        self.plot_tracker.step_predictions.append({
+            "step": int(step),
+            "upper": upper_res,
+            "lower": lower_res
+        })
         
         self.plot_tracker.update_and_plot(
             step_index=int(step),

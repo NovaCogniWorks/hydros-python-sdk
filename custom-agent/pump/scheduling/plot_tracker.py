@@ -488,6 +488,7 @@ class PlotHistoryTracker:
             
         history_df = pd.DataFrame(records)
         unit_history_df = pd.DataFrame(unit_records)
+        self._export_excel(history_df)
         
         # 使用 simulation._plot_results
         from odd_dmpc.simulation import ClosedLoopSimulation
@@ -501,4 +502,41 @@ class PlotHistoryTracker:
             logger.info(f"汇总图生成完成，保存在: {self.output_dir.absolute()}")
         except Exception as e:
             logger.error(f"生成汇总图失败: {e}", exc_info=True)
+
+    def _export_excel(self, summary_df: pd.DataFrame):
+        import os
+        import pandas as pd
+        output_file = os.path.join(self.output_dir, "summary_and_predictions.xlsx")
+        pred_records = []
+        if hasattr(self, "step_predictions"):
+            for pred in self.step_predictions:
+                step = pred["step"]
+                upper = pred["upper"]
+                lower = pred["lower"]
+                for sid, q_planned in upper.get("q_planned", {}).items():
+                    for t_idx, q in enumerate(q_planned):
+                        row = {
+                            "Step": step,
+                            "Future_Hour_Idx": t_idx,
+                            "Station": sid,
+                            "Upper_Q_Planned": q,
+                            "Upper_Z_Planned": upper.get("z_planned", {}).get(sid, [None]*len(q_planned))[t_idx] if t_idx < len(upper.get("z_planned", {}).get(sid, [])) else None,
+                        }
+                        if sid in lower and "total_q" in lower[sid] and t_idx < len(lower[sid]["total_q"]):
+                            row["Lower_Q_Planned"] = lower[sid]["total_q"][t_idx]
+                        else:
+                            row["Lower_Q_Planned"] = None
+                        pred_records.append(row)
+        
+        try:
+            with pd.ExcelWriter(output_file) as writer:
+                summary_df.to_excel(writer, sheet_name="Final_Summary", index=False)
+                if pred_records:
+                    pd.DataFrame(pred_records).to_excel(writer, sheet_name="Step_Predictions", index=False)
+            print(f"Excel data exported to {output_file}")
+        except Exception as e:
+            print(f"Failed to export to Excel, exporting to CSV instead. Error: {e}")
+            summary_df.to_csv(os.path.join(self.output_dir, "final_summary.csv"), index=False)
+            if pred_records:
+                pd.DataFrame(pred_records).to_csv(os.path.join(self.output_dir, "step_predictions.csv"), index=False)
 
