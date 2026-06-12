@@ -932,22 +932,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         
         event_source_type = getattr(event, "hydro_event_source_type", "")
-        is_weather_forecast = False
-        if event_source_type:
-            val = getattr(event_source_type, "value", event_source_type)
-            # 兼容从枚举读取或是字符串比较
-            if val == getattr(AgentEventType, "WEATHER_FORECAST", "WEATHER_FORECAST") or val == "WEATHER_FORECAST":
-                is_weather_forecast = True
+        from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
+        val = getattr(event_source_type, "value", event_source_type) if event_source_type else ""
+        is_water_use = (val == getattr(AgentEventType, "WATER_USE", "WATER_USE") or val == "WATER_USE")
 
-        if is_weather_forecast and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
+        if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "odd_demand_plan"):
             current_step = getattr(self, "_internal_opt_step", 0)
             
             for obj_ts in event.object_time_series:
                 raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
-                logger.info("==========【时间序列更新】==========")
-                logger.info(f"处理 WEATHER_FORECAST 天气预报数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
-                logger.info(f"原始数组序列: {raw_values}")
-                logger.info("====================================")
                 
                 candidate_keys = [
                     str(getattr(obj_ts, "object_id", "")),
@@ -966,52 +959,40 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     if col_name:
                         sign = self._disturbance_sensor_sign(key)
                         break
-                if not col_name:
-                    logger.warning(
-                        "未能将天气预报对象匹配到拓扑中的 disturbance_node: "
-                        f"object_id={obj_ts.object_id}, object_name={obj_ts.object_name}"
-                    )
-                    continue
-                    
-                if not obj_ts.time_series:
-                    continue
-                    
-                for idx, ts_val in enumerate(obj_ts.time_series):
-                    target_idx = getattr(ts_val, "step", None)
-                    if target_idx is None:
-                        target_idx = current_step + idx
-                    else:
-                        target_idx = current_step + int(target_idx)
-                    target_idx = int(target_idx)
-                    
-                    # 动态扩展 DataFrame
-                    if target_idx >= len(self.odd_demand_plan):
-                        import pandas as pd
-                        expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
-                        new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
-                        self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
-                        self._sync_dynamic_demand_plan()
                         
-                    self.odd_demand_plan.loc[target_idx, col_name] += sign * float(ts_val.value)
+                if col_name:
+                    logger.info("==========【时间序列更新 - 并入需水计划(WATER_USE)】==========")
+                    logger.info(f"成功将对象匹配到拓扑边界: {obj_ts.object_name} (ID: {obj_ts.object_id}) -> {col_name}")
+                    logger.info(f"原始数组序列: {raw_values}")
+                    logger.info("==================================================")
                     
-            logger.info(f"已成功将 WEATHER_FORECAST 事件并入当前预测范围的用水计划中 (当前步: {current_step})")
-        else:
-            # 2. 遍历并处理数据
-            for obj_ts in event.object_time_series:
-                raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
-                logger.info("==========【时间序列更新】==========")
-                logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")
-                logger.info(f"原始数组序列: {raw_values}")
-                logger.info("====================================")
-                
-                # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
-                # 例如更新模型的边界约束:
-                # 可按需调用：self.on_boundary_condition_update([obj_ts])
-                
-                # 打印部分数据供调试
-                if obj_ts.time_series:
-                    first_val = obj_ts.time_series[0]
-                    logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+                    if not obj_ts.time_series:
+                        continue
+                        
+                    for idx, ts_val in enumerate(obj_ts.time_series):
+                        target_idx = getattr(ts_val, "step", None)
+                        if target_idx is None:
+                            target_idx = current_step + idx
+                        else:
+                            target_idx = current_step + int(target_idx)
+                        target_idx = int(target_idx)
+                        
+                        # 动态扩展 DataFrame
+                        if target_idx >= len(self.odd_demand_plan):
+                            import pandas as pd
+                            expand_len = max(100, target_idx - len(self.odd_demand_plan) + 1)
+                            new_df = pd.DataFrame(0.0, index=range(len(self.odd_demand_plan), len(self.odd_demand_plan) + expand_len), columns=self.odd_demand_plan.columns)
+                            self.odd_demand_plan = pd.concat([self.odd_demand_plan, new_df], ignore_index=True)
+                            self._sync_dynamic_demand_plan()
+                            
+                        self.odd_demand_plan.loc[target_idx, col_name] += sign * float(ts_val.value)
+                        
+                    logger.info(f"已成功将事件并入当前预测范围的用水计划中 (当前步: {current_step})")
+                else:
+                    logger.info("==========【时间序列更新 - 未映射指标】==========")
+                    logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新 (未配置到边界扰动映射中)")
+                    logger.info(f"原始数组序列: {raw_values}")
+                    logger.info("================================================")
 
         # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(
