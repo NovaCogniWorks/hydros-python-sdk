@@ -302,14 +302,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         if hasattr(self, "global_demand_plan"):
             horizon = self.system_config.horizon_hours
-            start_idx = step
-            end_idx = step + horizon
+            opt_start_step = max(0, step - current_step)
+            end_idx = opt_start_step + horizon
             if end_idx > len(self.global_demand_plan):
                 import pandas as pd
                 expand_len = max(100, end_idx - len(self.global_demand_plan))
                 new_df = pd.DataFrame(0.0, index=range(len(self.global_demand_plan), len(self.global_demand_plan) + expand_len), columns=self.global_demand_plan.columns)
                 self.global_demand_plan = pd.concat([self.global_demand_plan, new_df], ignore_index=True)
-            self.odd_demand_plan = self.global_demand_plan.iloc[start_idx:end_idx].copy().reset_index(drop=True)
+            self.odd_demand_plan = self.global_demand_plan.iloc[opt_start_step:end_idx].copy().reset_index(drop=True)
             self._sync_dynamic_demand_plan()
             
         step_val = current_step
