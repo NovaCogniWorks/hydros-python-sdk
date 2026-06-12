@@ -268,6 +268,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 self._disturbance_sensor_key_to_col[key] = col_name
                 self._disturbance_sensor_key_to_sign[key] = sign
         self.global_demand_plan = build_zero_demand_plan(self.system_config, length=200)
+        self.global_rain_plan = build_zero_demand_plan(self.system_config, length=200)
         self.odd_demand_plan = build_zero_demand_plan(self.system_config)
         self._sync_dynamic_demand_plan()
 
@@ -276,6 +277,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.upper_scheduler.demand_plan = self.odd_demand_plan
         if hasattr(self, "plot_tracker"):
             self.plot_tracker.demand_plan = self.odd_demand_plan
+            if hasattr(self, "global_rain_plan"):
+                self.plot_tracker.global_rain_plan = self.global_rain_plan
 
     def _disturbance_sensor_sign(self, sensor_name: str) -> float:
         normalized_name = str(sensor_name).strip()
@@ -309,6 +312,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 expand_len = max(100, end_idx - len(self.global_demand_plan))
                 new_df = pd.DataFrame(0.0, index=range(len(self.global_demand_plan), len(self.global_demand_plan) + expand_len), columns=self.global_demand_plan.columns)
                 self.global_demand_plan = pd.concat([self.global_demand_plan, new_df], ignore_index=True)
+                if hasattr(self, "global_rain_plan"):
+                    new_rain_df = pd.DataFrame(0.0, index=range(len(self.global_rain_plan), len(self.global_rain_plan) + expand_len), columns=self.global_rain_plan.columns)
+                    self.global_rain_plan = pd.concat([self.global_rain_plan, new_rain_df], ignore_index=True)
             self.odd_demand_plan = self.global_demand_plan.iloc[opt_start_step:end_idx].copy().reset_index(drop=True)
             self._sync_dynamic_demand_plan()
             
@@ -318,8 +324,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self._lazy_init_odd_mpc()
         
         max_step = self.system_config.horizon_hours
-        if step >= max_step:
-            logger.info(f"当前 step ({step}) 已达到或超过系统配置的最大步数 ({max_step})，跳过本次优化。")
+        if current_step >= max_step:
+            logger.info(f"当前内部 step ({current_step}) 已达到或超过系统配置的最大步数 ({max_step})，跳过本次优化。")
             if not getattr(self, "_summary_plot_generated", False):
                 if hasattr(self, 'plot_tracker') and hasattr(self.plot_tracker, 'generate_summary_plot'):
                     self.plot_tracker.generate_summary_plot()
@@ -950,9 +956,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         val = getattr(event_source_type, "value", event_source_type) if event_source_type else ""
         is_water_use = (val == getattr(AgentEventType, "WATER_USE", "WATER_USE") or val == "WATER_USE")
+        is_weather_forecast = (val == getattr(AgentEventType, "WEATHER_FORECAST", "WEATHER_FORECAST") or val == "WEATHER_FORECAST")
+
+        outer_step = getattr(self, "_outer_step", 0)
 
         if is_water_use and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "global_demand_plan"):
-            outer_step = getattr(self, "_outer_step", 0)
             
             for obj_ts in event.object_time_series:
                 raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
@@ -996,6 +1004,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                             expand_len = max(100, target_idx - len(self.global_demand_plan) + 1)
                             new_df = pd.DataFrame(0.0, index=range(len(self.global_demand_plan), len(self.global_demand_plan) + expand_len), columns=self.global_demand_plan.columns)
                             self.global_demand_plan = pd.concat([self.global_demand_plan, new_df], ignore_index=True)
+                            self._sync_dynamic_demand_plan()
                             
                         # 强制正负号转换（反转符号），不设置多余的判断条件
                         self.global_demand_plan.loc[target_idx, col_name] += -float(ts_val.value)
@@ -1009,6 +1018,46 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新 (未配置到边界扰动映射中)")
                     logger.info(f"原始数组序列: {raw_values}")
                     logger.info("================================================")
+                    
+        elif is_weather_forecast and hasattr(self, "_disturbance_node_to_col") and hasattr(self, "global_rain_plan"):
+            for obj_ts in event.object_time_series:
+                raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
+                candidate_keys = [
+                    str(getattr(obj_ts, "object_id", "")),
+                    str(getattr(obj_ts, "object_name", "")),
+                ]
+                col_name = None
+                for key in candidate_keys:
+                    if not key: continue
+                    col_name = self._disturbance_sensor_key_to_col.get(key) or self._disturbance_node_to_col.get(key)
+                    if col_name: break
+                        
+                if col_name:
+                    logger.info("==========【时间序列更新 - 并入降水预测(WEATHER_FORECAST)】==========")
+                    logger.info(f"当前外层步数(outer_step): {outer_step}")
+                    logger.info(f"将对象匹配到拓扑边界: {obj_ts.object_name} -> {col_name}")
+                    
+                    if not obj_ts.time_series:
+                        continue
+                        
+                    for idx, ts_val in enumerate(obj_ts.time_series):
+                        target_idx = getattr(ts_val, "step", None)
+                        if target_idx is None:
+                            target_idx = outer_step + idx
+                        else:
+                            target_idx = outer_step + int(target_idx)
+                        target_idx = int(target_idx)
+                        
+                        if target_idx >= len(self.global_rain_plan):
+                            import pandas as pd
+                            expand_len = max(100, target_idx - len(self.global_rain_plan) + 1)
+                            new_df = pd.DataFrame(0.0, index=range(len(self.global_rain_plan), len(self.global_rain_plan) + expand_len), columns=self.global_rain_plan.columns)
+                            self.global_rain_plan = pd.concat([self.global_rain_plan, new_df], ignore_index=True)
+                            self._sync_dynamic_demand_plan()
+                            
+                        self.global_rain_plan.loc[target_idx, col_name] += -float(ts_val.value)
+                    
+                    logger.info("==========================================================")
 
         # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(

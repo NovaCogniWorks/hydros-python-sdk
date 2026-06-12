@@ -22,6 +22,8 @@ class PlotHistoryTracker:
         self.hist_back_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_front_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_pool_levels = {pid: [] for pid in self.system_config.pool_ids}
+        self.hist_pred_back_levels = {sid: [] for sid in self.system_config.station_ids}
+        self.hist_pred_front_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_disturbances = {pid: [] for pid in self.system_config.pool_ids}
         self.hist_upper_flow_errors = {sid: [] for sid in self.system_config.station_ids}
         self.hist_lower_flow_errors = {sid: [] for sid in self.system_config.station_ids}
@@ -61,6 +63,11 @@ class PlotHistoryTracker:
             front = float(observation.station_front_levels[station_id])
             self.hist_back_levels[station_id].append(back)
             self.hist_front_levels[station_id].append(front)
+            
+            pred_back = float(upper_plan.station_back_levels[station_id][0]) if station_id in upper_plan.station_back_levels and len(upper_plan.station_back_levels[station_id]) > 0 else back
+            pred_front = float(upper_plan.station_front_levels[station_id][0]) if station_id in upper_plan.station_front_levels and len(upper_plan.station_front_levels[station_id]) > 0 else front
+            self.hist_pred_back_levels[station_id].append(pred_back)
+            self.hist_pred_front_levels[station_id].append(pred_front)
             
             # Efficiency & Power
             eff = float(actions[station_id].predicted_efficiencies[0]) if hasattr(actions[station_id], 'predicted_efficiencies') and actions[station_id].predicted_efficiencies else 0.0
@@ -156,6 +163,7 @@ class PlotHistoryTracker:
         for idx, (up_id, down_id) in enumerate(zip(station_ids[:-1], station_ids[1:]), start=1):
             pool_id = pool_ids[idx - 1] if idx - 1 < len(pool_ids) else idx
             demand_column = f"station{up_id}-station{down_id}"
+            
             if demand_column in self.demand_plan.columns:
                 series_vals = self.demand_plan[demand_column].values[:n_points]
                 if len(series_vals) < n_points:
@@ -164,11 +172,20 @@ class PlotHistoryTracker:
             else:
                 demand_series[pool_id] = np.zeros(n_points, dtype=float)
                 
+            if hasattr(self, "global_rain_plan") and demand_column in getattr(self, "global_rain_plan", pd.DataFrame()).columns:
+                r_series = getattr(self, "global_rain_plan")[demand_column].values[:n_points]
+                if len(r_series) < n_points:
+                    r_series = np.pad(r_series, (0, n_points - len(r_series)), 'edge')
+                rain_series[pool_id] = np.asarray(r_series, dtype=float)
+            else:
+                rain_series[pool_id] = np.zeros(n_points, dtype=float)
+                
         # Fill any unmapped pools
         for pool_id in pool_ids:
             if pool_id not in demand_series:
                 demand_series[pool_id] = np.zeros(n_points, dtype=float)
-            rain_series[pool_id] = np.zeros(n_points, dtype=float)
+            if pool_id not in rain_series or len(rain_series[pool_id]) == 0:
+                rain_series[pool_id] = np.zeros(n_points, dtype=float)
             
         return times, demand_series, {pool_id: np.asarray(values, dtype=float) for pool_id, values in rain_series.items()}
 
@@ -437,6 +454,8 @@ class PlotHistoryTracker:
                     "actual_flow": self.hist_flows[st_id][i],
                     "actual_back_level": self.hist_back_levels[st_id][i],
                     "actual_front_level": self.hist_front_levels[st_id][i],
+                    "pred_back_level": self.hist_pred_back_levels[st_id][i],
+                    "pred_front_level": self.hist_pred_front_levels[st_id][i],
                     "mode": self.hist_modes[st_id][i],
                     "actual_upper_flow_error": self.hist_upper_flow_errors[st_id][i],
                     "actual_lower_flow_error": self.hist_lower_flow_errors[st_id][i],
