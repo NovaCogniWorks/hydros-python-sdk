@@ -32,6 +32,7 @@ class PlotHistoryTracker:
         
         self.hist_modes = {sid: [] for sid in self.system_config.station_ids}
         self.hist_ref_flows = {sid: [] for sid in self.system_config.station_ids}
+        self.hist_power_mw = {sid: [] for sid in self.system_config.station_ids}
         
         # We need a mock runtime or just create a dict for odd boundaries
         self.odd1_flow_tolerance = 0.5
@@ -61,11 +62,12 @@ class PlotHistoryTracker:
             self.hist_back_levels[station_id].append(back)
             self.hist_front_levels[station_id].append(front)
             
-            # Efficiency
-            # Since we might not have _actual_unit_metrics easily, we can just use total station flow and head to estimate efficiency
-            # or just default to 0 for plotting if not available
+            # Efficiency & Power
             eff = float(actions[station_id].predicted_efficiencies[0]) if hasattr(actions[station_id], 'predicted_efficiencies') and actions[station_id].predicted_efficiencies else 0.0
             self.hist_efficiencies[station_id].append(eff)
+            head = float(observation.station_heads.get(station_id, 0.0))
+            power = (9.81 * 1000 * flow * head) / (eff * 1e6) if eff > 0.01 else 0.0
+            self.hist_power_mw[station_id].append(power)
             
             # Errors
             self.hist_odd_flow_errors[station_id].append(float(decisions[station_id].flow_error))
@@ -78,9 +80,12 @@ class PlotHistoryTracker:
             station_snapshot = {}
             station = self.system_config.station_by_id[station_id]
             for unit in station.units:
+                u_eff = float(actions[station_id].predicted_unit_efficiencies.get(unit.id, [0.0])[0]) if hasattr(actions[station_id], 'predicted_unit_efficiencies') else 0.0
                 station_snapshot[unit.name] = {
+                    "Unit_ID": unit.id,
                     "Status": int(actions[station_id].unit_status.get(unit.id, 0)),
                     "Opening": float(actions[station_id].unit_openings.get(unit.id, 0.0)),
+                    "Efficiency": u_eff,
                 }
             snapshot[station_id] = station_snapshot
             
@@ -422,6 +427,7 @@ class PlotHistoryTracker:
         records = []
         first_station_id = self.system_config.station_ids[0] if self.system_config.station_ids else None
         
+        unit_records = []
         for i, t in enumerate(self.hist_times):
             for st_id in self.system_config.station_ids:
                 row = {
@@ -434,10 +440,26 @@ class PlotHistoryTracker:
                     "mode": self.hist_modes[st_id][i],
                     "actual_upper_flow_error": self.hist_upper_flow_errors[st_id][i],
                     "actual_lower_flow_error": self.hist_lower_flow_errors[st_id][i],
+                    "efficiency": self.hist_efficiencies[st_id][i],
+                    "power_mw": self.hist_power_mw[st_id][i],
+                    "step_hours": float(self.system_config.dt_hours),
                 }
+                
+                st_snapshot = self.hist_unit_status[i].get(st_id, {})
+                for u_name, u_data in st_snapshot.items():
+                    unit_records.append({
+                        "station_id": st_id,
+                        "unit_id": u_data["Unit_ID"],
+                        "time_hours": t,
+                        "opening": u_data["Opening"],
+                        "unit_efficiency": u_data["Efficiency"],
+                        "status": u_data["Status"],
+                    })
+
                 if st_id == first_station_id:
                     for pid in self.system_config.pool_ids:
                         row[f"disturbance_estimate_pool_{pid}"] = self.hist_disturbances[pid][i]
+                        row[f"actual_pool_level_{pid}"] = self.hist_pool_levels[pid][i]
                 records.append(row)
                 
         if not records:
@@ -446,6 +468,7 @@ class PlotHistoryTracker:
             return
             
         history_df = pd.DataFrame(records)
+        unit_history_df = pd.DataFrame(unit_records)
         
         # 使用 simulation._plot_results
         from odd_dmpc.simulation import ClosedLoopSimulation
@@ -455,7 +478,7 @@ class PlotHistoryTracker:
         # 兼容 simulation._plot_results 内部所需的 self.system_config 等属性
         # 因为 PlotHistoryTracker 刚好具备所有必需的属性，我们可以直接传入 self
         try:
-            ClosedLoopSimulation._plot_results(self, history_df)
+            ClosedLoopSimulation._plot_results(self, history_df, unit_history=unit_history_df)
             logger.info(f"汇总图生成完成，保存在: {self.output_dir.absolute()}")
         except Exception as e:
             logger.error(f"生成汇总图失败: {e}", exc_info=True)

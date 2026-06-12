@@ -1992,8 +1992,9 @@ class ClosedLoopSimulation:
         fig.savefig(step_plot_path, dpi=180)
         plt.close(fig)
 
-    def _plot_results(self, history: pd.DataFrame) -> None:
+    def _plot_results(self, history: pd.DataFrame, unit_history: pd.DataFrame = None) -> None:
         import matplotlib.pyplot as plt
+        import numpy as np
         time_col = "time_hours" if "time_hours" in history.columns else "hour"
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
@@ -2002,8 +2003,18 @@ class ClosedLoopSimulation:
         
         station_palette = plt.cm.tab10(np.linspace(0.2, 0.9, max(len(station_ids), 1)))
         
+        # Calculate global summary metrics
+        total_energy_mwh = 0.0
+        total_volume_m3 = 0.0
+        overall_mean_efficiency = 0.0
+        if "power_mw" in history.columns and "step_hours" in history.columns:
+            total_energy_mwh = float((history["power_mw"] * history["step_hours"]).sum())
+            total_volume_m3 = float((history["actual_flow"] * history["step_hours"] * 3600.0).sum())
+            if total_energy_mwh > 0:
+                overall_mean_efficiency = (total_volume_m3 * 9.81 / 3600.0) / (total_energy_mwh * 1e3) * 100.0 # to percentage
+        
         for idx_st, station_id in enumerate(station_ids):
-            fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=True)
+            fig, axes = plt.subplots(6, 1, figsize=(14, 24), sharex=True)
             station_df = history[history["station_id"] == station_id]
             st_color = station_palette[idx_st % len(station_palette)]
             
@@ -2016,23 +2027,41 @@ class ClosedLoopSimulation:
             mode_map = {"ODD1": 1, "ODD2": 2, "ODD3": 3}
             axes[2].step(station_df[time_col], station_df["mode"].map(mode_map), where="post", color=st_color, label=f"S{station_id}")
             
-            axes[3].plot(station_df[time_col], station_df["actual_upper_flow_error"], linestyle="-.", color=st_color, label=f"S{station_id} actual-upper")
-            axes[3].plot(station_df[time_col], station_df["actual_lower_flow_error"], linestyle=":", color=st_color, label=f"S{station_id} actual-lower")
+            # Units Angle
+            if unit_history is not None and not unit_history.empty:
+                st_uh = unit_history[unit_history["station_id"] == station_id]
+                for unit_id in st_uh["unit_id"].unique():
+                    u_df = st_uh[st_uh["unit_id"] == unit_id]
+                    axes[3].plot(u_df[time_col], u_df["opening"], label=f"U{unit_id} angle")
+                    
+            # Units Efficiency
+            if unit_history is not None and not unit_history.empty:
+                st_uh = unit_history[unit_history["station_id"] == station_id]
+                for unit_id in st_uh["unit_id"].unique():
+                    u_df = st_uh[st_uh["unit_id"] == unit_id]
+                    active_eff = u_df["unit_efficiency"].where(u_df["status"] == 1, np.nan)
+                    axes[4].plot(u_df[time_col], active_eff, label=f"U{unit_id} eff")
+            if "efficiency" in station_df.columns:
+                axes[4].plot(station_df[time_col], station_df["efficiency"], color="k", linestyle="--", linewidth=2, label=f"S{station_id} total eff")
+            
+            axes[5].plot(station_df[time_col], station_df["actual_upper_flow_error"], linestyle="-.", color=st_color, label=f"S{station_id} actual-upper")
+            axes[5].plot(station_df[time_col], station_df["actual_lower_flow_error"], linestyle=":", color=st_color, label=f"S{station_id} actual-lower")
             
             palette = plt.cm.tab20(np.linspace(0.1, 0.9, max(len(pool_ids), 1)))
+            pool_mae_text = []
             for idx, pool_id in enumerate(pool_ids):
                 color = palette[idx % len(palette)]
                 column = f"disturbance_estimate_pool_{pool_id}"
                 if column in observer_df.columns:
-                    axes[3].plot(observer_df[time_col], observer_df[column], color=color, label=f"Observer pool {pool_id}")
-                axes[3].plot(
+                    axes[5].plot(observer_df[time_col], observer_df[column], color=color, label=f"Observer pool {pool_id}")
+                axes[5].plot(
                     disturbance_times,
                     demand_series.get(pool_id, np.zeros_like(disturbance_times)),
                     color=color,
                     alpha=0.8,
                     label=f"Plan pool {pool_id}",
                 )
-                axes[3].step(
+                axes[5].step(
                     disturbance_times,
                     rain_series.get(pool_id, np.zeros_like(disturbance_times)),
                     where="post",
@@ -2041,18 +2070,45 @@ class ClosedLoopSimulation:
                     alpha=0.8,
                     label=f"Rain pool {pool_id}",
                 )
+                pool_lvl_col = f"actual_pool_level_{pool_id}"
+                if pool_lvl_col in observer_df.columns and len(observer_df) > 0:
+                    first_lvl = observer_df[pool_lvl_col].iloc[0]
+                    lvl_mae = (observer_df[pool_lvl_col] - first_lvl).abs().mean()
+                    pool_mae_text.append(f"P{pool_id} Lvl Var: {lvl_mae:.3f}m")
             
             axes[0].set_title(f"Station {station_id} Overview")
-            axes[0].set_ylabel("Flow")
-            axes[1].set_ylabel("Level")
+            axes[0].set_ylabel("Flow (m3/s)")
+            axes[1].set_ylabel("Level (m)")
             axes[2].set_ylabel("Mode")
-            axes[3].set_ylabel("Disturbance & Errors")
-            axes[3].set_xlabel("Hour")
+            axes[3].set_ylabel("Blade Angle")
+            axes[4].set_ylabel("Efficiency (%)")
+            axes[5].set_ylabel("Disturbance & Errors")
+            axes[5].set_xlabel("Hour")
+            
+            flow_mae = (station_df["actual_flow"] - station_df["ref_flow"]).abs().mean()
+            mean_pwr = station_df["power_mw"].mean() if "power_mw" in station_df.columns else 0.0
+            
+            text_str = (
+                f"Summary S{station_id}:\n"
+                f"Flow MAE (Pred vs Actual): {flow_mae:.2f} m3/s\n"
+                f"Mean Power: {mean_pwr:.2f} MW\n"
+            )
+            if idx_st == len(station_ids) - 1:
+                text_str += (
+                    f"\n--- System Total ---\n"
+                    f"Total Power Consumption: {total_energy_mwh:.2f} MWh\n"
+                    f"Total Avg Efficiency: {overall_mean_efficiency:.2f} %\n"
+                )
+                if pool_mae_text:
+                    text_str += "\nPool Level Mean Variation (Avg Water Level):\n"
+                    text_str += "\n".join(pool_mae_text)
+                    
+            fig.text(0.02, 0.98, text_str, fontsize=12, va='top', ha='left', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
             
             for axis in axes:
                 axis.grid(True, alpha=0.3)
-                axis.legend(loc="best", fontsize=8)
+                axis.legend(loc="upper right", fontsize=8)
                 
-            fig.tight_layout()
+            fig.tight_layout(rect=[0, 0, 1, 0.92])
             fig.savefig(self.output_dir / f"closed_loop_overview_{station_id}.png", dpi=200)
             plt.close(fig)

@@ -943,7 +943,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             current_step = getattr(self, "_internal_opt_step", 0)
             
             for obj_ts in event.object_time_series:
+                raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
+                logger.info("==========【时间序列更新】==========")
                 logger.info(f"处理 WEATHER_FORECAST 天气预报数据，对象 {obj_ts.object_name} (ID: {obj_ts.object_id})")
+                logger.info(f"原始数组序列: {raw_values}")
+                logger.info("====================================")
+                
                 candidate_keys = [
                     str(getattr(obj_ts, "object_id", "")),
                     str(getattr(obj_ts, "object_name", "")),
@@ -993,7 +998,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         else:
             # 2. 遍历并处理数据
             for obj_ts in event.object_time_series:
+                raw_values = [getattr(ts_val, "value", None) for ts_val in obj_ts.time_series] if obj_ts.time_series else []
+                logger.info("==========【时间序列更新】==========")
                 logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")
+                logger.info(f"原始数组序列: {raw_values}")
+                logger.info("====================================")
                 
                 # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
                 # 例如更新模型的边界约束:

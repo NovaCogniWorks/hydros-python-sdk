@@ -196,24 +196,24 @@ scheduling:
   dt_hours: 1
   target_avg_flow_last_station: 50
 runtime:
-  # odd:
-  #   odd1_flow_tolerance: 0
-  #   odd1_level_tolerance: 0
-  #   odd3_flow_tolerance: 0
-  #   odd3_level_tolerance: 0
-  #   odd2_fit_threshold: 0.9
+  odd:
+    odd1_flow_tolerance: 0
+    odd1_level_tolerance: 0
+    odd3_flow_tolerance: 0
+    odd3_level_tolerance: 0
+    odd2_fit_threshold: 0.9
   # odd:
   #   odd1_flow_tolerance: 999
   #   odd1_level_tolerance: 999
   #   odd3_flow_tolerance: 999
   #   odd3_level_tolerance: 999
   #   odd2_fit_threshold: 0.9
-  odd:
-    odd1_flow_tolerance: 4
-    odd1_level_tolerance: 0.3
-    odd3_flow_tolerance: 8
-    odd3_level_tolerance: 0.8
-    odd2_fit_threshold: 0.9
+  # odd:
+  #   odd1_flow_tolerance: 4
+  #   odd1_level_tolerance: 0.15
+  #   odd3_flow_tolerance: 8
+  #   odd3_level_tolerance: 0.8
+  #   odd2_fit_threshold: 0.9
   search:
     head_search_tolerance: 0.35
     flow_search_tolerance: 8.0
@@ -221,7 +221,7 @@ runtime:
   upper_scheduler:
     upper_level_correction_gain: 0.0
     upper_flow_bias_correction_gain: 1.0
-    upper_mpc_optimization_method: greedy
+    upper_mpc_optimization_method: nlp
   lower_controller:
     control_horizon_lower: 10
     opening_change_threshold: 0.0
@@ -253,7 +253,7 @@ runtime:
         '20600': []
       maintenance_fault: {}
   observer:
-    observer_gain: 0.5
+    observer_gain: 0.7
     observer_smoothing: 0.0
     disturbance_forecast_window_hours: 4.0
     disturbance_forecast_method: hold
