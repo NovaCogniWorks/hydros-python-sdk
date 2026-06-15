@@ -20,7 +20,7 @@ from hydros_agent_sdk import (
     ErrorCodes,
     handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
 )
-from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,

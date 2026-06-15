@@ -19,7 +19,7 @@ from hydros_agent_sdk import (
     load_env_config, ErrorCodes, handle_agent_errors,
     DeviceValueTypeEnum, HydroObjectType
 )
-from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
 

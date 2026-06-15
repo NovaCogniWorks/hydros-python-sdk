@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from hydros_agent_sdk.sensor_data import SensorData
+
 
 class FieldMetricsCache:
     """存储最新现地指标和有界的逐步历史数据。"""
@@ -87,8 +89,6 @@ class FieldMetricsCache:
         return {step: dict(metrics) for step, metrics in self.metrics_by_step.items()}
 
     def to_sensor_data(self) -> List["SensorData"]:
-        from hydros_agent_sdk.mpc.models import SensorData
-
         return [
             SensorData.model_validate(value)
             for value in self.latest_metrics.values()

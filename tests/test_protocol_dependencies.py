@@ -33,6 +33,23 @@ class ProtocolDependencyTest(unittest.TestCase):
     def test_importing_root_package_does_not_load_mpc_package(self):
         self.assert_import_does_not_load_mpc("import hydros_agent_sdk")
 
+    def test_importing_agents_package_does_not_load_mpc_package(self):
+        self.assert_import_does_not_load_mpc("import hydros_agent_sdk.agents")
+
+    def test_field_metrics_cache_sensor_data_conversion_does_not_load_mpc_package(self):
+        self.assert_import_does_not_load_mpc(
+            "from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache; "
+            "cache = FieldMetricsCache(max_steps=3); "
+            "cache.update({'object_id': 1, 'metrics_code': 'water_level', 'position_code': 'none', 'value': 2.5}); "
+            "cache.to_sensor_data()"
+        )
+
+    def test_mpc_models_does_not_export_sensor_data(self):
+        script = "import hydros_agent_sdk.mpc.models as models; print(hasattr(models, 'SensorData'))"
+        result = self.run_python(script)
+
+        self.assertEqual("False", result.stdout.strip())
+
     def assert_import_does_not_load_mpc(self, import_statement):
         script = (
             "import sys; "
@@ -40,9 +57,14 @@ class ProtocolDependencyTest(unittest.TestCase):
             "print(any(name == 'hydros_agent_sdk.mpc' or name.startswith('hydros_agent_sdk.mpc.') "
             "for name in sys.modules))"
         )
+        result = self.run_python(script)
+
+        self.assertEqual("False", result.stdout.strip())
+
+    def run_python(self, script):
         env = dict(os.environ)
         env["PYTHONPATH"] = str(PROJECT_ROOT)
-        result = subprocess.run(
+        return subprocess.run(
             [sys.executable, "-c", script],
             cwd=str(PROJECT_ROOT),
             env=env,
@@ -50,8 +72,6 @@ class ProtocolDependencyTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-
-        self.assertEqual("False", result.stdout.strip())
 
 
 if __name__ == "__main__":

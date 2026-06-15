@@ -34,7 +34,7 @@ from hydros_agent_sdk import (
     safe_execute,
     AgentErrorContext,
 )
-from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,

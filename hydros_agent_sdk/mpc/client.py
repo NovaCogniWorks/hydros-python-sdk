@@ -10,8 +10,9 @@ from urllib.request import Request, urlopen
 from hydros_agent_sdk.mpc.config import DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
+from hydros_agent_sdk.sensor_data import SensorData
 
-from .models import MpcOptimizeRequest, MpcOptimizeResponse, SensorData
+from .models import MpcOptimizeRequest, MpcOptimizeResponse
 
 if TYPE_CHECKING:
     from hydros_agent_sdk.mpc.task_state import MpcTaskState

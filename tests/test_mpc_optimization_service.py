@@ -3,10 +3,11 @@ from types import SimpleNamespace
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
-from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
+from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.sensor_data import SensorData
 
 
 class FakeMpcPlanningClient:

@@ -6,7 +6,6 @@ from .models import (
     HorizonStep,
     MpcOptimizeRequest,
     MpcOptimizeResponse,
-    SensorData,
     PredictedResult,
 )
 from .mpc_result_factory import MpcResultFactory
@@ -24,6 +23,5 @@ __all__ = [
     "MpcRuntimeConfig",
     "MpcResultFactory",
     "MpcRollingRuntime",
-    "SensorData",
     "PredictedResult",
 ]

@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
-from hydros_agent_sdk.mpc.models import SensorData
 from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
@@ -24,6 +23,7 @@ from hydros_agent_sdk.protocol.models import (
     SimulationContext,
 )
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
+from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
@@ -106,26 +106,12 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
 
         logger.info(f"MpcCentralSchedulingAgent initialized: {self.agent_id}")
 
-    def _init_command_dispatching(
-        self,
-        sim_coordination_client,
-        hydros_cluster_id: str,
-        context: SimulationContext,
-        object_agent_code_map: Optional[Dict[str, str]],
-    ) -> None:
-        super()._init_command_dispatching(
-            sim_coordination_client=sim_coordination_client,
-            hydros_cluster_id=hydros_cluster_id,
-            context=context,
-            object_agent_code_map=object_agent_code_map,
-        )
-        self._control_command_builder = MpcControlCommandBuilder(
+    def _create_control_command_builder(self) -> MpcControlCommandBuilder:
+        """创建带 MPC response 转换能力的控制指令 builder。"""
+        return MpcControlCommandBuilder(
             source_agent=self,
             get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
             resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
-        )
-        self._control_command_dispatcher.build_station_target_value_request = (
-            self._control_command_builder.build_station_target_value_request
         )
 
     def _init_mpc_configuration(

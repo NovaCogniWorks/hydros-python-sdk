@@ -175,7 +175,7 @@ class SystemCentralSchedulingAgentFactory:
         sim_coordination_client: 'SimCoordinationClient',
         context: SimulationContext
     ):
-        from hydros_agent_sdk.agents import SystemCentralSchedulingAgent
+        from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
         from hydros_agent_sdk.runtime import load_runtime_env_settings
 
         settings = load_runtime_env_settings(env_config=self.env_config)

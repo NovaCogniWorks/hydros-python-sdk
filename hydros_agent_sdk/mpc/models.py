@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
+from hydros_agent_sdk.sensor_data import SensorData as _SensorData
 
 
 def _payload_field(name: str, default: Any = None, default_factory: Any = None) -> Any:
@@ -13,16 +14,6 @@ def _payload_field(name: str, default: Any = None, default_factory: Any = None) 
         **kwargs,
         serialization_alias=name,
     )
-
-
-class SensorData(HydroBaseModel):
-    object_id: Optional[int] = _payload_field("object_id")
-    object_type: Optional[str] = _payload_field("object_type")
-    metrics_code: Optional[str] = _payload_field("metrics_code")
-    position_code: Optional[str] = _payload_field("position_code")
-    value: Optional[float] = None
-    step_index: Optional[int] = _payload_field("step_index")
-    attributes: Optional[str] = _payload_field("attributes")
 
 
 class ControlObjectResult(HydroBaseModel):
@@ -59,7 +50,7 @@ class MpcOptimizeRequest(HydroBaseModel):
     control_config_url: Optional[str] = _payload_field("control_config_url")
     upstream_boundaries: Dict[str, List[float]] = _payload_field("upstream_boundaries", default_factory=dict)
     downstream_boundaries: Optional[Dict[str, Any]] = _payload_field("downstream_boundaries")
-    sensor_data: List[SensorData] = _payload_field("sensor_data", default_factory=list)
+    sensor_data: List[_SensorData] = _payload_field("sensor_data", default_factory=list)
     fixed_controls: Dict[str, float] = _payload_field("fixed_controls", default_factory=dict)
     multi_profile: bool = _payload_field("multi_profile", default=False)
     include_diversion: bool = _payload_field("include_diversion", default=False)

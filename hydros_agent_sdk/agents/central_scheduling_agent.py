@@ -159,14 +159,18 @@ class CentralSchedulingAgent(TickableAgent):
             context=context,
             object_agent_code_map_getter=lambda: self._object_agent_code_map,
         )
-        self._control_command_builder = StationTargetValueCommandBuilder(
-            source_agent=self,
-            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
-            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
-        )
+        self._control_command_builder = self._create_control_command_builder()
         self._control_command_dispatcher = ControlCommandDispatcher(
             send_command=lambda command: self._agent_command_gateway.send_command(command),
             build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
+        )
+
+    def _create_control_command_builder(self) -> StationTargetValueCommandBuilder:
+        """创建中央调度控制指令 builder，子类可覆盖以扩展转换能力。"""
+        return StationTargetValueCommandBuilder(
+            source_agent=self,
+            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
+            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
         )
 
     def _init_model_state(self) -> None:

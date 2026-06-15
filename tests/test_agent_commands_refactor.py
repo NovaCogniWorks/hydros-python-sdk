@@ -19,7 +19,7 @@ from hydros_agent_sdk.agent_commands import (
     HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
-from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
@@ -30,7 +30,6 @@ from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     HorizonStep,
     MpcOptimizeResponse,
-    SensorData,
     PredictedResult,
 )
 from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
@@ -61,6 +60,7 @@ from hydros_agent_sdk.protocol.models import (
 )
 from hydros_agent_sdk.runtime import RuntimeEnvSettings
 from hydros_agent_sdk.scenario_config import BizScenarioConfiguration, SimAgentProperties
+from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.utils import (
     SimpleChildObject,
