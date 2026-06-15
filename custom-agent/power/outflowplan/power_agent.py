@@ -2,7 +2,7 @@
 中央调度电力智能体。
 
 该智能体为电力系统实现模型预测控制（MPC）优化。它继承
-CentralSchedulingAgent，并提供发电和配电调度的优化逻辑。
+MpcCentralSchedulingAgent，并提供发电和配电调度的优化逻辑。
 
 该智能体会：
 1. 加载电力系统拓扑
@@ -34,7 +34,7 @@ from hydros_agent_sdk import (
     safe_execute,
     AgentErrorContext,
 )
-from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -85,7 +85,7 @@ if __name__ == "__main__":
 logger = logging.getLogger(__name__)
 
 
-class PowerSchedulingAgent(CentralSchedulingAgent):
+class PowerSchedulingAgent(MpcCentralSchedulingAgent):
     """
     面向电力系统的中央调度智能体具体实现。
 

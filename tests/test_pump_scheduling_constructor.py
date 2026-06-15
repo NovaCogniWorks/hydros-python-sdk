@@ -40,7 +40,7 @@ def test_pump_scheduling_constructor_uses_base_rolling_optimization_binding(monk
     def fake_base_init(self, *args, **kwargs):
         object.__setattr__(self, "_mpc_rolling_runtime", FakeRollingRuntime())
 
-    monkeypatch.setattr(module.CentralSchedulingAgent, "__init__", fake_base_init)
+    monkeypatch.setattr(module.MpcCentralSchedulingAgent, "__init__", fake_base_init)
 
     module.PumpCentralSchedulingAgent(
         sim_coordination_client=Mock(),

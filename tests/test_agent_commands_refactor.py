@@ -19,7 +19,7 @@ from hydros_agent_sdk.agent_commands import (
     HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
-from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.agents import MpcCentralSchedulingAgent
 from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
@@ -103,7 +103,7 @@ class StationTargetValueHandler(AgentCommandHandler[HydroStationTargetValueReque
         )
 
 
-class CentralSchedulingAgentForTest(CentralSchedulingAgent):
+class CentralSchedulingAgentForTest(MpcCentralSchedulingAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.optimization_steps = []
@@ -140,7 +140,7 @@ class CentralSchedulingAgentForTest(CentralSchedulingAgent):
         )
 
 
-class ProductionCentralSchedulingAgentForTest(CentralSchedulingAgent):
+class ProductionCentralSchedulingAgentForTest(MpcCentralSchedulingAgent):
     def load_agent_configuration(self, request):
         return None
 

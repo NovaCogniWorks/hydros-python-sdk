@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class MqttMetricsSubscriber:
     """订阅 MQTT 现地指标 topic，并把解析后的 payload 写入缓存。"""
 
-    def __init__(self, mqtt_client: Any, metrics_data_cache: MetricsDataCache):
+    def __init__(self, mqtt_client: Any, metrics_data_cache: FieldMetricsCache):
         self.mqtt_client = mqtt_client
         self.metrics_data_cache = metrics_data_cache
         self.subscription_topic: Optional[str] = None

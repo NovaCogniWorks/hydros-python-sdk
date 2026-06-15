@@ -25,6 +25,7 @@ from .runtime import (
     AgentCommandRuntime,
 )
 from .dispatching import ControlCommandDispatcher
+from .target_value_builder import StationTargetValueCommandBuilder
 from .transport import (
     AgentCommandClient,
     AgentCommandGateway,
@@ -52,4 +53,5 @@ __all__ = [
     "AgentCommandClient",
     "AgentCommandGateway",
     "ControlCommandDispatcher",
+    "StationTargetValueCommandBuilder",
 ]

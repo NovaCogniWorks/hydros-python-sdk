@@ -42,7 +42,8 @@ class TickableAgent(BaseHydroAgent):
     子类：
     - OntologySimulationAgent: Ontology-based simulation
     - TwinsSimulationAgent: Digital twins simulation
-    - CentralSchedulingAgent: Central scheduling with MPC optimization
+    - CentralSchedulingAgent: Central scheduling base
+    - MpcCentralSchedulingAgent: Central scheduling with MPC optimization
 
     关键特性：
     - tick 驱动执行（响应 TickCmdRequest）

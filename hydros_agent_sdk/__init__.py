@@ -17,6 +17,7 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_properties import AgentProperties
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.agent_config import (
@@ -73,6 +74,7 @@ from hydros_agent_sdk.agents import (
     TwinsSimulationAgent,
     ModelCalculationAgent,
     CentralSchedulingAgent,
+    MpcCentralSchedulingAgent,
     SystemCentralSchedulingAgent,
     OutflowPlanAgent,
 )
@@ -107,7 +109,6 @@ from hydros_agent_sdk.transport import (
 from hydros_agent_sdk.mpc import (
     ControlObjectResult,
     HorizonStep,
-    MetricsDataCache,
     MpcConfigResolver,
     MpcOptimizeRequest,
     MpcOptimizeResponse,
@@ -161,6 +162,7 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandQueueService,
     AgentCommandRuntime,
     AgentCommandClient,
+    StationTargetValueCommandBuilder,
 )
 
 __all__ = [
@@ -199,6 +201,7 @@ __all__ = [
     "AgentContext",
     "AgentConfigurationService",
     "AgentLoggingContextSetter",
+    "FieldMetricsCache",
     "RuntimeEnvSettings",
     "ResponseFactory",
     "TimeSeriesCache",
@@ -209,7 +212,6 @@ __all__ = [
     "MqttMetricsPublisher",
     "ControlObjectResult",
     "HorizonStep",
-    "MetricsDataCache",
     "MqttMetricsSubscriber",
     "MpcConfigResolver",
     "MpcOptimizeRequest",
@@ -277,6 +279,7 @@ __all__ = [
     "AgentCommandQueueService",
     "AgentCommandRuntime",
     "AgentCommandClient",
+    "StationTargetValueCommandBuilder",
 
     # 工具类
     "HydroObjectUtilsV2",
@@ -310,6 +313,7 @@ __all__ = [
     "TwinsSimulationAgent",
     "ModelCalculationAgent",
     "CentralSchedulingAgent",
+    "MpcCentralSchedulingAgent",
     "SystemCentralSchedulingAgent",
     "OutflowPlanAgent",
 ]

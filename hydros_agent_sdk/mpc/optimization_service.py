@@ -7,9 +7,9 @@ import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from hydros_agent_sdk.agent_properties import AgentProperties
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
 from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
@@ -23,7 +23,7 @@ class MpcOptimizationService:
     def __init__(
         self,
         properties: AgentProperties,
-        metrics_data_cache: MetricsDataCache,
+        metrics_data_cache: FieldMetricsCache,
         configured_mpc_service_base_url: Optional[str] = None,
         configured_mpc_request_timeout_seconds: Optional[float] = None,
         mpc_planning_client: Optional[MpcPlanningClient] = None,
