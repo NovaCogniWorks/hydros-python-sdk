@@ -45,3 +45,4 @@ from .models import (
     TopHydroObject,
     Waterway,
 )
+from .mpc_results import MpcResult, MpcResultDetail

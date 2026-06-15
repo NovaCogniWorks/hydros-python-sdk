@@ -1,8 +1,9 @@
 import unittest
 from unittest.mock import Mock
 
-from hydros_agent_sdk import MpcCentralSchedulingAgent
-from hydros_agent_sdk.agents import CentralSchedulingAgent, SystemCentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import TickCmdRequest
 from hydros_agent_sdk.protocol.models import SimulationContext
 

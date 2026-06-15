@@ -121,7 +121,7 @@ cd examples
 ### Step 1: Choose a Base Class
 
 ```python
-from hydros_agent_sdk import (
+from hydros_agent_sdk.agents import (
     TwinsSimulationAgent,      # For high-fidelity simulation
     OntologySimulationAgent,   # For ontology-based reasoning
     ModelCalculationAgent,     # For event-driven calculation
@@ -132,8 +132,8 @@ from hydros_agent_sdk import (
 ### Step 2: Implement Your Agent
 
 ```python
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 from hydros_agent_sdk import (
-    TwinsSimulationAgent,
     HydroAgentFactory,
     MultiAgentCallback,
     load_env_config,
