@@ -491,11 +491,11 @@ class LauncherLoggingConfigurator:
         try:
             env_config = load_env_config(self.env_file)
             return (
-                env_config.get("hydros_cluster_id", "default_cluster"),
+                env_config.get("hydros_cluster_id", "hydros-k3s-staging"),
                 env_config.get("hydros_node_id", "LOCAL"),
             )
         except Exception:
-            return "default_cluster", os.getenv("HYDROS_NODE_ID", "LOCAL")
+            return "hydros-k3s-staging", os.getenv("HYDROS_NODE_ID", "LOCAL")
 
 
 class LauncherDebugSupport:

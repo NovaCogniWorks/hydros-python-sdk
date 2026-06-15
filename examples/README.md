@@ -70,8 +70,8 @@ Edit `env.properties`:
 ```properties
 mqtt_broker_url=tcp://192.168.1.24
 mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/default_cluster
-hydros_cluster_id=default_cluster
+mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
+hydros_cluster_id=hydros-k3s-staging
 hydros_node_id=default_central
 ```
 
@@ -277,10 +277,10 @@ Shared by all agents in this directory:
 # MQTT Broker Configuration
 mqtt_broker_url=tcp://192.168.1.24
 mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/default_cluster
+mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
 
 # Cluster Configuration
-hydros_cluster_id=default_cluster
+hydros_cluster_id=hydros-k3s-staging
 hydros_node_id=default_central
 ```
 
