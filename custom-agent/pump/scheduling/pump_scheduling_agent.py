@@ -1,8 +1,8 @@
 """
 中央调度智能体示例
 
-本模块展示了如何基于 MpcCentralSchedulingAgent 基类实现一个具体的中央调度智能体。
-该智能体会在滚动时界（Rolling Horizon）上执行模型预测控制（MPC）优化。
+本模块展示了如何基于 CentralSchedulingAgent 基类实现一个具体的中央调度智能体。
+该智能体使用自定义 ODD-DMPC 调度算法，不装配 SDK 默认 MPC rolling runtime。
 """
 
 import logging
@@ -19,22 +19,23 @@ from hydros_agent_sdk import (
     load_env_config, ErrorCodes, handle_agent_errors,
     DeviceValueTypeEnum, HydroObjectType
 )
-from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
 
 logger = logging.getLogger(__name__)
 
 
-class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
+class PumpCentralSchedulingAgent(CentralSchedulingAgent):
     """
     中央调度智能体的具体实现。
 
     该智能体的主要功能包括：
     1. 加载水网拓扑结构
-    2. 初始化 MPC 优化模型
+    2. 初始化自定义 ODD-DMPC 优化模型
     3. 通过 MQTT 订阅现地实时指标（Field Metrics）
-    4. 执行滚动时界（MPC）优化逻辑
+    4. 执行自定义滚动调度优化逻辑
     5. 为其他智能体（如泵站、闸门）生成调度控制指令
     """
 
@@ -51,6 +52,11 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         **kwargs
     ):
         """初始化中央调度智能体。"""
+        configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
+        configured_target_and_constrain_config_url = kwargs.pop(
+            "target_and_constrain_config_url",
+            None,
+        )
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -62,7 +68,22 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             hydros_node_id=hydros_node_id,
             **kwargs
         )
+        object.__setattr__(self, "_configured_mpc_config_url", configured_mpc_config_url)
+        object.__setattr__(
+            self,
+            "_configured_target_and_constrain_config_url",
+            configured_target_and_constrain_config_url,
+        )
+        object.__setattr__(self, "_mpc_task_state", None)
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
+
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Any]]:
+        """执行泵站自定义滚动调度，并下发生成的控制指令。"""
+        self._ensure_mpc_task_state(request.step).current_step = request.step
+        commands = self.on_optimization(request.step)
+        if commands:
+            self._control_command_dispatcher.dispatch(commands)
+        return None
 
     def _resolve_config_path(self) -> str:
         return os.path.abspath(
@@ -914,11 +935,10 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             )
 
         try:
-            mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
             reporter = MpcResultReporter(sim_coordination_client=self.sim_coordination_client)
             reporter.publish_customize_report(
                 source_agent_instance=self,
-                mpc_task_state= mpc_task_state,
+                mpc_task_state=self._ensure_mpc_task_state(step),
                 horizon_step=horizon_step_list,
                 plan_type="optimal"
             )
@@ -947,6 +967,49 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
         return commands
 
+    def _ensure_mpc_task_state(self, step: int) -> SchedulingTaskState:
+        if self._mpc_task_state is None:
+            self._mpc_task_state = SchedulingTaskState(
+                context=self.context,
+                rolling_interval_steps=1,
+                start_step=step,
+                current_step=step,
+                total_steps=getattr(self, "system_config", None).horizon_hours
+                if hasattr(self, "system_config")
+                else 0,
+                algorithm_config_url=self._configured_mpc_config_url,
+                control_config_url=self._configured_target_and_constrain_config_url,
+            )
+            return self._mpc_task_state
+
+        self._mpc_task_state.current_step = step
+        if hasattr(self, "system_config"):
+            self._mpc_task_state.total_steps = self.system_config.horizon_hours
+        return self._mpc_task_state
+
+    def _activate_mpc_task_state_from_event(self, event, step: Optional[int] = None) -> Optional[SchedulingTaskState]:
+        if event is None:
+            return self._mpc_task_state
+
+        current_step = (
+            event.auto_schedule_at_step
+            if getattr(event, "auto_schedule_at_step", None) is not None
+            else step
+        )
+        if current_step is None:
+            current_step = getattr(self, "_outer_step", self._current_step)
+
+        task_state = self._ensure_mpc_task_state(int(current_step))
+        task_state.register_hydro_event(event)
+        logger.info(
+            "Pump scheduling task state activated: bizSceneInstanceId=%s, currentStep=%s, eventSource=%s, timeSeriesCount=%s",
+            self.context.biz_scene_instance_id,
+            task_state.current_step,
+            getattr(event, "hydro_event_source_type", None),
+            len(getattr(event, "object_time_series", None) or []),
+        )
+        return task_state
+
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
@@ -960,6 +1023,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
+        self._activate_mpc_task_state_from_event(event)
         
         from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         
@@ -1095,6 +1159,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
         # 1. 获取变更的数据事件
         event = request.outflow_time_series_data_changed_event
+        self._activate_mpc_task_state_from_event(event)
 
         if event and event.object_time_series:
             # 2. 遍历并处理数据
@@ -1107,7 +1172,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
             # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
             self.on_boundary_condition_update(event.object_time_series)
-            self._mpc_rolling_runtime.handle_time_series_changed(event)
 
         # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(

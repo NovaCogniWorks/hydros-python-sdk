@@ -33,7 +33,7 @@ from hydros_agent_sdk.mpc.models import (
     PredictedResult,
 )
 from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.commands import (
     MpcResultReport,
     SimTaskInitRequest,
@@ -896,8 +896,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 3)
         self.assertEqual(runtime.mpc_task_state.total_steps, 20)
         self.assertEqual(runtime.mpc_task_state.output_step_size, 7200)
-        self.assertEqual(runtime.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
-        self.assertEqual(runtime.mpc_task_state.target_and_constrain_config_url, "http://config/control.yaml")
+        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.mpc_task_state.control_config_url, "http://config/control.yaml")
         self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
@@ -1018,9 +1018,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
-        self.assertEqual(runtime.mpc_task_state.mpc_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
         self.assertEqual(
-            runtime.mpc_task_state.target_and_constrain_config_url,
+            runtime.mpc_task_state.control_config_url,
             "http://config/control.yaml",
         )
         self.assertEqual(runtime.mpc_task_state.output_step_size, 3600)
@@ -1247,14 +1247,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=10,
             current_step=15,
             output_step_size=7200,
-            mpc_config_url="http://config/mpc.yaml",
-            target_and_constrain_config_url="http://config/control.yaml",
+            algorithm_config_url="http://config/mpc.yaml",
+            control_config_url="http://config/control.yaml",
         )
         state.register_hydro_event(
             TimeSeriesDataChangedEvent(
@@ -1320,13 +1320,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
             current_step=2,
-            mpc_config_url="http://config/mpc.yaml",
-            target_and_constrain_config_url="http://config/control.yaml",
+            algorithm_config_url="http://config/mpc.yaml",
+            control_config_url="http://config/control.yaml",
         )
         raw_response = {
             "success": True,
@@ -1438,13 +1438,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_logs_empty_sensor_data_before_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-empty-sensor")
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
             current_step=2,
-            mpc_config_url="http://config/mpc.yaml",
-            target_and_constrain_config_url="http://config/control.yaml",
+            algorithm_config_url="http://config/mpc.yaml",
+            control_config_url="http://config/control.yaml",
         )
         opener = Mock()
         client = MpcPlanningClient(
@@ -1475,7 +1475,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1540,7 +1540,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1600,7 +1600,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_result_reporter_builds_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-report")
         source = build_agent_instance("agent-014-customize-report", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1639,7 +1639,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_result_reporter_publishes_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-publish")
         source = build_agent_instance("agent-014-customize-publish", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1689,7 +1689,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014-renamed-fields", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1737,7 +1737,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
         source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = MpcTaskState(
+        state = SchedulingTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -2149,7 +2149,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         client.mqtt_client.publish.return_value = publish_result
         report = MpcResultReporter().build_report(
             source,
-            MpcTaskState(
+            SchedulingTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,
@@ -2231,7 +2231,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         report = MpcResultReporter().build_report(
             source,
-            MpcTaskState(
+            SchedulingTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,

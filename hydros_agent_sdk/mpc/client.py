@@ -15,7 +15,7 @@ from hydros_agent_sdk.sensor_data import SensorData
 from .models import MpcOptimizeRequest, MpcOptimizeResponse
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk.mpc.task_state import MpcTaskState
+    from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class MpcPlanningClient:
 
     def execute_optimization(
         self,
-        mpc_task_state: "MpcTaskState",
+        mpc_task_state: "SchedulingTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> List[MpcOptimizeResponse]:
@@ -117,7 +117,7 @@ class MpcPlanningClient:
 
     def build_optimize_request(
         self,
-        mpc_task_state: "MpcTaskState",
+        mpc_task_state: "SchedulingTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> MpcOptimizeRequest:
@@ -149,8 +149,8 @@ class MpcPlanningClient:
         return MpcOptimizeRequest(
             biz_scene_instance_id=mpc_task_state.context.biz_scene_instance_id,
             step_index=mpc_task_state.current_step,
-            mpc_config_url=mpc_task_state.mpc_config_url,
-            control_config_url=mpc_task_state.target_and_constrain_config_url,
+            mpc_config_url=mpc_task_state.algorithm_config_url,
+            control_config_url=mpc_task_state.control_config_url,
             upstream_boundaries=self.build_lateral_inflow_boundaries(
                 mpc_task_state.hydro_events,
                 mpc_task_state.current_step,

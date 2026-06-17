@@ -8,7 +8,7 @@ from typing import Any, Callable, List, Optional
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import AgentStatus, SimulationContext
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
@@ -31,7 +31,7 @@ class MpcRollingRuntime:
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
-        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]] = None,
+        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]] = None,
     ):
         self.context = context
         self.properties = properties
@@ -47,7 +47,7 @@ class MpcRollingRuntime:
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
         self.rolling_cycle_runner = rolling_cycle_runner
         self._last_optimization_step = 0
-        self._mpc_task_state: Optional[MpcTaskState] = None
+        self._mpc_task_state: Optional[SchedulingTaskState] = None
         self._lock = RLock()
 
     @property
@@ -55,7 +55,7 @@ class MpcRollingRuntime:
         return self._last_optimization_step
 
     @property
-    def mpc_task_state(self) -> Optional[MpcTaskState]:
+    def mpc_task_state(self) -> Optional[SchedulingTaskState]:
         return self._mpc_task_state
 
     def _get_scenario_sim_agent_properties(self):
@@ -117,7 +117,7 @@ class MpcRollingRuntime:
 
     def set_rolling_cycle_runner(
         self,
-        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]],
+        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]],
     ) -> None:
         self.rolling_cycle_runner = rolling_cycle_runner
 
@@ -238,12 +238,12 @@ class MpcRollingRuntime:
         self._last_optimization_step = current_step
         self.set_agent_status(AgentStatus.ACTIVE)
 
-    def require_mpc_task_state(self) -> MpcTaskState:
+    def require_mpc_task_state(self) -> SchedulingTaskState:
         if self._mpc_task_state is None:
             raise RuntimeError("mpc_task_state is not initialized")
         return self._mpc_task_state
 
-    def do_rolling_optimal(self, mpc_task_state: MpcTaskState) -> Optional[List[Any]]:
+    def do_rolling_optimal(self, mpc_task_state: SchedulingTaskState) -> Optional[List[Any]]:
         if self.rolling_cycle_runner is not None:
             return self.rolling_cycle_runner(mpc_task_state)
 
@@ -264,7 +264,7 @@ class MpcRollingRuntime:
         rolling_interval_steps: int,
         current_step: int,
         total_steps: int,
-    ) -> MpcTaskState:
+    ) -> SchedulingTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
             configured_mpc_config_url=self.configured_mpc_config_url,
@@ -280,13 +280,13 @@ class MpcRollingRuntime:
             mpc_config.mpc_config_url,
             mpc_config.target_and_constrain_config_url,
         )
-        return MpcTaskState(
+        return SchedulingTaskState(
             context=self.context,
             rolling_interval_steps=rolling_interval_steps,
             start_step=current_step,
             current_step=current_step,
             total_steps=total_steps,
             output_step_size=self.get_output_step_size(),
-            mpc_config_url=mpc_config.mpc_config_url,
-            target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
+            algorithm_config_url=mpc_config.mpc_config_url,
+            control_config_url=mpc_config.target_and_constrain_config_url,
         )

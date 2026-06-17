@@ -179,7 +179,7 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         """
         处理时序更新，并激活兼容 Java 侧的滚动 MPC。
 
-        在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建 MpcTaskState
+        在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建调度任务状态
         的第一个触发点。后续 tick 只会在该激活点之后继续滚动。
         """
         logger.debug("Received MPC central scheduling time series update: commandId=%s", request.command_id)

@@ -1,4 +1,4 @@
-"""滚动 MPC 任务的运行时状态。"""
+"""滚动调度任务的通用运行时状态。"""
 
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -8,8 +8,8 @@ from hydros_agent_sdk.protocol.models import SimulationContext
 
 
 @dataclass
-class MpcTaskState:
-    """单个兼容 Java 侧滚动 MPC 循环的运行时状态。"""
+class SchedulingTaskState:
+    """单个滚动调度循环的运行时状态。"""
 
     context: SimulationContext
     rolling_interval_steps: int
@@ -18,8 +18,8 @@ class MpcTaskState:
     total_steps: int = 36
     current_loop: int = 1
     output_step_size: Optional[int] = None
-    mpc_config_url: Optional[str] = None
-    target_and_constrain_config_url: Optional[str] = None
+    algorithm_config_url: Optional[str] = None
+    control_config_url: Optional[str] = None
     hydro_events: List[TimeSeriesDataChangedEvent] = field(default_factory=list)
 
     def register_hydro_event(self, event: TimeSeriesDataChangedEvent) -> None:

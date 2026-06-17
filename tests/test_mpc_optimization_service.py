@@ -5,7 +5,7 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.models import SimulationContext
 from hydros_agent_sdk.sensor_data import SensorData
 
@@ -61,7 +61,7 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_optimizes_with_cache_sensor_data_and_reports_responses(self):
         context = SimulationContext(biz_scene_instance_id="scene-service")
         source = SimpleNamespace(context=context)
-        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
         cache = FieldMetricsCache(max_steps=3)
         cache.update(
             {
@@ -93,7 +93,7 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_uses_injected_sensor_provider(self):
         context = SimulationContext(biz_scene_instance_id="scene-provider")
         source = SimpleNamespace(context=context)
-        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
         mpc_client = FakeMpcPlanningClient([MpcOptimizeResponse(plan_type="OPTIMAL")])
         service = MpcOptimizationService(
             properties=AgentProperties(),
