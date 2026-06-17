@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export DOCKER_HOST="${DOCKER_HOST:-tcp://prod.hydros.yuma.intra:2375}"
+DEPLOY_HOST="${DEPLOY_HOST:-192.168.20.52}"
+DEPLOY_DOCKER_PORT="${DEPLOY_DOCKER_PORT:-2375}"
+export DOCKER_HOST="${DOCKER_HOST:-tcp://${DEPLOY_HOST}:${DEPLOY_DOCKER_PORT}}"
 VERSION="${VERSION:-v1.0.0}"
 
 BASE_IMAGE="${BASE_IMAGE:-python:3.11-slim}"
@@ -53,6 +55,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PUMP_DIR="${REPO_ROOT}/custom-agent/pump"
 
 echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
+echo "Docker host: ${DOCKER_HOST}"
 echo "Container start args: ${HYDROS_AGENT_START_ARGS}"
 if [ -n "${DEBUG_PORT}" ]; then
     echo "Debug port: ${DEBUG_PORT}"
