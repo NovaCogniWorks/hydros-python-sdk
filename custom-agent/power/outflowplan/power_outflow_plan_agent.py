@@ -8,11 +8,20 @@
 import copy
 import json
 import logging
+import sys
+import tempfile
 from typing import Optional, List
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
+CURRENT_DIR = Path(__file__).resolve().parent
+MPC_DIR = CURRENT_DIR.parent / "mpc"
+if str(MPC_DIR) not in sys.path:
+    sys.path.insert(0, str(MPC_DIR))
+
+from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
     ErrorCodes,
     handle_agent_errors,
@@ -78,8 +87,21 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
 
         # 拓扑对象
         self._topology = None
+        self._hydrosim_api = HydroSimulationApi()
+        self._hydrosim_initialized = False
 
         logger.info(f"MyOutflowPlanAgent created: {agent_id}")
+
+    @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
+    def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
+        response = super().on_init(request)
+        try:
+            self._initialize_hydrosim_session()
+        except FileNotFoundError as exc:
+            logger.warning("HydroSim init skipped because configuration files are missing: %s", exc)
+        except Exception:
+            logger.exception("HydroSim init failed during agent initialization.")
+        return response
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
@@ -108,11 +130,13 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             )
 
             # 执行出力计划计算
-            outflow_plans = self._normalize_object_time_series(
+            planning_source_series = self._normalize_object_time_series(
                 self._resolve_incoming_outflow_plans(hydro_event)
             )
-            if not outflow_plans:
-                outflow_plans = self._execute_outflow_planning(hydro_event)
+            if planning_source_series:
+                outflow_plans = self._execute_outflow_planning(hydro_event, planning_source_series)
+            else:
+                outflow_plans = self._execute_outflow_planning(hydro_event, [])
 
             logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
 
@@ -123,7 +147,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                 command_status=CommandStatus.SUCCEED,
                 source_agent_instance=self,
                 hydro_event=hydro_event,
-                outflow_time_series_map={"Gate": outflow_plans},
+                outflow_time_series_map={"Station": outflow_plans},
                 broadcast=False
             )
 
@@ -230,11 +254,12 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             )
         return normalized
 
-    def _execute_outflow_planning(self, hydro_event) -> List[ObjectTimeSeries]:
+    def _execute_outflow_planning(self, hydro_event, planning_source_series: List[ObjectTimeSeries]) -> List[ObjectTimeSeries]:
         """
-        执行具体的外发流量计划逻辑。
+        执行具体的水电站出力规划逻辑。
 
-        在这里实现具体的流量调度或计划算法。
+        优先使用 MPC/HydroSim 算法包生成各站点出力时间序列。
+        当输入事件中缺少可用的站点出力需求时间序列时，退化为示例逻辑。
 
         参数:
             hydro_event: 触发计划计算的水文事件
@@ -242,32 +267,99 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         返回:
             包含流量计划的时间序列列表 (ObjectTimeSeries)
         """
-        logger.info("Executing outflow planning...")
+        logger.info("Executing power planning with HydroSim API...")
 
-        # 示例：生成模拟的流量计划数据
+        if planning_source_series:
+            self._ensure_hydrosim_initialized()
+            with tempfile.TemporaryDirectory(prefix="hydrosim_power_plan_") as temp_dir:
+                planning_file = self._write_power_planning_file(temp_dir, planning_source_series)
+                planning_result = self._hydrosim_api.get_station_power_planning_series(planning_file)
+            station_power_plans = self._build_station_object_time_series(
+                planning_result.get("station_power_series", [])
+            )
+            logger.info("HydroSim power planning completed, produced %s station series", len(station_power_plans))
+            return station_power_plans
+
+        logger.warning("No Station/power planning series found in incoming event, fallback to sample logic.")
+        return self._build_fallback_plans(hydro_event)
+
+    def _initialize_hydrosim_session(self) -> None:
+        time_series_file = self._get_hydrosim_property(
+            "hydrosim_time_series_file",
+            str(MPC_DIR / "time_series_power_planning.json"),
+        )
+        mpc_config_file = self._get_hydrosim_property(
+            "hydrosim_mpc_config_file",
+            str(MPC_DIR / "mpc_config.yaml"),
+        )
+        initial_states_file = self._get_hydrosim_property(
+            "hydrosim_initial_states_file",
+            str(MPC_DIR / "initial_states.yaml"),
+        )
+        constraints_file = self._get_hydrosim_property(
+            "hydrosim_constraints_file",
+            str(MPC_DIR / "constrains_targets.yaml"),
+        )
+
+        init_result = self._hydrosim_api.initialize(
+            time_series_file=time_series_file,
+            mpc_config_file=mpc_config_file,
+            initial_states_file=initial_states_file,
+            constraints_file=constraints_file,
+        )
+        self._hydrosim_initialized = True
+        logger.info("HydroSim initialized for power planning, session=%s", init_result["session"]["session_id"])
+
+    def _ensure_hydrosim_initialized(self) -> None:
+        if not self._hydrosim_initialized:
+            self._initialize_hydrosim_session()
+
+    def _get_hydrosim_property(self, key: str, default: str) -> str:
+        value = self.properties.get_property(key, default)
+        return str(Path(value).resolve())
+
+    def _write_power_planning_file(self, temp_dir: str, object_time_series_list: List[ObjectTimeSeries]) -> str:
+        payload = {
+            "object_time_series": [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in object_time_series_list
+                if item.object_type == "Station" and item.metrics_code == "power"
+            ]
+        }
+        if not payload["object_time_series"]:
+            raise ValueError("输入事件中未找到可用于出力规划的 Station/power 时间序列。")
+        planning_file = Path(temp_dir) / "time_series_power_planning.json"
+        with open(planning_file, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        return str(planning_file)
+
+    def _build_station_object_time_series(self, station_power_series: List[dict]) -> List[ObjectTimeSeries]:
+        result: List[ObjectTimeSeries] = []
+        for station in station_power_series:
+            result.append(
+                ObjectTimeSeries(
+                    time_series_name=f"{station['station']}_power_plan",
+                    object_id=int(station["node_id"]),
+                    object_type="Station",
+                    object_name=station["station"],
+                    metrics_code="power",
+                    time_series=[
+                        TimeSeriesValue(step=int(row["step"]), value=float(row["value"]))
+                        for row in station.get("time_series", [])
+                    ],
+                )
+            )
+        return result
+
+    def _build_fallback_plans(self, hydro_event) -> List[ObjectTimeSeries]:
         outflow_plans = []
-
-        # 从配置中获取计划时界（预测时长）
         planning_horizon = self.properties.get_property('planning_horizon', 24)
-
-        # 为每个相关对象生成流量计划
         if self._topology:
-            for top_obj in self._topology.top_objects[:3]:  # 示例：仅取前3个对象
+            for top_obj in self._topology.top_objects[:3]:
                 time_series_values = []
-
                 for step in range(planning_horizon):
-                    # 在此处编写具体的计划逻辑
-                    # 例如：优化算法、预测模型、基于规则的计划等
                     planned_outflow = self._calculate_planned_outflow(top_obj, step, hydro_event)
-
-                    time_series_values.append(
-                        TimeSeriesValue(
-                            step=step,
-                            value=planned_outflow
-                        )
-                    )
-
-                # 创建对象的时间序列结果
+                    time_series_values.append(TimeSeriesValue(step=step, value=planned_outflow))
                 outflow_plan = ObjectTimeSeries(
                     time_series_name=f"{top_obj.object_name}_outflow_plan",
                     object_id=top_obj.object_id,
@@ -276,10 +368,8 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                     metrics_code="planned_outflow",
                     time_series=time_series_values
                 )
-
                 outflow_plans.append(outflow_plan)
-
-        logger.info(f"Generated {len(outflow_plans)} outflow plans")
+        logger.info("Generated %s fallback plans", len(outflow_plans))
         return outflow_plans
 
     def _calculate_planned_outflow(self, hydro_object, step: int, hydro_event) -> float:
@@ -309,6 +399,12 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         # 清理资源
         self._topology = None
         self._plan_config = {}
+        if self._hydrosim_initialized:
+            try:
+                self._hydrosim_api.cancel()
+            except Exception:
+                logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
+        self._hydrosim_initialized = False
 
         # 在状态管理器中注销
         self.state_manager.terminate_task(self.context)

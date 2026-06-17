@@ -1,0 +1,2777 @@
+{
+  "hydro_event_type": "TIME_SERIES_DATA_UPDATED",
+  "hydro_event_id": "TS_DEFAULT_POWER_PLANNNING_00000001",
+  "hydro_event_name": "发电规划预制模板",
+  "auto_schedule_at_step": -1,
+  "object_time_series": [
+    {
+      "time_series_name": "发电需求规划时间序列",
+      "object_ids": [
+        20100,
+        20300,
+        20500
+      ],
+      "object_type": "Station",
+      "object_name": "三站出力",
+      "metrics_code": "power",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 1160
+        },
+        {
+          "step": 15,
+          "value": 1160
+        },
+        {
+          "step": 30,
+          "value": 1160
+        },
+        {
+          "step": 45,
+          "value": 1160
+        },
+        {
+          "step": 60,
+          "value": 1160
+        },
+        {
+          "step": 75,
+          "value": 1150
+        },
+        {
+          "step": 90,
+          "value": 1140
+        },
+        {
+          "step": 105,
+          "value": 1130
+        },
+        {
+          "step": 120,
+          "value": 1120
+        },
+        {
+          "step": 135,
+          "value": 1112.5
+        },
+        {
+          "step": 150,
+          "value": 1105
+        },
+        {
+          "step": 165,
+          "value": 1097.5
+        },
+        {
+          "step": 180,
+          "value": 1090
+        },
+        {
+          "step": 195,
+          "value": 1082.5
+        },
+        {
+          "step": 210,
+          "value": 1075
+        },
+        {
+          "step": 225,
+          "value": 1067.5
+        },
+        {
+          "step": 240,
+          "value": 1060
+        },
+        {
+          "step": 255,
+          "value": 1062.5
+        },
+        {
+          "step": 270,
+          "value": 1065
+        },
+        {
+          "step": 285,
+          "value": 1067.5
+        },
+        {
+          "step": 300,
+          "value": 1070
+        },
+        {
+          "step": 315,
+          "value": 1092.5
+        },
+        {
+          "step": 330,
+          "value": 1115
+        },
+        {
+          "step": 345,
+          "value": 1137.5
+        },
+        {
+          "step": 360,
+          "value": 1160
+        },
+        {
+          "step": 375,
+          "value": 1195
+        },
+        {
+          "step": 390,
+          "value": 1230
+        },
+        {
+          "step": 405,
+          "value": 1265
+        },
+        {
+          "step": 420,
+          "value": 1300
+        },
+        {
+          "step": 435,
+          "value": 1372.5
+        },
+        {
+          "step": 450,
+          "value": 1445
+        },
+        {
+          "step": 465,
+          "value": 1517.5
+        },
+        {
+          "step": 480,
+          "value": 1590
+        },
+        {
+          "step": 495,
+          "value": 1662.5
+        },
+        {
+          "step": 510,
+          "value": 1735
+        },
+        {
+          "step": 525,
+          "value": 1807.5
+        },
+        {
+          "step": 540,
+          "value": 1880
+        },
+        {
+          "step": 555,
+          "value": 1922.5
+        },
+        {
+          "step": 570,
+          "value": 1965
+        },
+        {
+          "step": 585,
+          "value": 2007.5
+        },
+        {
+          "step": 600,
+          "value": 2050
+        },
+        {
+          "step": 615,
+          "value": 2070
+        },
+        {
+          "step": 630,
+          "value": 2090
+        },
+        {
+          "step": 645,
+          "value": 2110
+        },
+        {
+          "step": 660,
+          "value": 2130
+        },
+        {
+          "step": 675,
+          "value": 2147.5
+        },
+        {
+          "step": 690,
+          "value": 2165
+        },
+        {
+          "step": 705,
+          "value": 2182.5
+        },
+        {
+          "step": 720,
+          "value": 2200
+        },
+        {
+          "step": 735,
+          "value": 2190
+        },
+        {
+          "step": 750,
+          "value": 2180
+        },
+        {
+          "step": 765,
+          "value": 2170
+        },
+        {
+          "step": 780,
+          "value": 2160
+        },
+        {
+          "step": 795,
+          "value": 2140
+        },
+        {
+          "step": 810,
+          "value": 2120
+        },
+        {
+          "step": 825,
+          "value": 2100
+        },
+        {
+          "step": 840,
+          "value": 2080
+        },
+        {
+          "step": 855,
+          "value": 2065
+        },
+        {
+          "step": 870,
+          "value": 2050
+        },
+        {
+          "step": 885,
+          "value": 2035
+        },
+        {
+          "step": 900,
+          "value": 2020
+        },
+        {
+          "step": 915,
+          "value": 2030
+        },
+        {
+          "step": 930,
+          "value": 2040
+        },
+        {
+          "step": 945,
+          "value": 2050
+        },
+        {
+          "step": 960,
+          "value": 2060
+        },
+        {
+          "step": 975,
+          "value": 2130
+        },
+        {
+          "step": 990,
+          "value": 2200
+        },
+        {
+          "step": 1005,
+          "value": 2270
+        },
+        {
+          "step": 1020,
+          "value": 2340
+        },
+        {
+          "step": 1035,
+          "value": 2415
+        },
+        {
+          "step": 1050,
+          "value": 2490
+        },
+        {
+          "step": 1065,
+          "value": 2565
+        },
+        {
+          "step": 1080,
+          "value": 2640
+        },
+        {
+          "step": 1095,
+          "value": 2707.5
+        },
+        {
+          "step": 1110,
+          "value": 2775
+        },
+        {
+          "step": 1125,
+          "value": 2842.5
+        },
+        {
+          "step": 1140,
+          "value": 2910
+        },
+        {
+          "step": 1155,
+          "value": 2945
+        },
+        {
+          "step": 1170,
+          "value": 2980
+        },
+        {
+          "step": 1185,
+          "value": 3015
+        },
+        {
+          "step": 1200,
+          "value": 3050
+        },
+        {
+          "step": 1215,
+          "value": 3015
+        },
+        {
+          "step": 1230,
+          "value": 2980
+        },
+        {
+          "step": 1245,
+          "value": 2945
+        },
+        {
+          "step": 1260,
+          "value": 2910
+        },
+        {
+          "step": 1275,
+          "value": 2802.5
+        },
+        {
+          "step": 1290,
+          "value": 2695
+        },
+        {
+          "step": 1305,
+          "value": 2587.5
+        },
+        {
+          "step": 1320,
+          "value": 2480
+        },
+        {
+          "step": 1335,
+          "value": 2330
+        },
+        {
+          "step": 1350,
+          "value": 2180
+        },
+        {
+          "step": 1365,
+          "value": 2030
+        },
+        {
+          "step": 1380,
+          "value": 1880
+        },
+        {
+          "step": 1395,
+          "value": 1770
+        },
+        {
+          "step": 1410,
+          "value": 1660
+        },
+        {
+          "step": 1425,
+          "value": 1550
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求规划时间序列",
+      "object_ids": [
+        20700
+      ],
+      "object_type": "Station",
+      "object_name": "沙坪坝出力",
+      "metrics_code": "power",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 124.5
+        },
+        {
+          "step": 15,
+          "value": 124.5
+        },
+        {
+          "step": 30,
+          "value": 124.5
+        },
+        {
+          "step": 45,
+          "value": 124.5
+        },
+        {
+          "step": 60,
+          "value": 124.5
+        },
+        {
+          "step": 75,
+          "value": 124.5
+        },
+        {
+          "step": 90,
+          "value": 124.5
+        },
+        {
+          "step": 105,
+          "value": 124.5
+        },
+        {
+          "step": 120,
+          "value": 124.5
+        },
+        {
+          "step": 135,
+          "value": 124.5
+        },
+        {
+          "step": 150,
+          "value": 124.5
+        },
+        {
+          "step": 165,
+          "value": 124.5
+        },
+        {
+          "step": 180,
+          "value": 124.5
+        },
+        {
+          "step": 195,
+          "value": 124.5
+        },
+        {
+          "step": 210,
+          "value": 124.5
+        },
+        {
+          "step": 225,
+          "value": 124.5
+        },
+        {
+          "step": 240,
+          "value": 124.5
+        },
+        {
+          "step": 255,
+          "value": 124.5
+        },
+        {
+          "step": 270,
+          "value": 124.5
+        },
+        {
+          "step": 285,
+          "value": 124.5
+        },
+        {
+          "step": 300,
+          "value": 124.5
+        },
+        {
+          "step": 315,
+          "value": 124.5
+        },
+        {
+          "step": 330,
+          "value": 124.5
+        },
+        {
+          "step": 345,
+          "value": 124.5
+        },
+        {
+          "step": 360,
+          "value": 124.5
+        },
+        {
+          "step": 375,
+          "value": 124.5
+        },
+        {
+          "step": 390,
+          "value": 124.5
+        },
+        {
+          "step": 405,
+          "value": 124.5
+        },
+        {
+          "step": 420,
+          "value": 124.5
+        },
+        {
+          "step": 435,
+          "value": 124.5
+        },
+        {
+          "step": 450,
+          "value": 124.5
+        },
+        {
+          "step": 465,
+          "value": 124.5
+        },
+        {
+          "step": 480,
+          "value": 124.5
+        },
+        {
+          "step": 495,
+          "value": 124.5
+        },
+        {
+          "step": 510,
+          "value": 124.5
+        },
+        {
+          "step": 525,
+          "value": 124.5
+        },
+        {
+          "step": 540,
+          "value": 124.5
+        },
+        {
+          "step": 555,
+          "value": 124.5
+        },
+        {
+          "step": 570,
+          "value": 124.5
+        },
+        {
+          "step": 585,
+          "value": 124.5
+        },
+        {
+          "step": 600,
+          "value": 124.5
+        },
+        {
+          "step": 615,
+          "value": 124.5
+        },
+        {
+          "step": 630,
+          "value": 125
+        },
+        {
+          "step": 645,
+          "value": 127.5
+        },
+        {
+          "step": 660,
+          "value": 130
+        },
+        {
+          "step": 675,
+          "value": 132.5
+        },
+        {
+          "step": 690,
+          "value": 135
+        },
+        {
+          "step": 705,
+          "value": 137.5
+        },
+        {
+          "step": 720,
+          "value": 140
+        },
+        {
+          "step": 735,
+          "value": 137.5
+        },
+        {
+          "step": 750,
+          "value": 135
+        },
+        {
+          "step": 765,
+          "value": 132.5
+        },
+        {
+          "step": 780,
+          "value": 130
+        },
+        {
+          "step": 795,
+          "value": 127.5
+        },
+        {
+          "step": 810,
+          "value": 125
+        },
+        {
+          "step": 825,
+          "value": 124.5
+        },
+        {
+          "step": 840,
+          "value": 124.5
+        },
+        {
+          "step": 855,
+          "value": 124.5
+        },
+        {
+          "step": 870,
+          "value": 124.5
+        },
+        {
+          "step": 885,
+          "value": 124.5
+        },
+        {
+          "step": 900,
+          "value": 124.5
+        },
+        {
+          "step": 915,
+          "value": 124.5
+        },
+        {
+          "step": 930,
+          "value": 125
+        },
+        {
+          "step": 945,
+          "value": 127.5
+        },
+        {
+          "step": 960,
+          "value": 130
+        },
+        {
+          "step": 975,
+          "value": 137.5
+        },
+        {
+          "step": 990,
+          "value": 145
+        },
+        {
+          "step": 1005,
+          "value": 152.5
+        },
+        {
+          "step": 1020,
+          "value": 160
+        },
+        {
+          "step": 1035,
+          "value": 170
+        },
+        {
+          "step": 1050,
+          "value": 180
+        },
+        {
+          "step": 1065,
+          "value": 190
+        },
+        {
+          "step": 1080,
+          "value": 200
+        },
+        {
+          "step": 1095,
+          "value": 207.5
+        },
+        {
+          "step": 1110,
+          "value": 215
+        },
+        {
+          "step": 1125,
+          "value": 222.5
+        },
+        {
+          "step": 1140,
+          "value": 230
+        },
+        {
+          "step": 1155,
+          "value": 232.5
+        },
+        {
+          "step": 1170,
+          "value": 235
+        },
+        {
+          "step": 1185,
+          "value": 237.5
+        },
+        {
+          "step": 1200,
+          "value": 240
+        },
+        {
+          "step": 1215,
+          "value": 235
+        },
+        {
+          "step": 1230,
+          "value": 230
+        },
+        {
+          "step": 1245,
+          "value": 225
+        },
+        {
+          "step": 1260,
+          "value": 220
+        },
+        {
+          "step": 1275,
+          "value": 210
+        },
+        {
+          "step": 1290,
+          "value": 200
+        },
+        {
+          "step": 1305,
+          "value": 190
+        },
+        {
+          "step": 1320,
+          "value": 180
+        },
+        {
+          "step": 1335,
+          "value": 165
+        },
+        {
+          "step": 1350,
+          "value": 150
+        },
+        {
+          "step": 1365,
+          "value": 135
+        },
+        {
+          "step": 1380,
+          "value": 124.5
+        },
+        {
+          "step": 1395,
+          "value": 124.5
+        },
+        {
+          "step": 1410,
+          "value": 124.5
+        },
+        {
+          "step": 1425,
+          "value": 124.5
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求入流时间序列",
+      "object_ids": [
+        20100
+      ],
+      "object_type": "Station",
+      "object_name": "瀑布沟入流变化",
+      "metrics_code": "water_flow",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 334
+        },
+        {
+          "step": 15,
+          "value": 332.75
+        },
+        {
+          "step": 30,
+          "value": 331.5
+        },
+        {
+          "step": 45,
+          "value": 330.25
+        },
+        {
+          "step": 60,
+          "value": 329
+        },
+        {
+          "step": 75,
+          "value": 327.75
+        },
+        {
+          "step": 90,
+          "value": 326.5
+        },
+        {
+          "step": 105,
+          "value": 325.25
+        },
+        {
+          "step": 120,
+          "value": 324
+        },
+        {
+          "step": 135,
+          "value": 323
+        },
+        {
+          "step": 150,
+          "value": 322
+        },
+        {
+          "step": 165,
+          "value": 321
+        },
+        {
+          "step": 180,
+          "value": 320
+        },
+        {
+          "step": 195,
+          "value": 319
+        },
+        {
+          "step": 210,
+          "value": 318
+        },
+        {
+          "step": 225,
+          "value": 317
+        },
+        {
+          "step": 240,
+          "value": 316
+        },
+        {
+          "step": 255,
+          "value": 316
+        },
+        {
+          "step": 270,
+          "value": 316
+        },
+        {
+          "step": 285,
+          "value": 316
+        },
+        {
+          "step": 300,
+          "value": 316
+        },
+        {
+          "step": 315,
+          "value": 316
+        },
+        {
+          "step": 330,
+          "value": 316
+        },
+        {
+          "step": 345,
+          "value": 316
+        },
+        {
+          "step": 360,
+          "value": 316
+        },
+        {
+          "step": 375,
+          "value": 312.88
+        },
+        {
+          "step": 390,
+          "value": 309.75
+        },
+        {
+          "step": 405,
+          "value": 306.62
+        },
+        {
+          "step": 420,
+          "value": 303.5
+        },
+        {
+          "step": 435,
+          "value": 300.38
+        },
+        {
+          "step": 450,
+          "value": 297.25
+        },
+        {
+          "step": 465,
+          "value": 294.12
+        },
+        {
+          "step": 480,
+          "value": 291
+        },
+        {
+          "step": 495,
+          "value": 280.25
+        },
+        {
+          "step": 510,
+          "value": 269.5
+        },
+        {
+          "step": 525,
+          "value": 258.75
+        },
+        {
+          "step": 540,
+          "value": 248
+        },
+        {
+          "step": 555,
+          "value": 237.25
+        },
+        {
+          "step": 570,
+          "value": 226.5
+        },
+        {
+          "step": 585,
+          "value": 215.75
+        },
+        {
+          "step": 600,
+          "value": 205
+        },
+        {
+          "step": 615,
+          "value": 200
+        },
+        {
+          "step": 630,
+          "value": 195
+        },
+        {
+          "step": 645,
+          "value": 190
+        },
+        {
+          "step": 660,
+          "value": 185
+        },
+        {
+          "step": 675,
+          "value": 180
+        },
+        {
+          "step": 690,
+          "value": 175
+        },
+        {
+          "step": 705,
+          "value": 170
+        },
+        {
+          "step": 720,
+          "value": 165
+        },
+        {
+          "step": 735,
+          "value": 164.88
+        },
+        {
+          "step": 750,
+          "value": 164.75
+        },
+        {
+          "step": 765,
+          "value": 164.62
+        },
+        {
+          "step": 780,
+          "value": 164.5
+        },
+        {
+          "step": 795,
+          "value": 164.38
+        },
+        {
+          "step": 810,
+          "value": 164.25
+        },
+        {
+          "step": 825,
+          "value": 164.12
+        },
+        {
+          "step": 840,
+          "value": 164
+        },
+        {
+          "step": 855,
+          "value": 164
+        },
+        {
+          "step": 870,
+          "value": 164
+        },
+        {
+          "step": 885,
+          "value": 164
+        },
+        {
+          "step": 900,
+          "value": 164
+        },
+        {
+          "step": 915,
+          "value": 164
+        },
+        {
+          "step": 930,
+          "value": 164
+        },
+        {
+          "step": 945,
+          "value": 164
+        },
+        {
+          "step": 960,
+          "value": 164
+        },
+        {
+          "step": 975,
+          "value": 164
+        },
+        {
+          "step": 990,
+          "value": 164
+        },
+        {
+          "step": 1005,
+          "value": 164
+        },
+        {
+          "step": 1020,
+          "value": 164
+        },
+        {
+          "step": 1035,
+          "value": 164
+        },
+        {
+          "step": 1050,
+          "value": 164
+        },
+        {
+          "step": 1065,
+          "value": 164
+        },
+        {
+          "step": 1080,
+          "value": 164
+        },
+        {
+          "step": 1095,
+          "value": 164
+        },
+        {
+          "step": 1110,
+          "value": 164
+        },
+        {
+          "step": 1125,
+          "value": 164
+        },
+        {
+          "step": 1140,
+          "value": 164
+        },
+        {
+          "step": 1155,
+          "value": 164
+        },
+        {
+          "step": 1170,
+          "value": 164
+        },
+        {
+          "step": 1185,
+          "value": 164
+        },
+        {
+          "step": 1200,
+          "value": 164
+        },
+        {
+          "step": 1215,
+          "value": 168.62
+        },
+        {
+          "step": 1230,
+          "value": 173.25
+        },
+        {
+          "step": 1245,
+          "value": 177.88
+        },
+        {
+          "step": 1260,
+          "value": 182.5
+        },
+        {
+          "step": 1275,
+          "value": 187.12
+        },
+        {
+          "step": 1290,
+          "value": 191.75
+        },
+        {
+          "step": 1305,
+          "value": 196.38
+        },
+        {
+          "step": 1320,
+          "value": 201
+        },
+        {
+          "step": 1335,
+          "value": 219.38
+        },
+        {
+          "step": 1350,
+          "value": 237.75
+        },
+        {
+          "step": 1365,
+          "value": 256.12
+        },
+        {
+          "step": 1380,
+          "value": 274.5
+        },
+        {
+          "step": 1395,
+          "value": 292.88
+        },
+        {
+          "step": 1410,
+          "value": 311.25
+        },
+        {
+          "step": 1425,
+          "value": 329.62
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求水位时间序列",
+      "object_ids": [
+        20100
+      ],
+      "object_type": "Station",
+      "object_name": "瀑布沟水位变化",
+      "metrics_code": "water_level",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 820
+        },
+        {
+          "step": 15,
+          "value": 820
+        },
+        {
+          "step": 30,
+          "value": 820
+        },
+        {
+          "step": 45,
+          "value": 820
+        },
+        {
+          "step": 60,
+          "value": 820
+        },
+        {
+          "step": 75,
+          "value": 820
+        },
+        {
+          "step": 90,
+          "value": 820
+        },
+        {
+          "step": 105,
+          "value": 820
+        },
+        {
+          "step": 120,
+          "value": 820
+        },
+        {
+          "step": 135,
+          "value": 820
+        },
+        {
+          "step": 150,
+          "value": 820
+        },
+        {
+          "step": 165,
+          "value": 820
+        },
+        {
+          "step": 180,
+          "value": 820
+        },
+        {
+          "step": 195,
+          "value": 820
+        },
+        {
+          "step": 210,
+          "value": 820
+        },
+        {
+          "step": 225,
+          "value": 820
+        },
+        {
+          "step": 240,
+          "value": 820
+        },
+        {
+          "step": 255,
+          "value": 820
+        },
+        {
+          "step": 270,
+          "value": 820
+        },
+        {
+          "step": 285,
+          "value": 820
+        },
+        {
+          "step": 300,
+          "value": 820
+        },
+        {
+          "step": 315,
+          "value": 820
+        },
+        {
+          "step": 330,
+          "value": 820
+        },
+        {
+          "step": 345,
+          "value": 820
+        },
+        {
+          "step": 360,
+          "value": 820
+        },
+        {
+          "step": 375,
+          "value": 820
+        },
+        {
+          "step": 390,
+          "value": 820
+        },
+        {
+          "step": 405,
+          "value": 820
+        },
+        {
+          "step": 420,
+          "value": 820
+        },
+        {
+          "step": 435,
+          "value": 820
+        },
+        {
+          "step": 450,
+          "value": 820
+        },
+        {
+          "step": 465,
+          "value": 820
+        },
+        {
+          "step": 480,
+          "value": 820
+        },
+        {
+          "step": 495,
+          "value": 820
+        },
+        {
+          "step": 510,
+          "value": 820
+        },
+        {
+          "step": 525,
+          "value": 820
+        },
+        {
+          "step": 540,
+          "value": 820
+        },
+        {
+          "step": 555,
+          "value": 820
+        },
+        {
+          "step": 570,
+          "value": 820
+        },
+        {
+          "step": 585,
+          "value": 820
+        },
+        {
+          "step": 600,
+          "value": 820
+        },
+        {
+          "step": 615,
+          "value": 820
+        },
+        {
+          "step": 630,
+          "value": 820
+        },
+        {
+          "step": 645,
+          "value": 820
+        },
+        {
+          "step": 660,
+          "value": 820
+        },
+        {
+          "step": 675,
+          "value": 820
+        },
+        {
+          "step": 690,
+          "value": 820
+        },
+        {
+          "step": 705,
+          "value": 820
+        },
+        {
+          "step": 720,
+          "value": 820
+        },
+        {
+          "step": 735,
+          "value": 820
+        },
+        {
+          "step": 750,
+          "value": 820
+        },
+        {
+          "step": 765,
+          "value": 820
+        },
+        {
+          "step": 780,
+          "value": 820
+        },
+        {
+          "step": 795,
+          "value": 820
+        },
+        {
+          "step": 810,
+          "value": 820
+        },
+        {
+          "step": 825,
+          "value": 820
+        },
+        {
+          "step": 840,
+          "value": 820
+        },
+        {
+          "step": 855,
+          "value": 820
+        },
+        {
+          "step": 870,
+          "value": 820
+        },
+        {
+          "step": 885,
+          "value": 820
+        },
+        {
+          "step": 900,
+          "value": 820
+        },
+        {
+          "step": 915,
+          "value": 820
+        },
+        {
+          "step": 930,
+          "value": 820
+        },
+        {
+          "step": 945,
+          "value": 820
+        },
+        {
+          "step": 960,
+          "value": 820
+        },
+        {
+          "step": 975,
+          "value": 820
+        },
+        {
+          "step": 990,
+          "value": 820
+        },
+        {
+          "step": 1005,
+          "value": 820
+        },
+        {
+          "step": 1020,
+          "value": 820
+        },
+        {
+          "step": 1035,
+          "value": 820
+        },
+        {
+          "step": 1050,
+          "value": 820
+        },
+        {
+          "step": 1065,
+          "value": 820
+        },
+        {
+          "step": 1080,
+          "value": 820
+        },
+        {
+          "step": 1095,
+          "value": 820
+        },
+        {
+          "step": 1110,
+          "value": 820
+        },
+        {
+          "step": 1125,
+          "value": 820
+        },
+        {
+          "step": 1140,
+          "value": 820
+        },
+        {
+          "step": 1155,
+          "value": 820
+        },
+        {
+          "step": 1170,
+          "value": 820
+        },
+        {
+          "step": 1185,
+          "value": 820
+        },
+        {
+          "step": 1200,
+          "value": 820
+        },
+        {
+          "step": 1215,
+          "value": 820
+        },
+        {
+          "step": 1230,
+          "value": 820
+        },
+        {
+          "step": 1245,
+          "value": 820
+        },
+        {
+          "step": 1260,
+          "value": 820
+        },
+        {
+          "step": 1275,
+          "value": 820
+        },
+        {
+          "step": 1290,
+          "value": 820
+        },
+        {
+          "step": 1305,
+          "value": 820
+        },
+        {
+          "step": 1320,
+          "value": 820
+        },
+        {
+          "step": 1335,
+          "value": 820
+        },
+        {
+          "step": 1350,
+          "value": 820
+        },
+        {
+          "step": 1365,
+          "value": 820
+        },
+        {
+          "step": 1380,
+          "value": 820
+        },
+        {
+          "step": 1395,
+          "value": 820
+        },
+        {
+          "step": 1410,
+          "value": 820
+        },
+        {
+          "step": 1425,
+          "value": 820
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求水位时间序列",
+      "object_ids": [
+        20300
+      ],
+      "object_type": "Station",
+      "object_name": "深溪沟水位变化",
+      "metrics_code": "water_level",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 658
+        },
+        {
+          "step": 15,
+          "value": 658
+        },
+        {
+          "step": 30,
+          "value": 658
+        },
+        {
+          "step": 45,
+          "value": 658
+        },
+        {
+          "step": 60,
+          "value": 658
+        },
+        {
+          "step": 75,
+          "value": 658
+        },
+        {
+          "step": 90,
+          "value": 658
+        },
+        {
+          "step": 105,
+          "value": 658
+        },
+        {
+          "step": 120,
+          "value": 658
+        },
+        {
+          "step": 135,
+          "value": 658
+        },
+        {
+          "step": 150,
+          "value": 658
+        },
+        {
+          "step": 165,
+          "value": 658
+        },
+        {
+          "step": 180,
+          "value": 658
+        },
+        {
+          "step": 195,
+          "value": 658
+        },
+        {
+          "step": 210,
+          "value": 658
+        },
+        {
+          "step": 225,
+          "value": 658
+        },
+        {
+          "step": 240,
+          "value": 658
+        },
+        {
+          "step": 255,
+          "value": 658
+        },
+        {
+          "step": 270,
+          "value": 658
+        },
+        {
+          "step": 285,
+          "value": 658
+        },
+        {
+          "step": 300,
+          "value": 658
+        },
+        {
+          "step": 315,
+          "value": 658
+        },
+        {
+          "step": 330,
+          "value": 658
+        },
+        {
+          "step": 345,
+          "value": 658
+        },
+        {
+          "step": 360,
+          "value": 658
+        },
+        {
+          "step": 375,
+          "value": 658
+        },
+        {
+          "step": 390,
+          "value": 658
+        },
+        {
+          "step": 405,
+          "value": 658
+        },
+        {
+          "step": 420,
+          "value": 658
+        },
+        {
+          "step": 435,
+          "value": 658
+        },
+        {
+          "step": 450,
+          "value": 658
+        },
+        {
+          "step": 465,
+          "value": 658
+        },
+        {
+          "step": 480,
+          "value": 658
+        },
+        {
+          "step": 495,
+          "value": 658
+        },
+        {
+          "step": 510,
+          "value": 658
+        },
+        {
+          "step": 525,
+          "value": 658
+        },
+        {
+          "step": 540,
+          "value": 658
+        },
+        {
+          "step": 555,
+          "value": 658
+        },
+        {
+          "step": 570,
+          "value": 658
+        },
+        {
+          "step": 585,
+          "value": 658
+        },
+        {
+          "step": 600,
+          "value": 658
+        },
+        {
+          "step": 615,
+          "value": 658
+        },
+        {
+          "step": 630,
+          "value": 658
+        },
+        {
+          "step": 645,
+          "value": 658
+        },
+        {
+          "step": 660,
+          "value": 658
+        },
+        {
+          "step": 675,
+          "value": 658
+        },
+        {
+          "step": 690,
+          "value": 658
+        },
+        {
+          "step": 705,
+          "value": 658
+        },
+        {
+          "step": 720,
+          "value": 658
+        },
+        {
+          "step": 735,
+          "value": 658
+        },
+        {
+          "step": 750,
+          "value": 658
+        },
+        {
+          "step": 765,
+          "value": 658
+        },
+        {
+          "step": 780,
+          "value": 658
+        },
+        {
+          "step": 795,
+          "value": 658
+        },
+        {
+          "step": 810,
+          "value": 658
+        },
+        {
+          "step": 825,
+          "value": 658
+        },
+        {
+          "step": 840,
+          "value": 658
+        },
+        {
+          "step": 855,
+          "value": 658
+        },
+        {
+          "step": 870,
+          "value": 658
+        },
+        {
+          "step": 885,
+          "value": 658
+        },
+        {
+          "step": 900,
+          "value": 658
+        },
+        {
+          "step": 915,
+          "value": 658
+        },
+        {
+          "step": 930,
+          "value": 658
+        },
+        {
+          "step": 945,
+          "value": 658
+        },
+        {
+          "step": 960,
+          "value": 658
+        },
+        {
+          "step": 975,
+          "value": 658
+        },
+        {
+          "step": 990,
+          "value": 658
+        },
+        {
+          "step": 1005,
+          "value": 658
+        },
+        {
+          "step": 1020,
+          "value": 658
+        },
+        {
+          "step": 1035,
+          "value": 658
+        },
+        {
+          "step": 1050,
+          "value": 658
+        },
+        {
+          "step": 1065,
+          "value": 658
+        },
+        {
+          "step": 1080,
+          "value": 658
+        },
+        {
+          "step": 1095,
+          "value": 658
+        },
+        {
+          "step": 1110,
+          "value": 658
+        },
+        {
+          "step": 1125,
+          "value": 658
+        },
+        {
+          "step": 1140,
+          "value": 658
+        },
+        {
+          "step": 1155,
+          "value": 658
+        },
+        {
+          "step": 1170,
+          "value": 658
+        },
+        {
+          "step": 1185,
+          "value": 658
+        },
+        {
+          "step": 1200,
+          "value": 658
+        },
+        {
+          "step": 1215,
+          "value": 658
+        },
+        {
+          "step": 1230,
+          "value": 658
+        },
+        {
+          "step": 1245,
+          "value": 658
+        },
+        {
+          "step": 1260,
+          "value": 658
+        },
+        {
+          "step": 1275,
+          "value": 658
+        },
+        {
+          "step": 1290,
+          "value": 658
+        },
+        {
+          "step": 1305,
+          "value": 658
+        },
+        {
+          "step": 1320,
+          "value": 658
+        },
+        {
+          "step": 1335,
+          "value": 658
+        },
+        {
+          "step": 1350,
+          "value": 658
+        },
+        {
+          "step": 1365,
+          "value": 658
+        },
+        {
+          "step": 1380,
+          "value": 658
+        },
+        {
+          "step": 1395,
+          "value": 658
+        },
+        {
+          "step": 1410,
+          "value": 658
+        },
+        {
+          "step": 1425,
+          "value": 658
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求水位时间序列",
+      "object_ids": [
+        20500
+      ],
+      "object_type": "Station",
+      "object_name": "枕头坝水位变化",
+      "metrics_code": "water_level",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 619
+        },
+        {
+          "step": 15,
+          "value": 619
+        },
+        {
+          "step": 30,
+          "value": 619
+        },
+        {
+          "step": 45,
+          "value": 619
+        },
+        {
+          "step": 60,
+          "value": 619
+        },
+        {
+          "step": 75,
+          "value": 619
+        },
+        {
+          "step": 90,
+          "value": 619
+        },
+        {
+          "step": 105,
+          "value": 619
+        },
+        {
+          "step": 120,
+          "value": 619
+        },
+        {
+          "step": 135,
+          "value": 619
+        },
+        {
+          "step": 150,
+          "value": 619
+        },
+        {
+          "step": 165,
+          "value": 619
+        },
+        {
+          "step": 180,
+          "value": 619
+        },
+        {
+          "step": 195,
+          "value": 619
+        },
+        {
+          "step": 210,
+          "value": 619
+        },
+        {
+          "step": 225,
+          "value": 619
+        },
+        {
+          "step": 240,
+          "value": 619
+        },
+        {
+          "step": 255,
+          "value": 619
+        },
+        {
+          "step": 270,
+          "value": 619
+        },
+        {
+          "step": 285,
+          "value": 619
+        },
+        {
+          "step": 300,
+          "value": 619
+        },
+        {
+          "step": 315,
+          "value": 619
+        },
+        {
+          "step": 330,
+          "value": 619
+        },
+        {
+          "step": 345,
+          "value": 619
+        },
+        {
+          "step": 360,
+          "value": 619
+        },
+        {
+          "step": 375,
+          "value": 619
+        },
+        {
+          "step": 390,
+          "value": 619
+        },
+        {
+          "step": 405,
+          "value": 619
+        },
+        {
+          "step": 420,
+          "value": 619
+        },
+        {
+          "step": 435,
+          "value": 619
+        },
+        {
+          "step": 450,
+          "value": 619
+        },
+        {
+          "step": 465,
+          "value": 619
+        },
+        {
+          "step": 480,
+          "value": 619
+        },
+        {
+          "step": 495,
+          "value": 619
+        },
+        {
+          "step": 510,
+          "value": 619
+        },
+        {
+          "step": 525,
+          "value": 619
+        },
+        {
+          "step": 540,
+          "value": 619
+        },
+        {
+          "step": 555,
+          "value": 619
+        },
+        {
+          "step": 570,
+          "value": 619
+        },
+        {
+          "step": 585,
+          "value": 619
+        },
+        {
+          "step": 600,
+          "value": 619
+        },
+        {
+          "step": 615,
+          "value": 619
+        },
+        {
+          "step": 630,
+          "value": 619
+        },
+        {
+          "step": 645,
+          "value": 619
+        },
+        {
+          "step": 660,
+          "value": 619
+        },
+        {
+          "step": 675,
+          "value": 619
+        },
+        {
+          "step": 690,
+          "value": 619
+        },
+        {
+          "step": 705,
+          "value": 619
+        },
+        {
+          "step": 720,
+          "value": 619
+        },
+        {
+          "step": 735,
+          "value": 619
+        },
+        {
+          "step": 750,
+          "value": 619
+        },
+        {
+          "step": 765,
+          "value": 619
+        },
+        {
+          "step": 780,
+          "value": 619
+        },
+        {
+          "step": 795,
+          "value": 619
+        },
+        {
+          "step": 810,
+          "value": 619
+        },
+        {
+          "step": 825,
+          "value": 619
+        },
+        {
+          "step": 840,
+          "value": 619
+        },
+        {
+          "step": 855,
+          "value": 619
+        },
+        {
+          "step": 870,
+          "value": 619
+        },
+        {
+          "step": 885,
+          "value": 619
+        },
+        {
+          "step": 900,
+          "value": 619
+        },
+        {
+          "step": 915,
+          "value": 619
+        },
+        {
+          "step": 930,
+          "value": 619
+        },
+        {
+          "step": 945,
+          "value": 619
+        },
+        {
+          "step": 960,
+          "value": 619
+        },
+        {
+          "step": 975,
+          "value": 619
+        },
+        {
+          "step": 990,
+          "value": 619
+        },
+        {
+          "step": 1005,
+          "value": 619
+        },
+        {
+          "step": 1020,
+          "value": 619
+        },
+        {
+          "step": 1035,
+          "value": 619
+        },
+        {
+          "step": 1050,
+          "value": 619
+        },
+        {
+          "step": 1065,
+          "value": 619
+        },
+        {
+          "step": 1080,
+          "value": 619
+        },
+        {
+          "step": 1095,
+          "value": 619
+        },
+        {
+          "step": 1110,
+          "value": 619
+        },
+        {
+          "step": 1125,
+          "value": 619
+        },
+        {
+          "step": 1140,
+          "value": 619
+        },
+        {
+          "step": 1155,
+          "value": 619
+        },
+        {
+          "step": 1170,
+          "value": 619
+        },
+        {
+          "step": 1185,
+          "value": 619
+        },
+        {
+          "step": 1200,
+          "value": 619
+        },
+        {
+          "step": 1215,
+          "value": 619
+        },
+        {
+          "step": 1230,
+          "value": 619
+        },
+        {
+          "step": 1245,
+          "value": 619
+        },
+        {
+          "step": 1260,
+          "value": 619
+        },
+        {
+          "step": 1275,
+          "value": 619
+        },
+        {
+          "step": 1290,
+          "value": 619
+        },
+        {
+          "step": 1305,
+          "value": 619
+        },
+        {
+          "step": 1320,
+          "value": 619
+        },
+        {
+          "step": 1335,
+          "value": 619
+        },
+        {
+          "step": 1350,
+          "value": 619
+        },
+        {
+          "step": 1365,
+          "value": 619
+        },
+        {
+          "step": 1380,
+          "value": 619
+        },
+        {
+          "step": 1395,
+          "value": 619
+        },
+        {
+          "step": 1410,
+          "value": 619
+        },
+        {
+          "step": 1425,
+          "value": 619
+        }
+      ]
+    },
+    {
+      "time_series_name": "发电需求水位时间序列",
+      "object_ids": [
+        20700
+      ],
+      "object_type": "Station",
+      "object_name": "沙坪水位变化",
+      "metrics_code": "water_level",
+      "time_series": [
+        {
+          "step": 0,
+          "value": 552
+        },
+        {
+          "step": 15,
+          "value": 552
+        },
+        {
+          "step": 30,
+          "value": 552
+        },
+        {
+          "step": 45,
+          "value": 552
+        },
+        {
+          "step": 60,
+          "value": 552
+        },
+        {
+          "step": 75,
+          "value": 552
+        },
+        {
+          "step": 90,
+          "value": 552
+        },
+        {
+          "step": 105,
+          "value": 552
+        },
+        {
+          "step": 120,
+          "value": 552
+        },
+        {
+          "step": 135,
+          "value": 552
+        },
+        {
+          "step": 150,
+          "value": 552
+        },
+        {
+          "step": 165,
+          "value": 552
+        },
+        {
+          "step": 180,
+          "value": 552
+        },
+        {
+          "step": 195,
+          "value": 552
+        },
+        {
+          "step": 210,
+          "value": 552
+        },
+        {
+          "step": 225,
+          "value": 552
+        },
+        {
+          "step": 240,
+          "value": 552
+        },
+        {
+          "step": 255,
+          "value": 552
+        },
+        {
+          "step": 270,
+          "value": 552
+        },
+        {
+          "step": 285,
+          "value": 552
+        },
+        {
+          "step": 300,
+          "value": 552
+        },
+        {
+          "step": 315,
+          "value": 552
+        },
+        {
+          "step": 330,
+          "value": 552
+        },
+        {
+          "step": 345,
+          "value": 552
+        },
+        {
+          "step": 360,
+          "value": 552
+        },
+        {
+          "step": 375,
+          "value": 552
+        },
+        {
+          "step": 390,
+          "value": 552
+        },
+        {
+          "step": 405,
+          "value": 552
+        },
+        {
+          "step": 420,
+          "value": 552
+        },
+        {
+          "step": 435,
+          "value": 552
+        },
+        {
+          "step": 450,
+          "value": 552
+        },
+        {
+          "step": 465,
+          "value": 552
+        },
+        {
+          "step": 480,
+          "value": 552
+        },
+        {
+          "step": 495,
+          "value": 552
+        },
+        {
+          "step": 510,
+          "value": 552
+        },
+        {
+          "step": 525,
+          "value": 552
+        },
+        {
+          "step": 540,
+          "value": 552
+        },
+        {
+          "step": 555,
+          "value": 552
+        },
+        {
+          "step": 570,
+          "value": 552
+        },
+        {
+          "step": 585,
+          "value": 552
+        },
+        {
+          "step": 600,
+          "value": 552
+        },
+        {
+          "step": 615,
+          "value": 552
+        },
+        {
+          "step": 630,
+          "value": 552
+        },
+        {
+          "step": 645,
+          "value": 552
+        },
+        {
+          "step": 660,
+          "value": 552
+        },
+        {
+          "step": 675,
+          "value": 552
+        },
+        {
+          "step": 690,
+          "value": 552
+        },
+        {
+          "step": 705,
+          "value": 552
+        },
+        {
+          "step": 720,
+          "value": 552
+        },
+        {
+          "step": 735,
+          "value": 552
+        },
+        {
+          "step": 750,
+          "value": 552
+        },
+        {
+          "step": 765,
+          "value": 552
+        },
+        {
+          "step": 780,
+          "value": 552
+        },
+        {
+          "step": 795,
+          "value": 552
+        },
+        {
+          "step": 810,
+          "value": 552
+        },
+        {
+          "step": 825,
+          "value": 552
+        },
+        {
+          "step": 840,
+          "value": 552
+        },
+        {
+          "step": 855,
+          "value": 552
+        },
+        {
+          "step": 870,
+          "value": 552
+        },
+        {
+          "step": 885,
+          "value": 552
+        },
+        {
+          "step": 900,
+          "value": 552
+        },
+        {
+          "step": 915,
+          "value": 552
+        },
+        {
+          "step": 930,
+          "value": 552
+        },
+        {
+          "step": 945,
+          "value": 552
+        },
+        {
+          "step": 960,
+          "value": 552
+        },
+        {
+          "step": 975,
+          "value": 552
+        },
+        {
+          "step": 990,
+          "value": 552
+        },
+        {
+          "step": 1005,
+          "value": 552
+        },
+        {
+          "step": 1020,
+          "value": 552
+        },
+        {
+          "step": 1035,
+          "value": 552
+        },
+        {
+          "step": 1050,
+          "value": 552
+        },
+        {
+          "step": 1065,
+          "value": 552
+        },
+        {
+          "step": 1080,
+          "value": 552
+        },
+        {
+          "step": 1095,
+          "value": 552
+        },
+        {
+          "step": 1110,
+          "value": 552
+        },
+        {
+          "step": 1125,
+          "value": 552
+        },
+        {
+          "step": 1140,
+          "value": 552
+        },
+        {
+          "step": 1155,
+          "value": 552
+        },
+        {
+          "step": 1170,
+          "value": 552
+        },
+        {
+          "step": 1185,
+          "value": 552
+        },
+        {
+          "step": 1200,
+          "value": 552
+        },
+        {
+          "step": 1215,
+          "value": 552
+        },
+        {
+          "step": 1230,
+          "value": 552
+        },
+        {
+          "step": 1245,
+          "value": 552
+        },
+        {
+          "step": 1260,
+          "value": 552
+        },
+        {
+          "step": 1275,
+          "value": 552
+        },
+        {
+          "step": 1290,
+          "value": 552
+        },
+        {
+          "step": 1305,
+          "value": 552
+        },
+        {
+          "step": 1320,
+          "value": 552
+        },
+        {
+          "step": 1335,
+          "value": 552
+        },
+        {
+          "step": 1350,
+          "value": 552
+        },
+        {
+          "step": 1365,
+          "value": 552
+        },
+        {
+          "step": 1380,
+          "value": 552
+        },
+        {
+          "step": 1395,
+          "value": 552
+        },
+        {
+          "step": 1410,
+          "value": 552
+        },
+        {
+          "step": 1425,
+          "value": 552
+        }
+      ]
+    }
+  ],
+  "priority": "HIGH",
+  "valid": true
+}

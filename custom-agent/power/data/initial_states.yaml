@@ -1,0 +1,275 @@
+initial_states:
+  channels:
+    defaults:
+      water_level: 0.0
+      water_depth: 0.0
+    overrides:
+      water_level: []
+      water_depth:
+       -
+        id: 20200
+        name: pbg-sxg
+        type: UnifiedCanal
+        metrics_code: water_depth
+        value: 659.0
+       -
+        id: 20000
+        name: sm-pbg
+        type: UnifiedCanal
+        metrics_code: water_depth
+        value: 819.0
+       -
+        id: 20400
+        name: sxg-ztb
+        type: UnifiedCanal
+        metrics_code: water_depth
+        value: 623.0
+       -
+        id: 20600
+        name: ztb-sp
+        type: UnifiedCanal
+        metrics_code: water_depth
+        value: 553.0
+  boundaries:
+    defaults: {}
+    overrides:
+     -
+      id: 20001
+      name: DM1
+      type: CrossSection
+      metrics_code: water_flow
+      value: 334.0
+     -
+      id: 沙坪后
+      name: 沙坪后
+      type: CrossSection
+      metrics_code: water_level
+      value: 534.67
+  bleeders:
+    defaults: {}
+    overrides: []
+  gates:
+    defaults: {}
+    overrides:
+     -
+      id: 20101
+      name: 瀑布闸1
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20102
+      name: 瀑布闸2
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20103
+      name: 瀑布闸3
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20301
+      name: 深溪闸1
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20302
+      name: 深溪闸2
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20303
+      name: 深溪闸3
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20501
+      name: 枕头闸1
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20502
+      name: 枕头闸2
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20503
+      name: 枕头闸3
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20504
+      name: 枕头闸4
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20505
+      name: 枕头闸5
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20701
+      name: 沙坪闸1
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20702
+      name: 沙坪闸2
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20703
+      name: 沙坪闸3
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20704
+      name: 沙坪闸4
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+     -
+      id: 20705
+      name: 沙坪闸5
+      type: Gate
+      metrics_code: gate_opening
+      value: 0.0
+  pumps:
+    defaults: {}
+    overrides: []
+  turbines:
+    defaults: {}
+    overrides:
+     -
+      id: 20304
+      name: 深溪沟水轮机1
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20305
+      name: 深溪沟水轮机2
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20306
+      name: 深溪沟水轮机3
+      type: Turbine
+      metrics_code: power
+      value: 79.0
+     -
+      id: 20307
+      name: 深溪沟水轮机4
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20104
+      name: 瀑布沟水轮机1
+      type: Turbine
+      metrics_code: power
+      value: 334.0
+     -
+      id: 20105
+      name: 瀑布沟水轮机2
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20106
+      name: 瀑布沟水轮机3
+      type: Turbine
+      metrics_code: power
+      value: 13.75
+     -
+      id: 20107
+      name: 瀑布沟水轮机4
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20108
+      name: 瀑布沟水轮机5
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20109
+      name: 瀑布沟水轮机6
+      type: Turbine
+      metrics_code: power
+      value: 17.379
+     -
+      id: 20706
+      name: 沙坪坝水轮机1
+      type: Turbine
+      metrics_code: power
+      value: 35.328
+     -
+      id: 20707
+      name: 沙坪坝水轮机2
+      type: Turbine
+      metrics_code: power
+      value: 0.098875
+     -
+      id: 20708
+      name: 沙坪坝水轮机3
+      type: Turbine
+      metrics_code: power
+      value: 0.098875
+     -
+      id: 20709
+      name: 沙坪坝水轮机4
+      type: Turbine
+      metrics_code: power
+      value: 0.033875
+     -
+      id: 20710
+      name: 沙坪坝水轮机5
+      type: Turbine
+      metrics_code: power
+      value: 0.0
+     -
+      id: 20711
+      name: 沙坪坝水轮机6
+      type: Turbine
+      metrics_code: power
+      value: 31.238
+     -
+      id: 20506
+      name: 枕头坝水轮机1
+      type: Turbine
+      metrics_code: power
+      value: 0.6764
+     -
+      id: 20507
+      name: 枕头坝水轮机2
+      type: Turbine
+      metrics_code: power
+      value: 109.98
+     -
+      id: 20508
+      name: 枕头坝水轮机3
+      type: Turbine
+      metrics_code: power
+      value: 1.1595
+     -
+      id: 20509
+      name: 枕头坝水轮机4
+      type: Turbine
+      metrics_code: power
+      value: 1.2404
