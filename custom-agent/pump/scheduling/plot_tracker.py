@@ -22,6 +22,8 @@ class PlotHistoryTracker:
         self.hist_back_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_front_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_pool_levels = {pid: [] for pid in self.system_config.pool_ids}
+        self.hist_pred_back_levels = {sid: [] for sid in self.system_config.station_ids}
+        self.hist_pred_front_levels = {sid: [] for sid in self.system_config.station_ids}
         self.hist_disturbances = {pid: [] for pid in self.system_config.pool_ids}
         self.hist_upper_flow_errors = {sid: [] for sid in self.system_config.station_ids}
         self.hist_lower_flow_errors = {sid: [] for sid in self.system_config.station_ids}
@@ -32,6 +34,7 @@ class PlotHistoryTracker:
         
         self.hist_modes = {sid: [] for sid in self.system_config.station_ids}
         self.hist_ref_flows = {sid: [] for sid in self.system_config.station_ids}
+        self.hist_power_mw = {sid: [] for sid in self.system_config.station_ids}
         
         # We need a mock runtime or just create a dict for odd boundaries
         self.odd1_flow_tolerance = 0.5
@@ -61,11 +64,17 @@ class PlotHistoryTracker:
             self.hist_back_levels[station_id].append(back)
             self.hist_front_levels[station_id].append(front)
             
-            # Efficiency
-            # Since we might not have _actual_unit_metrics easily, we can just use total station flow and head to estimate efficiency
-            # or just default to 0 for plotting if not available
+            pred_back = float(upper_plan.station_back_levels[station_id][0]) if station_id in upper_plan.station_back_levels and len(upper_plan.station_back_levels[station_id]) > 0 else back
+            pred_front = float(upper_plan.station_front_levels[station_id][0]) if station_id in upper_plan.station_front_levels and len(upper_plan.station_front_levels[station_id]) > 0 else front
+            self.hist_pred_back_levels[station_id].append(pred_back)
+            self.hist_pred_front_levels[station_id].append(pred_front)
+            
+            # Efficiency & Power
             eff = float(actions[station_id].predicted_efficiencies[0]) if hasattr(actions[station_id], 'predicted_efficiencies') and actions[station_id].predicted_efficiencies else 0.0
             self.hist_efficiencies[station_id].append(eff)
+            head = float(observation.station_heads.get(station_id, 0.0))
+            power = (9.81 * 1000 * flow * head) / (eff * 1e6) if eff > 0.01 else 0.0
+            self.hist_power_mw[station_id].append(power)
             
             # Errors
             self.hist_odd_flow_errors[station_id].append(float(decisions[station_id].flow_error))
@@ -78,9 +87,12 @@ class PlotHistoryTracker:
             station_snapshot = {}
             station = self.system_config.station_by_id[station_id]
             for unit in station.units:
+                u_eff = float(actions[station_id].predicted_unit_efficiencies.get(unit.id, [0.0])[0]) if hasattr(actions[station_id], 'predicted_unit_efficiencies') else 0.0
                 station_snapshot[unit.name] = {
+                    "Unit_ID": unit.id,
                     "Status": int(actions[station_id].unit_status.get(unit.id, 0)),
                     "Opening": float(actions[station_id].unit_openings.get(unit.id, 0.0)),
+                    "Efficiency": u_eff,
                 }
             snapshot[station_id] = station_snapshot
             
@@ -151,6 +163,7 @@ class PlotHistoryTracker:
         for idx, (up_id, down_id) in enumerate(zip(station_ids[:-1], station_ids[1:]), start=1):
             pool_id = pool_ids[idx - 1] if idx - 1 < len(pool_ids) else idx
             demand_column = f"station{up_id}-station{down_id}"
+            
             if demand_column in self.demand_plan.columns:
                 series_vals = self.demand_plan[demand_column].values[:n_points]
                 if len(series_vals) < n_points:
@@ -159,11 +172,20 @@ class PlotHistoryTracker:
             else:
                 demand_series[pool_id] = np.zeros(n_points, dtype=float)
                 
+            if hasattr(self, "global_rain_plan") and demand_column in getattr(self, "global_rain_plan", pd.DataFrame()).columns:
+                r_series = getattr(self, "global_rain_plan")[demand_column].values[:n_points]
+                if len(r_series) < n_points:
+                    r_series = np.pad(r_series, (0, n_points - len(r_series)), 'edge')
+                rain_series[pool_id] = np.asarray(r_series, dtype=float)
+            else:
+                rain_series[pool_id] = np.zeros(n_points, dtype=float)
+                
         # Fill any unmapped pools
         for pool_id in pool_ids:
             if pool_id not in demand_series:
                 demand_series[pool_id] = np.zeros(n_points, dtype=float)
-            rain_series[pool_id] = np.zeros(n_points, dtype=float)
+            if pool_id not in rain_series or len(rain_series[pool_id]) == 0:
+                rain_series[pool_id] = np.zeros(n_points, dtype=float)
             
         return times, demand_series, {pool_id: np.asarray(values, dtype=float) for pool_id, values in rain_series.items()}
 
@@ -422,6 +444,7 @@ class PlotHistoryTracker:
         records = []
         first_station_id = self.system_config.station_ids[0] if self.system_config.station_ids else None
         
+        unit_records = []
         for i, t in enumerate(self.hist_times):
             for st_id in self.system_config.station_ids:
                 row = {
@@ -431,13 +454,31 @@ class PlotHistoryTracker:
                     "actual_flow": self.hist_flows[st_id][i],
                     "actual_back_level": self.hist_back_levels[st_id][i],
                     "actual_front_level": self.hist_front_levels[st_id][i],
+                    "pred_back_level": self.hist_pred_back_levels[st_id][i],
+                    "pred_front_level": self.hist_pred_front_levels[st_id][i],
                     "mode": self.hist_modes[st_id][i],
                     "actual_upper_flow_error": self.hist_upper_flow_errors[st_id][i],
                     "actual_lower_flow_error": self.hist_lower_flow_errors[st_id][i],
+                    "efficiency": self.hist_efficiencies[st_id][i],
+                    "power_mw": self.hist_power_mw[st_id][i],
+                    "step_hours": float(self.system_config.dt_hours),
                 }
+                
+                st_snapshot = self.hist_unit_status[i].get(st_id, {})
+                for u_name, u_data in st_snapshot.items():
+                    unit_records.append({
+                        "station_id": st_id,
+                        "unit_id": u_data["Unit_ID"],
+                        "time_hours": t,
+                        "opening": u_data["Opening"],
+                        "unit_efficiency": u_data["Efficiency"],
+                        "status": u_data["Status"],
+                    })
+
                 if st_id == first_station_id:
                     for pid in self.system_config.pool_ids:
                         row[f"disturbance_estimate_pool_{pid}"] = self.hist_disturbances[pid][i]
+                        row[f"actual_pool_level_{pid}"] = self.hist_pool_levels[pid][i]
                 records.append(row)
                 
         if not records:
@@ -446,6 +487,8 @@ class PlotHistoryTracker:
             return
             
         history_df = pd.DataFrame(records)
+        unit_history_df = pd.DataFrame(unit_records)
+        self._export_excel(history_df)
         
         # 使用 simulation._plot_results
         from odd_dmpc.simulation import ClosedLoopSimulation
@@ -455,8 +498,45 @@ class PlotHistoryTracker:
         # 兼容 simulation._plot_results 内部所需的 self.system_config 等属性
         # 因为 PlotHistoryTracker 刚好具备所有必需的属性，我们可以直接传入 self
         try:
-            ClosedLoopSimulation._plot_results(self, history_df)
+            ClosedLoopSimulation._plot_results(self, history_df, unit_history=unit_history_df)
             logger.info(f"汇总图生成完成，保存在: {self.output_dir.absolute()}")
         except Exception as e:
             logger.error(f"生成汇总图失败: {e}", exc_info=True)
+
+    def _export_excel(self, summary_df: pd.DataFrame):
+        import os
+        import pandas as pd
+        output_file = os.path.join(self.output_dir, "summary_and_predictions.xlsx")
+        pred_records = []
+        if hasattr(self, "step_predictions"):
+            for pred in self.step_predictions:
+                step = pred["step"]
+                upper = pred["upper"]
+                lower = pred["lower"]
+                for sid, q_planned in upper.get("q_planned", {}).items():
+                    for t_idx, q in enumerate(q_planned):
+                        row = {
+                            "Step": step,
+                            "Future_Hour_Idx": t_idx,
+                            "Station": sid,
+                            "Upper_Q_Planned": q,
+                            "Upper_Z_Planned": upper.get("z_planned", {}).get(sid, [None]*len(q_planned))[t_idx] if t_idx < len(upper.get("z_planned", {}).get(sid, [])) else None,
+                        }
+                        if sid in lower and "total_q" in lower[sid] and t_idx < len(lower[sid]["total_q"]):
+                            row["Lower_Q_Planned"] = lower[sid]["total_q"][t_idx]
+                        else:
+                            row["Lower_Q_Planned"] = None
+                        pred_records.append(row)
+        
+        try:
+            with pd.ExcelWriter(output_file) as writer:
+                summary_df.to_excel(writer, sheet_name="Final_Summary", index=False)
+                if pred_records:
+                    pd.DataFrame(pred_records).to_excel(writer, sheet_name="Step_Predictions", index=False)
+            print(f"Excel data exported to {output_file}")
+        except Exception as e:
+            print(f"Failed to export to Excel, exporting to CSV instead. Error: {e}")
+            summary_df.to_csv(os.path.join(self.output_dir, "final_summary.csv"), index=False)
+            if pred_records:
+                pd.DataFrame(pred_records).to_csv(os.path.join(self.output_dir, "step_predictions.csv"), index=False)
 

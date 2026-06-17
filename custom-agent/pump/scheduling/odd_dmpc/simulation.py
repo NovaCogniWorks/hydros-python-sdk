@@ -1992,8 +1992,9 @@ class ClosedLoopSimulation:
         fig.savefig(step_plot_path, dpi=180)
         plt.close(fig)
 
-    def _plot_results(self, history: pd.DataFrame) -> None:
+    def _plot_results(self, history: pd.DataFrame, unit_history: pd.DataFrame = None) -> None:
         import matplotlib.pyplot as plt
+        import numpy as np
         time_col = "time_hours" if "time_hours" in history.columns else "hour"
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
@@ -2002,37 +2003,52 @@ class ClosedLoopSimulation:
         
         station_palette = plt.cm.tab10(np.linspace(0.2, 0.9, max(len(station_ids), 1)))
         
+        summary_lines = []
+        pool_mae_text = []
+        
         for idx_st, station_id in enumerate(station_ids):
-            fig, axes = plt.subplots(4, 1, figsize=(12, 16), sharex=True)
+            fig, axes = plt.subplots(5, 1, figsize=(14, 20), sharex=True)
             station_df = history[history["station_id"] == station_id]
             st_color = station_palette[idx_st % len(station_palette)]
             
             axes[0].plot(station_df[time_col], station_df["ref_flow"], linestyle="--", color=st_color, alpha=0.5, label=f"S{station_id} ref")
             axes[0].plot(station_df[time_col], station_df["actual_flow"], color=st_color, label=f"S{station_id} actual")
             
-            axes[1].plot(station_df[time_col], station_df["actual_back_level"], color=st_color, label=f"S{station_id} back")
-            axes[1].plot(station_df[time_col], station_df["actual_front_level"], linestyle="--", color=st_color, label=f"S{station_id} front")
-            
             mode_map = {"ODD1": 1, "ODD2": 2, "ODD3": 3}
-            axes[2].step(station_df[time_col], station_df["mode"].map(mode_map), where="post", color=st_color, label=f"S{station_id}")
+            axes[1].step(station_df[time_col], station_df["mode"].map(mode_map), where="post", color=st_color, label=f"S{station_id}")
             
-            axes[3].plot(station_df[time_col], station_df["actual_upper_flow_error"], linestyle="-.", color=st_color, label=f"S{station_id} actual-upper")
-            axes[3].plot(station_df[time_col], station_df["actual_lower_flow_error"], linestyle=":", color=st_color, label=f"S{station_id} actual-lower")
+            # Units Angle
+            if unit_history is not None and not unit_history.empty:
+                st_uh = unit_history[unit_history["station_id"] == station_id]
+                for unit_id in st_uh["unit_id"].unique():
+                    u_df = st_uh[st_uh["unit_id"] == unit_id]
+                    axes[2].plot(u_df[time_col], u_df["opening"], label=f"U{unit_id} angle")
+                    
+            # Units Efficiency
+            if unit_history is not None and not unit_history.empty:
+                st_uh = unit_history[unit_history["station_id"] == station_id]
+                for unit_id in st_uh["unit_id"].unique():
+                    u_df = st_uh[st_uh["unit_id"] == unit_id]
+                    active_eff = u_df["unit_efficiency"].where(u_df["status"] == 1, np.nan)
+                    axes[3].plot(u_df[time_col], active_eff, label=f"U{unit_id} eff")
+            
+            axes[4].plot(station_df[time_col], station_df["actual_upper_flow_error"], linestyle="-.", color=st_color, label=f"S{station_id} actual-upper")
+            axes[4].plot(station_df[time_col], station_df["actual_lower_flow_error"], linestyle=":", color=st_color, label=f"S{station_id} actual-lower")
             
             palette = plt.cm.tab20(np.linspace(0.1, 0.9, max(len(pool_ids), 1)))
             for idx, pool_id in enumerate(pool_ids):
                 color = palette[idx % len(palette)]
                 column = f"disturbance_estimate_pool_{pool_id}"
                 if column in observer_df.columns:
-                    axes[3].plot(observer_df[time_col], observer_df[column], color=color, label=f"Observer pool {pool_id}")
-                axes[3].plot(
+                    axes[4].plot(observer_df[time_col], observer_df[column], color=color, label=f"Observer pool {pool_id}")
+                axes[4].plot(
                     disturbance_times,
                     demand_series.get(pool_id, np.zeros_like(disturbance_times)),
                     color=color,
                     alpha=0.8,
                     label=f"Plan pool {pool_id}",
                 )
-                axes[3].step(
+                axes[4].step(
                     disturbance_times,
                     rain_series.get(pool_id, np.zeros_like(disturbance_times)),
                     where="post",
@@ -2043,16 +2059,72 @@ class ClosedLoopSimulation:
                 )
             
             axes[0].set_title(f"Station {station_id} Overview")
-            axes[0].set_ylabel("Flow")
-            axes[1].set_ylabel("Level")
-            axes[2].set_ylabel("Mode")
-            axes[3].set_ylabel("Disturbance & Errors")
-            axes[3].set_xlabel("Hour")
+            axes[0].set_ylabel("Flow (m3/s)")
+            axes[1].set_ylabel("Mode")
+            axes[2].set_ylabel("Blade Angle")
+            axes[3].set_ylabel("Efficiency (%)")
+            axes[4].set_ylabel("Disturbance & Errors")
+            axes[4].set_xlabel("Hour")
+            
+            flow_mae = (station_df["actual_flow"] - station_df["ref_flow"]).abs().mean()
+            
+            summary_lines.append(f"Summary S{station_id}:")
+            summary_lines.append(f"Flow MAE (Pred vs Actual): {flow_mae:.2f} m3/s")
+            summary_lines.append("")
             
             for axis in axes:
                 axis.grid(True, alpha=0.3)
-                axis.legend(loc="best", fontsize=8)
+                axis.legend(loc="upper right", fontsize=8)
                 
             fig.tight_layout()
             fig.savefig(self.output_dir / f"closed_loop_overview_{station_id}.png", dpi=200)
             plt.close(fig)
+            
+        # Generate pool level overview plots
+        for p_idx, pool_id in enumerate(pool_ids):
+            if p_idx >= len(station_ids) - 1:
+                break
+            up_st = station_ids[p_idx]
+            dn_st = station_ids[p_idx + 1]
+            up_df = history[history["station_id"] == up_st].sort_values(time_col)
+            dn_df = history[history["station_id"] == dn_st].sort_values(time_col)
+            
+            t_vals = up_df[time_col].values
+            
+            fig_p, ax_p = plt.subplots(figsize=(10, 6))
+            if "pred_back_level" in up_df.columns:
+                ax_p.plot(t_vals, up_df["pred_back_level"], linestyle=":", color="blue", label=f"Pred S{up_st} back")
+            if "pred_front_level" in dn_df.columns:
+                ax_p.plot(t_vals, dn_df["pred_front_level"], linestyle=":", color="orange", label=f"Pred S{dn_st} front")
+                
+            ax_p.plot(t_vals, up_df["actual_back_level"], color="blue", alpha=0.7, label=f"Actual S{up_st} back")
+            ax_p.plot(t_vals, dn_df["actual_front_level"], color="orange", alpha=0.7, label=f"Actual S{dn_st} front")
+            
+            act_avg = (up_df["actual_back_level"].values + dn_df["actual_front_level"].values) / 2.0
+            ax_p.plot(t_vals, act_avg, color="green", linewidth=2, label="Actual Pool Average")
+            
+            ax_p.set_title(f"Pool {pool_id} Level Overview (S{up_st} -> S{dn_st})")
+            ax_p.set_xlabel("Hour")
+            ax_p.set_ylabel("Level (m)")
+            ax_p.legend(loc="best")
+            ax_p.grid(True, alpha=0.3)
+            
+            fig_p.tight_layout()
+            fig_p.savefig(self.output_dir / f"pool_level_overview_{pool_id}.png", dpi=200)
+            plt.close(fig_p)
+            
+            # calculate pool average MAE for summary
+            pool_lvl_col = f"actual_pool_level_{pool_id}"
+            if pool_lvl_col in observer_df.columns and len(observer_df) > 0:
+                first_lvl = observer_df[pool_lvl_col].iloc[0]
+                lvl_mae = (observer_df[pool_lvl_col] - first_lvl).abs().mean()
+                pool_mae_text.append(f"P{pool_id} Lvl Var: {lvl_mae:.3f}m")
+                
+        # Write summary to file
+        summary_lines.append("--- System Total ---")
+        if pool_mae_text:
+            summary_lines.append("Pool Level Mean Variation (Avg Water Level):")
+            summary_lines.extend(pool_mae_text)
+            
+        with open(self.output_dir / "summary_metrics.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(summary_lines) + "\n")

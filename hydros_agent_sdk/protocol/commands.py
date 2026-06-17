@@ -10,7 +10,7 @@ from .models import (
     CommandStatus,
 )
 from .base import HydroBaseModel
-from hydros_agent_sdk.mpc.models import MpcResult
+from .mpc_results import MpcResult
 
 # 指令类型常量
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"

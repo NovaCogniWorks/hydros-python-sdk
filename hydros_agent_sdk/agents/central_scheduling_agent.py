@@ -1,24 +1,18 @@
 """
-具备 MPC 优化能力的中央调度智能体。
+中央调度智能体通用基类。
 
-该模块提供了 CentralSchedulingAgent 类，它扩展了 TickableAgent，
-增加了模型预测控制（MPC）优化功能。
+CentralSchedulingAgent 提供不默认装配 MPC 的中央调度通用能力。
 """
 
 import logging
-from typing import Optional, List, Dict, Any, Callable, Iterable
+from typing import Optional, List, Dict, Any
 from abc import abstractmethod
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
+from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
-from hydros_agent_sdk.mpc.client import MpcPlanningClient
-from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
-from hydros_agent_sdk.mpc.models import SensorData
-from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
-from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
@@ -48,21 +42,20 @@ DEFAULT_METRICS_HISTORY_STEPS = 10
 
 class CentralSchedulingAgent(TickableAgent):
     """
-    具备 MPC 优化能力的中央调度智能体。
+    中央调度智能体兼容基类。
 
-    该智能体执行模型预测控制（MPC）优化：
-    1. 在滚动优化时界（Rolling Horizon）上执行（步长周期的倍数）
-    2. 通过 MQTT 订阅接收来自现地设备的实时指标
-    3. 处理边界条件更新
-    4. 执行 MPC 优化
-    5. 通过 agent command 客户端发送智能体间控制指令
+    该基类只负责中央调度 Agent 的通用协作能力：
+    1. 通过 MQTT 订阅接收来自现地设备的实时指标
+    2. 处理边界条件更新
+    3. 通过 agent command 客户端发送智能体间控制指令
+    4. 持有算法可选使用的模型、拓扑和指标缓存
+
+    默认 MPC 滚动优化路径由 MpcCentralSchedulingAgent 承载。
 
     核心特性：
-    - 滚动时界优化 (MPC)
     - 通过 MQTT 订阅实时现地指标
     - 边界条件处理
-    - 基于优化的控制逻辑
-    - 支持智能体间指令交互（未来支持）
+    - 支持智能体间指令交互
 
     使用示例：
         ```python
@@ -80,7 +73,6 @@ class CentralSchedulingAgent(TickableAgent):
 
     子类必须实现：
     - on_init(): 初始化智能体并加载优化模型
-    - on_optimization(): 执行 MPC 优化逻辑
     - on_terminate(): 清理资源
     """
 
@@ -116,18 +108,6 @@ class CentralSchedulingAgent(TickableAgent):
             agent_configuration_url: 可选的配置 URL
             **kwargs: 其他关键字参数
         """
-        configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
-        configured_target_and_constrain_config_url = kwargs.pop(
-            "target_and_constrain_config_url", None
-        )
-        configured_mpc_service_base_url = kwargs.pop("mpc_service_base_url", None)
-        configured_mpc_request_timeout_seconds = kwargs.pop(
-            "mpc_request_timeout_seconds",
-            None,
-        )
-        configured_mpc_planning_client = kwargs.pop("mpc_planning_client", None)
-        configured_mpc_result_reporter = kwargs.pop("mpc_result_reporter", None)
-        configured_mpc_sensor_provider = kwargs.pop("mpc_sensor_provider", None)
         configured_object_agent_code_map = kwargs.pop("object_agent_code_map", None)
 
         super().__init__(
@@ -145,21 +125,29 @@ class CentralSchedulingAgent(TickableAgent):
             **kwargs
         )
 
-        # 相关 MPC 配置
-        self._configured_mpc_service_base_url = configured_mpc_service_base_url
-        self._configured_mpc_request_timeout_seconds = configured_mpc_request_timeout_seconds
-        self._mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = (
-            configured_mpc_sensor_provider
+        self._init_command_dispatching(
+            sim_coordination_client=sim_coordination_client,
+            hydros_cluster_id=hydros_cluster_id,
+            context=context,
+            object_agent_code_map=configured_object_agent_code_map,
         )
-        self._mpc_planning_client: Optional[MpcPlanningClient] = configured_mpc_planning_client
-        self._mpc_result_reporter: MpcResultReporter = configured_mpc_result_reporter or MpcResultReporter(
-            sim_coordination_client=sim_coordination_client
-        )
+        self._init_model_state()
+        self._init_field_metrics(sim_coordination_client)
+
+        logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
+
+    def _init_command_dispatching(
+        self,
+        sim_coordination_client,
+        hydros_cluster_id: str,
+        context: SimulationContext,
+        object_agent_code_map: Optional[Dict[str, str]],
+    ) -> None:
+        """装配中央调度下发智能体指令所需的协作对象。"""
         self._object_agent_code_map: Dict[str, str] = {
             str(object_id): agent_code
-            for object_id, agent_code in (configured_object_agent_code_map or {}).items()
+            for object_id, agent_code in (object_agent_code_map or {}).items()
         }
-        # 智能体指令客户端按需懒加载
         self._agent_command_gateway = AgentCommandGateway(
             sim_coordination_client=sim_coordination_client,
             hydros_cluster_id=hydros_cluster_id,
@@ -171,52 +159,34 @@ class CentralSchedulingAgent(TickableAgent):
             context=context,
             object_agent_code_map_getter=lambda: self._object_agent_code_map,
         )
-        self._control_command_builder = MpcControlCommandBuilder(
-            source_agent=self,
-            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
-            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
-        )
+        self._control_command_builder = self._create_control_command_builder()
         self._control_command_dispatcher = ControlCommandDispatcher(
             send_command=lambda command: self._agent_command_gateway.send_command(command),
             build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
         )
 
-        # 优化模型与拓扑
+    def _create_control_command_builder(self) -> StationTargetValueCommandBuilder:
+        """创建中央调度控制指令 builder，子类可覆盖以扩展转换能力。"""
+        return StationTargetValueCommandBuilder(
+            source_agent=self,
+            get_sibling_agent_instance=self._target_agent_resolver.get_sibling_agent_instance,
+            resolve_target_agent_for_object=self._target_agent_resolver.resolve_target_agent_for_object,
+        )
+
+    def _init_model_state(self) -> None:
+        """初始化中央调度算法可复用的模型和拓扑占位。"""
         self._optimization_model = None
         self._topology = None
 
-        # 现地设备实时指标缓存
-        self._metrics_data_cache = MetricsDataCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
+    def _init_field_metrics(self, sim_coordination_client) -> None:
+        """初始化现地设备实时指标缓存和 MQTT 订阅适配器。"""
+        self._metrics_data_cache = FieldMetricsCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
         self._field_metrics_cache = self._metrics_data_cache.latest_metrics
         self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
         self._metrics_subscriber = MqttMetricsSubscriber(
             mqtt_client=sim_coordination_client.mqtt_client,
             metrics_data_cache=self._metrics_data_cache,
         )
-
-        self._mpc_optimization_service = MpcOptimizationService(
-            properties=self.properties,
-            metrics_data_cache=self._metrics_data_cache,
-            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
-            configured_mpc_request_timeout_seconds=self._configured_mpc_request_timeout_seconds,
-            mpc_planning_client=self._mpc_planning_client,
-            mpc_result_reporter=self._mpc_result_reporter,
-            mpc_sensor_provider=self._mpc_sensor_provider,
-        )
-        self._mpc_rolling_runtime = MpcRollingRuntime(
-            context=context,
-            properties=self.properties,
-            optimize_step=self.on_optimization,
-            dispatch_control_commands=self._control_command_dispatcher.dispatch,
-            set_current_step=lambda step: setattr(self, "_current_step", step),
-            get_current_step=lambda: self._current_step,
-            set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
-            configured_mpc_config_url=configured_mpc_config_url,
-            configured_target_and_constrain_config_url=configured_target_and_constrain_config_url,
-            configured_mpc_service_base_url=self._configured_mpc_service_base_url,
-        )
-
-        logger.info(f"CentralSchedulingAgent initialized: {self.agent_id}")
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -250,23 +220,11 @@ class CentralSchedulingAgent(TickableAgent):
             需要通过 MQTT 发送的 MqttMetrics 对象列表（可选）
         """
         logger.debug(f"Central scheduling step {request.step}")
-
-        try:
-            self._mpc_rolling_runtime.on_tick(request.step)
-
-            # 返回可选指标
-            return None
-
-        except Exception as e:
-            logger.error(f"Error in central scheduling step {request.step}: {e}", exc_info=True)
-            return None
+        return None
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        处理时序更新，并激活兼容 Java 侧的滚动 MPC。
-
-        在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建 MpcTaskState
-        的第一个触发点。后续 tick 只会在该激活点之后继续滚动。
+        处理时序更新并刷新中央调度的边界条件缓存。
         """
         logger.debug("Received central scheduling time series update: commandId=%s", request.command_id)
 
@@ -278,8 +236,6 @@ class CentralSchedulingAgent(TickableAgent):
                     self._time_series_cache[cache_key] = time_series
                 self.on_boundary_condition_update(event.object_time_series)
 
-            self._mpc_rolling_runtime.handle_time_series_changed(event)
-
             return ResponseFactory.time_series_data_update_succeed(self, request)
         except Exception as e:
             logger.error("Error handling central scheduling time series update: %s", e, exc_info=True)
@@ -287,10 +243,10 @@ class CentralSchedulingAgent(TickableAgent):
 
     def on_optimization(self, step: int) -> Optional[List[Any]]:
         """
-        执行 MPC 优化逻辑。
+        执行中央调度优化逻辑。
 
-        默认实现会调用独立的 MpcPlanningClient，并通过 MpcResultReporter
-        回传 mpc_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
+        通用基类默认不执行优化。需要默认 MPC 能力的子类应继承
+        MpcCentralSchedulingAgent；自定义算法子类可以覆盖此方法。
 
         参数:
             step: 当前仿真步长
@@ -298,16 +254,7 @@ class CentralSchedulingAgent(TickableAgent):
         返回:
             需要发送给边缘智能体的控制指令列表，或 None
         """
-        mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
-        responses = self._mpc_optimization_service.optimize(
-            self,
-            mpc_task_state,
-            step,
-        )
-        if not responses:
-            return None
-
-        return self._control_command_builder.build_from_mpc_responses(responses)
+        return None
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

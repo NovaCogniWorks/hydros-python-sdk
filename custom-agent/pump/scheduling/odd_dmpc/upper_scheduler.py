@@ -182,6 +182,16 @@ class UpperScheduler:
                 if t == 0:
                     target_levels[idx] = float(targets.get(str(pair["back_level_key"]), L0[idx+1]))
 
+        from odd_dmpc.environment import _pool_level_clip_bounds
+        pool_level_bounds = []
+        for pair in chain_pairs:
+            up_id = int(pair["upstream_station_id"])
+            down_id = int(pair["downstream_station_id"])
+            l_min, l_max = _pool_level_clip_bounds(self.system_config, up_id, down_id, margin=0.0)
+            pool_level_bounds.append((l_min, l_max))
+        pool_mins = np.array([b[0] for b in pool_level_bounds])
+        pool_maxs = np.array([b[1] for b in pool_level_bounds])
+
         def get_states_vectorized(x):
             Q = x.reshape((T, N))
             delta_Q = Q[:, :-1] - Q[:, 1:] # (T, N-1)
@@ -230,6 +240,10 @@ class UpperScheduler:
             # 水位惩罚项，整体计算平方差
             level_diff = L[1:, 1:-1] - target_levels
             penalty += np.sum(5.0 * level_diff**2)
+            
+            # 水位超限的强力惩罚 (Soft Constraints)
+            penalty += np.sum(np.maximum(pool_mins - L[1:, 1:-1], 0)) * 5000.0
+            penalty += np.sum(np.maximum(L[1:, 1:-1] - pool_maxs, 0)) * 5000.0
             
             return -total_eff + penalty
 

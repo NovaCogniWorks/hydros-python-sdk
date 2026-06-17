@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
+from hydros_agent_sdk.sensor_data import SensorData as _SensorData
 
 
 def _payload_field(name: str, default: Any = None, default_factory: Any = None) -> Any:
@@ -13,16 +14,6 @@ def _payload_field(name: str, default: Any = None, default_factory: Any = None) 
         **kwargs,
         serialization_alias=name,
     )
-
-
-class SensorData(HydroBaseModel):
-    object_id: Optional[int] = _payload_field("object_id")
-    object_type: Optional[str] = _payload_field("object_type")
-    metrics_code: Optional[str] = _payload_field("metrics_code")
-    position_code: Optional[str] = _payload_field("position_code")
-    value: Optional[float] = None
-    step_index: Optional[int] = _payload_field("step_index")
-    attributes: Optional[str] = _payload_field("attributes")
 
 
 class ControlObjectResult(HydroBaseModel):
@@ -59,7 +50,7 @@ class MpcOptimizeRequest(HydroBaseModel):
     control_config_url: Optional[str] = _payload_field("control_config_url")
     upstream_boundaries: Dict[str, List[float]] = _payload_field("upstream_boundaries", default_factory=dict)
     downstream_boundaries: Optional[Dict[str, Any]] = _payload_field("downstream_boundaries")
-    sensor_data: List[SensorData] = _payload_field("sensor_data", default_factory=list)
+    sensor_data: List[_SensorData] = _payload_field("sensor_data", default_factory=list)
     fixed_controls: Dict[str, float] = _payload_field("fixed_controls", default_factory=dict)
     multi_profile: bool = _payload_field("multi_profile", default=False)
     include_diversion: bool = _payload_field("include_diversion", default=False)
@@ -72,29 +63,3 @@ class MpcOptimizeResponse(HydroBaseModel):
     gate_operations: Optional[int] = None
     gate_amplitude: Optional[float] = None
     horizon_controls: List[HorizonStep] = Field(default_factory=list)
-
-
-class MpcResultDetail(HydroBaseModel):
-    horizon_step: Optional[int] = None
-    command_type: Optional[str] = None
-    object_type: Optional[str] = None
-    node_id: Optional[int] = None
-    object_id: Optional[int] = None
-    value: Optional[float] = None
-    target_value: Optional[float] = None
-    horizon_time: Optional[str] = None
-    attributes: Optional[str] = None
-
-
-class MpcResult(HydroBaseModel):
-    biz_scene_instance_id: str
-    waterway_id: Optional[str] = None
-    tenant_id: Optional[str] = None
-    biz_scenario_id: Optional[str] = None
-    step: int
-    plan_type: Optional[str] = None
-    loss: Optional[float] = None
-    gate_operations: Optional[int] = None
-    gate_amplitude: Optional[float] = None
-    attributes: Optional[str] = None
-    details: List[MpcResultDetail] = Field(default_factory=list)

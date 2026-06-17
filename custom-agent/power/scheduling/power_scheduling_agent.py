@@ -1,7 +1,7 @@
 """
 中央调度智能体示例
 
-本模块展示了如何基于 CentralSchedulingAgent 基类实现一个具体的中央调度智能体。
+本模块展示了如何基于 MpcCentralSchedulingAgent 基类实现一个具体的中央调度智能体。
 该智能体会在滚动时界（Rolling Horizon）上执行模型预测控制（MPC）优化。
 """
 
@@ -20,7 +20,7 @@ from hydros_agent_sdk import (
     ErrorCodes,
     handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
 )
-from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -40,7 +40,7 @@ from hydros_agent_sdk.protocol.models import (
 logger = logging.getLogger(__name__)
 
 
-class PumpCentralSchedulingAgent(CentralSchedulingAgent):
+class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
     中央调度智能体的具体实现。
 

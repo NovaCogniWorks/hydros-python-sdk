@@ -1,11 +1,11 @@
 import unittest
 
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 
 
-class MetricsDataCacheTest(unittest.TestCase):
+class FieldMetricsCacheTest(unittest.TestCase):
     def test_updates_latest_and_step_cache_for_none_position_metrics(self):
-        cache = MetricsDataCache(max_steps=3)
+        cache = FieldMetricsCache(max_steps=3)
 
         self.assertIsNone(
             cache.update(
@@ -37,7 +37,7 @@ class MetricsDataCacheTest(unittest.TestCase):
         self.assertEqual(cache.by_step(2)["1001_flow"]["attributes"], "{\"front_water_flow\":2.0}")
 
     def test_trims_step_history_by_max_steps(self):
-        cache = MetricsDataCache(max_steps=2)
+        cache = FieldMetricsCache(max_steps=2)
 
         for step in range(1, 5):
             cache.update(
@@ -54,7 +54,7 @@ class MetricsDataCacheTest(unittest.TestCase):
         self.assertEqual(cache.get_value(1001, "flow"), 4.0)
 
     def test_converts_latest_metrics_to_sensor_data(self):
-        cache = MetricsDataCache(max_steps=3)
+        cache = FieldMetricsCache(max_steps=3)
         cache.update(
             {
                 "object_id": 1001,

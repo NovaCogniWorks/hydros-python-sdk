@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 
 
@@ -21,7 +21,7 @@ class FakeMqttClient:
 class MqttMetricsSubscriberTest(unittest.TestCase):
     def test_subscribes_and_caches_parsed_metrics_payload(self):
         mqtt_client = FakeMqttClient()
-        cache = MetricsDataCache(max_steps=3)
+        cache = FieldMetricsCache(max_steps=3)
         subscriber = MqttMetricsSubscriber(mqtt_client, cache)
 
         subscriber.subscribe("/metrics/topic")
@@ -46,7 +46,7 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
         self.assertEqual(cache.by_step(4)["1001_flow"]["attributes"], "{\"front_water_flow\":2.5}")
 
     def test_invalid_json_is_ignored(self):
-        cache = MetricsDataCache(max_steps=3)
+        cache = FieldMetricsCache(max_steps=3)
         subscriber = MqttMetricsSubscriber(FakeMqttClient(), cache)
         msg = SimpleNamespace(topic="/metrics/topic", payload=b"{not-json")
 

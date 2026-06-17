@@ -1,11 +1,13 @@
-"""现地指标缓存，供 MPC 优化使用。"""
+"""现地指标缓存，供中央调度和默认 MPC 优化复用。"""
+
+from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from hydros_agent_sdk.mpc.models import SensorData
+from hydros_agent_sdk.sensor_data import SensorData
 
 
-class MetricsDataCache:
+class FieldMetricsCache:
     """存储最新现地指标和有界的逐步历史数据。"""
 
     def __init__(self, max_steps: int):
@@ -72,7 +74,7 @@ class MetricsDataCache:
                         attrs = attributes
                     else:
                         continue
-                        
+
                     if isinstance(attrs, dict) and attr_name in attrs:
                         try:
                             return float(attrs[attr_name])
@@ -86,7 +88,7 @@ class MetricsDataCache:
     def history(self) -> Dict[int, Dict[str, Dict[str, Any]]]:
         return {step: dict(metrics) for step, metrics in self.metrics_by_step.items()}
 
-    def to_sensor_data(self) -> List[SensorData]:
+    def to_sensor_data(self) -> List["SensorData"]:
         return [
             SensorData.model_validate(value)
             for value in self.latest_metrics.values()

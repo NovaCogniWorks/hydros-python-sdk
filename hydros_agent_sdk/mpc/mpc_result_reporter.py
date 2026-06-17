@@ -5,6 +5,7 @@ import logging
 from typing import Iterable, List, Optional, TYPE_CHECKING
 
 from hydros_agent_sdk.protocol.commands import MpcResultReport
+from hydros_agent_sdk.protocol.mpc_results import MpcResult, MpcResultDetail
 from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext
 from hydros_agent_sdk.utils import generate_coordination_command_id
 
@@ -12,8 +13,6 @@ from .models import (
     ControlObjectResult,
     HorizonStep,
     MpcOptimizeResponse,
-    MpcResult,
-    MpcResultDetail,
     PredictedResult,
 )
 
