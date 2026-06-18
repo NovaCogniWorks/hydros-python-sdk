@@ -4,6 +4,13 @@
 .codegraph
 .agents
 .codex
+.venv/
+.pycache-check/
+.uv-cache/
+.hf-cache/
+.xdg-cache/
+.ruff_cache/
+node_modules/
 
 __pycache__/
 *.py[cod]
@@ -18,6 +25,11 @@ htmlcov/
 build/
 dist/
 output/
+
+docs/
+tests/
+examples/
+custom-agent/power/
 
 examples/logs/
 custom-agent/*/logs/

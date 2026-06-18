@@ -5,6 +5,7 @@ DEPLOY_HOST="${DEPLOY_HOST:-192.168.20.52}"
 DEPLOY_DOCKER_PORT="${DEPLOY_DOCKER_PORT:-2375}"
 export DOCKER_HOST="${DOCKER_HOST:-tcp://${DEPLOY_HOST}:${DEPLOY_DOCKER_PORT}}"
 VERSION="${VERSION:-v1.0.0}"
+SKIP_BUILD="${SKIP_BUILD:-false}"
 
 BASE_IMAGE="${BASE_IMAGE:-python:3.11-slim}"
 IMAGE_NAME="${IMAGE_NAME:-hydros-pump-agent}"
@@ -60,13 +61,17 @@ echo "Container start args: ${HYDROS_AGENT_START_ARGS}"
 if [ -n "${DEBUG_PORT}" ]; then
     echo "Debug port: ${DEBUG_PORT}"
 fi
-docker build \
-    -f "${PUMP_DIR}/Dockerfile" \
-    --build-arg BASE_IMAGE="${BASE_IMAGE}" \
-    -t "${IMAGE_NAME}:${VERSION}" \
-    "${REPO_ROOT}"
+if [ "${SKIP_BUILD}" = "true" ]; then
+    echo "Skipping docker build; reusing ${IMAGE_NAME}:${VERSION}"
+else
+    docker build \
+        -f "${PUMP_DIR}/Dockerfile" \
+        --build-arg BASE_IMAGE="${BASE_IMAGE}" \
+        -t "${IMAGE_NAME}:${VERSION}" \
+        "${REPO_ROOT}"
 
-docker tag "${IMAGE_NAME}:${VERSION}" "${IMAGE_NAME}:latest"
+    docker tag "${IMAGE_NAME}:${VERSION}" "${IMAGE_NAME}:latest"
+fi
 
 docker rm -f "${CONTAINER_NAME}" || true
 docker volume create "${LOG_VOLUME}" >/dev/null

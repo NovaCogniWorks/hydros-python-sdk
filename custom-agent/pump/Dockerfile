@@ -18,7 +18,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends bash libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
+COPY custom-agent/pump/requirements.txt /tmp/requirements.txt
 RUN EXTRA_INDEX_ARGS=""; \
     if [ -n "${PIP_EXTRA_INDEX_URL}" ]; then EXTRA_INDEX_ARGS="--extra-index-url ${PIP_EXTRA_INDEX_URL}"; fi; \
     python -m pip install --upgrade pip setuptools wheel \
@@ -26,7 +26,7 @@ RUN EXTRA_INDEX_ARGS=""; \
     && for i in 1 2 3; do \
         python -m pip install --no-cache-dir --retries 10 --timeout 120 --progress-bar off \
         -i "${PIP_INDEX_URL}" ${EXTRA_INDEX_ARGS} \
-        -r /tmp/requirements.txt pyomo==6.9.4 && exit 0; \
+        -r /tmp/requirements.txt && exit 0; \
         echo "pip install failed, retry ${i}/3"; \
         sleep 5; \
     done; \
