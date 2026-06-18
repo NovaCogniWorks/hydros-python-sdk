@@ -45,6 +45,7 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
 
         self.assertFalse(hasattr(agent, "_mpc_rolling_runtime"))
         self.assertFalse(hasattr(agent, "_mpc_optimization_service"))
+        self.assertFalse(hasattr(agent, "on_optimization"))
         self.assertIsNone(
             agent.on_tick_simulation(
                 TickCmdRequest(
@@ -72,6 +73,20 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
             agent._control_command_dispatcher.build_station_target_value_request.__self__,
             agent._control_command_builder,
         )
+
+    def test_mpc_base_owns_default_optimization_hook(self):
+        agent = MpcCentralSchedulingAgentForTest(
+            sim_coordination_client=Mock(mqtt_client=Mock()),
+            agent_id="agent-mpc-optimization",
+            agent_code="MPC_CENTRAL",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="MPC Central",
+            context=SimulationContext(biz_scene_instance_id="scene-mpc-optimization"),
+            hydros_cluster_id="cluster",
+            hydros_node_id="node",
+        )
+
+        self.assertTrue(hasattr(agent, "on_optimization"))
 
     def test_mpc_base_uses_mpc_control_command_builder_without_rebinding_dispatcher(self):
         agent = MpcCentralSchedulingAgentForTest(
