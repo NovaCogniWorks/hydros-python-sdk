@@ -206,10 +206,10 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         默认实现会调用独立的 MpcPlanningClient，并通过 MpcResultReporter
         回传 mpc_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
         """
-        mpc_task_state = self._mpc_rolling_runtime.require_mpc_task_state()
+        task_state = self._mpc_rolling_runtime.require_task_state()
         responses = self._mpc_optimization_service.optimize(
             self,
-            mpc_task_state,
+            task_state,
             step,
         )
         if not responses:

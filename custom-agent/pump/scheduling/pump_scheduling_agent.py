@@ -21,6 +21,7 @@ from hydros_agent_sdk import (
 )
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
 
@@ -74,12 +75,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             "_configured_target_and_constrain_config_url",
             configured_target_and_constrain_config_url,
         )
-        object.__setattr__(self, "_mpc_task_state", None)
+        self._task_state_lifecycle = SchedulingTaskStateLifecycle(
+            context=context,
+            get_current_step=self._get_current_scheduling_step,
+            get_rolling_interval_steps=lambda: 1,
+            get_total_steps=self._get_total_scheduling_steps,
+            get_algorithm_config_url=lambda: self._configured_mpc_config_url,
+            get_control_config_url=(
+                lambda: self._configured_target_and_constrain_config_url
+            ),
+        )
         logger.info(f"中央调度智能体实例已创建: {agent_id}")
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Any]]:
         """执行泵站自定义滚动调度，并下发生成的控制指令。"""
-        self._ensure_mpc_task_state(request.step).current_step = request.step
+        self._ensure_scheduling_task_state(request.step).current_step = request.step
         commands = self.on_optimization(request.step)
         if commands:
             self._control_command_dispatcher.dispatch(commands)
@@ -938,7 +948,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             reporter = MpcResultReporter(sim_coordination_client=self.sim_coordination_client)
             reporter.publish_customize_report(
                 source_agent_instance=self,
-                mpc_task_state=self._ensure_mpc_task_state(step),
+                mpc_task_state=self._ensure_scheduling_task_state(step),
                 horizon_step=horizon_step_list,
                 plan_type="optimal"
             )
@@ -967,40 +977,24 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         return commands
 
-    def _ensure_mpc_task_state(self, step: int) -> SchedulingTaskState:
-        if self._mpc_task_state is None:
-            self._mpc_task_state = SchedulingTaskState(
-                context=self.context,
-                rolling_interval_steps=1,
-                start_step=step,
-                current_step=step,
-                total_steps=getattr(self, "system_config", None).horizon_hours
-                if hasattr(self, "system_config")
-                else 0,
-                algorithm_config_url=self._configured_mpc_config_url,
-                control_config_url=self._configured_target_and_constrain_config_url,
-            )
-            return self._mpc_task_state
+    def _get_current_scheduling_step(self) -> int:
+        if hasattr(self, "_outer_step"):
+            return self._outer_step
+        return self._current_step
 
-        self._mpc_task_state.current_step = step
+    def _get_total_scheduling_steps(self) -> int:
         if hasattr(self, "system_config"):
-            self._mpc_task_state.total_steps = self.system_config.horizon_hours
-        return self._mpc_task_state
+            return self.system_config.horizon_hours
+        return 0
 
-    def _activate_mpc_task_state_from_event(self, event, step: Optional[int] = None) -> Optional[SchedulingTaskState]:
-        if event is None:
-            return self._mpc_task_state
+    def _ensure_scheduling_task_state(self, step: int) -> SchedulingTaskState:
+        return self._task_state_lifecycle.ensure_task_state(step)
 
-        current_step = (
-            event.auto_schedule_at_step
-            if getattr(event, "auto_schedule_at_step", None) is not None
-            else step
-        )
-        if current_step is None:
-            current_step = getattr(self, "_outer_step", self._current_step)
+    def _activate_scheduling_task_state_from_event(self, event, step: Optional[int] = None) -> Optional[SchedulingTaskState]:
+        task_state = self._task_state_lifecycle.activate_from_event(event, step=step)
+        if task_state is None:
+            return None
 
-        task_state = self._ensure_mpc_task_state(int(current_step))
-        task_state.register_hydro_event(event)
         logger.info(
             "Pump scheduling task state activated: bizSceneInstanceId=%s, currentStep=%s, eventSource=%s, timeSeriesCount=%s",
             self.context.biz_scene_instance_id,
@@ -1023,7 +1017,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
-        self._activate_mpc_task_state_from_event(event)
+        self._activate_scheduling_task_state_from_event(event)
         
         from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         
@@ -1159,7 +1153,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 1. 获取变更的数据事件
         event = request.outflow_time_series_data_changed_event
-        self._activate_mpc_task_state_from_event(event)
+        self._activate_scheduling_task_state_from_event(event)
 
         if event and event.object_time_series:
             # 2. 遍历并处理数据

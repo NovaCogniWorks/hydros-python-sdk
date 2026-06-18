@@ -891,14 +891,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [5])
         runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
-        self.assertEqual(runtime.mpc_task_state.start_step, 5)
-        self.assertEqual(runtime.mpc_task_state.current_step, 5)
-        self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 3)
-        self.assertEqual(runtime.mpc_task_state.total_steps, 20)
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 7200)
-        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
-        self.assertEqual(runtime.mpc_task_state.control_config_url, "http://config/control.yaml")
-        self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
+        self.assertEqual(runtime.task_state.start_step, 5)
+        self.assertEqual(runtime.task_state.current_step, 5)
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 3)
+        self.assertEqual(runtime.task_state.total_steps, 20)
+        self.assertEqual(runtime.task_state.output_step_size, 7200)
+        self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.task_state.control_config_url, "http://config/control.yaml")
+        self.assertEqual(len(runtime.task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
     def test_central_scheduling_agent_fails_without_rolling_config(self):
@@ -931,7 +931,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertEqual(response.command_status, CommandStatus.FAILED)
-        self.assertIsNone(agent._mpc_rolling_runtime.mpc_task_state)
+        self.assertIsNone(agent._mpc_rolling_runtime.task_state)
 
     def test_central_scheduling_agent_prefers_scenario_sim_agent_properties(self):
         state_manager = AgentStateManager()
@@ -975,9 +975,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
-        self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 60)
-        self.assertEqual(runtime.mpc_task_state.total_steps, 36)
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 1800)
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 60)
+        self.assertEqual(runtime.task_state.total_steps, 36)
+        self.assertEqual(runtime.task_state.output_step_size, 1800)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()
@@ -1018,12 +1018,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
-        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
         self.assertEqual(
-            runtime.mpc_task_state.control_config_url,
+            runtime.task_state.control_config_url,
             "http://config/control.yaml",
         )
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 3600)
+        self.assertEqual(runtime.task_state.output_step_size, 3600)
 
     def test_central_scheduling_agent_can_opt_into_tick_auto_start_and_rolls(self):
         state_manager = AgentStateManager()
@@ -1056,20 +1056,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [0])
         runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
-        self.assertEqual(runtime.mpc_task_state.start_step, 0)
+        self.assertEqual(runtime.task_state.start_step, 0)
 
         agent.on_time_series_data_update(
             build_time_series_update_request(context, command_id="ts-update-012", auto_schedule_at_step=1)
         )
         self.assertEqual(agent.optimization_steps, [0])
-        self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
+        self.assertEqual(len(runtime.task_state.hydro_events), 1)
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-2", context=context, step=2))
         self.assertEqual(agent.optimization_steps, [0])
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-3", context=context, step=3))
         self.assertEqual(agent.optimization_steps, [0, 3])
-        self.assertEqual(runtime.mpc_task_state.current_loop, 3)
+        self.assertEqual(runtime.task_state.current_loop, 3)
 
     def test_central_scheduling_agent_does_not_auto_start_mpc_on_tick_by_default(self):
         state_manager = AgentStateManager()

@@ -114,8 +114,9 @@ def test_pump_scheduling_time_series_update_activates_generic_task_state(monkeyp
     response = agent.on_time_series_data_update(request)
 
     assert response.command_status == CommandStatus.SUCCEED
-    assert agent._mpc_task_state is not None
-    assert agent._mpc_task_state.current_step == 12
-    assert agent._mpc_task_state.context is context
-    assert agent._mpc_task_state.algorithm_config_url == "custom-agent/pump/data/config_xhh.yaml"
-    assert agent._mpc_task_state.hydro_events == [request.time_series_data_changed_event]
+    task_state = agent._task_state_lifecycle.task_state
+    assert task_state is not None
+    assert task_state.current_step == 12
+    assert task_state.context is context
+    assert task_state.algorithm_config_url == "custom-agent/pump/data/config_xhh.yaml"
+    assert task_state.hydro_events == [request.time_series_data_changed_event]
