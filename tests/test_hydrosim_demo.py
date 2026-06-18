@@ -19,6 +19,7 @@ if str(MPC_DIR) not in sys.path:
 
 import hydrosim_demo
 from hydrosim_api import (
+    CurrentStepPowerPlanningValue,
     HydroSimulationApi,
     HydroSimulationSession,
     HydroSimulationService,
@@ -268,9 +269,20 @@ class HydroSimDemoTest(unittest.TestCase):
         self.assertEqual(len(planning_result["station_power_series"]), 4)
         self.assertEqual(planning_result["station_power_series"][0]["time_series"][0]["step"], 0)
 
-        first_step = api.execute_step()
+        first_step = api.execute_step(
+            current_step_power_planning_values=[
+                CurrentStepPowerPlanningValue(object_id=101, object_type="Station", metrics_code="power", value=88.0),
+                CurrentStepPowerPlanningValue(object_id=102, object_type="Station", metrics_code="power", value=99.0),
+                CurrentStepPowerPlanningValue(object_id=201, object_type="Station", metrics_code="power", value=77.0),
+                CurrentStepPowerPlanningValue(object_id=202, object_type="Station", metrics_code="power", value=66.0),
+            ]
+        )
         self.assertEqual(first_step["current_step_index"], 0)
         self.assertEqual(len(first_step["station_step_outputs"]), 4)
+        self.assertEqual(len(first_step["current_step_power_planning_values"]), 4)
+        self.assertEqual(first_step["current_step_power_planning_values"][0]["value"], 88.0)
+        self.assertEqual(first_step["current_step_power_planning_values"][0]["object_id"], 101)
+        self.assertEqual(first_step["station_step_outputs"][0]["power"], 88.0)
 
         second_step = api.execute_step()
         self.assertEqual(second_step["current_step_index"], 1)

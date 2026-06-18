@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_snake
 
 from hydrosim import config as hydrosim_config
 from hydrosim import (
@@ -22,6 +24,7 @@ from hydrosim import (
 )
 
 __all__ = [
+    "CurrentStepPowerPlanningValue",
     "HydroSimulationApi",
     "HydroSimulationSession",
     "HydroSimulationService",
@@ -33,6 +36,19 @@ __all__ = [
     "run_random_simulation",
     "run_configured_simulation",
 ]
+
+
+class CurrentStepPowerPlanningValue(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_snake,
+        populate_by_name=True,
+        from_attributes=True,
+    )
+
+    object_id: int
+    object_type: str
+    metrics_code: str
+    value: float
 
 
 @dataclass
@@ -223,31 +239,79 @@ class HydroSimulationApi:
     def execute_step(
         self,
         step_index: int | None = None,
-        time_series_power_planning_file: str | None = None,
+        current_step_power_planning_values: List[CurrentStepPowerPlanningValue] | None = None,
     ) -> Dict[str, Any]:
         """每步执行接口。
 
         用法：
         - 如果已生成规划结果，则按顺序返回下一步各站点出力
         - 如果传入 `step_index`，则返回指定步
-        - 如果传入 `time_series_power_planning_file`，会先生成最新规划结果再返回步进结果
+        - 如果传入 `current_step_power_planning_values`，则使用包含 `object_id/object_type/metrics_code/value` 的当前步规划值执行步进
         """
 
         session = self._require_session()
-        if time_series_power_planning_file is not None:
-            self.get_station_power_planning_series(time_series_power_planning_file)
-            session = self._require_session()
         if session.cancelled:
             raise RuntimeError("当前会话已取消，不能继续执行步进。")
-        if not session.latest_station_power_series:
-            raise RuntimeError("当前会话尚未生成规划结果，请先调用获取规划出力时间序列接口。")
 
         target_step = session.current_step_index if step_index is None else int(step_index)
-        station_step_outputs = []
-        total_steps = 0
-        for station in session.latest_station_power_series:
+        total_steps = self._resolve_total_steps(session.latest_station_power_series)
+
+        if current_step_power_planning_values is None and not session.latest_station_power_series:
+            raise RuntimeError("当前会话尚未生成规划结果，请先调用获取规划出力时间序列接口。")
+
+        if current_step_power_planning_values is None:
+            station_step_outputs = self._build_station_step_outputs_from_series(
+                session.latest_station_power_series,
+                target_step,
+            )
+            current_step_power_planning_values = [
+                {
+                    "object_id": item["node_id"],
+                    "object_type": "Station",
+                    "metrics_code": "power",
+                    "value": item["power"],
+                }
+                for item in station_step_outputs
+            ]
+        else:
+            current_step_power_planning_values = self._normalize_current_step_power_planning_values(
+                current_step_power_planning_values,
+            )
+            station_names = hydrosim_config.build_station_name_map()
+            station_step_outputs = [
+                {
+                    "node_id": item.object_id,
+                    "station": station_names.get(item.object_id, str(item.object_id)),
+                    "step": target_step,
+                    "power": item.value,
+                }
+                for item in current_step_power_planning_values
+            ]
+            current_step_power_planning_values = [item.model_dump() for item in current_step_power_planning_values]
+
+        if step_index is None:
+            session.current_step_index = target_step + 1
+
+        return {
+            "message": "步进执行成功。",
+            "session": session.to_dict(),
+            "current_step_index": target_step,
+            "has_next_step": target_step + 1 < total_steps,
+            "current_step_power_planning_values": current_step_power_planning_values,
+            "station_step_outputs": station_step_outputs,
+        }
+
+    def _resolve_total_steps(self, station_power_series: List[Dict[str, Any]]) -> int:
+        return max((len(station.get("time_series", [])) for station in station_power_series), default=0)
+
+    def _build_station_step_outputs_from_series(
+        self,
+        station_power_series: List[Dict[str, Any]],
+        target_step: int,
+    ) -> List[Dict[str, Any]]:
+        station_step_outputs: List[Dict[str, Any]] = []
+        for station in station_power_series:
             series = station.get("time_series", [])
-            total_steps = max(total_steps, len(series))
             if target_step < 0 or target_step >= len(series):
                 raise IndexError(f"step_index={target_step} 超出站点 {station['station']} 的时间序列范围。")
             row = series[target_step]
@@ -259,17 +323,33 @@ class HydroSimulationApi:
                     "power": float(row["value"]),
                 }
             )
+        return station_step_outputs
 
-        if step_index is None:
-            session.current_step_index = target_step + 1
-
-        return {
-            "message": "步进执行成功。",
-            "session": session.to_dict(),
-            "current_step_index": target_step,
-            "has_next_step": target_step + 1 < total_steps,
-            "station_step_outputs": station_step_outputs,
-        }
+    def _normalize_current_step_power_planning_values(
+        self,
+        current_step_power_planning_values: List[CurrentStepPowerPlanningValue | Dict[str, Any]],
+    ) -> List[CurrentStepPowerPlanningValue]:
+        normalized_values: List[CurrentStepPowerPlanningValue] = []
+        for item in current_step_power_planning_values:
+            model = (
+                item
+                if isinstance(item, CurrentStepPowerPlanningValue)
+                else CurrentStepPowerPlanningValue.model_validate(item)
+            )
+            object_id = int(model.object_id)
+            object_type = model.object_type
+            metrics_code = model.metrics_code
+            if object_type != "Station" or metrics_code != "power":
+                raise ValueError("current_step_power_planning_values 仅支持 Station/power 规划出力数据。")
+            normalized_values.append(
+                CurrentStepPowerPlanningValue(
+                    object_id=object_id,
+                    object_type=object_type,
+                    metrics_code=metrics_code,
+                    value=float(model.value),
+                )
+            )
+        return normalized_values
 
     def cancel(self) -> Dict[str, Any]:
         """取消接口。

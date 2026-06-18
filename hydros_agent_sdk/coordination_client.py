@@ -320,7 +320,7 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
-        logger.info(f"Enqueued command: {self._format_command_for_log(command)}")
+        # logger.info(f"Enqueued command: {self._format_command_for_log(command)}")
 
     def send_command(self, command: SimCommand):
         """
