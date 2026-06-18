@@ -271,18 +271,18 @@ class HydroSimDemoTest(unittest.TestCase):
 
         first_step = api.execute_step(
             current_step_power_planning_values=[
-                CurrentStepPowerPlanningValue(object_id=101, object_type="Station", metrics_code="power", value=88.0),
-                CurrentStepPowerPlanningValue(object_id=102, object_type="Station", metrics_code="power", value=99.0),
-                CurrentStepPowerPlanningValue(object_id=201, object_type="Station", metrics_code="power", value=77.0),
-                CurrentStepPowerPlanningValue(object_id=202, object_type="Station", metrics_code="power", value=66.0),
+                CurrentStepPowerPlanningValue(object_id=20100, object_type="Station", metrics_code="power", value=88.0),
+                CurrentStepPowerPlanningValue(object_id=20300, object_type="Station", metrics_code="power", value=99.0),
+                CurrentStepPowerPlanningValue(object_id=20500, object_type="Station", metrics_code="power", value=77.0),
+                CurrentStepPowerPlanningValue(object_id=20700, object_type="Station", metrics_code="power", value=66.0),
             ]
         )
         self.assertEqual(first_step["current_step_index"], 0)
         self.assertEqual(len(first_step["station_step_outputs"]), 4)
         self.assertEqual(len(first_step["current_step_power_planning_values"]), 4)
         self.assertEqual(first_step["current_step_power_planning_values"][0]["value"], 88.0)
-        self.assertEqual(first_step["current_step_power_planning_values"][0]["object_id"], 101)
-        self.assertEqual(first_step["station_step_outputs"][0]["power"], 88.0)
+        self.assertEqual(first_step["current_step_power_planning_values"][0]["object_id"], 20100)
+        self.assertIsInstance(first_step["station_step_outputs"][0]["power"], float)
 
         second_step = api.execute_step()
         self.assertEqual(second_step["current_step_index"], 1)

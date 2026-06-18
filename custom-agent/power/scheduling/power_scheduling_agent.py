@@ -1,24 +1,29 @@
 """
-中央调度智能体示例
+中央调度智能体示例。
 
-本模块展示了如何基于 MpcCentralSchedulingAgent 基类实现一个具体的中央调度智能体。
-该智能体会在滚动时界（Rolling Horizon）上执行模型预测控制（MPC）优化。
+本模块展示如何基于 MpcCentralSchedulingAgent 接入电站 HydroSim 算法。
 """
 
 import logging
 import os
 import sys
+import time
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-# 将当前目录添加到 Python 路径中
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
+CURRENT_DIR = Path(__file__).resolve().parent
+HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
+DATA_DIR = CURRENT_DIR.parent / "data"
+if str(HYDROSIM_DIR) not in sys.path:
+    sys.path.insert(0, str(HYDROSIM_DIR))
 
+from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
     load_env_config,
     ErrorCodes,
-    handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
+    handle_agent_errors,
+    DeviceValueTypeEnum,
+    HydroObjectType,
 )
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
@@ -26,6 +31,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
+    TickCmdRequest,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
     OutflowTimeSeriesDataUpdateRequest,
@@ -36,20 +42,18 @@ from hydros_agent_sdk.protocol.models import (
     CommandStatus,
     AgentStatus,
 )
+from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
 
 class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
-    中央调度智能体的具体实现。
+    水电站中央调度智能体。
 
-    该智能体的主要功能包括：
-    1. 加载水网拓扑结构
-    2. 初始化 MPC 优化模型
-    3. 通过 MQTT 订阅现地实时指标（Field Metrics）
-    4. 执行滚动时界（MPC）优化逻辑
-    5. 为其他智能体（如泵站、闸门）生成调度控制指令
+    该实现复用 MpcCentralSchedulingAgent 的滚动调度能力，并通过
+    HydroSimulationApi 的 initialize/get_station_power_planning_series/execute_step
+    链路返回每步设备级仿真结果。
     """
 
     def __init__(
@@ -62,9 +66,8 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         context: SimulationContext,
         hydros_cluster_id: str,
         hydros_node_id: str,
-        **kwargs
+        **kwargs,
     ):
-        """初始化中央调度智能体。"""
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -74,54 +77,38 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             context=context,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
-            **kwargs
+            **kwargs,
         )
-
-        logger.info(f"中央调度智能体实例已创建: {agent_id}")
+        self._hydrosim_api = HydroSimulationApi()
+        self._hydrosim_initialized = False
+        self._hydrosim_power_plan_loaded = False
+        logger.info("中央调度智能体实例已创建: %s", agent_id)
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
-        """
-        初始化智能体。该方法在任务启动时被调用。
-        """
-        logger.info(f"正在初始化智能体: {self.agent_id}")
+        logger.info("正在初始化智能体: %s", self.agent_id)
 
         try:
-            # 1. 加载智能体配置 (从 agent.properties)
             self.load_agent_configuration(request)
-
-            # 2. 初始化优化模型 (模拟)
             self._initialize_optimization_model()
+            self._initialize_hydrosim_session()
+            self._ensure_hydrosim_power_plan_loaded()
 
-            # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
             env_config = load_env_config()
-            base_metrics_topic = env_config.get('metrics_topic')
+            base_metrics_topic = env_config.get("metrics_topic")
             if base_metrics_topic:
-                # 手动替换 {hydros_cluster_id} 变量
-                cluster_id = env_config.get('hydros_cluster_id', 'hydros-k3s-testing')
-                base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
-
-                # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
+                cluster_id = env_config.get("hydros_cluster_id", "hydros-k3s-testing")
+                base_metrics_topic = base_metrics_topic.replace("{hydros_cluster_id}", cluster_id)
                 task_id = self.context.biz_scene_instance_id
-
-                # 拼接完整主题实现任务隔离：base_topic/task_id
                 full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
-
-                logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
+                logger.info("订阅渲染后的现地数据主题: %s", full_metrics_topic)
                 self._metrics_subscriber.subscribe(full_metrics_topic)
 
-            # 4. 在状态管理器中注册
             self.state_manager.init_task(self.context, [self])
             self.state_manager.add_local_agent(self)
-
-            # 5. 启动 agent command 客户端，后面就能直接发指令
             self._agent_command_gateway.start()
 
-            logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
-
-            # 将智能体状态更新为 ACTIVE (活动)
-            object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
-
+            object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
             return SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -129,43 +116,37 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 source_agent_instance=self,
                 created_agent_instances=[self],
                 managed_top_objects={},
-                broadcast=False
+                broadcast=False,
             )
         except Exception:
-            # 初始化失败就把客户端收掉，别把半拉资源留住
             self._agent_command_gateway.shutdown()
             raise
 
     def _initialize_optimization_model(self):
-        """
-        初始化优化模型（模拟逻辑）。
-        在实际应用中，这里会加载优化引擎（如 Gurobi, CPLEX 或自定义算法）。
-        """
         logger.info("正在加载 MPC 优化模型...")
         self._optimization_model = {"status": "ready"}
         logger.info("优化模型已就绪")
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
+    def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
+        """
+        执行每步仿真，并返回算法真实生成的设备级结果：
+        - 各水轮机：`power`、`water_flow`
+        - 各闸门：`water_flow`、`gate_opening`
+        """
+        super().on_tick_simulation(request)
+        self._ensure_hydrosim_initialized()
+        self._ensure_hydrosim_power_plan_loaded()
+
+        step_result = self._hydrosim_api.execute_step(step_index=request.step)
+        metrics_list = self._build_metrics_from_step_result(step_result)
+        logger.info("step=%s HydroSim execute_step 返回设备指标 %s 条", request.step, len(metrics_list))
+        return metrics_list
+
+    @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
-        """
-        执行 MPC 优化逻辑。
-        该方法由基类根据 roll_steps 自动触发。
-
-        参数:
-            step: 当前仿真步长
-        
-        返回:
-            生成的控制指令列表，将发送给其他智能体
-        """
-        logger.info(f"--- 第 {step} 步：开始执行 MPC 滚动优化 ---")
-
-        # 1. 获取输入数据（例如：从缓存中读取订阅到的水位数据）
-        # 示例：water_level = self._metrics_data_cache.get_value(101, "water_level")
-        
-        # 2. 调用优化算法（模拟运行）
+        logger.info("--- 第 %s 步：开始执行 MPC 滚动优化 ---", step)
         logger.info("求解器正在运行中...")
-        
-        # 3. 直接下发控制指令
         logger.info("优化完成，开始下发控制指令")
         return [
             {
@@ -184,87 +165,118 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             },
         ]
 
+    def _build_metrics_from_step_result(self, step_result: Dict[str, Any]) -> List[MqttMetrics]:
+        metrics_list: List[MqttMetrics] = []
+        for item in step_result.get("device_step_outputs") or []:
+            metrics_list.append(
+                MqttMetrics(
+                    source_id=self.agent_code,
+                    job_instance_id=self.biz_scene_instance_id,
+                    object_id=int(item["object_id"]),
+                    object_name=str(item["object_name"]),
+                    step_index=int(item["step"]),
+                    source_timestamp_ms=int(time.time() * 1000),
+                    metrics_code=str(item["metrics_code"]),
+                    value=float(item["value"]),
+                )
+            )
+        return metrics_list
+
+    def _initialize_hydrosim_session(self) -> None:
+        init_result = self._hydrosim_api.initialize(
+            time_series_file=self._get_hydrosim_property(
+                "hydrosim_time_series_file",
+                str(DATA_DIR / "time_series_power_planning.json"),
+            ),
+            mpc_config_file=self._get_hydrosim_property(
+                "hydrosim_mpc_config_file",
+                str(DATA_DIR / "mpc_config.yaml"),
+            ),
+            initial_states_file=self._get_hydrosim_property(
+                "hydrosim_initial_states_file",
+                str(DATA_DIR / "initial_states.yaml"),
+            ),
+            constraints_file=self._get_hydrosim_property(
+                "hydrosim_constraints_file",
+                str(DATA_DIR / "constrains_targets.yaml"),
+            ),
+        )
+        self._hydrosim_initialized = True
+        logger.info("HydroSim initialized for scheduling, session=%s", init_result["session"]["session_id"])
+
+    def _ensure_hydrosim_initialized(self) -> None:
+        if not self._hydrosim_initialized:
+            self._initialize_hydrosim_session()
+
+    def _ensure_hydrosim_power_plan_loaded(self) -> None:
+        if self._hydrosim_power_plan_loaded:
+            return
+        result = self._hydrosim_api.get_station_power_planning_series(
+            self._get_hydrosim_property(
+                "hydrosim_power_planning_file",
+                str(DATA_DIR / "time_series_power_planning.json"),
+            )
+        )
+        self._hydrosim_power_plan_loaded = True
+        logger.info(
+            "HydroSim power planning loaded, stations=%s",
+            len(result.get("station_power_series", [])),
+        )
+
+    def _get_hydrosim_property(self, key: str, default: str) -> str:
+        value = self.properties.get_property(key, default)
+        return str(Path(value).resolve())
+
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
-        """
-        处理时间序列数据更新（例如外部水位观测、边界条件等）。
-        
-        参数:
-            request: 时间序列数据更新请求，包含新数据
-        """
-        logger.info(f"--- 收到时间序列数据更新：{request.command_id} ---")
-        
-        # 1. 获取变更的数据事件
+        logger.info("--- 收到时间序列数据更新：%s ---", request.command_id)
         event = request.time_series_data_changed_event
-        
-        # 2. 遍历并处理数据
         for obj_ts in event.object_time_series:
-            logger.info(f"对象 {obj_ts.object_name} 的指标 {obj_ts.metrics_code} 已更新")
-            
-            # 这里可以将数据存入本地缓存，或直接更新优化模型的边界条件
-            # 例如更新模型的边界约束:
-            # 可按需调用：self.on_boundary_condition_update([obj_ts])
-            
-            # 打印部分数据供调试
+            logger.info("对象 %s 的指标 %s 已更新", obj_ts.object_name, obj_ts.metrics_code)
             if obj_ts.time_series:
                 first_val = obj_ts.time_series[0]
-                logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+                logger.debug("首个数据点: Step=%s, Value=%s", first_val.step, first_val.value)
 
-        # 3. 返回成功响应
         return TimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self,
-            broadcast=False
+            broadcast=False,
         )
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest) -> OutflowTimeSeriesDataUpdateResponse:
-        """
-        处理出流时间序列数据更新。
-
-        参数:
-            request: 出流时间序列数据更新请求
-        """
-        logger.info(f"--- 收到出流量时间序列数据更新：{request.command_id} ---")
-
-        # 1. 获取变更的数据事件
+        logger.info("--- 收到出流量时间序列数据更新：%s ---", request.command_id)
         event = request.outflow_time_series_data_changed_event
-
         if event and event.object_time_series:
-            # 2. 遍历并处理数据
             for obj_ts in event.object_time_series:
-
-                # 打印部分数据供调试
                 if obj_ts.time_series:
                     first_val = obj_ts.time_series[0]
-                    logger.debug(f"  首个数据点: Step={first_val.step}, Value={first_val.value}")
+                    logger.debug("首个数据点: Step=%s, Value=%s", first_val.step, first_val.value)
 
-            # 3. 更新优化模型的边界条件（让 MPC 能够感知到这些计划外的流量变化）
-            # 可按需调用：self.on_boundary_condition_update(event.object_time_series)
-
-        # 4. 返回成功响应
         return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self,
-            broadcast=False
+            broadcast=False,
         )
 
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        """
-        终止智能体运行并清理资源。
-        """
-        logger.info(f"正在停止中央调度智能体: {self.agent_id}")
-
-        # 清理资源
+        logger.info("正在停止中央调度智能体: %s", self.agent_id)
         self._agent_command_gateway.shutdown()
         self._optimization_model = None
-        
-        # 从状态管理器中注销
+
+        if self._hydrosim_initialized:
+            try:
+                self._hydrosim_api.cancel()
+            except Exception:
+                logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
+        self._hydrosim_initialized = False
+        self._hydrosim_power_plan_loaded = False
+
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
 
@@ -273,5 +285,5 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             command_id=request.command_id,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self,
-            broadcast=False
+            broadcast=False,
         )

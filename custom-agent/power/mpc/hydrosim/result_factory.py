@@ -255,26 +255,34 @@ class HydroSimulationResultFactory:
                 continue
             device_id = int(row["device_id"])
             control_type = str(row.get("type", ""))
-            metric = "power" if control_type == "Turbine" else "gate_opening"
-            key = (device_id, metric)
-            if key in seen_devices:
-                continue
-            seen_devices.add(key)
-            values = self._control_domain_device_series(device_id, metric, control_type, control_domains, multi_stair, multi_reservoir)
-            if not values:
-                continue
-            series_items.append(
-                {
-                    "time_series_name": f"device_{device_id}_{metric}_simulation_result",
-                    "object_ids": [device_id],
-                    "object_type": control_type,
-                    "object_name": f"device_{device_id}",
-                    "metrics_code": metric,
-                    "node_id": int(row.get("node_id")),
-                    "source": "simulation_result",
-                    "time_series": self._make_time_series_rows(formal_steps, values, sample_interval),
-                }
-            )
+            metrics = self._device_metrics_for_control_type(control_type)
+            for metric in metrics:
+                key = (device_id, metric)
+                if key in seen_devices:
+                    continue
+                seen_devices.add(key)
+                values = self._control_domain_device_series(
+                    device_id,
+                    metric,
+                    control_type,
+                    control_domains,
+                    multi_stair,
+                    multi_reservoir,
+                )
+                if not values:
+                    continue
+                series_items.append(
+                    {
+                        "time_series_name": f"device_{device_id}_{metric}_simulation_result",
+                        "object_ids": [device_id],
+                        "object_type": control_type,
+                        "object_name": f"device_{device_id}",
+                        "metrics_code": metric,
+                        "node_id": int(row.get("node_id")),
+                        "source": "simulation_result",
+                        "time_series": self._make_time_series_rows(formal_steps, values, sample_interval),
+                    }
+                )
 
         result = {
             "hydro_event_type": "SIMULATION_RESULT_UPDATED",
@@ -604,7 +612,25 @@ class HydroSimulationResultFactory:
                 return []
             return units[unit_idx].history["current_power"]
 
-        if control_type == "Gate" and metric in ("gate_opening", "opening"):
+        if control_type == "Turbine" and metric in ("water_flow", "flow", "outflow"):
+            turbine_ids = [
+                int(row["device_id"])
+                for row in control_domains
+                if int(row.get("node_id", -1)) == node_id and row.get("type") == "Turbine"
+            ]
+            unique_ids = []
+            for turbine_id in turbine_ids:
+                if turbine_id not in unique_ids:
+                    unique_ids.append(turbine_id)
+            if device_id not in unique_ids:
+                return []
+            unit_idx = unique_ids.index(device_id)
+            units = multi_stair.multi_stair[station_idx].multi_station
+            if unit_idx >= len(units):
+                return []
+            return units[unit_idx].history["flow"]
+
+        if control_type == "Gate" and metric in ("gate_opening", "opening", "water_flow", "flow", "outflow"):
             gate_ids = [
                 int(row["device_id"])
                 for row in control_domains
@@ -624,6 +650,8 @@ class HydroSimulationResultFactory:
                     break
             spill = np.asarray(reservoir.history["current_outflow_discharge"], dtype=float)
             per_gate_q = spill / max(len(unique_ids), 1)
+            if metric in ("water_flow", "flow", "outflow"):
+                return per_gate_q.tolist()
             opening = np.clip(
                 per_gate_q / max(reservoir.max_spill_q / max(len(unique_ids), 1), 1e-9) * max_opening,
                 0.0,
@@ -632,6 +660,13 @@ class HydroSimulationResultFactory:
             return opening.tolist()
 
         return []
+
+    def _device_metrics_for_control_type(self, control_type: str) -> Sequence[str]:
+        if control_type == "Turbine":
+            return ("power", "water_flow")
+        if control_type == "Gate":
+            return ("water_flow", "gate_opening")
+        return ()
 
     def _make_time_series_rows(self, steps: Sequence[int], values: Sequence[float], sample_interval: int) -> List[Dict]:
         if sample_interval <= 0:

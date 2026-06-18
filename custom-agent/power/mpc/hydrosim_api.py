@@ -62,6 +62,8 @@ class HydroSimulationSession:
     constraints_file: str
     latest_power_planning_file: str | None = None
     latest_station_power_series: List[Dict[str, Any]] = field(default_factory=list)
+    latest_device_output_series: List[Dict[str, Any]] = field(default_factory=list)
+    step_runtime: "HydroSimulationStepRuntime | None" = None
     current_step_index: int = 0
     cancelled: bool = False
 
@@ -76,6 +78,25 @@ class HydroSimulationSession:
             "current_step_index": self.current_step_index,
             "cancelled": self.cancelled,
         }
+
+
+@dataclass
+class HydroSimulationStepRuntime:
+    """HydroSim 步进态：保存 execute_step 所需的真实算法运行上下文。"""
+
+    merged_event: Dict[str, Any]
+    initial_states: Dict[str, Any]
+    constraints: Dict[str, Any]
+    flow_configs: List[Dict[str, Any]]
+    steps: Any
+    flows_in: Any
+    station_power_plan: Dict[int, Any]
+    target_stage_by_node: Dict[int, Any]
+    control_domains: List[Dict[str, Any]]
+    device_names: Dict[int, str]
+    multi_river: Any
+    multi_reservoir: Any
+    multi_stair: Any
 
 
 class HydroSimulationApi:
@@ -179,6 +200,8 @@ class HydroSimulationApi:
 
         session.latest_power_planning_file = None
         session.latest_station_power_series = []
+        session.latest_device_output_series = []
+        session.step_runtime = None
         session.current_step_index = 0
         session.cancelled = False
         return {
@@ -223,9 +246,12 @@ class HydroSimulationApi:
             files = result["files"]
             run_summary = result["json"]["run_summary"]
             station_power_series = self._extract_station_power_series_from_yaml(files["configured_outputs_yaml"])
+            device_output_series = self._extract_device_output_series_from_yaml(files["configured_outputs_yaml"])
 
         session.latest_power_planning_file = str(Path(time_series_power_planning_file).resolve())
         session.latest_station_power_series = station_power_series
+        session.latest_device_output_series = device_output_series
+        session.step_runtime = self._build_step_runtime(session, merged_event)
         session.current_step_index = 0
         session.cancelled = False
 
@@ -252,45 +278,55 @@ class HydroSimulationApi:
         session = self._require_session()
         if session.cancelled:
             raise RuntimeError("当前会话已取消，不能继续执行步进。")
-
         target_step = session.current_step_index if step_index is None else int(step_index)
-        total_steps = self._resolve_total_steps(session.latest_station_power_series)
+        step_runtime = session.step_runtime
+
+        if step_runtime is None:
+            raise RuntimeError("当前会话尚未生成可步进的仿真上下文，请先调用获取规划出力时间序列接口。")
+
+        total_steps = int(len(step_runtime.steps))
+        if total_steps <= 0:
+            raise RuntimeError("当前会话没有可执行的仿真步。")
+        if target_step < 0 or target_step >= total_steps:
+            raise IndexError(f"step_index={target_step} 超出仿真步范围 [0, {total_steps - 1}]。")
 
         if current_step_power_planning_values is None and not session.latest_station_power_series:
             raise RuntimeError("当前会话尚未生成规划结果，请先调用获取规划出力时间序列接口。")
 
-        if current_step_power_planning_values is None:
-            station_step_outputs = self._build_station_step_outputs_from_series(
-                session.latest_station_power_series,
-                target_step,
+        if target_step < session.current_step_index:
+            session.step_runtime = self._build_step_runtime(
+                session,
+                copy.deepcopy(step_runtime.merged_event),
             )
-            current_step_power_planning_values = [
-                {
-                    "object_id": item["node_id"],
-                    "object_type": "Station",
-                    "metrics_code": "power",
-                    "value": item["power"],
-                }
-                for item in station_step_outputs
-            ]
-        else:
-            current_step_power_planning_values = self._normalize_current_step_power_planning_values(
-                current_step_power_planning_values,
-            )
-            station_names = hydrosim_config.build_station_name_map()
-            station_step_outputs = [
-                {
-                    "node_id": item.object_id,
-                    "station": station_names.get(item.object_id, str(item.object_id)),
-                    "step": target_step,
-                    "power": item.value,
-                }
-                for item in current_step_power_planning_values
-            ]
-            current_step_power_planning_values = [item.model_dump() for item in current_step_power_planning_values]
+            step_runtime = session.step_runtime
+            session.current_step_index = 0
 
-        if step_index is None:
-            session.current_step_index = target_step + 1
+        normalized_values = self._normalize_current_step_power_planning_values(
+            current_step_power_planning_values or [],
+        )
+        planning_values_by_node = self._resolve_step_power_plan_values(
+            step_runtime,
+            target_step,
+            normalized_values,
+        )
+        self._advance_runtime_to_target_step(
+            session=session,
+            step_runtime=step_runtime,
+            target_step=target_step,
+            planning_values_by_node=planning_values_by_node,
+        )
+
+        station_step_outputs = self._build_station_step_outputs_from_runtime(step_runtime, target_step)
+        device_step_outputs = self._build_device_step_outputs_from_runtime(step_runtime, target_step)
+        current_step_power_planning_values = [
+            {
+                "object_id": node_id,
+                "object_type": "Station",
+                "metrics_code": "power",
+                "value": float(planning_values_by_node[node_id]),
+            }
+            for node_id in hydrosim_config.STATION_NODE_IDS
+        ]
 
         return {
             "message": "步进执行成功。",
@@ -299,6 +335,7 @@ class HydroSimulationApi:
             "has_next_step": target_step + 1 < total_steps,
             "current_step_power_planning_values": current_step_power_planning_values,
             "station_step_outputs": station_step_outputs,
+            "device_step_outputs": device_step_outputs,
         }
 
     def _resolve_total_steps(self, station_power_series: List[Dict[str, Any]]) -> int:
@@ -330,6 +367,7 @@ class HydroSimulationApi:
         current_step_power_planning_values: List[CurrentStepPowerPlanningValue | Dict[str, Any]],
     ) -> List[CurrentStepPowerPlanningValue]:
         normalized_values: List[CurrentStepPowerPlanningValue] = []
+        station_names = hydrosim_config.build_station_name_map()
         for item in current_step_power_planning_values:
             model = (
                 item
@@ -341,6 +379,8 @@ class HydroSimulationApi:
             metrics_code = model.metrics_code
             if object_type != "Station" or metrics_code != "power":
                 raise ValueError("current_step_power_planning_values 仅支持 Station/power 规划出力数据。")
+            if object_id not in station_names:
+                raise ValueError(f"current_step_power_planning_values 包含未配置的站点 object_id={object_id}。")
             normalized_values.append(
                 CurrentStepPowerPlanningValue(
                     object_id=object_id,
@@ -351,6 +391,209 @@ class HydroSimulationApi:
             )
         return normalized_values
 
+    def _build_step_runtime(
+        self,
+        session: HydroSimulationSession,
+        merged_event: Dict[str, Any],
+    ) -> HydroSimulationStepRuntime:
+        runtime = self.service.core.runtime
+        initial_states = self._load_yaml_file(session.initial_states_file, "初始状态文件")
+        constraints = self._load_yaml_file(session.constraints_file, "约束文件")
+        steps = runtime._time_axis_from_event(merged_event)
+        flow_configs, default_target_stage_by_node = runtime._apply_yaml_basic_parameters(
+            list(self.service.core.flow_configs),
+            constraints,
+            initial_states,
+            merged_event,
+        )
+        flows_in = runtime._upstream_inflow_series(merged_event, steps, initial_states)
+        power_cmd, station_power_plan = runtime._power_series_by_station(merged_event, steps)
+        target_stage_by_node = runtime._target_stage_series_by_node(
+            merged_event,
+            steps,
+            default_target_stage_by_node,
+        )
+        multi_river = runtime.RiverArray(
+            1,
+            "大渡河_水力_V16_步进",
+            flow_configs,
+            max(len(steps), 1),
+            self.service.core.capa_loc,
+        )
+        multi_reservoir = runtime.HydroResStairs(
+            1,
+            "大渡河_水库_V16_步进",
+            flow_configs,
+            self.service.core.flow_station_cfgs,
+            self.service.core.capa_loc,
+        )
+        multi_stair = runtime.HydroStair(
+            1,
+            "大渡河_电站_V16_步进",
+            float(power_cmd[0]),
+            self.service.core.power_configs,
+            self.service.core.unit_configs,
+        )
+        runtime._apply_initial_conditions(multi_reservoir, multi_stair, flow_configs, initial_states)
+        return HydroSimulationStepRuntime(
+            merged_event=merged_event,
+            initial_states=initial_states,
+            constraints=constraints,
+            flow_configs=flow_configs,
+            steps=steps,
+            flows_in=flows_in,
+            station_power_plan=station_power_plan,
+            target_stage_by_node=target_stage_by_node,
+            control_domains=list(constraints.get("control_domains", []) or []),
+            device_names=self._build_device_name_map(initial_states),
+            multi_river=multi_river,
+            multi_reservoir=multi_reservoir,
+            multi_stair=multi_stair,
+        )
+
+    def _build_device_name_map(self, initial_states: Dict[str, Any]) -> Dict[int, str]:
+        result: Dict[int, str] = {}
+        root = initial_states.get("initial_states", initial_states)
+        for section in root.values():
+            if not isinstance(section, dict):
+                continue
+            overrides = section.get("overrides", [])
+            if isinstance(overrides, dict):
+                rows: List[Dict[str, Any]] = []
+                for values in overrides.values():
+                    if isinstance(values, list):
+                        rows.extend(values)
+            else:
+                rows = list(overrides or [])
+            for row in rows:
+                if not isinstance(row, dict) or row.get("id") is None or not row.get("name"):
+                    continue
+                try:
+                    device_id = int(row["id"])
+                except (TypeError, ValueError):
+                    continue
+                result[device_id] = str(row["name"])
+        return result
+
+    def _resolve_step_power_plan_values(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        target_step: int,
+        normalized_values: List[CurrentStepPowerPlanningValue],
+    ) -> Dict[int, float]:
+        planning_values_by_node = {
+            int(node_id): float(step_runtime.station_power_plan[node_id][target_step])
+            for node_id in hydrosim_config.STATION_NODE_IDS
+        }
+        for item in normalized_values:
+            planning_values_by_node[int(item.object_id)] = float(item.value)
+        return planning_values_by_node
+
+    def _advance_runtime_to_target_step(
+        self,
+        session: HydroSimulationSession,
+        step_runtime: HydroSimulationStepRuntime,
+        target_step: int,
+        planning_values_by_node: Dict[int, float],
+    ) -> None:
+        while session.current_step_index <= target_step:
+            step_to_run = session.current_step_index
+            step_plan = (
+                planning_values_by_node
+                if step_to_run == target_step
+                else {
+                    int(node_id): float(step_runtime.station_power_plan[node_id][step_to_run])
+                    for node_id in hydrosim_config.STATION_NODE_IDS
+                }
+            )
+            self._execute_runtime_step(step_runtime, step_to_run, step_plan)
+            session.current_step_index = step_to_run + 1
+
+    def _execute_runtime_step(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        step_index: int,
+        planning_values_by_node: Dict[int, float],
+    ) -> None:
+        runtime = self.service.core.runtime
+        runtime._set_step_target_stages(
+            step_runtime.multi_reservoir,
+            step_runtime.target_stage_by_node,
+            step_index,
+        )
+        step_runtime.multi_stair.update_stage_hints(step_runtime.multi_reservoir.stage_hints())
+        total_power_cmd = float(sum(planning_values_by_node.values()))
+        step_runtime.multi_stair.step_execute(total_power_cmd)
+        step_runtime.multi_reservoir.step(
+            step_runtime.multi_river,
+            step_runtime.multi_stair,
+            record=True,
+        )
+        step_runtime.multi_river.step_execute(
+            step_runtime.multi_reservoir,
+            float(step_runtime.flows_in[step_index]),
+        )
+
+    def _build_station_step_outputs_from_runtime(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        target_step: int,
+    ) -> List[Dict[str, Any]]:
+        outputs: List[Dict[str, Any]] = []
+        for node_id in hydrosim_config.STATION_NODE_IDS:
+            station_idx = hydrosim_config.NODE_TO_INDEX[node_id]
+            station = step_runtime.multi_stair.multi_stair[station_idx]
+            outputs.append(
+                {
+                    "node_id": int(node_id),
+                    "station": str(station.name),
+                    "step": int(target_step),
+                    "power": float(station.history["current_power"][-1]),
+                }
+            )
+        return outputs
+
+    def _build_device_step_outputs_from_runtime(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        target_step: int,
+    ) -> List[Dict[str, Any]]:
+        result_factory = self.service.core.result_factory
+        outputs: List[Dict[str, Any]] = []
+        seen: set[tuple[int, str]] = set()
+        for row in step_runtime.control_domains:
+            if row.get("device_id") is None:
+                continue
+            device_id = int(row["device_id"])
+            control_type = str(row.get("type", ""))
+            for metric in result_factory._device_metrics_for_control_type(control_type):
+                key = (device_id, metric)
+                if key in seen:
+                    continue
+                seen.add(key)
+                series = result_factory._control_domain_device_series(
+                    device_id=device_id,
+                    metric=metric,
+                    control_type=control_type,
+                    control_domains=step_runtime.control_domains,
+                    multi_stair=step_runtime.multi_stair,
+                    multi_reservoir=step_runtime.multi_reservoir,
+                )
+                if not series:
+                    continue
+                outputs.append(
+                    {
+                        "object_id": device_id,
+                        "object_type": control_type,
+                        "object_name": step_runtime.device_names.get(device_id, f"device_{device_id}"),
+                        "metrics_code": metric,
+                        "node_id": row.get("node_id"),
+                        "step": int(target_step),
+                        "value": float(series[-1]),
+                    }
+                )
+        return outputs
+
     def cancel(self) -> Dict[str, Any]:
         """取消接口。
 
@@ -360,7 +603,9 @@ class HydroSimulationApi:
         session = self._require_session()
         session.cancelled = True
         session.latest_station_power_series = []
+        session.latest_device_output_series = []
         session.latest_power_planning_file = None
+        session.step_runtime = None
         session.current_step_index = 0
         return {
             "message": "当前 HydroSim 会话已取消。",
@@ -374,6 +619,7 @@ class HydroSimulationApi:
             "message": "当前会话信息获取成功。",
             "session": session.to_dict(),
             "has_active_power_plan": bool(session.latest_station_power_series),
+            "has_active_device_outputs": bool(session.latest_device_output_series),
         }
 
     def _require_session(self) -> HydroSimulationSession:
@@ -459,6 +705,64 @@ class HydroSimulationApi:
                 }
             )
         return result
+
+    def _extract_device_output_series_from_yaml(self, yaml_path: str) -> List[Dict[str, Any]]:
+        with open(yaml_path, "r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle) or {}
+
+        result = []
+        for item in payload.get("object_time_series", []) or []:
+            object_type = item.get("object_type")
+            metrics_code = item.get("metrics_code")
+            if object_type not in {"Turbine", "Gate"}:
+                continue
+            if metrics_code not in {"power", "water_flow", "gate_opening"}:
+                continue
+            object_ids = item.get("object_ids") or []
+            if item.get("object_id") is not None:
+                object_ids = list(object_ids) + [item["object_id"]]
+            if len(object_ids) != 1:
+                continue
+            result.append(
+                {
+                    "object_id": int(object_ids[0]),
+                    "object_type": object_type,
+                    "object_name": item.get("object_name") or f"device_{object_ids[0]}",
+                    "metrics_code": metrics_code,
+                    "node_id": item.get("node_id"),
+                    "time_series": [
+                        {"step": int(row["step"]), "value": float(row["value"])}
+                        for row in item.get("time_series", [])
+                    ],
+                }
+            )
+        return result
+
+    def _build_device_step_outputs_from_series(
+        self,
+        device_output_series: List[Dict[str, Any]],
+        target_step: int,
+    ) -> List[Dict[str, Any]]:
+        outputs = []
+        for device_series in device_output_series:
+            series = device_series.get("time_series", [])
+            if target_step < 0 or target_step >= len(series):
+                raise IndexError(
+                    f"step_index={target_step} 超出设备 {device_series['object_id']} 的时间序列范围。"
+                )
+            row = series[target_step]
+            outputs.append(
+                {
+                    "object_id": int(device_series["object_id"]),
+                    "object_type": str(device_series["object_type"]),
+                    "object_name": str(device_series["object_name"]),
+                    "metrics_code": str(device_series["metrics_code"]),
+                    "node_id": device_series.get("node_id"),
+                    "step": int(row["step"]),
+                    "value": float(row["value"]),
+                }
+            )
+        return outputs
 
 
 def describe_simulation_capabilities() -> Dict[str, object]:
