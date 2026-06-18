@@ -1,8 +1,8 @@
 """
-外发流量计划智能体示例
+水电站出力时间序列智能体示例。
 
-该示例展示了如何基于 OutflowPlanAgent 基类实现一个具体的外发流量计划智能体。
-该智能体通过响应水文事件来执行流量计划计算。
+该实现基于 OutflowPlanAgent 事件入口，在收到外发时间序列请求后，
+生成站点出力 `Station/power` 时间序列并回传给协调器。
 """
 
 import copy
@@ -10,16 +10,18 @@ import json
 import logging
 import sys
 import tempfile
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
+import yaml
 
 CURRENT_DIR = Path(__file__).resolve().parent
-MPC_DIR = CURRENT_DIR.parent / "mpc"
-if str(MPC_DIR) not in sys.path:
-    sys.path.insert(0, str(MPC_DIR))
+HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
+DATA_DIR = CURRENT_DIR.parent / "data"
+if str(HYDROSIM_DIR) not in sys.path:
+    sys.path.insert(0, str(HYDROSIM_DIR))
 
 from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
@@ -51,13 +53,13 @@ logger = logging.getLogger(__name__)
 
 class PowerOutflowPlanAgent(OutflowPlanAgent):
     """
-    外发流量计划智能体的具体实现。
+    水电站出力时间序列智能体的具体实现。
 
     该智能体的主要功能包括：
     1. 加载水网拓扑
-    2. 初始化流量计划模型
-    3. 响应外发流量时间序列请求
-    4. 根据水文事件生成下泄流量计划
+    2. 初始化 HydroSim 出力规划会话
+    3. 响应外发时间序列请求
+    4. 根据水文事件生成站点出力时间序列
     """
 
     def __init__(
@@ -90,7 +92,8 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         self._hydrosim_api = HydroSimulationApi()
         self._hydrosim_initialized = False
 
-        logger.info(f"MyOutflowPlanAgent created: {agent_id}")
+        logger.info("PowerOutflowPlanAgent created: %s", agent_id)
+        logger.warning("PowerOutflowPlanAgent runtime file marker: %s", __file__)
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -106,16 +109,23 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
         """
-        处理外发流量时间序列请求。
+        处理外发时间序列请求并输出站点出力时间序列。
 
         该方法：
         1. 从请求中提取事件信息
-        2. 执行外发流量计划计算逻辑
+        2. 执行水电站出力规划逻辑
         3. 生成 ObjectTimeSeries 格式的结果
         4. 将响应发送回协调器
         """
         logger.info(f"Received OutflowTimeSeriesRequest, commandId={request.command_id}")
         logger.info(f"Event: {request.hydro_event}")
+        logger.warning(
+            "Power planning request marker: file=%s, event_url=%s, direct_load=%s, embedded_series=%s",
+            __file__,
+            getattr(request.hydro_event, "event_content_url", None),
+            getattr(request.hydro_event, "direct_load_time_series", None),
+            len(getattr(request.hydro_event, "object_time_series", []) or []),
+        )
 
         try:
             hydro_event = request.hydro_event.model_copy(
@@ -133,12 +143,9 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             planning_source_series = self._normalize_object_time_series(
                 self._resolve_incoming_outflow_plans(hydro_event)
             )
-            if planning_source_series:
-                outflow_plans = self._execute_outflow_planning(hydro_event, planning_source_series)
-            else:
-                outflow_plans = self._execute_outflow_planning(hydro_event, [])
+            outflow_plans = self._execute_outflow_planning(hydro_event, planning_source_series)
 
-            logger.info(f"Outflow planning completed, produced {len(outflow_plans)} time series")
+            logger.info("Power planning completed, produced %s station time series", len(outflow_plans))
 
             # 构造响应
             response = OutflowTimeSeriesResponse(
@@ -187,15 +194,8 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         return object_time_series
 
     def _load_object_time_series_from_url(self, event_content_url: str) -> List[ObjectTimeSeries]:
-        parsed = urlparse(event_content_url)
-        encoded_url = urlunparse(parsed._replace(path=quote(parsed.path)))
-        request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
-
-        try:
-            with urlopen(request, timeout=10) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
-            logger.warning("Failed to load outflow event content from %s: %s", event_content_url, exc)
+        payload = self._load_event_payload_from_url(event_content_url)
+        if payload is None:
             return []
 
         for event_model in (OutflowTimeSeriesDataChangedEvent, TimeSeriesDataChangedEvent):
@@ -214,6 +214,40 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             except Exception:
                 logger.debug("Skipping invalid object_time_series item: %s", item, exc_info=True)
         return result
+
+    def _load_event_payload_from_url(self, event_content_url: str) -> Optional[Dict[str, Any]]:
+        parsed = urlparse(event_content_url)
+        encoded_url = urlunparse(parsed._replace(path=quote(parsed.path)))
+        request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
+
+        try:
+            with urlopen(request, timeout=10) as response:
+                raw_content = response.read().decode("utf-8")
+        except (HTTPError, URLError, TimeoutError) as exc:
+            logger.warning("Failed to fetch outflow event content from %s: %s", event_content_url, exc)
+            return None
+
+        try:
+            payload = json.loads(raw_content)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            payload = yaml.safe_load(raw_content)
+        except yaml.YAMLError as exc:
+            logger.warning("Failed to parse outflow event content from %s as JSON/YAML: %s", event_content_url, exc)
+            return None
+
+        if not isinstance(payload, dict):
+            logger.warning(
+                "Outflow event content from %s is not an object payload, actual_type=%s",
+                event_content_url,
+                type(payload).__name__,
+            )
+            return None
+        return payload
 
     def _normalize_object_time_series(
         self,
@@ -265,14 +299,24 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             hydro_event: 触发计划计算的水文事件
 
         返回:
-            包含流量计划的时间序列列表 (ObjectTimeSeries)
+            包含站点出力计划的时间序列列表 (ObjectTimeSeries)
         """
         logger.info("Executing power planning with HydroSim API...")
 
-        if planning_source_series:
+        planning_payload = self._build_power_planning_payload_from_properties()
+        if planning_payload is None:
+            self._log_missing_station_power_series([], source="properties.objects_time_series_url")
+
+        if planning_payload is None:
+            planning_payload = self._build_power_planning_payload(planning_source_series)
+        if planning_payload is None:
+            self._log_missing_station_power_series(planning_source_series, source="normalized_event_series")
+            planning_payload = self._build_power_planning_payload_from_event_url(hydro_event)
+
+        if planning_payload is not None:
             self._ensure_hydrosim_initialized()
             with tempfile.TemporaryDirectory(prefix="hydrosim_power_plan_") as temp_dir:
-                planning_file = self._write_power_planning_file(temp_dir, planning_source_series)
+                planning_file = self._write_power_planning_file(temp_dir, planning_payload)
                 planning_result = self._hydrosim_api.get_station_power_planning_series(planning_file)
             station_power_plans = self._build_station_object_time_series(
                 planning_result.get("station_power_series", [])
@@ -283,22 +327,125 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         logger.warning("No Station/power planning series found in incoming event, fallback to sample logic.")
         return self._build_fallback_plans(hydro_event)
 
+    def _build_power_planning_payload(
+        self,
+        object_time_series_list: List[ObjectTimeSeries],
+    ) -> Optional[List[ObjectTimeSeries]]:
+        planning_series = [
+            item
+            for item in object_time_series_list or []
+            if item.object_type == "Station" and item.metrics_code == "power"
+        ]
+        return planning_series or None
+
+    def _build_power_planning_payload_from_properties(self) -> Optional[List[ObjectTimeSeries]]:
+        planning_url = self.properties.get_property("objects_time_series_url", None)
+        if not planning_url:
+            logger.info("Property objects_time_series_url is not configured.")
+            return None
+
+        payload = self._load_event_payload_from_url(str(planning_url))
+        if payload is None:
+            logger.warning("Failed to load planning payload from properties.objects_time_series_url=%s", planning_url)
+            return None
+
+        planning_series = self._extract_station_power_series_from_payload(payload, str(planning_url))
+        if planning_series:
+            logger.info(
+                "Loaded Station/power planning series from properties.objects_time_series_url, count=%s, url=%s",
+                len(planning_series),
+                planning_url,
+            )
+        return planning_series
+
+    def _build_power_planning_payload_from_event_url(self, hydro_event) -> Optional[List[ObjectTimeSeries]]:
+        event_content_url = getattr(hydro_event, "event_content_url", None)
+        if not event_content_url:
+            logger.info("No event_content_url available for loading Station/power planning payload.")
+            return None
+
+        payload = self._load_event_payload_from_url(event_content_url)
+        if payload is None:
+            return None
+
+        raw_series = payload.get("object_time_series") or payload.get("objectTimeSeries") or []
+        if not raw_series:
+            logger.warning(
+                "Event payload from %s does not contain object_time_series/objectTimeSeries.",
+                event_content_url,
+            )
+            return None
+
+        planning_series = self._extract_station_power_series_from_payload(payload, event_content_url)
+
+        if planning_series:
+            logger.info(
+                "Loaded Station/power planning series from event URL, count=%s, url=%s",
+                len(planning_series),
+                event_content_url,
+            )
+        else:
+            self._log_missing_station_power_series(raw_series, source=f"event_url:{event_content_url}")
+        return planning_series or None
+
+    def _extract_station_power_series_from_payload(
+        self,
+        payload: Dict[str, Any],
+        payload_source: str,
+    ) -> List[ObjectTimeSeries]:
+        raw_series = payload.get("object_time_series") or payload.get("objectTimeSeries") or []
+        planning_series: List[ObjectTimeSeries] = []
+        for item in raw_series:
+            try:
+                parsed_item = ObjectTimeSeries.model_validate(item)
+            except Exception:
+                logger.debug("Skipping invalid planning item from %s: %s", payload_source, item, exc_info=True)
+                continue
+            if parsed_item.object_type == "Station" and parsed_item.metrics_code == "power":
+                planning_series.append(parsed_item)
+        return planning_series
+
+    def _log_missing_station_power_series(self, object_time_series_list, source: str) -> None:
+        summary = []
+        for item in object_time_series_list or []:
+            if isinstance(item, ObjectTimeSeries):
+                summary.append(
+                    f"{item.object_type}/{item.metrics_code}/id={item.object_id or item.object_ids}"
+                )
+                continue
+
+            if isinstance(item, dict):
+                summary.append(
+                    f"{item.get('object_type') or item.get('objectType')}/"
+                    f"{item.get('metrics_code') or item.get('metricsCode')}/"
+                    f"id={item.get('object_id') or item.get('objectId') or item.get('object_ids') or item.get('objectIds')}"
+                )
+                continue
+
+            summary.append(type(item).__name__)
+
+        logger.warning(
+            "No Station/power series matched for source=%s, candidates=%s",
+            source,
+            summary,
+        )
+
     def _initialize_hydrosim_session(self) -> None:
         time_series_file = self._get_hydrosim_property(
             "hydrosim_time_series_file",
-            str(MPC_DIR / "time_series_power_planning.json"),
+            str(DATA_DIR / "time_series_power_planning.json"),
         )
         mpc_config_file = self._get_hydrosim_property(
             "hydrosim_mpc_config_file",
-            str(MPC_DIR / "mpc_config.yaml"),
+            str(DATA_DIR / "mpc_config.yaml"),
         )
         initial_states_file = self._get_hydrosim_property(
             "hydrosim_initial_states_file",
-            str(MPC_DIR / "initial_states.yaml"),
+            str(DATA_DIR / "initial_states.yaml"),
         )
         constraints_file = self._get_hydrosim_property(
             "hydrosim_constraints_file",
-            str(MPC_DIR / "constrains_targets.yaml"),
+            str(DATA_DIR / "constrains_targets.yaml"),
         )
 
         init_result = self._hydrosim_api.initialize(
@@ -352,25 +499,25 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         return result
 
     def _build_fallback_plans(self, hydro_event) -> List[ObjectTimeSeries]:
-        outflow_plans = []
+        power_plans = []
         planning_horizon = self.properties.get_property('planning_horizon', 24)
         if self._topology:
             for top_obj in self._topology.top_objects[:3]:
                 time_series_values = []
                 for step in range(planning_horizon):
-                    planned_outflow = self._calculate_planned_outflow(top_obj, step, hydro_event)
-                    time_series_values.append(TimeSeriesValue(step=step, value=planned_outflow))
-                outflow_plan = ObjectTimeSeries(
-                    time_series_name=f"{top_obj.object_name}_outflow_plan",
+                    planned_power = self._calculate_planned_outflow(top_obj, step, hydro_event)
+                    time_series_values.append(TimeSeriesValue(step=step, value=planned_power))
+                power_plan = ObjectTimeSeries(
+                    time_series_name=f"{top_obj.object_name}_power_plan",
                     object_id=top_obj.object_id,
-                    object_type=top_obj.object_type,
+                    object_type="Station",
                     object_name=top_obj.object_name,
-                    metrics_code="planned_outflow",
+                    metrics_code="power",
                     time_series=time_series_values
                 )
-                outflow_plans.append(outflow_plan)
-        logger.info("Generated %s fallback plans", len(outflow_plans))
-        return outflow_plans
+                power_plans.append(power_plan)
+        logger.info("Generated %s fallback power plans", len(power_plans))
+        return power_plans
 
     def _calculate_planned_outflow(self, hydro_object, step: int, hydro_event) -> float:
         """

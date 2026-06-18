@@ -11,8 +11,7 @@ custom-agent/
 │   ├── env.properties            # 共享环境配置
 │   ├── outflowplan/
 │   │   ├── agent.properties
-│   │   ├── power_agent.py
-│   │   └── power_solver.py
+│   │   └── power_outflow_plan_agent.py
 │   ├── scheduling/
 │   │   ├── agent.properties
 │   │   └── power_scheduling_agent.py
@@ -54,9 +53,9 @@ hydros_node_id=default_node
 
 示例：
 ```properties
-agent_code=POWER_AGENT
-agent_type=POWER_AGENT
-agent_name=Power Agent
+agent_code=OUTFLOW_PLAN_AGENT_POWER
+agent_type=OUTFLOW_PLAN_AGENT
+agent_name=Power Outflow Plan Agent
 ```
 
 ## 启动方式
