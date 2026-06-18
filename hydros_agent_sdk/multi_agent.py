@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -61,6 +61,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: 智能体}}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
+        self._pending_status_reports: List[Any] = []
         self._logging_context_setter = AgentLoggingContextSetter()
 
         logger.info(f"MultiAgentCallback created for node: {node_id}")
@@ -161,8 +162,18 @@ class MultiAgentCallback(SimCoordinationCallback):
     def set_client(self, client: Any):
         """设置协调客户端引用。"""
         self._client = client
-        self._status_support = AgentInstanceStatusSupport(sim_coordination_client=client)
+        self._status_support = AgentInstanceStatusSupport(
+            report_sink=self._record_status_report,
+        )
         logger.info("Coordination client reference set")
+
+    def _record_status_report(self, report) -> None:
+        self._pending_status_reports.append(report)
+
+    def consume_pending_status_reports(self):
+        reports = list(self._pending_status_reports)
+        self._pending_status_reports.clear()
+        return reports
 
     def get_component(self) -> str:
         """

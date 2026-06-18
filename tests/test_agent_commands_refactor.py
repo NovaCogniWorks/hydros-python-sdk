@@ -2128,7 +2128,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broadcast=True,
         )
 
-        self.assertTrue(client._should_send(report))
+        self.assertTrue(client.outbox_publisher.should_send(report))
 
     def test_coordination_client_logs_mpc_result_report_payload_when_sent(self):
         state_manager = AgentStateManager()
@@ -2145,8 +2145,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             state_manager=state_manager,
         )
         publish_result = Mock()
-        client.mqtt_client = Mock()
-        client.mqtt_client.publish.return_value = publish_result
+        client.outbox_publisher.mqtt_client = Mock()
+        client.outbox_publisher.mqtt_client.publish.return_value = publish_result
         report = MpcResultReporter().build_report(
             source,
             SchedulingTaskState(
@@ -2201,9 +2201,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
-            client._send_with_retry(report)
+            client.outbox_publisher.send_with_retry(report)
 
-        client.mqtt_client.publish.assert_called_once()
+        client.outbox_publisher.mqtt_client.publish.assert_called_once()
         publish_result.wait_for_publish.assert_called_once()
         log_output = "\n".join(logs.output)
         self.assertIn("MPC result report sent to coordinator", log_output)

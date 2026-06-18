@@ -193,12 +193,14 @@ def make_client(callback, state_manager):
 
 def start_inbound_workers(client):
     client.running.set()
-    client._start_inbound_workers()
+    client.inbound_runtime.start_workers()
+    client.control_worker_thread = client.inbound_runtime.control_worker_thread
 
 
 def stop_inbound_workers(client):
     client.running.clear()
-    client._stop_inbound_workers()
+    client.inbound_runtime.stop_workers()
+    client.control_worker_thread = client.inbound_runtime.control_worker_thread
 
 
 def mqtt_message(command):
@@ -417,7 +419,7 @@ def test_terminate_response_from_same_node_is_sendable_after_local_agent_removed
         broadcast=False,
     )
 
-    assert client._should_send(response) is True
+    assert client.outbox_publisher.should_send(response) is True
 
 
 def test_hydro_event_command_routes_time_series_payload_and_returns_ack():

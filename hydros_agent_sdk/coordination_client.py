@@ -9,9 +9,8 @@
 
 import logging
 import time
-import traceback
 import socket
-from typing import Optional, Dict, Callable
+from typing import Optional
 from queue import Empty, Queue
 from threading import Thread, Event
 import paho.mqtt.client as mqtt
@@ -27,51 +26,16 @@ from hydros_agent_sdk.logging_config import (
     set_hydros_node_id
 )
 from hydros_agent_sdk.protocol.commands import (
-    SimCommand,
-    SimTaskInitRequest,
-    SimTaskInitResponse,
-    TickCmdRequest,
-    SimTaskTerminateRequest,
-    TimeSeriesDataUpdateRequest,
-    TimeSeriesDataUpdateResponse,
-    OutflowTimeSeriesDataUpdateRequest,
-    TimeSeriesCalculationRequest,
-    AgentInstanceStatusReport,
-    HydroEventAckResponse,
     HydroEventCommand,
-    MpcResultReport,
-    OutflowTimeSeriesDataUpdateResponse,
-    SimCoordinationResponse,
+    SimCommand,
     SimCommandEnvelope,
-    OutflowTimeSeriesRequest,
-    OutflowTimeSeriesResponse,
-
-    # 指令类型常量
-    SIMCMD_TASK_INIT_REQUEST,
-    SIMCMD_TASK_INIT_RESPONSE,
-    SIMCMD_TICK_CMD_REQUEST,
-    SIMCMD_TASK_TERMINATE_REQUEST,
-    SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST,
-    SIMCMD_HYDRO_EVENT_COMMAND,
-    SIMCMD_TIME_SERIES_CALCULATION_REQUEST,
-    SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
-    SIMCMD_MPC_RESULT_REPORT,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
-    SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST
 )
-from hydros_agent_sdk.error_codes import ErrorCodes
-from hydros_agent_sdk.protocol.events import (
-    OutflowTimeSeriesDataChangedEvent,
-    OutflowTimeSeriesEvent,
-    TimeSeriesDataChangedEvent,
-)
-from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgentInstance
-from hydros_agent_sdk.runtime import ResponseFactory
+from hydros_agent_sdk.runtime.coordination_error_response_factory import CoordinationErrorResponseFactory
 from hydros_agent_sdk.runtime.coordination_inbound import (
     CoordinationInboundRuntime,
-    InboundCommand,
 )
 from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
+from hydros_agent_sdk.runtime.coordination_router import CoordinationCommandRouter
 import json
 
 logger = logging.getLogger(__name__)
@@ -241,26 +205,20 @@ class SimCoordinationClient:
         self.connected = Event()
 
         # 注册指令处理器
-        self._register_handlers()
+        self.command_router = CoordinationCommandRouter(
+            callback=self.sim_coordination_callback,
+            context_id_getter=self._command_context_id,
+            event_type_getter=self._command_event_type,
+            log=logger,
+        )
+        self.error_response_factory = CoordinationErrorResponseFactory(
+            state_manager=self.state_manager,
+            callback=self.sim_coordination_callback,
+            log=logger,
+        )
+        logger.info(f"Registered {len(self.command_router.handlers)} command handlers")
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
-
-    def _register_handlers(self):
-        """注册全部会路由到回调方法的指令处理器。"""
-        self.handlers: Dict[str, Callable[[SimCommand], None]] = {
-            SIMCMD_TASK_INIT_REQUEST: self._handle_task_init,
-            SIMCMD_TASK_INIT_RESPONSE: self._handle_task_init_response,
-            SIMCMD_TICK_CMD_REQUEST: self._handle_tick,
-            SIMCMD_TASK_TERMINATE_REQUEST: self._handle_task_terminate,
-            SIMCMD_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_time_series_data_update,
-            SIMCMD_HYDRO_EVENT_COMMAND: self._handle_hydro_event_command,
-            SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self._handle_time_series_calculation,
-            SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self._handle_agent_status_report,
-            SIMCMD_MPC_RESULT_REPORT: self._handle_mpc_result_report,
-            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self._handle_outflow_time_series_request,
-            SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self._handle_outflow_time_series_data_update
-        }
-        logger.info(f"Registered {len(self.handlers)} command handlers")
 
     def start(self):
         """
@@ -296,7 +254,8 @@ class SimCoordinationClient:
 
         # 启动队列处理线程
         self.running.set()
-        self._start_inbound_workers()
+        self.inbound_runtime.start_workers()
+        self.control_worker_thread = self.inbound_runtime.control_worker_thread
         self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
         self.queue_thread.start()
 
@@ -337,7 +296,8 @@ class SimCoordinationClient:
 
         # 停止队列线程
         self.running.clear()
-        self._stop_inbound_workers()
+        self.inbound_runtime.stop_workers()
+        self.control_worker_thread = self.inbound_runtime.control_worker_thread
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
@@ -359,7 +319,10 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
-        logger.info("Enqueued command: %s", self._format_command_for_log(command))
+        logger.info(
+            "Enqueued command: %s",
+            CoordinationOutboxPublisher.format_command_for_log(command),
+        )
 
     def send_command(self, command: SimCommand):
         """
@@ -368,16 +331,7 @@ class SimCoordinationClient:
         Args:
             command: 要发送的指令
         """
-        self._outbox().send_with_retry(command)
-
-    def _outbox(self) -> CoordinationOutboxPublisher:
-        """Return the outbox publisher, keeping mutable client settings in sync."""
-        self.outbox_publisher.mqtt_client = self.mqtt_client
-        self.outbox_publisher.topic = self.topic
-        self.outbox_publisher.qos = self.qos
-        self.outbox_publisher.max_retry_count = self.max_retry_count
-        self.outbox_publisher.base_retry_delay_ms = self.base_retry_delay_ms
-        return self.outbox_publisher
+        self.outbox_publisher.send_with_retry(command)
 
     # ========================================================================
     # MQTT 回调
@@ -477,7 +431,7 @@ class SimCoordinationClient:
 
             # 将业务处理推迟给 SDK 工作线程，避免 MQTT 网络回调
             # 被较慢的 tick/event/MPC 处理阻塞。
-            self._enqueue_incoming(command)
+            self.inbound_runtime.enqueue(command)
 
         except Exception as e:
             logger.error(
@@ -524,32 +478,6 @@ class SimCoordinationClient:
         if event is not None:
             return getattr(event, "hydro_event_type", None)
         return None
-
-    # ========================================================================
-    # 消息处理
-    # ========================================================================
-
-    def _start_inbound_workers(self):
-        """如果入站指令工作线程尚未运行，则启动它们。"""
-        self.inbound_runtime.start_workers()
-        self.control_worker_thread = self.inbound_runtime.control_worker_thread
-
-    def _stop_inbound_workers(self):
-        """运行标记清除后，短暂等待入站工作线程停止。"""
-        self.inbound_runtime.stop_workers()
-        self.control_worker_thread = self.inbound_runtime.control_worker_thread
-
-    def _enqueue_incoming(self, command: SimCommand):
-        self.inbound_runtime.enqueue(command)
-
-    def _select_inbound_queue(self, command: SimCommand):
-        return self.inbound_runtime.select_queue(command)
-
-    def _get_or_start_business_queue(self, context_id: str) -> Queue[InboundCommand]:
-        return self.inbound_runtime.get_or_start_business_queue(context_id)
-
-    def _inbound_worker_loop(self, source_queue: Queue[InboundCommand], worker_name: str):
-        self.inbound_runtime.worker_loop(source_queue, worker_name)
 
     def _set_logging_context(self, command: SimCommand):
         """
@@ -601,26 +529,14 @@ class SimCoordinationClient:
         # 根据指令设置日志上下文
         self._set_logging_context(command)
 
-        handler = self.handlers.get(command.command_type)
-        if handler:
-            try:
-                logger.debug(
-                    "MQTT command accepted: type=%s, id=%s, context=%s, eventType=%s, handler=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    self._command_event_type(command),
-                    getattr(handler, "__name__", str(handler)),
-                )
-                result = handler(command)
-                self._handle_callback_result(result)
-            except Exception as e:
-                logger.error(f"Error handling command {command.command_type}: {e}", exc_info=True)
-                error_response = self._create_error_response(command, e)
-                if error_response:
-                    self.enqueue(error_response)
-        else:
-            logger.warning(f"No handler registered for command type: {command.command_type}")
+        try:
+            result = self.command_router.dispatch(command)
+            self._handle_callback_result(result)
+        except Exception as e:
+            logger.error(f"Error handling command {command.command_type}: {e}", exc_info=True)
+            error_response = self.error_response_factory.create(command, e)
+            if error_response:
+                self.enqueue(error_response)
 
     def _handle_callback_result(self, result):
         """
@@ -643,246 +559,6 @@ class SimCoordinationClient:
 
         logger.debug("Ignoring unsupported callback result type: %s", type(result).__name__)
 
-    def _create_error_response(self, command: SimCommand, error: Exception) -> Optional[SimCoordinationResponse]:
-        """
-        尽可能将未捕获的处理器异常转换为失败响应。
-
-        某些请求类型，尤其是智能体创建前的任务初始化请求，可能缺少足够的
-        本地智能体上下文来满足协议要求的 source_agent_instance 字段。
-        这种情况下只记录日志，并将异常视为基础设施错误，而不是构造无效响应。
-        """
-        source_agent = self._resolve_error_source_agent(command)
-        if source_agent is None:
-            logger.error(
-                "Cannot create error response for command %s (%s): no source agent available",
-                command.command_id,
-                command.command_type,
-            )
-            return None
-
-        error_code = ErrorCodes.SYSTEM_ERROR
-
-        if isinstance(command, SimTaskInitRequest):
-            error_code = ErrorCodes.AGENT_INIT_FAILURE
-            factory_method = ResponseFactory.init_failed
-        elif isinstance(command, TickCmdRequest):
-            error_code = ErrorCodes.AGENT_TICK_FAILURE
-            factory_method = ResponseFactory.tick_failed
-        elif isinstance(command, SimTaskTerminateRequest):
-            error_code = ErrorCodes.AGENT_TERMINATE_FAILURE
-            factory_method = ResponseFactory.terminate_failed
-        elif isinstance(command, TimeSeriesDataUpdateRequest):
-            error_code = ErrorCodes.TIME_SERIES_UPDATE_FAILURE
-            factory_method = ResponseFactory.time_series_data_update_failed
-        elif isinstance(command, HydroEventCommand):
-            response = HydroEventAckResponse(
-                context=command.context,
-                command_id=command.command_id,
-                command_status=CommandStatus.FAILED,
-                source_agent_instance=source_agent,
-                broadcast=False,
-                error_code=ErrorCodes.SYSTEM_ERROR.code,
-                error_message=f"{error}\n{traceback.format_exc()}",
-            )
-            return response
-        elif isinstance(command, TimeSeriesCalculationRequest):
-            error_code = ErrorCodes.TIME_SERIES_CALCULATION_FAILURE
-            factory_method = ResponseFactory.time_series_calculation_failed
-        else:
-            factory_method = None
-
-        if factory_method is None:
-            logger.debug("No error response mapping for command type: %s", command.command_type)
-            return None
-
-        agent_name = getattr(source_agent, "agent_code", self.sim_coordination_callback.get_component())
-        error_detail = f"{error}\n{traceback.format_exc()}"
-        error_message = error_code.format_message(agent_name, error_detail)
-
-        return factory_method(
-            source_agent,
-            command,
-            error_code=error_code.code,
-            error_message=error_message,
-        )
-
-    def _resolve_error_source_agent(self, command: SimCommand) -> Optional[HydroAgentInstance]:
-        """查找适合作为 source_agent_instance 的本地智能体实例。"""
-        target_agent = getattr(command, "target_agent_instance", None)
-        if target_agent is not None:
-            return target_agent
-
-        context = getattr(command, "context", None)
-        context_id = getattr(context, "biz_scene_instance_id", None)
-        if context_id:
-            agents = self.state_manager.get_agents_for_context(context_id)
-            if agents:
-                return agents[0]
-
-            callback_agents = getattr(self.sim_coordination_callback, "agents", None)
-            if isinstance(callback_agents, dict):
-                context_agents = callback_agents.get(context_id)
-                if isinstance(context_agents, dict) and context_agents:
-                    return next(iter(context_agents.values()))
-
-        return None
-
-    # ========================================================================
-    # 指令处理器（路由到 callback）
-    # ========================================================================
-
-    def _handle_task_init(self, command: SimCommand):
-        """处理任务初始化请求。"""
-        request = command
-        assert isinstance(request, SimTaskInitRequest)
-        return self.sim_coordination_callback.on_sim_task_init(request)
-
-    def _handle_task_init_response(self, command: SimCommand):
-        """处理远端智能体的任务初始化响应。"""
-        response = command
-        assert isinstance(response, SimTaskInitResponse)
-        if self.sim_coordination_callback.is_remote_agent(response.source_agent_instance):
-            return self.sim_coordination_callback.on_agent_instance_sibling_created(response)
-        return None
-
-    def _handle_tick(self, command: SimCommand):
-        """处理 tick 指令。"""
-        request = command
-        assert isinstance(request, TickCmdRequest)
-        return self.sim_coordination_callback.on_tick(request)
-
-    def _handle_task_terminate(self, command: SimCommand):
-        """处理任务终止请求。"""
-        request = command
-        assert isinstance(request, SimTaskTerminateRequest)
-        return self.sim_coordination_callback.on_task_terminate(request)
-
-    def _handle_time_series_data_update(self, command: SimCommand):
-        """处理时间序列数据更新。"""
-        request = command
-        assert isinstance(request, TimeSeriesDataUpdateRequest)
-        return self.sim_coordination_callback.on_time_series_data_update(request)
-
-    def _handle_hydro_event_command(self, command: SimCommand):
-        """处理兼容 Java 侧的 hydro_event_command payload 路由。"""
-        request = command
-        assert isinstance(request, HydroEventCommand)
-        payload = request.payload
-
-        if isinstance(payload, TimeSeriesDataChangedEvent):
-            update_request = TimeSeriesDataUpdateRequest(
-                command_id=request.command_id,
-                context=request.context,
-                broadcast=request.broadcast,
-                time_series_data_changed_event=payload,
-            )
-            result = self.sim_coordination_callback.on_time_series_data_update(update_request)
-            return self._to_hydro_event_ack_response(request, result)
-
-        if isinstance(payload, OutflowTimeSeriesDataChangedEvent):
-            update_request = OutflowTimeSeriesDataUpdateRequest(
-                command_id=request.command_id,
-                context=request.context,
-                broadcast=request.broadcast,
-                outflow_time_series_data_changed_event=payload,
-            )
-            result = self.sim_coordination_callback.on_outflow_time_series_data_update(update_request)
-            return self._to_hydro_event_ack_response(request, result)
-
-        if isinstance(payload, OutflowTimeSeriesEvent):
-            if request.target_agent_instance is None:
-                logger.warning(
-                    "Ignoring outflow hydro_event_command without target_agent_instance: id=%s",
-                    request.command_id,
-                )
-                return None
-            outflow_request = OutflowTimeSeriesRequest(
-                command_id=request.command_id,
-                context=request.context,
-                broadcast=request.broadcast,
-                target_agent_instance=request.target_agent_instance,
-                hydro_event=payload,
-            )
-            return self.sim_coordination_callback.on_outflow_time_series(outflow_request)
-
-        logger.warning(
-            "Ignoring unsupported hydro_event_command payload: id=%s, eventType=%s",
-            request.command_id,
-            getattr(payload, "hydro_event_type", None),
-        )
-        return None
-
-    def _to_hydro_event_ack_response(self, request: HydroEventCommand, result):
-        """将更新响应转换为兼容 Java 侧的 hydro_event_ack_response。"""
-        if result is None:
-            return None
-
-        if isinstance(result, HydroEventAckResponse):
-            return result
-
-        if isinstance(result, (TimeSeriesDataUpdateResponse, OutflowTimeSeriesDataUpdateResponse)):
-            return self._build_hydro_event_ack_response(request, result)
-
-        if isinstance(result, list):
-            responses = []
-            for item in result:
-                if isinstance(item, HydroEventAckResponse):
-                    responses.append(item)
-                elif isinstance(item, (TimeSeriesDataUpdateResponse, OutflowTimeSeriesDataUpdateResponse)):
-                    responses.append(self._build_hydro_event_ack_response(request, item))
-            return responses
-
-        return None
-
-    @staticmethod
-    def _build_hydro_event_ack_response(
-        request: HydroEventCommand,
-        response: SimCoordinationResponse,
-    ) -> HydroEventAckResponse:
-        return HydroEventAckResponse(
-            context=request.context,
-            command_id=request.command_id,
-            command_status=response.command_status,
-            source_agent_instance=response.source_agent_instance,
-            broadcast=False,
-            error_code=response.error_code,
-            error_message=response.error_message,
-        )
-
-    def _handle_outflow_time_series_data_update(self, command: SimCommand):
-        """处理出流时间序列数据更新。"""
-        request = command
-        assert isinstance(request, OutflowTimeSeriesDataUpdateRequest)
-        return self.sim_coordination_callback.on_outflow_time_series_data_update(request)
-
-    def _handle_time_series_calculation(self, command: SimCommand):
-        """处理时间序列计算。"""
-        request = command
-        assert isinstance(request, TimeSeriesCalculationRequest)
-        return self.sim_coordination_callback.on_time_series_calculation(request)
-
-    def _handle_agent_status_report(self, command: SimCommand):
-        """处理远端智能体状态报告。"""
-        report = command
-        assert isinstance(report, AgentInstanceStatusReport)
-        if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
-            return self.sim_coordination_callback.on_agent_instance_sibling_status_updated(report)
-        return None
-
-    def _handle_mpc_result_report(self, command: SimCommand):
-        """处理远端智能体的 MPC 结果报告。"""
-        report = command
-        assert isinstance(report, MpcResultReport)
-        if self.sim_coordination_callback.is_remote_agent(report.source_agent_instance):
-            return self.sim_coordination_callback.on_mpc_result(report)
-        return None
-
-    def _handle_outflow_time_series_request(self, command: SimCommand):
-        """处理出流时间序列请求。"""
-        request = command
-        assert isinstance(request, OutflowTimeSeriesRequest)
-        return self.sim_coordination_callback.on_outflow_time_series(request)
-
     # ========================================================================
     # 出站消息队列
     # ========================================================================
@@ -900,8 +576,8 @@ class SimCoordinationClient:
                 command = self.out_message_queue.get(timeout=1)
 
                 # 检查消息是否应发送
-                if self._should_send(command):
-                    self._send_with_retry(command)
+                if self.outbox_publisher.should_send(command):
+                    self.outbox_publisher.send_with_retry(command)
 
             except Empty:
                 # 超时，继续循环
@@ -910,36 +586,3 @@ class SimCoordinationClient:
                 logger.error(f"Error in queue loop: {e}", exc_info=True)
 
         logger.info("Queue processing thread stopped")
-
-    def _should_send(self, command: SimCommand) -> bool:
-        """
-        检查指令是否应该发送。
-
-        类似 Java 侧的 needSend() 方法。
-
-        Args:
-            command: 要检查的指令
-
-        Returns:
-            应发送时返回 True，否则返回 False
-        """
-        return self._outbox().should_send(command)
-
-    def _send_with_retry(self, command: SimCommand):
-        """
-        使用重试逻辑发送指令。
-
-        类似 Java 侧的 sendAsyncWithRetry() 方法。
-
-        Args:
-            command: 要发送的指令
-        """
-        self._outbox().send_with_retry(command)
-
-    @staticmethod
-    def _format_command_for_log(command: SimCommand) -> str:
-        return CoordinationOutboxPublisher.format_command_for_log(command)
-
-    @staticmethod
-    def _count_mpc_result_details(command: MpcResultReport) -> int:
-        return CoordinationOutboxPublisher.count_mpc_result_details(command)
