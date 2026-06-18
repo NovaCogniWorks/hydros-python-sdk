@@ -793,7 +793,11 @@ class MultiAgentCoordinator:
 
         self.logger.info("")
         self.logger.info("Starting coordination client...")
-        self.client.start()
+        try:
+            self.client.start()
+        except Exception as exc:
+            self.logger.error("Failed to start coordination client: %s", exc, exc_info=True)
+            return False
 
         self.startup_reporter.log_started(env_config, registered_agents)
         self.running = True

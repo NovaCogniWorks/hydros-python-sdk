@@ -129,6 +129,60 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
     assert not coordinator.running
 
 
+def test_multi_agent_coordinator_returns_false_when_client_start_fails():
+    class Callback:
+        def __init__(self):
+            self.client = None
+
+        def set_client(self, client):
+            self.client = client
+
+    class RegistrationService:
+        def register_agents(self, _callback, _agent_names):
+            return {"mqtt_broker_url": "bad-host", "mqtt_broker_port": "1883", "mqtt_topic": "topic"}, []
+
+    class Client:
+        def start(self):
+            raise RuntimeError("Failed to connect to MQTT broker bad-host:1883")
+
+    class ClientFactory:
+        def __init__(self, client):
+            self.client = client
+
+        def create(self, _env_config, _callback):
+            return self.client
+
+    class Reporter:
+        def __init__(self):
+            self.started = False
+
+        def log_starting(self, _agent_names):
+            return None
+
+        def log_started(self, _env_config, _registered_agents):
+            self.started = True
+
+    callback = Callback()
+    client = Client()
+    reporter = Reporter()
+    coordinator = MultiAgentCoordinator(
+        launcher_dir="/tmp/hydros-agents",
+        env_file="/tmp/hydros-agents/env.properties",
+        log_file="/tmp/hydros-agents/logs/hydros.log",
+        module_loader=object(),
+        registration_service=RegistrationService(),
+        client_factory=ClientFactory(client),
+        startup_reporter=reporter,
+        callback_factory=lambda: callback,
+    )
+
+    assert not coordinator.start_all(["scheduling"])
+
+    assert callback.client is client
+    assert not reporter.started
+    assert not coordinator.running
+
+
 def test_registration_service_does_not_register_system_default_central_scheduling_agent_by_default(monkeypatch):
     class FakeAgent:
         pass

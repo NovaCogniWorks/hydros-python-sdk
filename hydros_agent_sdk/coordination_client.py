@@ -10,6 +10,7 @@
 import logging
 import time
 import traceback
+import socket
 from dataclasses import dataclass
 from typing import Optional, Dict, Callable
 from queue import Queue, Empty, Full
@@ -266,12 +267,20 @@ class SimCoordinationClient:
 
         # 连接 MQTT 代理
         logger.info(f"Connecting to MQTT broker: {self.broker_url}:{self.broker_port}")
-        self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
-        self.mqtt_client.loop_start()
+        try:
+            self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
+            self.mqtt_client.loop_start()
+        except (OSError, socket.gaierror) as exc:
+            raise RuntimeError(self._connection_failure_message(exc)) from exc
 
         # 等待连接建立
         if not self.connected.wait(timeout=10):
-            raise RuntimeError("Failed to connect to MQTT broker within 10 seconds")
+            self._cleanup_failed_start()
+            raise RuntimeError(
+                self._connection_failure_message(
+                    "connection acknowledgement timed out after 10 seconds"
+                )
+            )
 
         # 启动队列处理线程
         self.running.set()
@@ -280,6 +289,24 @@ class SimCoordinationClient:
         self.queue_thread.start()
 
         logger.info(f"SimCoordinationClient started successfully")
+
+    def _connection_failure_message(self, cause) -> str:
+        return (
+            "Failed to connect to MQTT broker "
+            f"{self.broker_url}:{self.broker_port} for topic {self.topic}: {cause}. "
+            "Check env.properties mqtt_broker_url/mqtt_broker_port, DNS resolution, "
+            "Kubernetes namespace/service name, and network reachability from this runtime."
+        )
+
+    def _cleanup_failed_start(self) -> None:
+        try:
+            self.mqtt_client.loop_stop()
+        except Exception:
+            logger.debug("Failed to stop MQTT loop after startup failure", exc_info=True)
+        try:
+            self.mqtt_client.disconnect()
+        except Exception:
+            logger.debug("Failed to disconnect MQTT client after startup failure", exc_info=True)
 
     def stop(self):
         """
