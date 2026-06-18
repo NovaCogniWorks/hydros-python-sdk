@@ -40,16 +40,16 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  outflowplan         Power Agent"
+    echo "  outflowplan         Power Outflow Plan Agent"
     echo "  pump                Pump Agent"
     echo "  scheduling          Scheduling Agent"
     echo ""
     echo "示例:"
-    echo "  $0 outflowplan               # 启动 power agent"
-    echo "  $0 outflowplan pump          # 在同一进程中启动 power 和 pump agents"
+    echo "  $0 outflowplan               # 启动 power outflow plan agent"
+    echo "  $0 outflowplan pump          # 在同一进程中启动 power outflow plan 和 pump agents"
     echo "  $0 --all                    # 启动所有 agents"
     echo "  $0 --logs                   # 查看日志"
-    echo "  $0 --debug outflowplan       # 启用调试模式启动 power agent"
+    echo "  $0 --debug outflowplan       # 启用调试模式启动 power outflow plan agent"
     echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
     echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
     echo ""
@@ -73,9 +73,9 @@ list_agents() {
     echo -e "${GREEN}可用的 Agents:${NC}"
     echo ""
 
-    if [ -f "${SCRIPT_DIR}/outflowplan/power_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Power Agent"
-        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_agent.py"
+    if [ -f "${SCRIPT_DIR}/outflowplan/power_outflow_plan_agent.py" ]; then
+        echo -e "  ${BLUE}outflowplan${NC} - Power Outflow Plan Agent"
+        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_outflow_plan_agent.py"
     fi
 
     if [ -f "${SCRIPT_DIR}/pump/outflow_plan_agent.py" ]; then
