@@ -1,6 +1,7 @@
 ARG BASE_IMAGE=python:3.11-slim
 FROM ${BASE_IMAGE}
 
+ARG APT_MIRROR=https://mirrors.aliyun.com
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG PIP_EXTRA_INDEX_URL=
 
@@ -14,7 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/hydros
 
-RUN apt-get update \
+RUN sed -i \
+        -e "s|http://deb.debian.org|${APT_MIRROR}|g" \
+        -e "s|http://security.debian.org|${APT_MIRROR}|g" \
+        -e "s|https://deb.debian.org|${APT_MIRROR}|g" \
+        -e "s|https://security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends bash libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
