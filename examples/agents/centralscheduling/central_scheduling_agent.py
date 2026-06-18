@@ -1,7 +1,7 @@
 """
 面向生产的中央调度智能体示例。
 
-本示例刻意保持业务逻辑轻量，让 SDK 默认 CentralSchedulingAgent 路径负责
+本示例刻意保持业务逻辑轻量，让 SDK 默认 MpcCentralSchedulingAgent 路径负责
 滚动 MPC、MpcResultReport 发布和智能体指令分派。
 """
 
@@ -10,7 +10,7 @@ import json
 from typing import Optional
 
 from hydros_agent_sdk import ErrorCodes, handle_agent_errors, load_runtime_env_settings
-from hydros_agent_sdk.agents import CentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -22,11 +22,11 @@ from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus
 logger = logging.getLogger(__name__)
 
 
-class ProductionCentralSchedulingAgent(CentralSchedulingAgent):
+class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
     最小化的生产中央智能体实现。
 
-    它不覆盖 on_optimization()，因此 SDK 基类会执行与 Java 等价的滚动 MPC 路径。
+    它不覆盖 on_optimization()，因此 MPC 基类会执行与 Java 等价的滚动 MPC 路径。
     """
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)

@@ -5,7 +5,7 @@ CentralSchedulingAgent 提供不默认装配 MPC 的中央调度通用能力。
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from abc import abstractmethod
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
@@ -240,21 +240,6 @@ class CentralSchedulingAgent(TickableAgent):
         except Exception as e:
             logger.error("Error handling central scheduling time series update: %s", e, exc_info=True)
             return ResponseFactory.time_series_data_update_failed(self, request)
-
-    def on_optimization(self, step: int) -> Optional[List[Any]]:
-        """
-        执行中央调度优化逻辑。
-
-        通用基类默认不执行优化。需要默认 MPC 能力的子类应继承
-        MpcCentralSchedulingAgent；自定义算法子类可以覆盖此方法。
-
-        参数:
-            step: 当前仿真步长
-
-        返回:
-            需要发送给边缘智能体的控制指令列表，或 None
-        """
-        return None
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """
