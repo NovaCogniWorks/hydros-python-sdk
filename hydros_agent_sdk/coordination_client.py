@@ -11,10 +11,9 @@ import logging
 import time
 import traceback
 import socket
-from dataclasses import dataclass
 from typing import Optional, Dict, Callable
-from queue import Queue, Empty, Full
-from threading import Thread, Event, RLock
+from queue import Empty, Queue
+from threading import Thread, Event
 import paho.mqtt.client as mqtt
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -33,7 +32,6 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     TickCmdRequest,
     SimTaskTerminateRequest,
-    SimTaskTerminateResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
     OutflowTimeSeriesDataUpdateRequest,
@@ -43,7 +41,6 @@ from hydros_agent_sdk.protocol.commands import (
     HydroEventCommand,
     MpcResultReport,
     OutflowTimeSeriesDataUpdateResponse,
-    SimCoordinationRequest,
     SimCoordinationResponse,
     SimCommandEnvelope,
     OutflowTimeSeriesRequest,
@@ -70,6 +67,11 @@ from hydros_agent_sdk.protocol.events import (
 )
 from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgentInstance
 from hydros_agent_sdk.runtime import ResponseFactory
+from hydros_agent_sdk.runtime.coordination_inbound import (
+    CoordinationInboundRuntime,
+    InboundCommand,
+)
+from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
 import json
 
 logger = logging.getLogger(__name__)
@@ -78,13 +80,6 @@ IGNORED_COORDINATION_COMMAND_TYPES = {
     "update_monitor_rule_request",
     "update_monitor_rule_response",
 }
-
-
-@dataclass(frozen=True)
-class InboundCommand:
-    command: SimCommand
-    received_at: float
-    queue_name: str
 
 
 class SimCoordinationClient:
@@ -213,19 +208,36 @@ class SimCoordinationClient:
 
         # 出站消息队列
         self.out_message_queue: Queue[SimCommand] = Queue()
+        self.outbox_publisher = CoordinationOutboxPublisher(
+            mqtt_client=self.mqtt_client,
+            state_manager=self.state_manager,
+            topic=self.topic,
+            qos=self.qos,
+            max_retry_count=self.max_retry_count,
+            base_retry_delay_ms=self.base_retry_delay_ms,
+            log=logger,
+        )
 
         # 入站消息队列。MQTT 回调必须保持轻量，
         # 可能较慢的业务处理器由工作线程执行。
-        self.control_message_queue: Queue[InboundCommand] = Queue(maxsize=control_queue_size)
-        self.business_queue_size = business_queue_size
-        self.business_message_queues: Dict[str, Queue[InboundCommand]] = {}
-        self._business_workers_lock = RLock()
+        self.running = Event()
+        self.inbound_runtime = CoordinationInboundRuntime(
+            running=self.running,
+            handler=self._handle_incoming_message,
+            context_id_getter=self._command_context_id,
+            control_queue_size=control_queue_size,
+            business_queue_size=business_queue_size,
+            log=logger,
+        )
+        self.control_message_queue = self.inbound_runtime.control_message_queue
+        self.business_queue_size = self.inbound_runtime.business_queue_size
+        self.business_message_queues = self.inbound_runtime.business_message_queues
+        self._business_workers_lock = self.inbound_runtime.business_workers_lock
 
         # 线程管理
-        self.running = Event()
         self.queue_thread: Optional[Thread] = None
-        self.control_worker_thread: Optional[Thread] = None
-        self.business_worker_threads: Dict[str, Thread] = {}
+        self.control_worker_thread = self.inbound_runtime.control_worker_thread
+        self.business_worker_threads = self.inbound_runtime.business_worker_threads
         self.connected = Event()
 
         # 注册指令处理器
@@ -347,7 +359,7 @@ class SimCoordinationClient:
         """
         self.out_message_queue.put(command)
         # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
-        # logger.info(f"Enqueued command: {self._format_command_for_log(command)}")
+        logger.info("Enqueued command: %s", self._format_command_for_log(command))
 
     def send_command(self, command: SimCommand):
         """
@@ -356,7 +368,16 @@ class SimCoordinationClient:
         Args:
             command: 要发送的指令
         """
-        self._send_with_retry(command)
+        self._outbox().send_with_retry(command)
+
+    def _outbox(self) -> CoordinationOutboxPublisher:
+        """Return the outbox publisher, keeping mutable client settings in sync."""
+        self.outbox_publisher.mqtt_client = self.mqtt_client
+        self.outbox_publisher.topic = self.topic
+        self.outbox_publisher.qos = self.qos
+        self.outbox_publisher.max_retry_count = self.max_retry_count
+        self.outbox_publisher.base_retry_delay_ms = self.base_retry_delay_ms
+        return self.outbox_publisher
 
     # ========================================================================
     # MQTT 回调
@@ -510,121 +531,25 @@ class SimCoordinationClient:
 
     def _start_inbound_workers(self):
         """如果入站指令工作线程尚未运行，则启动它们。"""
-        if self.control_worker_thread is None or not self.control_worker_thread.is_alive():
-            self.control_worker_thread = Thread(
-                target=self._inbound_worker_loop,
-                args=(self.control_message_queue, "ControlWorker"),
-                daemon=True,
-                name="ControlWorker",
-            )
-            self.control_worker_thread.start()
+        self.inbound_runtime.start_workers()
+        self.control_worker_thread = self.inbound_runtime.control_worker_thread
 
     def _stop_inbound_workers(self):
         """运行标记清除后，短暂等待入站工作线程停止。"""
-        with self._business_workers_lock:
-            business_workers = list(self.business_worker_threads.values())
-            self.business_worker_threads.clear()
-            self.business_message_queues.clear()
-
-        for worker in [self.control_worker_thread, *business_workers]:
-            if worker and worker.is_alive():
-                worker.join(timeout=5)
+        self.inbound_runtime.stop_workers()
+        self.control_worker_thread = self.inbound_runtime.control_worker_thread
 
     def _enqueue_incoming(self, command: SimCommand):
-        queue_name, target_queue = self._select_inbound_queue(command)
-        item = InboundCommand(command=command, received_at=time.monotonic(), queue_name=queue_name)
-        try:
-            target_queue.put_nowait(item)
-            logger.debug(
-                "Inbound command enqueued: type=%s, id=%s, context=%s, queue=%s, queueSize=%s",
-                command.command_type,
-                command.command_id,
-                self._command_context_id(command),
-                queue_name,
-                target_queue.qsize(),
-            )
-        except Full:
-            logger.error(
-                "Inbound queue full: type=%s, id=%s, context=%s, queue=%s, capacity=%s",
-                command.command_type,
-                command.command_id,
-                self._command_context_id(command),
-                queue_name,
-                target_queue.maxsize,
-            )
+        self.inbound_runtime.enqueue(command)
 
     def _select_inbound_queue(self, command: SimCommand):
-        if isinstance(command, (SimTaskInitRequest, SimTaskTerminateRequest)):
-            return "control", self.control_message_queue
-
-        context_id = self._command_context_id(command) or "__no_context__"
-        return f"business:{context_id}", self._get_or_start_business_queue(context_id)
+        return self.inbound_runtime.select_queue(command)
 
     def _get_or_start_business_queue(self, context_id: str) -> Queue[InboundCommand]:
-        with self._business_workers_lock:
-            business_queue = self.business_message_queues.get(context_id)
-            if business_queue is None:
-                business_queue = Queue(maxsize=self.business_queue_size)
-                self.business_message_queues[context_id] = business_queue
-
-            worker = self.business_worker_threads.get(context_id)
-            if worker is None or not worker.is_alive():
-                worker_name = f"BusinessWorker:{context_id}"
-                worker = Thread(
-                    target=self._inbound_worker_loop,
-                    args=(business_queue, worker_name),
-                    daemon=True,
-                    name=worker_name,
-                )
-                self.business_worker_threads[context_id] = worker
-                worker.start()
-        return business_queue
+        return self.inbound_runtime.get_or_start_business_queue(context_id)
 
     def _inbound_worker_loop(self, source_queue: Queue[InboundCommand], worker_name: str):
-        logger.info("Inbound command worker started: %s", worker_name)
-        while self.running.is_set():
-            try:
-                item = source_queue.get(timeout=1)
-            except Empty:
-                continue
-
-            queue_wait_ms = (time.monotonic() - item.received_at) * 1000
-            started_at = time.monotonic()
-            command = item.command
-            try:
-                logger.debug(
-                    "Inbound command handling started: type=%s, id=%s, context=%s, queue=%s, queueWaitMs=%.2f, worker=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    item.queue_name,
-                    queue_wait_ms,
-                    worker_name,
-                )
-                self._handle_incoming_message(command)
-                duration_ms = (time.monotonic() - started_at) * 1000
-                logger.debug(
-                    "Inbound command handled: type=%s, id=%s, context=%s, handlerDurationMs=%.2f, worker=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    duration_ms,
-                    worker_name,
-                )
-            except Exception as e:
-                logger.error(
-                    "Error in inbound worker %s: type=%s, id=%s, context=%s, error=%s",
-                    worker_name,
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    e,
-                    exc_info=True,
-                )
-            finally:
-                source_queue.task_done()
-
-        logger.info("Inbound command worker stopped: %s", worker_name)
+        self.inbound_runtime.worker_loop(source_queue, worker_name)
 
     def _set_logging_context(self, command: SimCommand):
         """
@@ -998,31 +923,7 @@ class SimCoordinationClient:
         Returns:
             应发送时返回 True，否则返回 False
         """
-        # 不发送请求（只发送响应和报告）
-        if isinstance(command, SimCoordinationRequest):
-            return False
-
-        # 只发送本地智能体的响应
-        if isinstance(command, SimCoordinationResponse):
-            if isinstance(command, SimTaskTerminateResponse):
-                node_id = self.state_manager.get_node_id()
-                if node_id and command.source_agent_instance.hydros_node_id == node_id:
-                    return True
-            return self.state_manager.is_local_agent(command.source_agent_instance)
-
-        # 发送本地智能体的状态报告。任务终止时，本地智能体注册表可能在异步发送循环
-        # 清空之前已被清理，因此仅对状态报告使用当前节点 ID 兜底。
-        if isinstance(command, AgentInstanceStatusReport):
-            if self.state_manager.is_local_agent(command.source_agent_instance):
-                return True
-            node_id = self.state_manager.get_node_id()
-            return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
-
-        # 只发送已注册本地智能体的 MPC 结果报告。
-        if isinstance(command, MpcResultReport):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
-
-        return False
+        return self._outbox().should_send(command)
 
     def _send_with_retry(self, command: SimCommand):
         """
@@ -1033,59 +934,12 @@ class SimCoordinationClient:
         Args:
             command: 要发送的指令
         """
-        attempt = 0
-        command_id = command.command_id
-
-        while attempt <= self.max_retry_count:
-            try:
-                # 序列化指令
-                payload = command.model_dump_json(by_alias=True)
-
-                # 发布到 MQTT
-                result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
-                result.wait_for_publish()
-
-                if isinstance(command, MpcResultReport):
-                    logger.info(
-                        "MPC result report sent to coordinator: topic=%s, command_id=%s, "
-                        "result_count=%s, detail_count=%s",
-                        self.topic,
-                        command_id,
-                        len(command.mpc_results or []),
-                        self._count_mpc_result_details(command),
-                    )
-                return  # 发送成功
-
-            except Exception as e:
-                logger.error(f"Failed to send command: id={command_id}, attempt={attempt}/{self.max_retry_count}: {e}")
-
-                attempt += 1
-                if attempt > self.max_retry_count:
-                    logger.error(f"Max retry count exceeded for command: id={command_id}")
-                    raise
-
-                # 指数退避：2^attempt * 基础延迟
-                delay_ms = self.base_retry_delay_ms * (2 ** attempt)
-                logger.info(f"Retrying after {delay_ms}ms... (attempt {attempt}/{self.max_retry_count})")
-                time.sleep(delay_ms / 1000.0)
+        self._outbox().send_with_retry(command)
 
     @staticmethod
     def _format_command_for_log(command: SimCommand) -> str:
-        if isinstance(command, MpcResultReport):
-            summary = {
-                "command_type": command.command_type,
-                "command_id": command.command_id,
-                "biz_scene_instance_id": (
-                    command.context.biz_scene_instance_id
-                    if command.context is not None
-                    else None
-                ),
-                "result_count": len(command.mpc_results or []),
-                "detail_count": SimCoordinationClient._count_mpc_result_details(command),
-            }
-            return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
-        return command.model_dump_json(indent=None)
+        return CoordinationOutboxPublisher.format_command_for_log(command)
 
     @staticmethod
     def _count_mpc_result_details(command: MpcResultReport) -> int:
-        return sum(len(result.details or []) for result in command.mpc_results or [])
+        return CoordinationOutboxPublisher.count_mpc_result_details(command)
