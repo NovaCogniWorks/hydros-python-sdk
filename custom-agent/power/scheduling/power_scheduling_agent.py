@@ -98,7 +98,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             base_metrics_topic = env_config.get('metrics_topic')
             if base_metrics_topic:
                 # 手动替换 {hydros_cluster_id} 变量
-                cluster_id = env_config.get('hydros_cluster_id', 'default_cluster_25')
+                cluster_id = env_config.get('hydros_cluster_id', 'hydros-k3s-testing')
                 base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
 
                 # 从上下文获取业务场景实例 ID (biz_scene_instance_id)

@@ -112,8 +112,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 手动替换 {hydros_cluster_id} 变量
                 cluster_id = env_config.get('hydros_cluster_id')
                 if not cluster_id:
-                    cluster_id = 'default_cluster_25'
-                    logger.warning("在 env_config 中未找到 'hydros_cluster_id' 参数，默认使用 'default_cluster_25'。")
+                    cluster_id = 'hydros-k3s-testing'
+                    logger.warning("在 env_config 中未找到 'hydros_cluster_id' 参数，默认使用 'hydros-k3s-testing'。")
                 base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
 
                 # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
