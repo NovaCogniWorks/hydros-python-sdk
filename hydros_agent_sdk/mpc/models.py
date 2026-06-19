@@ -39,7 +39,10 @@ class PredictedResult(HydroBaseModel):
 
 class HorizonStep(HydroBaseModel):
     horizon_step: Optional[int] = None
+    # Executable control intents returned by planning. Consumers should build
+    # control commands from this list, not from predicted_result_list.
     control_object_list: List[ControlObjectResult] = Field(default_factory=list)
+    # Prediction-only data for display, replay, reporting, and analysis.
     predicted_result_list: List[PredictedResult] = Field(default_factory=list)
 
 
