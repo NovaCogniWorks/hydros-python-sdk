@@ -1,16 +1,20 @@
 """
-Central scheduling agent example for the power HydroSim integration.
+电站 HydroSim 集成的集中调度智能体示例。
 """
 
 import logging
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, urlparse, urlunparse
+from urllib.request import Request, urlopen
 
 CURRENT_DIR = Path(__file__).resolve().parent
 HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
 DATA_DIR = CURRENT_DIR.parent / "data"
+RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "scheduling"
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
@@ -44,14 +48,57 @@ from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 logger = logging.getLogger(__name__)
 
 
+class HydroSimInputFileResolver:
+    """解析 HydroSim 输入文件来源，并按需下载远程配置到本地运行目录。"""
+
+    def __init__(self, properties, runtime_dir: Path):
+        self._properties = properties
+        self._runtime_dir = runtime_dir
+
+    def resolve(
+        self,
+        url_property_names: List[str],
+        path_property_names: List[str],
+        default_path: str,
+        local_filename: str,
+    ) -> str:
+        source = self._get_first_configured_value(url_property_names + path_property_names)
+        if not source:
+            return str(Path(default_path).resolve())
+        if self._is_remote_url(source):
+            return self._download_to_runtime_dir(source, local_filename)
+        return str(Path(source).resolve())
+
+    def _get_first_configured_value(self, property_names: List[str]) -> Optional[str]:
+        for property_name in property_names:
+            value = self._properties.get_property(property_name, None)
+            if value:
+                return str(value).strip()
+        return None
+
+    @staticmethod
+    def _is_remote_url(value: str) -> bool:
+        return value.startswith("http://") or value.startswith("https://")
+
+    def _download_to_runtime_dir(self, source_url: str, local_filename: str) -> str:
+        parsed = urlparse(source_url)
+        encoded_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/:@!$&'()*+,;=")))
+        request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
+        target_path = self._runtime_dir / local_filename
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with urlopen(request, timeout=30) as response:
+            target_path.write_bytes(response.read())
+        logger.info("Downloaded HydroSim input file from %s to %s", source_url, target_path)
+        return str(target_path.resolve())
+
+
 class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
-    Power HydroSim central scheduling agent.
+    电站 HydroSim 集中调度智能体。
 
-    The agent keeps the SDK central-scheduling wiring, but refreshes its
-    scheduling window only once per ``roll_steps`` interval. A refreshed window
-    publishes a horizon dataset, while every tick still executes the current
-    HydroSim step and returns step metrics.
+    该智能体沿用 SDK 的集中调度框架，但只会在每个 ``roll_steps`` 滚动周期
+    开始时刷新一次调度窗口。窗口刷新后会发布新的时域结果数据，而每个
+    tick 仍会执行当前 HydroSim 步并返回该步指标。
     """
 
     def __init__(
@@ -84,6 +131,12 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
         self._local_mpc_task_state: Optional[SchedulingTaskState] = None
+        self._hydrosim_runtime_dir = RUNTIME_DIR
+        self._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._hydrosim_input_resolver = HydroSimInputFileResolver(
+            properties=self.properties,
+            runtime_dir=self._hydrosim_runtime_dir,
+        )
         logger.info("Power central scheduling agent created: %s", agent_id)
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
@@ -125,9 +178,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             raise
 
     def _initialize_optimization_model(self) -> None:
-        logger.info("Loading MPC optimization model ...")
         self._optimization_model = {"status": "ready"}
-        logger.info("Optimization model ready")
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -144,12 +195,10 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
         step_result = self._hydrosim_api.execute_step(step_index=request.step)
         metrics_list = self._build_metrics_from_step_result(step_result)
-        logger.info("step=%s HydroSim execute_step returned %s metrics", request.step, len(metrics_list))
         return metrics_list
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
-        logger.info("--- step %s: running MPC rolling optimization ---", step)
         session = getattr(self._hydrosim_api, "_session", None)
         if session is None:
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
@@ -184,7 +233,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 }
             )
 
-        logger.info("Built %s power scheduling commands for step=%s", len(commands), step)
         return commands
 
     def _ensure_mpc_task_state(self, step: int) -> SchedulingTaskState:
@@ -228,12 +276,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             task_state.start_step = current_step
         if event is not None:
             task_state.register_hydro_event(event)
-        logger.info(
-            "Power scheduling task state activated: bizSceneInstanceId=%s, currentStep=%s, rollSteps=%s",
-            self.context.biz_scene_instance_id,
-            task_state.current_step,
-            task_state.rolling_interval_steps,
-        )
         return task_state
 
     def _resolve_roll_steps(self) -> int:
@@ -292,7 +334,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         horizon_steps: List[HorizonStep],
     ) -> None:
         if not horizon_steps:
-            logger.info("Skip rolling window report publish because no horizon dataset is available: step=%s", step)
             return
 
         reporter = getattr(self, "_mpc_result_reporter", None) or MpcResultReporter(
@@ -383,25 +424,33 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
     def _initialize_hydrosim_session(self) -> None:
         init_result = self._hydrosim_api.initialize(
-            time_series_file=self._get_hydrosim_property(
-                "hydrosim_time_series_file",
-                str(DATA_DIR / "time_series_power_planning.json"),
+            time_series_file=self._resolve_hydrosim_input_file(
+                url_property_names=["hydrosim_time_series_url"],
+                path_property_names=["hydrosim_time_series_file"],
+                default_path=str(DATA_DIR / "time_series_power_planning.json"),
+                local_filename="time_series_power_planning.json",
             ),
-            mpc_config_file=self._get_hydrosim_property(
-                "hydrosim_mpc_config_file",
-                str(DATA_DIR / "mpc_config.yaml"),
+            mpc_config_file=self._resolve_hydrosim_input_file(
+                url_property_names=["mpc_config_url", "hydrosim_mpc_config_url"],
+                path_property_names=["hydrosim_mpc_config_file"],
+                default_path=str(DATA_DIR / "mpc_config.yaml"),
+                local_filename="mpc_config.yaml",
             ),
-            initial_states_file=self._get_hydrosim_property(
-                "hydrosim_initial_states_file",
-                str(DATA_DIR / "initial_states.yaml"),
+            initial_states_file=self._resolve_hydrosim_input_file(
+                url_property_names=["init_state_config_url", "hydrosim_initial_states_url"],
+                path_property_names=["hydrosim_initial_states_file"],
+                default_path=str(DATA_DIR / "initial_states.yaml"),
+                local_filename="initial_states.yaml",
             ),
-            constraints_file=self._get_hydrosim_property(
-                "hydrosim_constraints_file",
-                str(DATA_DIR / "constrains_targets.yaml"),
+            constraints_file=self._resolve_hydrosim_input_file(
+                url_property_names=["target_and_constrain_config_url", "hydrosim_constraints_url"],
+                path_property_names=["hydrosim_constraints_file"],
+                default_path=str(DATA_DIR / "constrains_targets.yaml"),
+                local_filename="constrains_targets.yaml",
             ),
         )
         self._hydrosim_initialized = True
-        logger.info("HydroSim initialized for scheduling, session=%s", init_result["session"]["session_id"])
+        logger.info("HydroSim scheduling session initialized: session=%s", init_result["session"]["session_id"])
 
     def _ensure_hydrosim_initialized(self) -> None:
         if not self._hydrosim_initialized:
@@ -410,30 +459,61 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     def _ensure_hydrosim_power_plan_loaded(self) -> None:
         if self._hydrosim_power_plan_loaded:
             return
-        result = self._hydrosim_api.get_station_power_planning_series(
-            self._get_hydrosim_property(
-                "hydrosim_power_planning_file",
-                str(DATA_DIR / "time_series_power_planning.json"),
-            )
-        )
+        planning_file, cleanup_path = self._resolve_power_planning_file_for_load()
+        try:
+            result = self._hydrosim_api.get_station_power_planning_series(planning_file)
+        finally:
+            if cleanup_path is not None and cleanup_path.exists():
+                cleanup_path.unlink(missing_ok=True)
         self._hydrosim_power_plan_loaded = True
         logger.info("HydroSim power planning loaded, stations=%s", len(result.get("station_power_series", [])))
 
-    def _get_hydrosim_property(self, key: str, default: str) -> str:
-        value = self.properties.get_property(key, default)
-        return str(Path(value).resolve())
+    def _resolve_hydrosim_input_file(
+        self,
+        url_property_names: List[str],
+        path_property_names: List[str],
+        default_path: str,
+        local_filename: str,
+    ) -> str:
+        return self._hydrosim_input_resolver.resolve(
+            url_property_names=url_property_names,
+            path_property_names=path_property_names,
+            default_path=default_path,
+            local_filename=local_filename,
+        )
+
+    def _resolve_power_planning_file_for_load(self) -> Tuple[str, Optional[Path]]:
+        planning_url = self.properties.get_property("objects_time_series_url", None)
+        if planning_url:
+            temp_file = tempfile.NamedTemporaryFile(
+                prefix="hydrosim_power_plan_",
+                suffix=".json",
+                delete=False,
+            )
+            temp_path = Path(temp_file.name)
+            temp_file.close()
+            parsed = urlparse(str(planning_url))
+            encoded_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/:@!$&'()*+,;=")))
+            request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
+            with urlopen(request, timeout=30) as response:
+                temp_path.write_bytes(response.read())
+            logger.info("Downloaded HydroSim power planning file from %s to %s", planning_url, temp_path)
+            return str(temp_path.resolve()), temp_path
+
+        planning_file = self._resolve_hydrosim_input_file(
+            url_property_names=["hydrosim_power_planning_url"],
+            path_property_names=["hydrosim_power_planning_file"],
+            default_path=str(DATA_DIR / "time_series_power_planning.json"),
+            local_filename="time_series_power_planning.json",
+        )
+        return planning_file, None
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
-        logger.info("--- time series update received: %s ---", request.command_id)
+        logger.info("Time series update received: commandId=%s", request.command_id)
         event = request.time_series_data_changed_event
         self._activate_mpc_task_state_from_event(event)
-        if event and event.object_time_series:
-            for obj_ts in event.object_time_series:
-                logger.info("Object %s metric %s updated", obj_ts.object_name, obj_ts.metrics_code)
-                if obj_ts.time_series:
-                    first_val = obj_ts.time_series[0]
-                    logger.debug("First point: Step=%s, Value=%s", first_val.step, first_val.value)
+        self._refresh_hydrosim_session_from_event(event)
 
         return TimeSeriesDataUpdateResponse(
             context=self.context,
@@ -448,14 +528,10 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self,
         request: OutflowTimeSeriesDataUpdateRequest,
     ) -> OutflowTimeSeriesDataUpdateResponse:
-        logger.info("--- outflow time series update received: %s ---", request.command_id)
+        logger.info("Outflow time series update received: commandId=%s", request.command_id)
         event = request.outflow_time_series_data_changed_event
         self._activate_mpc_task_state_from_event(event)
-        if event and event.object_time_series:
-            for obj_ts in event.object_time_series:
-                if obj_ts.time_series:
-                    first_val = obj_ts.time_series[0]
-                    logger.debug("First point: Step=%s, Value=%s", first_val.step, first_val.value)
+        self._refresh_hydrosim_session_from_event(event)
 
         return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
@@ -464,6 +540,59 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             source_agent_instance=self,
             broadcast=False,
         )
+
+    def _refresh_hydrosim_session_from_event(self, event: Any) -> None:
+        if event is None or not getattr(event, "object_time_series", None):
+            return
+
+        self._ensure_hydrosim_initialized()
+        self._ensure_hydrosim_power_plan_loaded()
+        current_step = self._resolve_event_current_step(event)
+        current_step_metrics = self._build_current_step_metrics_for_hydrosim(current_step)
+        refresh_result = self._hydrosim_api.apply_time_series_event_update(
+            event,
+            current_step=current_step,
+            current_step_metrics=current_step_metrics,
+        )
+        logger.debug(
+            "HydroSim session refreshed from event: source=%s, step=%s, cacheMetrics=%s, updatedSeries=%s, stations=%s, devices=%s",
+            getattr(event, "hydro_event_source_type", None),
+            current_step,
+            len(current_step_metrics),
+            refresh_result.get("updated_time_series_count", 0),
+            len(refresh_result.get("station_power_series", []) or []),
+            len(refresh_result.get("device_output_series", []) or []),
+        )
+
+    def _resolve_event_current_step(self, event: Any) -> int:
+        event_step = getattr(event, "auto_schedule_at_step", None)
+        if event_step is not None and int(event_step) >= 0:
+            return int(event_step)
+        task_state = getattr(self, "_local_mpc_task_state", None)
+        if task_state is not None and getattr(task_state, "current_step", None) is not None:
+            return int(task_state.current_step)
+        return 0
+
+    def _build_current_step_metrics_for_hydrosim(self, current_step: int) -> List[Dict[str, Any]]:
+        metrics_at_step = self._metrics_data_cache.by_step(current_step)
+        metrics_source = metrics_at_step.values() if metrics_at_step else self._metrics_data_cache.latest_metrics.values()
+        overrides: List[Dict[str, Any]] = []
+        for metrics_data in metrics_source:
+            object_id = metrics_data.get("object_id")
+            metrics_code = metrics_data.get("metrics_code")
+            value = metrics_data.get("value")
+            object_type = metrics_data.get("object_type")
+            if object_id is None or not metrics_code or value is None or not object_type:
+                continue
+            overrides.append(
+                {
+                    "object_id": int(object_id),
+                    "object_type": str(object_type),
+                    "metrics_code": str(metrics_code),
+                    "value": float(value),
+                }
+            )
+        return overrides
 
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
@@ -482,7 +611,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self._rolling_window_end_step = None
         self._rolling_window_dataset = []
         self._local_mpc_task_state = None
-
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)
 

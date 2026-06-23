@@ -20,6 +20,7 @@ import yaml
 CURRENT_DIR = Path(__file__).resolve().parent
 HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
 DATA_DIR = CURRENT_DIR.parent / "data"
+RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "outflowplan"
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
@@ -49,6 +50,50 @@ from hydros_agent_sdk.protocol.events import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class HydroSimInputFileResolver:
+    """解析 HydroSim 输入文件来源，并按需下载远程配置到本地运行目录。"""
+
+    def __init__(self, properties, runtime_dir: Path):
+        self._properties = properties
+        self._runtime_dir = runtime_dir
+
+    def resolve(
+        self,
+        url_property_names: List[str],
+        path_property_names: List[str],
+        default_path: str,
+        local_filename: str,
+    ) -> str:
+        source = self._get_first_configured_value(url_property_names + path_property_names)
+        if not source:
+            return str(Path(default_path).resolve())
+        if self._is_remote_url(source):
+            return self._download_to_runtime_dir(source, local_filename)
+        return str(Path(source).resolve())
+
+    def _get_first_configured_value(self, property_names: List[str]) -> Optional[str]:
+        for property_name in property_names:
+            value = self._properties.get_property(property_name, None)
+            if value:
+                return str(value).strip()
+        return None
+
+    @staticmethod
+    def _is_remote_url(value: str) -> bool:
+        return value.startswith("http://") or value.startswith("https://")
+
+    def _download_to_runtime_dir(self, source_url: str, local_filename: str) -> str:
+        parsed = urlparse(source_url)
+        encoded_url = urlunparse(parsed._replace(path=quote(parsed.path, safe="/:@!$&'()*+,;=")))
+        request = Request(encoded_url, headers={"User-Agent": "HydrosPythonSdk/1.0"})
+        target_path = self._runtime_dir / local_filename
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with urlopen(request, timeout=30) as response:
+            target_path.write_bytes(response.read())
+        logger.info("Downloaded HydroSim input file from %s to %s", source_url, target_path)
+        return str(target_path.resolve())
 
 
 class PowerOutflowPlanAgent(OutflowPlanAgent):
@@ -91,6 +136,12 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         self._topology = None
         self._hydrosim_api = HydroSimulationApi()
         self._hydrosim_initialized = False
+        self._hydrosim_runtime_dir = RUNTIME_DIR
+        self._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._hydrosim_input_resolver = HydroSimInputFileResolver(
+            properties=self.properties,
+            runtime_dir=self._hydrosim_runtime_dir,
+        )
 
         logger.info("PowerOutflowPlanAgent created: %s", agent_id)
         logger.warning("PowerOutflowPlanAgent runtime file marker: %s", __file__)
@@ -431,21 +482,29 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         )
 
     def _initialize_hydrosim_session(self) -> None:
-        time_series_file = self._get_hydrosim_property(
-            "hydrosim_time_series_file",
-            str(DATA_DIR / "time_series_power_planning.json"),
+        time_series_file = self._resolve_hydrosim_input_file(
+            url_property_names=["hydrosim_time_series_url", "objects_time_series_url"],
+            path_property_names=["hydrosim_time_series_file", "hydrosim_power_planning_file"],
+            default_path=str(DATA_DIR / "time_series_power_planning.json"),
+            local_filename="time_series_power_planning.json",
         )
-        mpc_config_file = self._get_hydrosim_property(
-            "hydrosim_mpc_config_file",
-            str(DATA_DIR / "mpc_config.yaml"),
+        mpc_config_file = self._resolve_hydrosim_input_file(
+            url_property_names=["mpc_config_url", "hydrosim_mpc_config_url"],
+            path_property_names=["hydrosim_mpc_config_file"],
+            default_path=str(DATA_DIR / "mpc_config.yaml"),
+            local_filename="mpc_config.yaml",
         )
-        initial_states_file = self._get_hydrosim_property(
-            "hydrosim_initial_states_file",
-            str(DATA_DIR / "initial_states.yaml"),
+        initial_states_file = self._resolve_hydrosim_input_file(
+            url_property_names=["init_state_config_url", "hydrosim_initial_states_url"],
+            path_property_names=["hydrosim_initial_states_file"],
+            default_path=str(DATA_DIR / "initial_states.yaml"),
+            local_filename="initial_states.yaml",
         )
-        constraints_file = self._get_hydrosim_property(
-            "hydrosim_constraints_file",
-            str(DATA_DIR / "constrains_targets.yaml"),
+        constraints_file = self._resolve_hydrosim_input_file(
+            url_property_names=["target_and_constrain_config_url", "hydrosim_constraints_url"],
+            path_property_names=["hydrosim_constraints_file"],
+            default_path=str(DATA_DIR / "constrains_targets.yaml"),
+            local_filename="constrains_targets.yaml",
         )
 
         init_result = self._hydrosim_api.initialize(
@@ -461,9 +520,19 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         if not self._hydrosim_initialized:
             self._initialize_hydrosim_session()
 
-    def _get_hydrosim_property(self, key: str, default: str) -> str:
-        value = self.properties.get_property(key, default)
-        return str(Path(value).resolve())
+    def _resolve_hydrosim_input_file(
+        self,
+        url_property_names: List[str],
+        path_property_names: List[str],
+        default_path: str,
+        local_filename: str,
+    ) -> str:
+        return self._hydrosim_input_resolver.resolve(
+            url_property_names=url_property_names,
+            path_property_names=path_property_names,
+            default_path=default_path,
+            local_filename=local_filename,
+        )
 
     def _write_power_planning_file(self, temp_dir: str, object_time_series_list: List[ObjectTimeSeries]) -> str:
         payload = {
@@ -552,7 +621,6 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             except Exception:
                 logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
         self._hydrosim_initialized = False
-
         # 在状态管理器中注销
         self.state_manager.terminate_task(self.context)
         self.state_manager.remove_local_agent(self)

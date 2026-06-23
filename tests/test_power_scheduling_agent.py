@@ -1,12 +1,20 @@
 import importlib
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from hydros_agent_sdk.protocol.commands import TickCmdRequest, TimeSeriesDataUpdateRequest
-from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
-from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext
+from hydros_agent_sdk.protocol.commands import (
+    OutflowTimeSeriesDataUpdateRequest,
+    TickCmdRequest,
+    TimeSeriesDataUpdateRequest,
+)
+from hydros_agent_sdk.protocol.events import (
+    OutflowTimeSeriesDataChangedEvent,
+    TimeSeriesDataChangedEvent,
+)
+from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 
 
@@ -164,6 +172,79 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=3)
 
 
+def test_power_scheduling_init_downloads_hydrosim_inputs_from_config_urls():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-url-001")
+
+    download_payload = b"demo-content"
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return download_payload
+
+    original_urlopen = module.urlopen
+    try:
+        module.urlopen = Mock(return_value=_FakeResponse())
+        agent.properties["mpc_config_url"] = "https://example.test/mpc_config.yaml"
+        agent.properties["init_state_config_url"] = "https://example.test/initial_states.yaml"
+        agent.properties["target_and_constrain_config_url"] = "https://example.test/constrains_targets.yaml"
+        agent.properties["objects_time_series_url"] = "https://example.test/time_series_power_planning.json"
+        agent._hydrosim_api.initialize = Mock(
+            return_value={"session": {"session_id": "session-download-001"}}
+        )
+        agent._initialize_hydrosim_session()
+
+        init_kwargs = agent._hydrosim_api.initialize.call_args.kwargs
+        assert init_kwargs["time_series_file"].endswith("time_series_power_planning.json")
+        assert init_kwargs["mpc_config_file"].endswith("mpc_config.yaml")
+        assert init_kwargs["initial_states_file"].endswith("initial_states.yaml")
+        assert init_kwargs["constraints_file"].endswith("constrains_targets.yaml")
+        assert os.path.exists(init_kwargs["mpc_config_file"])
+        assert os.path.exists(init_kwargs["initial_states_file"])
+        assert os.path.exists(init_kwargs["constraints_file"])
+        assert os.path.exists(init_kwargs["time_series_file"])
+        assert module.urlopen.call_count >= 3
+    finally:
+        module.urlopen = original_urlopen
+
+
+def test_power_scheduling_uses_objects_time_series_url_for_power_planning_file():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-url-002")
+
+    class _FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"object_time_series": []}'
+
+    original_urlopen = module.urlopen
+    try:
+        module.urlopen = Mock(return_value=_FakeResponse())
+        agent.properties["objects_time_series_url"] = "https://example.test/time_series_power_planning.json"
+        agent._hydrosim_power_plan_loaded = False
+        agent._hydrosim_api.get_station_power_planning_series = Mock(
+            return_value={"station_power_series": []}
+        )
+
+        agent._ensure_hydrosim_power_plan_loaded()
+
+        planning_file = agent._hydrosim_api.get_station_power_planning_series.call_args.args[0]
+        assert Path(planning_file).parent != agent._hydrosim_runtime_dir
+    finally:
+        module.urlopen = original_urlopen
+
+
 def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-002")
@@ -216,6 +297,13 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
         configured_target_and_constrain_config_url="control.yaml",
     )
     agent._hydrosim_api._session = _build_session(30)
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
 
     response = agent.on_time_series_data_update(
         TimeSeriesDataUpdateRequest(
@@ -236,6 +324,182 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     assert agent._local_mpc_task_state.current_step == 1
     assert agent._local_mpc_task_state.rolling_interval_steps == 10
     assert agent._local_mpc_task_state.hydro_events
+    _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
+    assert kwargs["current_step"] == 1
+    assert kwargs["current_step_metrics"] == []
+
+
+def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimization():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-scene-004")
+
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
+        get_roll_steps=lambda: 10,
+        configured_mpc_config_url="mpc.yaml",
+        configured_target_and_constrain_config_url="control.yaml",
+    )
+    agent._hydrosim_api._session = _build_session(5)
+
+    def _refresh_plan(event, current_step=None, current_step_metrics=None):
+        session = agent._hydrosim_api._session
+        session.latest_station_power_series = [
+            {
+                "node_id": 20300,
+                "station": "Station-20300",
+                "time_series": [{"step": 2, "value": 321.0}],
+            }
+        ]
+        session.latest_device_output_series = []
+        return {
+            "station_power_series": session.latest_station_power_series,
+            "device_output_series": session.latest_device_output_series,
+            "updated_time_series_count": len(event.object_time_series),
+        }
+
+    agent._hydrosim_api.apply_time_series_event_update = Mock(side_effect=_refresh_plan)
+
+    response = agent.on_time_series_data_update(
+        TimeSeriesDataUpdateRequest(
+            command_id="ts-apply-001",
+            context=context,
+            time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WATER_USE",
+                auto_schedule_at_step=2,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=1001,
+                        object_name="water-use",
+                        metrics_code="flow",
+                        time_series=[TimeSeriesValue(step=2, value=12.0)],
+                    )
+                ],
+            ),
+            broadcast=False,
+        )
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert response.command_status == "SUCCEED"
+    agent._hydrosim_api.apply_time_series_event_update.assert_called_once()
+    _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
+    assert kwargs["current_step"] == 2
+    assert commands == [
+        {
+            "target_agent_code": "TARGET_AGENT_20300",
+            "target_command_type": "output_power",
+            "target_value": 321.0,
+            "object_id": 20300,
+            "object_type": "Station",
+        }
+    ]
+
+
+def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-scene-005")
+
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
+        get_roll_steps=lambda: 10,
+        configured_mpc_config_url="mpc.yaml",
+        configured_target_and_constrain_config_url="control.yaml",
+    )
+    agent._hydrosim_api._session = _build_session(5)
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+
+    response = agent.on_outflow_time_series_data_update(
+        OutflowTimeSeriesDataUpdateRequest(
+            command_id="outflow-apply-001",
+            context=context,
+            outflow_time_series_data_changed_event=OutflowTimeSeriesDataChangedEvent(
+                hydro_event_source_type="OUTFLOW_TIME_SERIES",
+                object_type="Gate",
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20101,
+                        object_name="Gate-20101",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=2, value=16.0)],
+                    )
+                ],
+            ),
+            broadcast=False,
+        )
+    )
+
+    assert response.command_status == "SUCCEED"
+    agent._hydrosim_api.apply_time_series_event_update.assert_called_once()
+
+
+def test_power_scheduling_time_series_update_passes_current_step_cache_to_hydrosim():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-scene-006")
+
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
+        get_roll_steps=lambda: 10,
+        configured_mpc_config_url="mpc.yaml",
+        configured_target_and_constrain_config_url="control.yaml",
+    )
+    agent._hydrosim_api._session = _build_session(5)
+    agent._metrics_data_cache.update(
+        {
+            "object_id": 20100,
+            "object_type": "Station",
+            "metrics_code": "water_flow",
+            "value": 456.0,
+            "step_index": 3,
+            "position_code": "none",
+            "attributes": None,
+        }
+    )
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+
+    agent.on_time_series_data_update(
+        TimeSeriesDataUpdateRequest(
+            command_id="ts-cache-001",
+            context=context,
+            time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WATER_USE",
+                auto_schedule_at_step=3,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20100,
+                        object_type="Station",
+                        object_name="Station-20100",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=3, value=334.0)],
+                    )
+                ],
+            ),
+            broadcast=False,
+        )
+    )
+
+    _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
+    assert kwargs["current_step"] == 3
+    assert kwargs["current_step_metrics"] == [
+        {
+            "object_id": 20100,
+            "object_type": "Station",
+            "metrics_code": "water_flow",
+            "value": 456.0,
+        }
+    ]
 
 
 def test_hydrosim_execute_step_returns_cached_device_outputs():
@@ -319,3 +583,203 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
     assert device_metrics[(20304, "water_flow")] == 42.5
     assert device_metrics[(20101, "water_flow")] == 16.2
     assert device_metrics[(20101, "gate_opening")] == 1.75
+
+
+def test_hydrosim_apply_time_series_event_update_merges_series_into_active_session():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    api._session = hydrosim_api.HydroSimulationSession(
+        session_id="session-merge-001",
+        time_series_file="base.json",
+        mpc_config_file="mpc.yaml",
+        initial_states_file="initial.yaml",
+        constraints_file="constraints.yaml",
+        latest_station_power_series=[],
+        latest_device_output_series=[],
+        step_runtime=SimpleNamespace(
+            merged_event={
+                "object_time_series": [
+                    {
+                        "object_id": 1001,
+                        "object_type": "Channel",
+                        "object_name": "channel-1001",
+                        "metrics_code": "flow",
+                        "time_series": [{"step": 0, "value": 10.0}],
+                    },
+                    {
+                        "object_id": 20300,
+                        "object_type": "Station",
+                        "object_name": "Station-20300",
+                        "metrics_code": "power",
+                        "time_series": [{"step": 0, "value": 100.0}],
+                    },
+                ]
+            }
+        ),
+    )
+    api._run_configured_with_event = Mock(return_value=({"ok": True}, [{"node_id": 20300, "station": "Station-20300", "time_series": []}], []))
+    api._build_step_runtime = Mock(return_value=SimpleNamespace(merged_event={}))
+
+    result = api.apply_time_series_event_update(
+        TimeSeriesDataChangedEvent(
+            hydro_event_source_type="WATER_USE",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=1001,
+                    object_type="Channel",
+                    object_name="channel-1001",
+                    metrics_code="flow",
+                    time_series=[TimeSeriesValue(step=0, value=25.0)],
+                ),
+                ObjectTimeSeries(
+                    object_id=1002,
+                    object_type="Channel",
+                    object_name="channel-1002",
+                    metrics_code="flow",
+                    time_series=[TimeSeriesValue(step=0, value=30.0)],
+                ),
+            ],
+        )
+    )
+
+    merged_event = api._run_configured_with_event.call_args.args[1]
+    merged_series = {
+        (item.get("object_id"), item.get("metrics_code")): item["time_series"][0]["value"]
+        for item in merged_event["object_time_series"]
+    }
+
+    assert merged_series[(1001, "flow")] == 25.0
+    assert merged_series[(1002, "flow")] == 30.0
+    assert merged_series[(20300, "power")] == 100.0
+    assert result["updated_time_series_count"] == 2
+
+
+def test_hydrosim_apply_time_series_event_update_preserves_unmodified_steps():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    api._session = hydrosim_api.HydroSimulationSession(
+        session_id="session-merge-steps-001",
+        time_series_file="base.json",
+        mpc_config_file="mpc.yaml",
+        initial_states_file="initial.yaml",
+        constraints_file="constraints.yaml",
+        latest_station_power_series=[],
+        latest_device_output_series=[],
+        step_runtime=SimpleNamespace(
+            merged_event={
+                "object_time_series": [
+                    {
+                        "object_ids": [20100, 20300, 20500],
+                        "object_type": "Station",
+                        "object_name": "三站出力",
+                        "metrics_code": "power",
+                        "time_series_name": "power-plan",
+                        "time_series": [
+                            {"step": 0, "value": 100.0},
+                            {"step": 15, "value": 120.0},
+                            {"step": 30, "value": 140.0},
+                        ],
+                    }
+                ]
+            }
+        ),
+    )
+    api._run_configured_with_event = Mock(return_value=({"ok": True}, [], []))
+    api._build_step_runtime = Mock(return_value=SimpleNamespace(merged_event={}))
+
+    api.apply_time_series_event_update(
+        OutflowTimeSeriesDataChangedEvent(
+            hydro_event_source_type="OUTFLOW_TIME_SERIES",
+            object_type="Station",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_ids=[20100, 20300, 20500],
+                    object_type="Station",
+                    object_name="三站出力-更新名称",
+                    metrics_code="power",
+                    time_series_name="power-plan-updated",
+                    time_series=[TimeSeriesValue(step=15, value=222.0)],
+                )
+            ],
+        )
+    )
+
+    merged_event = api._run_configured_with_event.call_args.args[1]
+    merged_item = merged_event["object_time_series"][0]
+
+    assert merged_item["object_name"] == "三站出力-更新名称"
+    assert merged_item["time_series_name"] == "power-plan-updated"
+    assert merged_item["time_series"] == [
+        {"step": 0, "value": 100.0},
+        {"step": 15, "value": 222.0},
+        {"step": 30, "value": 140.0},
+    ]
+
+
+def test_hydrosim_apply_time_series_event_update_uses_cache_for_current_step_only():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    api._session = hydrosim_api.HydroSimulationSession(
+        session_id="session-cache-001",
+        time_series_file="base.json",
+        mpc_config_file="mpc.yaml",
+        initial_states_file="initial.yaml",
+        constraints_file="constraints.yaml",
+        latest_station_power_series=[],
+        latest_device_output_series=[],
+        step_runtime=SimpleNamespace(
+            merged_event={
+                "object_time_series": [
+                    {
+                        "object_id": 20100,
+                        "object_type": "Station",
+                        "object_name": "Station-20100",
+                        "metrics_code": "water_flow",
+                        "time_series": [
+                            {"step": 3, "value": 334.0},
+                            {"step": 4, "value": 340.0},
+                            {"step": 5, "value": 350.0},
+                        ],
+                    }
+                ]
+            }
+        ),
+    )
+    api._run_configured_with_event = Mock(return_value=({"ok": True}, [], []))
+    api._build_step_runtime = Mock(return_value=SimpleNamespace(merged_event={}))
+
+    api.apply_time_series_event_update(
+        TimeSeriesDataChangedEvent(
+            hydro_event_source_type="WATER_USE",
+            auto_schedule_at_step=3,
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=20100,
+                    object_type="Station",
+                    object_name="Station-20100",
+                    metrics_code="water_flow",
+                    time_series=[
+                        TimeSeriesValue(step=3, value=334.0),
+                        TimeSeriesValue(step=4, value=340.0),
+                        TimeSeriesValue(step=5, value=350.0),
+                    ],
+                )
+            ],
+        ),
+        current_step=3,
+        current_step_metrics=[
+            {
+                "object_id": 20100,
+                "object_type": "Station",
+                "metrics_code": "water_flow",
+                "value": 456.0,
+            }
+        ],
+    )
+
+    merged_event = api._run_configured_with_event.call_args.args[1]
+    assert merged_event["object_time_series"][0]["time_series"] == [
+        {"step": 3, "value": 456.0},
+        {"step": 4, "value": 340.0},
+        {"step": 5, "value": 350.0},
+    ]

@@ -225,28 +225,10 @@ class HydroSimulationApi:
         base_event = self._load_json_file(session.time_series_file, "基础时间序列文件")
         planning_payload = self._load_json_file(time_series_power_planning_file, "发电需求时间序列文件")
         merged_event = self._merge_event_with_power_plan(base_event, planning_payload)
-
-        with tempfile.TemporaryDirectory(prefix="hydrosim_api_") as temp_dir:
-            merged_event_path = Path(temp_dir) / "merged_time_series_power_planning.json"
-            with open(merged_event_path, "w", encoding="utf-8") as handle:
-                json.dump(merged_event, handle, ensure_ascii=False, indent=2)
-
-            with contextlib.redirect_stdout(io.StringIO()):
-                result = self.run_configured(
-                    time_series_file=str(merged_event_path),
-                    mpc_config_file=session.mpc_config_file,
-                    initial_states_file=session.initial_states_file,
-                    constraints_file=session.constraints_file,
-                    output_mode="mixed",
-                    output_dir=temp_dir,
-                    make_plots=False,
-                    progress_interval=0,
-                )
-
-            files = result["files"]
-            run_summary = result["json"]["run_summary"]
-            station_power_series = self._extract_station_power_series_from_yaml(files["configured_outputs_yaml"])
-            device_output_series = self._extract_device_output_series_from_yaml(files["configured_outputs_yaml"])
+        run_summary, station_power_series, device_output_series = self._run_configured_with_event(
+            session,
+            merged_event,
+        )
 
         session.latest_power_planning_file = str(Path(time_series_power_planning_file).resolve())
         session.latest_station_power_series = station_power_series
@@ -260,6 +242,43 @@ class HydroSimulationApi:
             "session": session.to_dict(),
             "run_summary": run_summary,
             "station_power_series": station_power_series,
+        }
+
+    def apply_time_series_event_update(
+        self,
+        event_payload: Any,
+        current_step: int | None = None,
+        current_step_metrics: List[Dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """将事件时序并入当前 HydroSim 会话，并刷新规划结果与步进上下文。"""
+
+        session = self._require_session()
+        base_event = self._resolve_active_merged_event(session)
+        merged_event = self._merge_event_with_updates(base_event, event_payload)
+        if current_step is not None and current_step >= 0:
+            merged_event = self._overlay_current_step_metrics(
+                merged_event,
+                current_step=int(current_step),
+                current_step_metrics=current_step_metrics or [],
+            )
+        run_summary, station_power_series, device_output_series = self._run_configured_with_event(
+            session,
+            merged_event,
+        )
+
+        session.latest_station_power_series = station_power_series
+        session.latest_device_output_series = device_output_series
+        session.step_runtime = self._build_step_runtime(session, merged_event)
+        session.current_step_index = 0
+        session.cancelled = False
+
+        return {
+            "message": "HydroSim 会话已应用时序事件更新。",
+            "session": session.to_dict(),
+            "run_summary": run_summary,
+            "station_power_series": station_power_series,
+            "device_output_series": device_output_series,
+            "updated_time_series_count": len(self._get_object_time_series_items(event_payload)),
         }
 
     def execute_step(
@@ -641,6 +660,40 @@ class HydroSimulationApi:
         with open(path_obj, "r", encoding="utf-8") as handle:
             return yaml.safe_load(handle) or {}
 
+    def _run_configured_with_event(
+        self,
+        session: HydroSimulationSession,
+        merged_event: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        with tempfile.TemporaryDirectory(prefix="hydrosim_api_") as temp_dir:
+            merged_event_path = Path(temp_dir) / "merged_time_series_power_planning.json"
+            with open(merged_event_path, "w", encoding="utf-8") as handle:
+                json.dump(merged_event, handle, ensure_ascii=False, indent=2)
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = self.run_configured(
+                    time_series_file=str(merged_event_path),
+                    mpc_config_file=session.mpc_config_file,
+                    initial_states_file=session.initial_states_file,
+                    constraints_file=session.constraints_file,
+                    output_mode="mixed",
+                    output_dir=temp_dir,
+                    make_plots=False,
+                    progress_interval=0,
+                )
+
+            files = result["files"]
+            run_summary = result["json"]["run_summary"]
+            station_power_series = self._extract_station_power_series_from_yaml(files["configured_outputs_yaml"])
+            device_output_series = self._extract_device_output_series_from_yaml(files["configured_outputs_yaml"])
+            return run_summary, station_power_series, device_output_series
+
+    def _resolve_active_merged_event(self, session: HydroSimulationSession) -> Dict[str, Any]:
+        step_runtime = getattr(session, "step_runtime", None)
+        if step_runtime is not None and getattr(step_runtime, "merged_event", None):
+            return copy.deepcopy(step_runtime.merged_event)
+        return self._load_json_file(session.time_series_file, "基础时间序列文件")
+
     def _merge_event_with_power_plan(self, base_event: Dict[str, Any], planning_payload: Dict[str, Any]) -> Dict[str, Any]:
         planning_series = self._extract_station_power_items(planning_payload)
         if not planning_series:
@@ -652,6 +705,184 @@ class HydroSimulationApi:
         object_time_series.extend(copy.deepcopy(planning_series))
         merged_event["object_time_series"] = object_time_series
         return merged_event
+
+    def _merge_event_with_updates(self, base_event: Dict[str, Any], event_payload: Any) -> Dict[str, Any]:
+        update_items = self._get_object_time_series_items(event_payload)
+        if not update_items:
+            return copy.deepcopy(base_event)
+
+        merged_event = copy.deepcopy(base_event)
+        existing_items = list(merged_event.get("object_time_series", []) or [])
+        event_object_type = self._get_event_object_type(event_payload)
+        index_by_key = {
+            self._build_time_series_identity(item): idx
+            for idx, item in enumerate(existing_items)
+        }
+
+        for raw_item in update_items:
+            normalized_item = copy.deepcopy(raw_item)
+            if event_object_type and not normalized_item.get("object_type"):
+                normalized_item["object_type"] = event_object_type
+            identity = self._build_time_series_identity(normalized_item)
+            existing_index = index_by_key.get(identity)
+            if existing_index is None:
+                index_by_key[identity] = len(existing_items)
+                existing_items.append(normalized_item)
+            else:
+                existing_items[existing_index] = self._merge_object_time_series_item(
+                    existing_items[existing_index],
+                    normalized_item,
+                )
+
+        merged_event["object_time_series"] = existing_items
+        return merged_event
+
+    def _get_object_time_series_items(self, payload: Any) -> List[Dict[str, Any]]:
+        if payload is None:
+            return []
+        if hasattr(payload, "model_dump"):
+            payload = payload.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if isinstance(payload, dict):
+            items = payload.get("object_time_series")
+            if not isinstance(items, list):
+                items = payload.get("objectTimeSeries")
+            return [item for item in (items or []) if isinstance(item, dict)]
+        return []
+
+    def _get_event_object_type(self, payload: Any) -> str | None:
+        if payload is None:
+            return None
+        if hasattr(payload, "object_type"):
+            return getattr(payload, "object_type")
+        if isinstance(payload, dict):
+            return payload.get("object_type") or payload.get("objectType")
+        return None
+
+    def _build_time_series_identity(self, item: Dict[str, Any]) -> tuple[Any, ...]:
+        object_ids = item.get("object_ids") or []
+        if item.get("object_id") is not None:
+            object_ids = list(object_ids) + [item["object_id"]]
+        normalized_object_ids = tuple(sorted(str(object_id) for object_id in object_ids if object_id is not None))
+        return (
+            item.get("object_type"),
+            item.get("metrics_code"),
+            normalized_object_ids,
+            item.get("object_name") if not normalized_object_ids else None,
+        )
+
+    def _merge_object_time_series_item(self, existing_item: Dict[str, Any], update_item: Dict[str, Any]) -> Dict[str, Any]:
+        merged_item = copy.deepcopy(existing_item)
+        for field in ("time_series_name", "object_id", "object_ids", "object_type", "object_name", "metrics_code"):
+            if update_item.get(field) not in (None, []):
+                merged_item[field] = copy.deepcopy(update_item[field])
+        merged_item["time_series"] = self._merge_time_series_rows(
+            existing_item.get("time_series", []) or [],
+            update_item.get("time_series", []) or [],
+        )
+        return merged_item
+
+    def _merge_time_series_rows(
+        self,
+        existing_rows: List[Dict[str, Any]],
+        update_rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        merged_by_step: Dict[int, Dict[str, Any]] = {}
+        extra_rows: List[Dict[str, Any]] = []
+
+        for row in existing_rows:
+            normalized_row = copy.deepcopy(row)
+            step = normalized_row.get("step")
+            if step is None:
+                extra_rows.append(normalized_row)
+                continue
+            merged_by_step[int(step)] = normalized_row
+
+        for row in update_rows:
+            normalized_row = copy.deepcopy(row)
+            step = normalized_row.get("step")
+            if step is None:
+                extra_rows.append(normalized_row)
+                continue
+            merged_by_step[int(step)] = normalized_row
+
+        ordered_rows = [merged_by_step[step] for step in sorted(merged_by_step)]
+        return ordered_rows + extra_rows
+
+    def _overlay_current_step_metrics(
+        self,
+        merged_event: Dict[str, Any],
+        current_step: int,
+        current_step_metrics: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not current_step_metrics:
+            return merged_event
+
+        overlay_event = copy.deepcopy(merged_event)
+        override_lookup: Dict[tuple[Any, ...], float] = {}
+        for item in current_step_metrics:
+            identity = self._build_metric_identity(item)
+            if identity is None or item.get("value") is None:
+                continue
+            override_lookup[identity] = float(item["value"])
+
+        if not override_lookup:
+            return overlay_event
+
+        for item in overlay_event.get("object_time_series", []) or []:
+            override_value = self._resolve_override_value_for_time_series_item(item, override_lookup)
+            if override_value is None:
+                continue
+            item["time_series"] = self._merge_time_series_rows(
+                item.get("time_series", []) or [],
+                [{"step": int(current_step), "value": float(override_value)}],
+            )
+        return overlay_event
+
+    def _resolve_override_value_for_time_series_item(
+        self,
+        item: Dict[str, Any],
+        override_lookup: Dict[tuple[Any, ...], float],
+    ) -> float | None:
+        metric_identity = self._build_metric_identity(item)
+        if metric_identity in override_lookup:
+            return override_lookup[metric_identity]
+
+        object_ids = self._extract_identity_object_ids(item)
+        if (
+            item.get("object_type") == "Station"
+            and item.get("metrics_code") == "power"
+            and len(object_ids) > 1
+        ):
+            collected = [
+                override_lookup[(item.get("object_type"), item.get("metrics_code"), (object_id,))]
+                for object_id in object_ids
+                if (item.get("object_type"), item.get("metrics_code"), (object_id,)) in override_lookup
+            ]
+            if collected:
+                return float(sum(collected))
+        return None
+
+    def _build_metric_identity(self, item: Dict[str, Any]) -> tuple[str, str, tuple[int, ...]] | None:
+        object_type = item.get("object_type")
+        metrics_code = item.get("metrics_code")
+        object_ids = self._extract_identity_object_ids(item)
+        if not object_type or not metrics_code or not object_ids:
+            return None
+        return str(object_type), str(metrics_code), tuple(object_ids)
+
+    def _extract_identity_object_ids(self, item: Dict[str, Any]) -> List[int]:
+        object_ids = item.get("object_ids") or []
+        if item.get("object_id") is not None:
+            object_ids = list(object_ids) + [item["object_id"]]
+        normalized: List[int] = []
+        for object_id in object_ids:
+            if object_id is None:
+                continue
+            try:
+                normalized.append(int(object_id))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(normalized))
 
     def _extract_station_power_items(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if isinstance(payload.get("object_time_series"), list):

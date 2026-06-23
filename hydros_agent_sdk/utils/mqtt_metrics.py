@@ -71,8 +71,8 @@ def send_metrics(
 
         # 检查发布是否成功
         if hasattr(result, 'rc') and result.rc == 0:
-            logger.debug(f"Sent metrics: {metrics.metrics_code}={metrics.value} "
-                        f"for object {metrics.object_name} (step {metrics.step_index})")
+            # logger.debug(f"Sent metrics: {metrics.metrics_code}={metrics.value} "
+            #             f"for object {metrics.object_name} (step {metrics.step_index})")
             return True
         else:
             logger.warning(f"Failed to send metrics: {metrics.metrics_code}")

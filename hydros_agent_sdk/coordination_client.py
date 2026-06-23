@@ -401,7 +401,7 @@ class SimCoordinationClient:
         try:
             # 解析消息
             payload_str = msg.payload.decode("utf-8")
-            logger.debug(f"Received message on topic {msg.topic}: {payload_str[:200]}...")
+            # logger.debug(f"Received message on topic {msg.topic}: {payload_str[:200]}...")
 
             # 解析 JSON
             data = json.loads(payload_str)
@@ -561,29 +561,29 @@ class SimCoordinationClient:
             except Empty:
                 continue
 
-            queue_wait_ms = (time.monotonic() - item.received_at) * 1000
-            started_at = time.monotonic()
+            # queue_wait_ms = (time.monotonic() - item.received_at) * 1000
+            # started_at = time.monotonic()
             command = item.command
             try:
-                logger.debug(
-                    "Inbound command handling started: type=%s, id=%s, context=%s, queue=%s, queueWaitMs=%.2f, worker=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    item.queue_name,
-                    queue_wait_ms,
-                    worker_name,
-                )
+                # logger.debug(
+                #     "Inbound command handling started: type=%s, id=%s, context=%s, queue=%s, queueWaitMs=%.2f, worker=%s",
+                #     command.command_type,
+                #     command.command_id,
+                #     self._command_context_id(command),
+                #     item.queue_name,
+                #     queue_wait_ms,
+                #     worker_name,
+                # )
                 self._handle_incoming_message(command)
-                duration_ms = (time.monotonic() - started_at) * 1000
-                logger.debug(
-                    "Inbound command handled: type=%s, id=%s, context=%s, handlerDurationMs=%.2f, worker=%s",
-                    command.command_type,
-                    command.command_id,
-                    self._command_context_id(command),
-                    duration_ms,
-                    worker_name,
-                )
+                # duration_ms = (time.monotonic() - started_at) * 1000
+                # logger.debug(
+                #     "Inbound command handled: type=%s, id=%s, context=%s, handlerDurationMs=%.2f, worker=%s",
+                #     command.command_type,
+                #     command.command_id,
+                #     self._command_context_id(command),
+                #     duration_ms,
+                #     worker_name,
+                # )
             except Exception as e:
                 logger.error(
                     "Error in inbound worker %s: type=%s, id=%s, context=%s, error=%s",

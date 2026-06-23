@@ -220,6 +220,41 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].time_series[0].value, 77.0)
 
+    def test_initialize_hydrosim_session_downloads_inputs_from_config_urls(self):
+        download_payload = b"demo-content"
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return download_payload
+
+        self.agent.properties["mpc_config_url"] = "https://example.test/mpc_config.yaml"
+        self.agent.properties["init_state_config_url"] = "https://example.test/initial_states.yaml"
+        self.agent.properties["target_and_constrain_config_url"] = "https://example.test/constrains_targets.yaml"
+        self.agent.properties["objects_time_series_url"] = "https://example.test/time_series_power_planning.json"
+        self.agent._hydrosim_api.initialize = MagicMock(
+            return_value={"session": {"session_id": "session-download-002"}}
+        )
+
+        with patch("power_outflow_plan_agent.urlopen", return_value=_FakeResponse()) as mock_urlopen:
+            self.agent._initialize_hydrosim_session()
+
+        init_kwargs = self.agent._hydrosim_api.initialize.call_args.kwargs
+        self.assertTrue(init_kwargs["time_series_file"].endswith("time_series_power_planning.json"))
+        self.assertTrue(init_kwargs["mpc_config_file"].endswith("mpc_config.yaml"))
+        self.assertTrue(init_kwargs["initial_states_file"].endswith("initial_states.yaml"))
+        self.assertTrue(init_kwargs["constraints_file"].endswith("constrains_targets.yaml"))
+        self.assertTrue(os.path.exists(init_kwargs["time_series_file"]))
+        self.assertTrue(os.path.exists(init_kwargs["mpc_config_file"]))
+        self.assertTrue(os.path.exists(init_kwargs["initial_states_file"]))
+        self.assertTrue(os.path.exists(init_kwargs["constraints_file"]))
+        self.assertGreaterEqual(mock_urlopen.call_count, 4)
+
     def test_on_terminate_returns_protocol_command_status_enum(self):
         request = SimTaskTerminateRequest(
             command_id="term-001",
@@ -234,6 +269,23 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.agent._hydrosim_api.cancel.assert_called_once()
         self.agent.state_manager.terminate_task.assert_called_once_with(self.context)
         self.agent.state_manager.remove_local_agent.assert_called_once_with(self.agent)
+
+    def test_on_terminate_cleans_hydrosim_runtime_dir(self):
+        runtime_marker = self.agent._hydrosim_runtime_dir / "marker.txt"
+        self.agent._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
+        runtime_marker.write_text("ok", encoding="utf-8")
+
+        request = SimTaskTerminateRequest(
+            command_id="term-002",
+            context=self.context,
+        )
+        self.agent._hydrosim_initialized = False
+
+        response = self.agent.on_terminate(request)
+
+        self.assertEqual(response.command_status, "SUCCEED")
+        self.assertTrue(self.agent._hydrosim_runtime_dir.exists())
+        self.assertTrue(runtime_marker.exists())
 
 
 if __name__ == "__main__":
