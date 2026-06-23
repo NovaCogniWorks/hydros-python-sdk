@@ -27,6 +27,9 @@ SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
 SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
 SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
+SIMCMD_MPC_EXECUTION_STATUS_REPORT = "mpc_execution_status_report"
+SIMCMD_PID_CONTROL_EXECUTION_REPORT = "pid_control_execution_report"
+SIMCMD_STATION_CONTROL_EXECUTION_REPORT = "station_control_execution_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
@@ -160,6 +163,105 @@ class MpcResultReport(SimCommand):
     source_agent_instance: HydroAgentInstance
     mpc_results: List[MpcResult]
 
+class MpcExecutionStatusReport(SimCommand):
+    """
+    MPC 执行状态报告。
+    Python SDK 只承载 Java 协议反序列化，具体状态语义由协调器消费。
+    """
+    command_type: Literal["mpc_execution_status_report"] = SIMCMD_MPC_EXECUTION_STATUS_REPORT
+    source_agent_instance: HydroAgentInstance
+    optimize_step: int = Field(validation_alias=AliasChoices("optimize_step", "optimizeStep"))
+    horizon_step: int = Field(validation_alias=AliasChoices("horizon_step", "horizonStep"))
+    biz_idem_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("biz_idem_key", "bizIdemKey"),
+    )
+    node_id: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("node_id", "nodeId"),
+    )
+    object_id: int = Field(validation_alias=AliasChoices("object_id", "objectId"))
+    object_type: str = Field(validation_alias=AliasChoices("object_type", "objectType"))
+    target_value_type: str = Field(
+        validation_alias=AliasChoices("target_value_type", "targetValueType")
+    )
+    target_value: float = Field(validation_alias=AliasChoices("target_value", "targetValue"))
+    execution_command_id: str = Field(
+        validation_alias=AliasChoices("execution_command_id", "executionCommandId")
+    )
+    dispatch_key: str = Field(validation_alias=AliasChoices("dispatch_key", "dispatchKey"))
+    execution_status: str = Field(validation_alias=AliasChoices("execution_status", "executionStatus"))
+    execution_error_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_code", "executionErrorCode"),
+    )
+    execution_error_message: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_message", "executionErrorMessage"),
+    )
+    dispatched_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("dispatched_at", "dispatchedAt"),
+    )
+    executed_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("executed_at", "executedAt"),
+    )
+
+class PidControlExecutionReport(SimCommand):
+    """
+    PID 控制执行报告。
+    run_result/actuator_results 保持轻量 dict，避免在 SDK 内复制 Java 深层模型。
+    """
+    command_type: Literal["pid_control_execution_report"] = SIMCMD_PID_CONTROL_EXECUTION_REPORT
+    source_agent_instance: HydroAgentInstance
+    run_result: Dict[str, Any] = Field(validation_alias=AliasChoices("run_result", "runResult"))
+    actuator_results: List[Dict[str, Any]] = Field(
+        validation_alias=AliasChoices("actuator_results", "actuatorResults")
+    )
+
+class StationControlExecutionReport(SimCommand):
+    """
+    站点控制执行报告。
+    Python 侧只补齐协议反序列化，是否消费由后续路由/filter 决定。
+    """
+    command_type: Literal["station_control_execution_report"] = SIMCMD_STATION_CONTROL_EXECUTION_REPORT
+    source_agent_instance: HydroAgentInstance
+    target_agent_instance: Optional[HydroAgentInstance] = Field(
+        default=None,
+        validation_alias=AliasChoices("target_agent_instance", "targetAgentInstance"),
+    )
+    execution_command_id: str = Field(
+        validation_alias=AliasChoices("execution_command_id", "executionCommandId")
+    )
+    control_run_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("control_run_id", "controlRunId"),
+    )
+    object_type: str = Field(validation_alias=AliasChoices("object_type", "objectType"))
+    object_id: int = Field(validation_alias=AliasChoices("object_id", "objectId"))
+    target_value_type: str = Field(
+        validation_alias=AliasChoices("target_value_type", "targetValueType")
+    )
+    target_value: float = Field(validation_alias=AliasChoices("target_value", "targetValue"))
+    execution_status: str = Field(validation_alias=AliasChoices("execution_status", "executionStatus"))
+    execution_error_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_code", "executionErrorCode"),
+    )
+    execution_error_message: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_message", "executionErrorMessage"),
+    )
+    started_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("started_at", "startedAt"),
+    )
+    finished_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("finished_at", "finishedAt"),
+    )
+
 class ParameterIdentifiedReport(SimCommand):
     """
     参数识别结果报告。
@@ -201,6 +303,9 @@ CommandUnion = Union[
     DeviceStatusChangeResponse,
     AgentInstanceStatusReport,
     MpcResultReport,
+    MpcExecutionStatusReport,
+    PidControlExecutionReport,
+    StationControlExecutionReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,
     # 后续按需在这里补充其他指令
