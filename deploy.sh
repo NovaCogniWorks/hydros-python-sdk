@@ -56,10 +56,18 @@ if ! "$PYTHON_EXEC" -m twine --version >/dev/null 2>&1; then
 fi
 
 # Note: Uploading only *.whl to avoid Aliyun registry conflict bug with sdist
-"$PYTHON_EXEC" -m twine upload --skip-existing --repository-url "$REPO_URL" -u "$USERNAME" -p "$PASSWORD" dist/*.whl
+set +e
+UPLOAD_OUTPUT=$("$PYTHON_EXEC" -m twine upload --repository-url "$REPO_URL" -u "$USERNAME" -p "$PASSWORD" dist/*.whl 2>&1)
+UPLOAD_STATUS=$?
+set -e
 
-if [ $? -eq 0 ]; then
+echo "$UPLOAD_OUTPUT"
+
+if [ $UPLOAD_STATUS -eq 0 ]; then
     log_info "Upload successful!"
+    log_info "Deployment complete."
+elif echo "$UPLOAD_OUTPUT" | grep -q "409 Conflict"; then
+    log_info "Package version already exists in registry, skipping upload."
     log_info "Deployment complete."
 else
     log_error "Upload failed."
