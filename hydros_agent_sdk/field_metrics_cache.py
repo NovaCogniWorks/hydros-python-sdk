@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from hydros_agent_sdk.sensor_data import SensorData
+
+logger = logging.getLogger(__name__)
 
 
 class FieldMetricsCache:
@@ -24,8 +27,28 @@ class FieldMetricsCache:
         position_code = payload.get("position_code")
         attributes = payload.get("attributes")
         if position_code != "none":
+            # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
+            logger.info(
+                "field metrics dropped by position_code: object_id=%s metrics_code=%s "
+                "position_code=%s step_index=%s attributes=%s",
+                object_id,
+                metrics_code,
+                position_code,
+                step_index,
+                attributes,
+            )
             return None
         if object_id is None or not metrics_code:
+            # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
+            logger.info(
+                "field metrics dropped by required fields: object_id=%s metrics_code=%s "
+                "position_code=%s step_index=%s attributes=%s",
+                object_id,
+                metrics_code,
+                position_code,
+                step_index,
+                attributes,
+            )
             return None
 
         cache_key = f"{object_id}_{metrics_code}"
@@ -41,7 +64,21 @@ class FieldMetricsCache:
         self.latest_metrics[cache_key] = metrics_data
 
         if step_index is not None:
-            step = int(step_index)
+            try:
+                step = int(step_index)
+            except (TypeError, ValueError):
+                # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
+                logger.info(
+                    "field metrics failed to parse step_index: cache_key=%s object_id=%s "
+                    "metrics_code=%s position_code=%s step_index=%s attributes=%s",
+                    cache_key,
+                    object_id,
+                    metrics_code,
+                    position_code,
+                    step_index,
+                    attributes,
+                )
+                raise
             self.metrics_by_step.setdefault(step, {})
             self.metrics_by_step[step][cache_key] = {
                 **metrics_data,
@@ -49,6 +86,17 @@ class FieldMetricsCache:
             }
             self.trim()
 
+        # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
+        logger.info(
+            "field metrics cached: cache_key=%s object_id=%s metrics_code=%s "
+            "position_code=%s step_index=%s attributes=%s",
+            cache_key,
+            object_id,
+            metrics_code,
+            position_code,
+            step_index,
+            attributes,
+        )
         return cache_key
 
     def get_value(self, object_id: int, metrics_code: str) -> Optional[float]:
