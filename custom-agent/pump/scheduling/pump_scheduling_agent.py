@@ -433,6 +433,20 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 获取机组流量 (强制从 attributes 提取 front_water_flow，不允许降级)
                 q = self._metrics_data_cache.get_attribute_from_any_metric(uid, "front_water_flow")
                 if q is None:
+                    # 临时诊断日志：定位 front_water_flow 缺失原因，排查完成后删除。
+                    station_prefix = f"{sid}_"
+                    unit_prefix = f"{uid}_"
+                    related_cache_found = False
+                    for cache_key, metrics_data in self._metrics_data_cache.latest_metrics.items():
+                        if cache_key.startswith(unit_prefix) or cache_key.startswith(station_prefix):
+                            related_cache_found = True
+                            logger.info("metrics cache %s: %s", cache_key, metrics_data)
+                    if not related_cache_found:
+                        logger.info(
+                            "metrics cache has no entries for station=%s or unit=%s",
+                            sid,
+                            uid,
+                        )
                     # 查找对应的组件名称
                     station = next((s for s in self.system_config.stations if s.id == sid), None)
                     station_name = station.name if station else f"S{sid}"
