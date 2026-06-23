@@ -40,7 +40,7 @@ if [ ! -f "$PYTHON_EXEC" ]; then
     PYTHON_EXEC="python3"
 fi
 
-$PYTHON_EXEC -m build
+"$PYTHON_EXEC" -m build
 if [ $? -eq 0 ]; then
     log_info "Build successful."
 else
@@ -50,8 +50,13 @@ fi
 
 # 3. Upload
 log_info "Step 3/3: Uploading wheel to registry..."
+if ! "$PYTHON_EXEC" -m twine --version >/dev/null 2>&1; then
+    log_error "twine is not installed for $PYTHON_EXEC. Run: $PYTHON_EXEC -m pip install twine"
+    exit 1
+fi
+
 # Note: Uploading only *.whl to avoid Aliyun registry conflict bug with sdist
-twine upload --repository-url "$REPO_URL" -u "$USERNAME" -p "$PASSWORD" dist/*.whl
+"$PYTHON_EXEC" -m twine upload --repository-url "$REPO_URL" -u "$USERNAME" -p "$PASSWORD" dist/*.whl
 
 if [ $? -eq 0 ]; then
     log_info "Upload successful!"
