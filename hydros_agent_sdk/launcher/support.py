@@ -491,11 +491,11 @@ class LauncherLoggingConfigurator:
         try:
             env_config = load_env_config(self.env_file)
             return (
-                env_config.get("hydros_cluster_id", "default_cluster"),
+                env_config.get("hydros_cluster_id", "hydros-k3s-staging"),
                 env_config.get("hydros_node_id", "LOCAL"),
             )
         except Exception:
-            return "default_cluster", os.getenv("HYDROS_NODE_ID", "LOCAL")
+            return "hydros-k3s-staging", os.getenv("HYDROS_NODE_ID", "LOCAL")
 
 
 class LauncherDebugSupport:
@@ -793,7 +793,11 @@ class MultiAgentCoordinator:
 
         self.logger.info("")
         self.logger.info("Starting coordination client...")
-        self.client.start()
+        try:
+            self.client.start()
+        except Exception as exc:
+            self.logger.error("Failed to start coordination client: %s", exc, exc_info=True)
+            return False
 
         self.startup_reporter.log_started(env_config, registered_agents)
         self.running = True

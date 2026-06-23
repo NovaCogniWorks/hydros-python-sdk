@@ -2,11 +2,12 @@ import unittest
 from types import SimpleNamespace
 
 from hydros_agent_sdk.agent_properties import AgentProperties
-from hydros_agent_sdk.mpc.metrics_data_cache import MetricsDataCache
-from hydros_agent_sdk.mpc.models import MpcOptimizeResponse, SensorData
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
+from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.sensor_data import SensorData
 
 
 class FakeMpcPlanningClient:
@@ -48,7 +49,7 @@ class MpcOptimizationServiceTest(unittest.TestCase):
                     "mpc_request_timeout_seconds": "75",
                 }
             ),
-            metrics_data_cache=MetricsDataCache(max_steps=3),
+            metrics_data_cache=FieldMetricsCache(max_steps=3),
         )
 
         client = service.get_or_create_mpc_planning_client()
@@ -60,8 +61,8 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_optimizes_with_cache_sensor_data_and_reports_responses(self):
         context = SimulationContext(biz_scene_instance_id="scene-service")
         source = SimpleNamespace(context=context)
-        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
-        cache = MetricsDataCache(max_steps=3)
+        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        cache = FieldMetricsCache(max_steps=3)
         cache.update(
             {
                 "object_id": 1001,
@@ -92,11 +93,11 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_uses_injected_sensor_provider(self):
         context = SimulationContext(biz_scene_instance_id="scene-provider")
         source = SimpleNamespace(context=context)
-        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
         mpc_client = FakeMpcPlanningClient([MpcOptimizeResponse(plan_type="OPTIMAL")])
         service = MpcOptimizationService(
             properties=AgentProperties(),
-            metrics_data_cache=MetricsDataCache(max_steps=3),
+            metrics_data_cache=FieldMetricsCache(max_steps=3),
             mpc_planning_client=mpc_client,
             mpc_result_reporter=FakeMpcResultReporter(),
             mpc_sensor_provider=lambda agent, task_state: [

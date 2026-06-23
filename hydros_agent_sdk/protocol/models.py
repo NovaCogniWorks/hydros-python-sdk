@@ -165,6 +165,10 @@ class TimeSeriesValue(HydroBaseModel):
 class ObjectTimeSeries(HydroBaseModel):
     time_series_name: Optional[str] = None
     object_id: Optional[int] = None
+    object_ids: List[int] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("object_ids", "objectIds"),
+    )
     object_type: Optional[str] = None
     object_name: Optional[str] = None
     metrics_code: Optional[str] = None

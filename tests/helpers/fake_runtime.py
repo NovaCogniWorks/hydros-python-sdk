@@ -76,6 +76,6 @@ class FakeRuntime:
         self.client.connected.set()
         while not self.client.out_message_queue.empty():
             command = self.client.out_message_queue.get_nowait()
-            if self.client._should_send(command):
-                self.client._send_with_retry(command)
+            if self.client.outbox_publisher.should_send(command):
+                self.client.outbox_publisher.send_with_retry(command)
                 time.sleep(0)

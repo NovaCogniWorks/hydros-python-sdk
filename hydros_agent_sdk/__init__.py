@@ -17,6 +17,7 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_properties import AgentProperties
+from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.agent_config import (
@@ -66,17 +67,6 @@ from hydros_agent_sdk.logging_config import (
     get_hydros_node_id,
 )
 
-# 导入专用智能体类型
-from hydros_agent_sdk.agents import (
-    TickableAgent,
-    OntologySimulationAgent,
-    TwinsSimulationAgent,
-    ModelCalculationAgent,
-    CentralSchedulingAgent,
-    SystemCentralSchedulingAgent,
-    OutflowPlanAgent,
-)
-
 # 导入工厂和多智能体支持
 from hydros_agent_sdk.factory import HydroAgentFactory, SystemCentralSchedulingAgentFactory
 from hydros_agent_sdk.multi_agent import (
@@ -104,24 +94,6 @@ from hydros_agent_sdk.transport import (
     PublishRecord,
     Transport,
 )
-from hydros_agent_sdk.mpc import (
-    ControlObjectResult,
-    HorizonStep,
-    MetricsDataCache,
-    MpcConfigResolver,
-    MpcOptimizeRequest,
-    MpcOptimizeResponse,
-    MpcPlanningClient,
-    MpcPlanningError,
-    MpcRuntimeConfig,
-    MpcResult,
-    MpcResultDetail,
-    MpcResultFactory,
-    SensorData,
-    PredictedResult,
-)
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
-
 # 导入错误处理
 from hydros_agent_sdk.error_codes import (
     ErrorCode,
@@ -161,6 +133,7 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandQueueService,
     AgentCommandRuntime,
     AgentCommandClient,
+    StationTargetValueCommandBuilder,
 )
 
 __all__ = [
@@ -199,6 +172,7 @@ __all__ = [
     "AgentContext",
     "AgentConfigurationService",
     "AgentLoggingContextSetter",
+    "FieldMetricsCache",
     "RuntimeEnvSettings",
     "ResponseFactory",
     "TimeSeriesCache",
@@ -207,22 +181,7 @@ __all__ = [
     "PublishRecord",
     "Transport",
     "MqttMetricsPublisher",
-    "ControlObjectResult",
-    "HorizonStep",
-    "MetricsDataCache",
     "MqttMetricsSubscriber",
-    "MpcConfigResolver",
-    "MpcOptimizeRequest",
-    "MpcOptimizeResponse",
-    "MpcPlanningClient",
-    "MpcPlanningError",
-    "MpcRuntimeConfig",
-    "MpcResult",
-    "MpcResultDetail",
-    "MpcResultFactory",
-    "MpcResultReporter",
-    "SensorData",
-    "PredictedResult",
 
     # 工厂和多智能体支持
     "generate_agent_instance_id",
@@ -277,6 +236,7 @@ __all__ = [
     "AgentCommandQueueService",
     "AgentCommandRuntime",
     "AgentCommandClient",
+    "StationTargetValueCommandBuilder",
 
     # 工具类
     "HydroObjectUtilsV2",
@@ -304,12 +264,4 @@ __all__ = [
     "get_hydros_cluster_id",
     "get_hydros_node_id",
 
-    # 专用智能体类型
-    "TickableAgent",
-    "OntologySimulationAgent",
-    "TwinsSimulationAgent",
-    "ModelCalculationAgent",
-    "CentralSchedulingAgent",
-    "SystemCentralSchedulingAgent",
-    "OutflowPlanAgent",
 ]

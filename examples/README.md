@@ -70,8 +70,8 @@ Edit `env.properties`:
 ```properties
 mqtt_broker_url=tcp://192.168.1.24
 mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/default_cluster
-hydros_cluster_id=default_cluster
+mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
+hydros_cluster_id=hydros-k3s-staging
 hydros_node_id=default_central
 ```
 
@@ -121,7 +121,7 @@ cd examples
 ### Step 1: Choose a Base Class
 
 ```python
-from hydros_agent_sdk import (
+from hydros_agent_sdk.agents import (
     TwinsSimulationAgent,      # For high-fidelity simulation
     OntologySimulationAgent,   # For ontology-based reasoning
     ModelCalculationAgent,     # For event-driven calculation
@@ -132,8 +132,8 @@ from hydros_agent_sdk import (
 ### Step 2: Implement Your Agent
 
 ```python
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 from hydros_agent_sdk import (
-    TwinsSimulationAgent,
     HydroAgentFactory,
     MultiAgentCallback,
     load_env_config,
@@ -277,10 +277,10 @@ Shared by all agents in this directory:
 # MQTT Broker Configuration
 mqtt_broker_url=tcp://192.168.1.24
 mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/default_cluster
+mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
 
 # Cluster Configuration
-hydros_cluster_id=default_cluster
+hydros_cluster_id=hydros-k3s-staging
 hydros_node_id=default_central
 ```
 

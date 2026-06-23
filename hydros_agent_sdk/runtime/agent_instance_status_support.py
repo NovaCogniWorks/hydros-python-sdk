@@ -23,8 +23,11 @@ logger = logging.getLogger(__name__)
 class AgentInstanceStatusSupport:
     """为 Python 协调回调镜像 Java AgentInstanceStatusSupport 的行为。"""
 
-    def __init__(self, sim_coordination_client=None):
-        self.sim_coordination_client = sim_coordination_client
+    def __init__(
+        self,
+        report_sink: Optional[Callable[[AgentInstanceStatusReport], None]] = None,
+    ):
+        self.report_sink = report_sink
 
     def execute_with_status(
         self,
@@ -94,7 +97,8 @@ class AgentInstanceStatusSupport:
             phase=phase,
             metadata=metadata,
         )
-        self._publish_report(report)
+        if self.report_sink is not None:
+            self.report_sink(report)
         return report
 
     def _build_report(
@@ -117,41 +121,6 @@ class AgentInstanceStatusSupport:
                 metadata=metadata,
             ),
         )
-
-    def _publish_report(self, report: AgentInstanceStatusReport) -> None:
-        client = self.sim_coordination_client or getattr(
-            report.source_agent_instance,
-            "sim_coordination_client",
-            None,
-        )
-        if client is None:
-            logger.warning(
-                "Agent instance status report built but no coordination client is available: "
-                "agentId=%s, status=%s",
-                report.source_agent_instance.agent_id,
-                report.agent_instance_status.value,
-            )
-            return
-
-        try:
-            client.enqueue(report)
-            logger.info(
-                "Agent instance status report enqueued: agentId=%s, agentCode=%s, "
-                "status=%s, phase=%s, commandId=%s",
-                report.source_agent_instance.agent_id,
-                report.source_agent_instance.agent_code,
-                report.agent_instance_status.value,
-                (report.init_result or {}).get("phase"),
-                report.command_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to enqueue agent instance status report: agentId=%s, status=%s, error=%s",
-                report.source_agent_instance.agent_id,
-                report.agent_instance_status.value,
-                exc,
-                exc_info=True,
-            )
 
     @staticmethod
     def _sync_agent_status(

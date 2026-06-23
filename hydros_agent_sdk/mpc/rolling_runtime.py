@@ -8,7 +8,8 @@ from typing import Any, Callable, List, Optional
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
-from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import AgentStatus, SimulationContext
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
@@ -31,7 +32,7 @@ class MpcRollingRuntime:
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
-        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]] = None,
+        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]] = None,
     ):
         self.context = context
         self.properties = properties
@@ -47,7 +48,13 @@ class MpcRollingRuntime:
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
         self.rolling_cycle_runner = rolling_cycle_runner
         self._last_optimization_step = 0
-        self._mpc_task_state: Optional[MpcTaskState] = None
+        self._task_state_lifecycle = SchedulingTaskStateLifecycle(
+            context=context,
+            get_current_step=get_current_step,
+            get_rolling_interval_steps=self.get_roll_steps,
+            get_total_steps=self.get_total_steps,
+            get_output_step_size=self.get_output_step_size,
+        )
         self._lock = RLock()
 
     @property
@@ -55,8 +62,8 @@ class MpcRollingRuntime:
         return self._last_optimization_step
 
     @property
-    def mpc_task_state(self) -> Optional[MpcTaskState]:
-        return self._mpc_task_state
+    def task_state(self) -> Optional[SchedulingTaskState]:
+        return self._task_state_lifecycle.task_state
 
     def _get_scenario_sim_agent_properties(self):
         from hydros_agent_sdk.context_manager import ContextManager
@@ -117,13 +124,13 @@ class MpcRollingRuntime:
 
     def set_rolling_cycle_runner(
         self,
-        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]],
+        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]],
     ) -> None:
         self.rolling_cycle_runner = rolling_cycle_runner
 
     def is_mpc_optimizing_on_the_loop(self) -> bool:
         """任务是否已经激活滚动 MPC 循环。"""
-        return self._mpc_task_state is not None
+        return self._task_state_lifecycle.has_task_state()
 
     def on_tick(self, step: int) -> None:
         with self._lock:
@@ -141,23 +148,23 @@ class MpcRollingRuntime:
                 self.activate_from_tick(step)
                 return
 
-            mpc_task_state = self.require_mpc_task_state()
-            mpc_task_state.current_step = step
-            mpc_task_state.total_steps = self.get_total_steps()
-            should_roll = mpc_task_state.active_new_rolling(step)
+            task_state = self.require_task_state()
+            task_state.current_step = step
+            task_state.total_steps = self.get_total_steps()
+            should_roll = task_state.active_new_rolling(step)
 
             logger.info(
                 "MPC rolling check: bizSceneInstanceId=%s, startStep=%s, "
                 "currentStep=%s, rollStep=%s, shouldRoll=%s",
                 self.context.biz_scene_instance_id,
-                mpc_task_state.start_step,
+                task_state.start_step,
                 step,
-                mpc_task_state.rolling_interval_steps,
+                task_state.rolling_interval_steps,
                 should_roll,
             )
 
             if should_roll:
-                self.do_rolling_optimal(mpc_task_state)
+                self.do_rolling_optimal(task_state)
                 self._last_optimization_step = step
 
             self.set_agent_status(AgentStatus.ACTIVE)
@@ -196,67 +203,66 @@ class MpcRollingRuntime:
             )
 
             if not self.is_mpc_optimizing_on_the_loop():
-                mpc_task_state = self._create_task_state(
+                task_state = self._activate_task_state_from_event(
+                    event,
                     rolling_interval_steps=rolling_interval_steps,
                     current_step=current_step,
                     total_steps=total_steps,
                 )
-                mpc_task_state.register_hydro_event(event)
-                self._mpc_task_state = mpc_task_state
-                self.do_rolling_optimal(mpc_task_state)
+                self.do_rolling_optimal(task_state)
                 self._last_optimization_step = current_step
                 self.set_agent_status(AgentStatus.ACTIVE)
                 return
 
-            mpc_task_state = self.require_mpc_task_state()
-            mpc_task_state.rolling_interval_steps = rolling_interval_steps
-            mpc_task_state.current_step = current_step
-            mpc_task_state.total_steps = total_steps
-            mpc_task_state.register_hydro_event(event)
+            self._activate_task_state_from_event(
+                event,
+                rolling_interval_steps=rolling_interval_steps,
+                current_step=current_step,
+                total_steps=total_steps,
+            )
 
     def activate_from_tick(self, current_step: int) -> None:
         rolling_interval_steps = self.get_roll_steps()
         if rolling_interval_steps <= 0:
             raise ValueError(f"roll_steps must be positive: {rolling_interval_steps}")
 
-        mpc_task_state = self._create_task_state(
+        task_state = self._create_task_state(
             rolling_interval_steps=rolling_interval_steps,
             current_step=current_step,
             total_steps=self.get_total_steps(),
         )
-        self._mpc_task_state = mpc_task_state
 
         logger.info(
             "MPC rolling loop auto-started by tick: bizSceneInstanceId=%s, "
             "startStep=%s, rollStep=%s, totalSteps=%s",
             self.context.biz_scene_instance_id,
-            mpc_task_state.start_step,
-            mpc_task_state.rolling_interval_steps,
-            mpc_task_state.total_steps,
+            task_state.start_step,
+            task_state.rolling_interval_steps,
+            task_state.total_steps,
         )
-        self.do_rolling_optimal(mpc_task_state)
+        self.do_rolling_optimal(task_state)
         self._last_optimization_step = current_step
         self.set_agent_status(AgentStatus.ACTIVE)
 
-    def require_mpc_task_state(self) -> MpcTaskState:
-        if self._mpc_task_state is None:
-            raise RuntimeError("mpc_task_state is not initialized")
-        return self._mpc_task_state
+    def require_task_state(self) -> SchedulingTaskState:
+        return self._task_state_lifecycle.require_task_state(
+            "task_state is not initialized"
+        )
 
-    def do_rolling_optimal(self, mpc_task_state: MpcTaskState) -> Optional[List[Any]]:
+    def do_rolling_optimal(self, task_state: SchedulingTaskState) -> Optional[List[Any]]:
         if self.rolling_cycle_runner is not None:
-            return self.rolling_cycle_runner(mpc_task_state)
+            return self.rolling_cycle_runner(task_state)
 
         logger.info(
             "Executing MPC optimization: bizSceneInstanceId=%s, step=%s",
             self.context.biz_scene_instance_id,
-            mpc_task_state.current_step,
+            task_state.current_step,
         )
-        control_commands = self.optimize_step(mpc_task_state.current_step)
-        mpc_task_state.current_loop += 1
+        control_commands = self.optimize_step(task_state.current_step)
+        task_state.current_loop += 1
         if control_commands:
             self.dispatch_control_commands(control_commands)
-        logger.info("MPC optimization completed at step %s", mpc_task_state.current_step)
+        logger.info("MPC optimization completed at step %s", task_state.current_step)
         return control_commands
 
     def _create_task_state(
@@ -264,7 +270,7 @@ class MpcRollingRuntime:
         rolling_interval_steps: int,
         current_step: int,
         total_steps: int,
-    ) -> MpcTaskState:
+    ) -> SchedulingTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
             configured_mpc_config_url=self.configured_mpc_config_url,
@@ -280,13 +286,37 @@ class MpcRollingRuntime:
             mpc_config.mpc_config_url,
             mpc_config.target_and_constrain_config_url,
         )
-        return MpcTaskState(
-            context=self.context,
+        return self._task_state_lifecycle.ensure_task_state(
+            current_step,
             rolling_interval_steps=rolling_interval_steps,
-            start_step=current_step,
-            current_step=current_step,
             total_steps=total_steps,
             output_step_size=self.get_output_step_size(),
-            mpc_config_url=mpc_config.mpc_config_url,
-            target_and_constrain_config_url=mpc_config.target_and_constrain_config_url,
+            algorithm_config_url=mpc_config.mpc_config_url,
+            control_config_url=mpc_config.target_and_constrain_config_url,
+        )
+
+    def _activate_task_state_from_event(
+        self,
+        event: TimeSeriesDataChangedEvent,
+        rolling_interval_steps: int,
+        current_step: int,
+        total_steps: int,
+    ) -> SchedulingTaskState:
+        mpc_config = MpcConfigResolver.resolve(
+            self.properties,
+            configured_mpc_config_url=self.configured_mpc_config_url,
+            configured_target_and_constrain_config_url=(
+                self.configured_target_and_constrain_config_url
+            ),
+            configured_mpc_service_base_url=self.configured_mpc_service_base_url,
+        )
+        return self._task_state_lifecycle.activate_from_event(
+            event,
+            step=current_step,
+            use_event_step=False,
+            rolling_interval_steps=rolling_interval_steps,
+            total_steps=total_steps,
+            output_step_size=self.get_output_step_size(),
+            algorithm_config_url=mpc_config.mpc_config_url,
+            control_config_url=mpc_config.target_and_constrain_config_url,
         )

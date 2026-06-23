@@ -5,7 +5,7 @@
 import json
 import logging
 
-from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -20,12 +20,12 @@ from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 logger = logging.getLogger(__name__)
 
 
-class SystemCentralSchedulingAgent(CentralSchedulingAgent):
+class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
     系统默认中央调度智能体。
 
     该类固定服务于系统默认 agent_code：CENTRAL_SCHEDULING_AGENT。
-    它复用 CentralSchedulingAgent 的默认 MPC 路径，初始化时只做通用配置加载、
+    它复用 MpcCentralSchedulingAgent 的默认 MPC 路径，初始化时只做通用配置加载、
     现地指标订阅和状态注册；如果业务需要自定义调度逻辑，仍然可以继续通过
     独立的 agent_code 注册自定义 CentralSchedulingAgent 子类。
     """

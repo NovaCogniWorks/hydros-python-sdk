@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 
 from pydantic import ValidationError
 
@@ -73,9 +72,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
         submitted = []
         context = make_context()
         agent = make_agent(context)
-        support = AgentInstanceStatusSupport(
-            sim_coordination_client=SimpleNamespace(enqueue=submitted.append)
-        )
+        support = AgentInstanceStatusSupport(report_sink=submitted.append)
 
         response = TickCmdResponse(
             command_id="CMD_TICK",
@@ -103,9 +100,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
         submitted = []
         context = make_context()
         agent = make_agent(context)
-        support = AgentInstanceStatusSupport(
-            sim_coordination_client=SimpleNamespace(enqueue=submitted.append)
-        )
+        support = AgentInstanceStatusSupport(report_sink=submitted.append)
 
         response = TickCmdResponse(
             command_id="CMD_TICK",
@@ -130,9 +125,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
     def test_execute_with_status_exception_reports_failed_and_reraises(self):
         submitted = []
         agent = make_agent()
-        support = AgentInstanceStatusSupport(
-            sim_coordination_client=SimpleNamespace(enqueue=submitted.append)
-        )
+        support = AgentInstanceStatusSupport(report_sink=submitted.append)
 
         def fail():
             raise RuntimeError("boom")
@@ -148,9 +141,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
     def test_transition_status_skips_same_status(self):
         submitted = []
         agent = make_agent()
-        support = AgentInstanceStatusSupport(
-            sim_coordination_client=SimpleNamespace(enqueue=submitted.append)
-        )
+        support = AgentInstanceStatusSupport(report_sink=submitted.append)
 
         support.transition_status(agent, AgentInstanceStatus.RUNNING, phase="A")
         support.transition_status(agent, AgentInstanceStatus.RUNNING, phase="B")

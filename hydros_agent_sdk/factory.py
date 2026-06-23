@@ -175,7 +175,7 @@ class SystemCentralSchedulingAgentFactory:
         sim_coordination_client: 'SimCoordinationClient',
         context: SimulationContext
     ):
-        from hydros_agent_sdk.agents import SystemCentralSchedulingAgent
+        from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
         from hydros_agent_sdk.runtime import load_runtime_env_settings
 
         settings = load_runtime_env_settings(env_config=self.env_config)
@@ -184,7 +184,7 @@ class SystemCentralSchedulingAgentFactory:
         hydros_cluster_id = (
             settings.hydros_cluster_id
             or sim_coordination_client.state_manager.get_cluster_id()
-            or "default_cluster"
+            or "hydros-k3s-staging"
         )
         hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
 

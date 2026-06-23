@@ -1,4 +1,5 @@
 import os
+import socket
 import tempfile
 import unittest
 
@@ -132,6 +133,30 @@ class HydrosTopicsTest(unittest.TestCase):
                 broker_port=1883,
                 sim_coordination_callback=DummyCoordinationCallback(),
             )
+
+    def test_coordination_client_start_wraps_dns_failure(self):
+        client = SimCoordinationClient(
+            broker_url="tcp://hydros-mqtt-broker-internal.hydros.svc.cluster.local",
+            broker_port=1883,
+            hydros_cluster_id="demo_cluster",
+            sim_coordination_callback=DummyCoordinationCallback(),
+        )
+
+        def fail_connect(*_args, **_kwargs):
+            raise socket.gaierror(-2, "Name or service not known")
+
+        client.mqtt_client.connect = fail_connect
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to connect to MQTT broker "
+            "hydros-mqtt-broker-internal.hydros.svc.cluster.local:1883",
+        ) as context:
+            client.start()
+
+        self.assertIn("env.properties mqtt_broker_url/mqtt_broker_port", str(context.exception))
+        self.assertIn("DNS resolution", str(context.exception))
+        self.assertFalse(client.running.is_set())
 
 
 if __name__ == "__main__":

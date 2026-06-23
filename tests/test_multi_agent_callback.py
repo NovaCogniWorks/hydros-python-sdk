@@ -4,6 +4,7 @@ from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.logging_config import get_biz_component, get_biz_scene_instance_id
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
+    AgentInstanceStatusReport,
     SimTaskInitRequest,
     SimTaskInitResponse,
     SimTaskTerminateRequest,
@@ -11,6 +12,7 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     TickCmdResponse,
 )
+from hydros_agent_sdk.runtime.coordination_router import CoordinationCommandRouter
 from hydros_agent_sdk.protocol.models import (
     AgentStatus,
     AgentDriveMode,
@@ -199,6 +201,24 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     assert response.created_agent_instances == [instance]
     assert client.enqueued == []
     assert "TEST_AGENT" in callback.agents[context.biz_scene_instance_id]
+
+
+def test_multi_agent_router_returns_init_response_with_pending_status_report():
+    context = make_context()
+    instance = make_instance(context)
+    callback = MultiAgentCallback(node_id="node")
+    callback.register_agent_factory("TEST_AGENT", FakeFactory(FakeAgent(instance)))
+    client = FakeClient()
+    callback.set_client(client)
+    router = CoordinationCommandRouter(callback)
+
+    result = router.dispatch(make_init_request(context))
+
+    assert isinstance(result, list)
+    assert isinstance(result[0], SimTaskInitResponse)
+    assert isinstance(result[1], AgentInstanceStatusReport)
+    assert result[1].source_agent_instance == instance
+    assert client.enqueued == []
 
 
 def test_multi_agent_init_keeps_local_display_name_and_uses_requested_routing_config():

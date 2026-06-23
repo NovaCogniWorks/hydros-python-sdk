@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from hydros_agent_sdk.agent_config import AgentConfigLoader
 from hydros_agent_sdk.agent_constants import (
@@ -31,6 +32,10 @@ class AgentConfigurationService:
 
         agent_config_url = matching_agent.agent_configuration_url
         logger.info(f"Loading agent configuration from: {agent_config_url}")
+
+        if self._apply_specialized_config_url(agent, matching_agent, agent_config_url):
+            object.__setattr__(agent, "agent_configuration_url", agent_config_url)
+            return
 
         try:
             agent_config = AgentConfigLoader.from_url(agent_config_url)
@@ -70,6 +75,42 @@ class AgentConfigurationService:
             agent.agent_code == SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
             and agent.agent_type == CENTRAL_SCHEDULING_AGENT_TYPE
         )
+
+    @staticmethod
+    def _apply_specialized_config_url(agent, matching_agent, agent_config_url: str) -> bool:
+        agent_type = getattr(matching_agent, "agent_type", None) or getattr(agent, "agent_type", None)
+        if agent_type != CENTRAL_SCHEDULING_AGENT_TYPE:
+            return False
+
+        config_kind = AgentConfigurationService._detect_specialized_config_kind(agent_config_url)
+        if config_kind is None:
+            return False
+
+        property_key = (
+            "mpc_config_url"
+            if config_kind == "mpc"
+            else "target_and_constrain_config_url"
+        )
+        agent.properties.update({property_key: agent_config_url})
+        logger.info(
+            "Treating %s as %s for central scheduling agent '%s'",
+            agent_config_url,
+            property_key,
+            agent.agent_code,
+        )
+        return True
+
+    @staticmethod
+    def _detect_specialized_config_kind(agent_config_url: str) -> str | None:
+        parsed = urlparse(agent_config_url)
+        path = (parsed.path or agent_config_url).lower()
+        filename = path.rsplit("/", 1)[-1]
+
+        if "mpc_config" in filename:
+            return "mpc"
+        if "target_and_constrain" in filename or "constraint" in filename or "control" in filename:
+            return "target_and_constrain"
+        return None
 
     @staticmethod
     def _validate_agent_code(agent, matching_agent, agent_config, agent_config_url: str) -> None:

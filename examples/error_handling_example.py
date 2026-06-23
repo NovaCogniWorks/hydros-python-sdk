@@ -15,13 +15,13 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from hydros_agent_sdk import (
     setup_logging,
-    TwinsSimulationAgent,
     ErrorCodes,
     handle_agent_errors,
     safe_execute,
     AgentErrorContext,
     create_error_response,
 )
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -323,6 +323,7 @@ from hydros_agent_sdk import (
     AgentErrorContext,
     create_error_response,
 )
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 
 # 2. Use decorator for lifecycle methods
 class MyAgent(TwinsSimulationAgent):

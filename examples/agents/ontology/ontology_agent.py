@@ -57,10 +57,10 @@ if __name__ == "__main__":
     # 加载 env 配置，用于获取日志中的 cluster_id 和 node_id
     try:
         env_config = load_env_config()
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'default_cluster')
+        hydros_cluster_id = env_config.get('hydros_cluster_id', 'hydros-k3s-staging')
         hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
     except Exception:
-        hydros_cluster_id = 'default_cluster'
+        hydros_cluster_id = 'hydros-k3s-staging'
         hydros_node_id = os.getenv("HYDROS_NODE_ID", "LOCAL")
 
     setup_logging(

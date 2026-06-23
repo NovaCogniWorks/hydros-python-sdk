@@ -285,8 +285,6 @@ class HydroObjectUtilsV2:
                 parsed_url.fragment
             ))
 
-            logger.info(f"Loading YAML from URL: {url}")
-
             with urllib.request.urlopen(encoded_url) as response:
                 content = response.read().decode('utf-8')
                 yaml_data = yaml.safe_load(content)
@@ -328,8 +326,6 @@ class HydroObjectUtilsV2:
             if cs_id is None:
                 continue
             cross_sections_map[cs_id] = cs
-
-        logger.info(f"Parsing {len(objects_list)} objects from YAML")
 
         top_objects = []
 
@@ -432,7 +428,6 @@ class HydroObjectUtilsV2:
             )
             top_objects.append(top_obj)
 
-        logger.info(f"Successfully parsed {len(top_objects)} top-level objects")
         return top_objects
 
     @staticmethod
@@ -449,8 +444,6 @@ class HydroObjectUtilsV2:
         """
         if not with_metrics_code:
             return
-
-        logger.info("Appending metrics codes to child objects")
 
         for top_obj in top_objects:
             for child in top_obj.children:
@@ -518,9 +511,6 @@ class HydroObjectUtilsV2:
                     downstream_map[from_id] = []
                 downstream_map[from_id].append(to_id)
 
-        logger.info(f"Built topology indices: {len(child_to_parent_map)} child mappings, "
-                   f"{len(connections)} connections")
-
         return child_to_parent_map, upstream_map, downstream_map
 
     @staticmethod
@@ -577,8 +567,6 @@ class HydroObjectUtilsV2:
             upstreamMap=upstream_map,
             downstreamMap=downstream_map
         )
-
-        logger.info(f"Successfully built waterway topology with {len(top_objects)} top-level objects")
 
         return topology
 
