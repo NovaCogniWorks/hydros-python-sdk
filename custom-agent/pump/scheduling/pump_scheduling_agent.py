@@ -771,14 +771,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.plot_tracker.step_predictions = []
             
         self.plot_tracker.step_predictions.append({
-            "step": int(step),
+            "step": int(current_step),
             "upper": upper_res,
             "lower": lower_res
         })
         
         self.plot_tracker.update_and_plot(
-            step_index=int(step),
-            current_time_hours=float(observation.time_hours),
+            step_index=int(current_step),
+            current_time_hours=float(current_step * self.system_config.dt_hours),
             lower_step_hours=float(self.system_config.dt_hours),
             upper_plan=upper_plan,
             actions=actions,
