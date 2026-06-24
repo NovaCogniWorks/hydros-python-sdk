@@ -375,7 +375,22 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             logger.info("HydroSim power planning completed, produced %s station series", len(station_power_plans))
             return station_power_plans
 
-        logger.warning("No Station/power planning series found in incoming event, fallback to sample logic.")
+        inflow_payload = self._build_inflow_planning_payload(planning_source_series)
+        if inflow_payload is None:
+            inflow_payload = self._build_inflow_planning_payload_from_event_url(hydro_event)
+
+        if inflow_payload is not None:
+            self._ensure_hydrosim_initialized()
+            with tempfile.TemporaryDirectory(prefix="hydrosim_inflow_plan_") as temp_dir:
+                inflow_file = self._write_inflow_planning_file(temp_dir, inflow_payload)
+                planning_result = self._hydrosim_api.get_station_power_planning_series_from_inflow(inflow_file)
+            station_power_plans = self._build_station_object_time_series(
+                planning_result.get("station_power_series", [])
+            )
+            logger.info("HydroSim inflow-driven power planning completed, produced %s station series", len(station_power_plans))
+            return station_power_plans
+
+        logger.warning("No Station/power or Station/water_flow planning series found in incoming event, fallback to sample logic.")
         return self._build_fallback_plans(hydro_event)
 
     def _build_power_planning_payload(
@@ -388,6 +403,36 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             if item.object_type == "Station" and item.metrics_code == "power"
         ]
         return planning_series or None
+
+    def _build_inflow_planning_payload(
+        self,
+        object_time_series_list: List[ObjectTimeSeries],
+    ) -> Optional[List[ObjectTimeSeries]]:
+        inflow_series = [
+            item
+            for item in object_time_series_list or []
+            if item.object_type == "Station" and item.metrics_code == "water_flow"
+        ]
+        return inflow_series or None
+
+    def _build_inflow_planning_payload_from_event_url(self, hydro_event) -> Optional[List[ObjectTimeSeries]]:
+        event_content_url = getattr(hydro_event, "event_content_url", None)
+        if not event_content_url:
+            return None
+        payload = self._load_event_payload_from_url(event_content_url)
+        if payload is None:
+            return None
+        raw_series = payload.get("object_time_series") or payload.get("objectTimeSeries") or []
+        inflow_series: List[ObjectTimeSeries] = []
+        for item in raw_series:
+            try:
+                parsed_item = ObjectTimeSeries.model_validate(item)
+            except Exception:
+                logger.debug("Skipping invalid inflow item from %s: %s", event_content_url, item, exc_info=True)
+                continue
+            if parsed_item.object_type == "Station" and parsed_item.metrics_code == "water_flow":
+                inflow_series.append(parsed_item)
+        return inflow_series or None
 
     def _build_power_planning_payload_from_properties(self) -> Optional[List[ObjectTimeSeries]]:
         planning_url = self.properties.get_property("objects_time_series_url", None)
@@ -545,6 +590,21 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         if not payload["object_time_series"]:
             raise ValueError("输入事件中未找到可用于出力规划的 Station/power 时间序列。")
         planning_file = Path(temp_dir) / "time_series_power_planning.json"
+        with open(planning_file, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        return str(planning_file)
+
+    def _write_inflow_planning_file(self, temp_dir: str, object_time_series_list: List[ObjectTimeSeries]) -> str:
+        payload = {
+            "object_time_series": [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in object_time_series_list
+                if item.object_type == "Station" and item.metrics_code == "water_flow"
+            ]
+        }
+        if not payload["object_time_series"]:
+            raise ValueError("No Station/water_flow time series found for inflow-driven power planning.")
+        planning_file = Path(temp_dir) / "time_series_inflow_planning.json"
         with open(planning_file, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         return str(planning_file)

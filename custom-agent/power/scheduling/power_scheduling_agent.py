@@ -461,7 +461,14 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             return
         planning_file, cleanup_path = self._resolve_power_planning_file_for_load()
         try:
-            result = self._hydrosim_api.get_station_power_planning_series(planning_file)
+            try:
+                result = self._hydrosim_api.get_station_power_planning_series(planning_file)
+            except ValueError:
+                logger.info(
+                    "Power planning file has no Station/power series; trying inflow-driven planning: %s",
+                    planning_file,
+                )
+                result = self._hydrosim_api.get_station_power_planning_series_from_inflow(planning_file)
         finally:
             if cleanup_path is not None and cleanup_path.exists():
                 cleanup_path.unlink(missing_ok=True)

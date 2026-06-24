@@ -244,6 +244,33 @@ class HydroSimulationApi:
             "station_power_series": station_power_series,
         }
 
+    def get_station_power_planning_series_from_inflow(self, time_series_inflow_file: str) -> Dict[str, Any]:
+        """Generate station power planning from Station/water_flow time series."""
+
+        session = self._require_session()
+        base_event = self._load_json_file(session.time_series_file, "base time series file")
+        inflow_payload = self._load_json_file(time_series_inflow_file, "inflow time series file")
+        merged_event = self._merge_event_with_updates(base_event, inflow_payload)
+
+        generated_event, station_power_series, device_output_series = self._run_inflow_power_planning(
+            session,
+            merged_event,
+        )
+
+        session.latest_power_planning_file = str(Path(time_series_inflow_file).resolve())
+        session.latest_station_power_series = station_power_series
+        session.latest_device_output_series = device_output_series
+        session.step_runtime = self._build_step_runtime(session, generated_event)
+        session.current_step_index = 0
+        session.cancelled = False
+
+        return {
+            "message": "station power planning generated from inflow",
+            "session": session.to_dict(),
+            "station_power_series": station_power_series,
+            "device_output_series": device_output_series,
+        }
+
     def apply_time_series_event_update(
         self,
         event_payload: Any,
@@ -469,6 +496,177 @@ class HydroSimulationApi:
             multi_reservoir=multi_reservoir,
             multi_stair=multi_stair,
         )
+
+    def _run_inflow_power_planning(
+        self,
+        session: HydroSimulationSession,
+        merged_event: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        runtime = self.service.core.runtime
+        initial_states = self._load_yaml_file(session.initial_states_file, "initial states file")
+        constraints = self._load_yaml_file(session.constraints_file, "constraints file")
+        steps = runtime._time_axis_from_event(merged_event)
+        if len(steps) <= 0:
+            raise ValueError("inflow time series has no steps")
+
+        flow_configs, default_target_stage_by_node = runtime._apply_yaml_basic_parameters(
+            list(self.service.core.flow_configs),
+            constraints,
+            initial_states,
+            merged_event,
+        )
+        flows_in = runtime._upstream_inflow_series(merged_event, steps, initial_states)
+        if len(flows_in) <= 0:
+            raise ValueError("no Station/water_flow inflow series found")
+
+        target_stage_by_node = runtime._target_stage_series_by_node(
+            merged_event,
+            steps,
+            default_target_stage_by_node,
+        )
+        power_cmd = self._inflow_to_total_power_command(flows_in)
+
+        multi_river = runtime.RiverArray(
+            1,
+            "power_inflow_planning_river",
+            flow_configs,
+            max(len(steps), 1),
+            self.service.core.capa_loc,
+        )
+        multi_reservoir = runtime.HydroResStairs(
+            1,
+            "power_inflow_planning_reservoir",
+            flow_configs,
+            self.service.core.flow_station_cfgs,
+            self.service.core.capa_loc,
+        )
+        multi_stair = runtime.HydroStair(
+            1,
+            "power_inflow_planning_stair",
+            float(power_cmd[0]),
+            self.service.core.power_configs,
+            self.service.core.unit_configs,
+        )
+        runtime._apply_initial_conditions(multi_reservoir, multi_stair, flow_configs, initial_states)
+        runtime._run_phase_v16(
+            title="inflow power planning",
+            idx_start=0,
+            idx_end=len(steps),
+            progress_interval=0,
+            flows_in=flows_in,
+            power_cmd=power_cmd,
+            target_stage_by_node=target_stage_by_node,
+            multi_river=multi_river,
+            multi_reservoir=multi_reservoir,
+            multi_stair=multi_stair,
+        )
+
+        station_power_series = self._build_station_power_series_from_runtime(steps, multi_stair)
+        generated_event = self._merge_event_with_power_plan(
+            merged_event,
+            {"object_time_series": self._station_power_series_to_event_items(station_power_series)},
+        )
+        device_output_series = self._build_device_output_series_from_runtime(
+            steps=steps,
+            constraints=constraints,
+            initial_states=initial_states,
+            multi_stair=multi_stair,
+            multi_reservoir=multi_reservoir,
+        )
+        return generated_event, station_power_series, device_output_series
+
+    def _inflow_to_total_power_command(self, flows_in: Any) -> Any:
+        runtime = self.service.core.runtime
+        np = runtime.np
+        flows = np.asarray(flows_in, dtype=float)
+        station_heads = np.asarray(
+            [float(cfg["design_head"]) for cfg in self.service.core.power_configs],
+            dtype=float,
+        )
+        power_per_flow = float(9.81 * 0.90 * station_heads.sum() / 1000.0)
+        max_total_power = float(sum(float(cfg["max_power"]) for cfg in self.service.core.power_configs))
+        min_positive_power = float(sum(float(cfg["min_power"]) for cfg in self.service.core.power_configs))
+        power_cmd = np.clip(flows * power_per_flow, 0.0, max_total_power)
+        return np.where(power_cmd > 1e-6, np.maximum(power_cmd, min_positive_power), 0.0)
+
+    def _build_station_power_series_from_runtime(self, steps: Any, multi_stair: Any) -> List[Dict[str, Any]]:
+        station_names = hydrosim_config.build_station_name_map()
+        result: List[Dict[str, Any]] = []
+        for node_id in hydrosim_config.STATION_NODE_IDS:
+            station_idx = hydrosim_config.NODE_TO_INDEX[node_id]
+            station = multi_stair.multi_stair[station_idx]
+            result.append(
+                {
+                    "node_id": int(node_id),
+                    "station": station_names.get(node_id, str(station.name)),
+                    "time_series": [
+                        {"step": int(step), "value": float(value)}
+                        for step, value in zip(steps, station.history["current_power"])
+                    ],
+                }
+            )
+        return result
+
+    def _station_power_series_to_event_items(self, station_power_series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            {
+                "time_series_name": f"{station['station']}_power_plan",
+                "object_id": int(station["node_id"]),
+                "object_type": "Station",
+                "object_name": station["station"],
+                "metrics_code": "power",
+                "time_series": copy.deepcopy(station.get("time_series", [])),
+            }
+            for station in station_power_series
+        ]
+
+    def _build_device_output_series_from_runtime(
+        self,
+        steps: Any,
+        constraints: Dict[str, Any],
+        initial_states: Dict[str, Any],
+        multi_stair: Any,
+        multi_reservoir: Any,
+    ) -> List[Dict[str, Any]]:
+        result_factory = self.service.core.result_factory
+        control_domains = list(constraints.get("control_domains", []) or [])
+        device_names = self._build_device_name_map(initial_states)
+        result: List[Dict[str, Any]] = []
+        seen: set[tuple[int, str]] = set()
+        for row in control_domains:
+            if row.get("device_id") is None:
+                continue
+            device_id = int(row["device_id"])
+            control_type = str(row.get("type", ""))
+            for metric in result_factory._device_metrics_for_control_type(control_type):
+                key = (device_id, metric)
+                if key in seen:
+                    continue
+                seen.add(key)
+                values = result_factory._control_domain_device_series(
+                    device_id=device_id,
+                    metric=metric,
+                    control_type=control_type,
+                    control_domains=control_domains,
+                    multi_stair=multi_stair,
+                    multi_reservoir=multi_reservoir,
+                )
+                if not values:
+                    continue
+                result.append(
+                    {
+                        "object_id": device_id,
+                        "object_type": control_type,
+                        "object_name": device_names.get(device_id, f"device_{device_id}"),
+                        "metrics_code": metric,
+                        "node_id": row.get("node_id"),
+                        "time_series": [
+                            {"step": int(step), "value": float(value)}
+                            for step, value in zip(steps, values)
+                        ],
+                    }
+                )
+        return result
 
     def _build_device_name_map(self, initial_states: Dict[str, Any]) -> Dict[int, str]:
         result: Dict[int, str] = {}

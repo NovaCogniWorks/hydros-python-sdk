@@ -220,6 +220,53 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].time_series[0].value, 77.0)
 
+    def test_on_outflow_time_series_uses_inflow_planning_when_power_series_is_missing(self):
+        self.agent._hydrosim_initialized = True
+        from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
+
+        self.agent._resolve_incoming_outflow_plans = MagicMock(
+            return_value=[
+                ObjectTimeSeries(
+                    object_id=20100,
+                    object_type="Station",
+                    object_name="Station-20100",
+                    metrics_code="water_flow",
+                    time_series=[TimeSeriesValue(step=0, value=334.0)],
+                )
+            ]
+        )
+        self.agent._hydrosim_api.get_station_power_planning_series_from_inflow = MagicMock(
+            return_value={
+                "station_power_series": [
+                    {
+                        "node_id": 20100,
+                        "station": "Station-20100",
+                        "time_series": [{"step": 0, "value": 500.0}],
+                    }
+                ]
+            }
+        )
+
+        request = OutflowTimeSeriesRequest(
+            command_id="outflow-inflow-001",
+            context=self.context,
+            target_agent_instance=self.agent,
+            hydro_event=OutflowTimeSeriesEvent(
+                hydro_event_type="OUTFLOW_TIME_SERIES",
+                event_content_url=None,
+            ),
+        )
+
+        self.agent.on_outflow_time_series(request)
+
+        self.agent._hydrosim_api.get_station_power_planning_series_from_inflow.assert_called_once()
+        sent_response = self.mock_client.enqueue.call_args[0][0]
+        plans = sent_response.outflow_time_series_map["Station"]
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].object_id, 20100)
+        self.assertEqual(plans[0].metrics_code, "power")
+        self.assertEqual(plans[0].time_series[0].value, 500.0)
+
     def test_initialize_hydrosim_session_downloads_inputs_from_config_urls(self):
         download_payload = b"demo-content"
 
