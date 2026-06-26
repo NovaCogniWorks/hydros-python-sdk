@@ -630,6 +630,132 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
     assert device_metrics[(20101, "gate_opening")] == 1.75
 
 
+def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    stations = [
+        SimpleNamespace(name="Station-20100", history={"current_power": []}),
+        SimpleNamespace(name="Station-20300", history={"current_power": []}),
+        SimpleNamespace(name="Station-20500", history={"current_power": []}),
+        SimpleNamespace(name="Station-20700", history={"current_power": []}),
+    ]
+    step_runtime = hydrosim_api.HydroSimulationStepRuntime(
+        merged_event={"object_time_series": []},
+        initial_states={},
+        constraints={},
+        flow_configs=[],
+        steps=[0],
+        flows_in=[334.0],
+        station_power_plan={
+            20100: [1160.123456789],
+            20300: [180.987654321],
+            20500: [210.222222222],
+            20700: [90.333333333],
+        },
+        target_stage_by_node={20100: [819.0], 20300: [658.0], 20500: [619.0], 20700: [552.0]},
+        control_domains=[
+            {"device_id": 20304, "node_id": 20300, "type": "Turbine"},
+            {"device_id": 20101, "node_id": 20100, "type": "Gate"},
+        ],
+        device_names={20304: "Turbine-20304", 20101: "Gate-20101"},
+        multi_river=SimpleNamespace(),
+        multi_reservoir=SimpleNamespace(),
+        multi_stair=SimpleNamespace(multi_stair=stations),
+    )
+    api._session = hydrosim_api.HydroSimulationSession(
+        session_id="session-precision-001",
+        time_series_file="base.json",
+        mpc_config_file="mpc.yaml",
+        initial_states_file="initial.yaml",
+        constraints_file="constraints.yaml",
+        latest_station_power_series=[
+            {
+                "node_id": 20100,
+                "station": "Station-20100",
+                "time_series": [{"step": 0, "value": 1160.123456789}],
+            }
+        ],
+        step_runtime=step_runtime,
+    )
+    api.service.core.result_factory._device_metrics_for_control_type = Mock(
+        side_effect=lambda control_type: {
+            "Turbine": ("output_power", "water_flow"),
+            "Gate": ("gate_opening",),
+        }.get(control_type, ())
+    )
+    api.service.core.result_factory._control_domain_device_series = Mock(
+        side_effect=lambda **kwargs: {
+            (20304, "output_power"): [87.123456789],
+            (20304, "water_flow"): [42.123456789],
+            (20101, "gate_opening"): [1.987654321],
+        }[(kwargs["device_id"], kwargs["metric"])]
+    )
+
+    def _fake_execute_runtime_step(step_runtime_obj, step_index, planning_values_by_node):
+        stations[0].history["current_power"].append(1160.123456789)
+        stations[1].history["current_power"].append(180.987654321)
+        stations[2].history["current_power"].append(210.222222222)
+        stations[3].history["current_power"].append(90.333333333)
+
+    api._execute_runtime_step = Mock(side_effect=_fake_execute_runtime_step)
+
+    result = api.execute_step(step_index=0)
+
+    device_metrics = {
+        (item["object_id"], item["metrics_code"]): item["value"]
+        for item in result["device_step_outputs"]
+    }
+    station_metrics = {
+        item["node_id"]: item["power"]
+        for item in result["station_step_outputs"]
+    }
+    planning_values = {
+        item["object_id"]: item["value"]
+        for item in result["current_step_power_planning_values"]
+    }
+    assert station_metrics[20100] == 1160.123457
+    assert station_metrics[20300] == 180.987654
+    assert planning_values[20100] == 1160.123457
+    assert planning_values[20300] == 180.987654
+    assert device_metrics[(20304, "output_power")] == 87.123457
+    assert device_metrics[(20304, "water_flow")] == 42.123457
+    assert device_metrics[(20101, "gate_opening")] == 1.987654
+
+
+def test_hydrosim_build_device_step_outputs_from_series_rounds_outputs_to_six_decimals():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+
+    outputs = api._build_device_step_outputs_from_series(
+        device_output_series=[
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": "output_power",
+                "node_id": 20300,
+                "time_series": [{"step": 3, "value": 80.123456789}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": "gate_opening",
+                "node_id": 20100,
+                "time_series": [{"step": 3, "value": 1.987654321}],
+            },
+        ],
+        target_step=0,
+    )
+
+    output_map = {
+        (item["object_id"], item["metrics_code"]): item["value"]
+        for item in outputs
+    }
+    assert output_map[(20304, "output_power")] == 80.123457
+    assert output_map[(20101, "gate_opening")] == 1.987654
+
+
 def test_hydrosim_apply_time_series_event_update_merges_series_into_active_session():
     hydrosim_api = _load_hydrosim_api_module()
     api = hydrosim_api.HydroSimulationApi()

@@ -106,6 +106,9 @@ class HydroSimulationApi:
         self.service = service or HydroSimulationService()
         self._session: HydroSimulationSession | None = None
 
+    def _normalize_output_value(self, value: Any) -> float:
+        return round(float(value), 6)
+
     def describe_capabilities(self) -> Dict[str, object]:
         """获取算法能力摘要。"""
         return describe_simulation_capabilities()
@@ -369,7 +372,7 @@ class HydroSimulationApi:
                 "object_id": node_id,
                 "object_type": "Station",
                 "metrics_code": "output_power",
-                "value": float(planning_values_by_node[node_id]),
+                "value": self._normalize_output_value(planning_values_by_node[node_id]),
             }
             for node_id in hydrosim_config.STATION_NODE_IDS
         ]
@@ -403,7 +406,7 @@ class HydroSimulationApi:
                     "node_id": int(station["node_id"]),
                     "station": station["station"],
                     "step": int(row["step"]),
-                    "power": float(row["value"]),
+                    "power": self._normalize_output_value(row["value"]),
                 }
             )
         return station_step_outputs
@@ -600,7 +603,7 @@ class HydroSimulationApi:
                     "node_id": int(node_id),
                     "station": station_names.get(node_id, str(station.name)),
                     "time_series": [
-                        {"step": int(step), "value": float(value)}
+                        {"step": int(step), "value": self._normalize_output_value(value)}
                         for step, value in zip(steps, station.history["current_power"])
                     ],
                 }
@@ -661,7 +664,10 @@ class HydroSimulationApi:
                         "metrics_code": metric,
                         "node_id": row.get("node_id"),
                         "time_series": [
-                            {"step": int(step), "value": float(value)}
+                            {
+                                "step": int(step),
+                                "value": self._normalize_output_value(value),
+                            }
                             for step, value in zip(steps, values)
                         ],
                     }
@@ -765,7 +771,7 @@ class HydroSimulationApi:
                     "node_id": int(node_id),
                     "station": str(station.name),
                     "step": int(target_step),
-                    "power": float(station.history["current_power"][-1]),
+                    "power": self._normalize_output_value(station.history["current_power"][-1]),
                 }
             )
         return outputs
@@ -806,7 +812,7 @@ class HydroSimulationApi:
                         "metrics_code": metric,
                         "node_id": row.get("node_id"),
                         "step": int(target_step),
-                        "value": float(series[-1]),
+                        "value": self._normalize_output_value(series[-1]),
                     }
                 )
         return outputs
@@ -1105,7 +1111,7 @@ class HydroSimulationApi:
                     "node_id": int(item["node_id"]),
                     "station": item["station"],
                     "time_series": [
-                        {"step": int(row["step"]), "value": float(row["value"])}
+                        {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
                         for row in item.get("time_series", [])
                     ],
                 }
@@ -1128,7 +1134,7 @@ class HydroSimulationApi:
                     "node_id": node_id,
                     "station": item.get("object_name") or station_names.get(node_id, str(node_id)),
                     "time_series": [
-                        {"step": int(row["step"]), "value": float(row["value"])}
+                        {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
                         for row in item.get("time_series", [])
                     ],
                 }
@@ -1160,7 +1166,7 @@ class HydroSimulationApi:
                     "metrics_code": metrics_code,
                     "node_id": item.get("node_id"),
                     "time_series": [
-                        {"step": int(row["step"]), "value": float(row["value"])}
+                        {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
                         for row in item.get("time_series", [])
                     ],
                 }
@@ -1188,7 +1194,7 @@ class HydroSimulationApi:
                     "metrics_code": str(device_series["metrics_code"]),
                     "node_id": device_series.get("node_id"),
                     "step": int(row["step"]),
-                    "value": float(row["value"]),
+                    "value": self._normalize_output_value(row["value"]),
                 }
             )
         return outputs
