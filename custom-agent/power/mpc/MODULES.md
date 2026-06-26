@@ -457,7 +457,7 @@ python F:\sl\hydros\hydros-python-sdk\custom-agent\power\mpc\hydrosim_demo.py --
 8. 配置驱动仿真，输出文件：
 
 ```bash
-python F:\sl\hydros\hydros-python-sdk\custom-agent\power\mpc\hydrosim_demo.py --mode configured --time-series-file F:\path\to\time_series.json --mpc-config-file F:\path\to\mpc_config.yaml --initial-states-file F:\path\to\initial_states.yaml --constraints-file F:\path\to\constrains_targets.yaml --output-mode file --output-dir F:\sl\hydros\hydros-python-sdk\custom-agent\power\mpc\output_configured --make-plots
+python F:\sl\hydros\hydros-python-sdk\custom-agent\power\mpc\hydrosim_demo.py --mode configured --time-series-file F:\sl\hydros\hydros-python-sdk\custom-agent\power\.runtime\outflowplan\time_series_power_planning.json --mpc-config-file F:\sl\hydros\hydros-python-sdk\custom-agent\power\data\mpc_config.yaml --initial-states-file F:\sl\hydros\hydros-python-sdk\custom-agent\power\.runtime\scheduling\initial_states.yaml --constraints-file F:\sl\hydros\hydros-python-sdk\custom-agent\power\.runtime\scheduling\constrains_targets.yaml --output-mode file --output-dir F:\sl\hydros\hydros-python-sdk\custom-agent\power\mpc\output_configured --make-plots
 ```
 
 说明：

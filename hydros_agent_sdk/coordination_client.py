@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 IGNORED_COORDINATION_COMMAND_TYPES = {
     "update_monitor_rule_request",
     "update_monitor_rule_response",
+    "station_control_execution_report",
 }
 
 

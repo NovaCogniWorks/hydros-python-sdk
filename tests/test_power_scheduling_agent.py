@@ -75,7 +75,7 @@ def _build_session(step_count: int):
             "object_id": 20304,
             "object_type": "Turbine",
             "object_name": "Turbine-20304",
-            "metrics_code": "power",
+            "metrics_code": "output_power",
             "node_id": 20300,
             "time_series": [{"step": step, "value": 80.0 + step} for step in range(step_count)],
         },
@@ -105,7 +105,7 @@ def _build_step_result(step: int):
                 "object_id": 20304,
                 "object_type": "Turbine",
                 "object_name": "Turbine-20304",
-                "metrics_code": "power",
+                "metrics_code": "output_power",
                 "step": step,
                 "value": 80.0 + step,
             },
@@ -150,7 +150,7 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     )
 
     metrics_map = {(item.object_id, item.metrics_code): item.value for item in metrics_list}
-    assert metrics_map[(20304, "power")] == 83.0
+    assert metrics_map[(20304, "output_power")] == 83.0
     assert metrics_map[(20101, "gate_opening")] == 1.3
     assert len(enqueued) == 1
     report = enqueued[0]
@@ -162,14 +162,32 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     dispatched_commands = agent._control_command_dispatcher.dispatch.call_args.args[0]
     assert dispatched_commands == [
         {
-            "target_agent_code": "TARGET_AGENT_20300",
+            "target_agent_code": "TARGET_AGENT_20304",
             "target_command_type": "output_power",
-            "target_value": 103.0,
-            "object_id": 20300,
-            "object_type": "Station",
+            "target_value": 83.0,
+            "object_id": 20304,
+            "object_type": "Turbine",
         }
     ]
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=3)
+
+
+def test_power_scheduling_optimization_prefers_turbine_output_power_commands():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-turbine-001")
+    agent._hydrosim_api._session = _build_session(4)
+
+    commands = agent.on_optimization(2)
+
+    assert commands == [
+        {
+            "target_agent_code": "TARGET_AGENT_20304",
+            "target_command_type": "output_power",
+            "target_value": 82.0,
+            "object_id": 20304,
+            "object_type": "Turbine",
+        }
+    ]
 
 
 def test_power_scheduling_init_downloads_hydrosim_inputs_from_config_urls():
@@ -396,6 +414,33 @@ def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimiz
     ]
 
 
+def test_power_scheduling_optimization_falls_back_to_station_series_when_turbine_series_missing():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-station-fallback-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[
+            {
+                "node_id": 20300,
+                "station": "Station-20300",
+                "time_series": [{"step": 2, "value": 321.0}],
+            }
+        ],
+        latest_device_output_series=[],
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert commands == [
+        {
+            "target_agent_code": "TARGET_AGENT_20300",
+            "target_command_type": "output_power",
+            "target_value": 321.0,
+            "object_id": 20300,
+            "object_type": "Station",
+        }
+    ]
+
+
 def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-005")
@@ -551,13 +596,13 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
     )
     api.service.core.result_factory._device_metrics_for_control_type = Mock(
         side_effect=lambda control_type: {
-            "Turbine": ("power", "water_flow"),
+            "Turbine": ("output_power", "water_flow"),
             "Gate": ("water_flow", "gate_opening"),
         }.get(control_type, ())
     )
     api.service.core.result_factory._control_domain_device_series = Mock(
         side_effect=lambda **kwargs: {
-            (20304, "power"): [87.6],
+            (20304, "output_power"): [87.6],
             (20304, "water_flow"): [42.5],
             (20101, "water_flow"): [16.2],
             (20101, "gate_opening"): [1.75],
@@ -579,7 +624,7 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
         (item["object_id"], item["metrics_code"]): item["value"]
         for item in result["device_step_outputs"]
     }
-    assert device_metrics[(20304, "power")] == 87.6
+    assert device_metrics[(20304, "output_power")] == 87.6
     assert device_metrics[(20304, "water_flow")] == 42.5
     assert device_metrics[(20101, "water_flow")] == 16.2
     assert device_metrics[(20101, "gate_opening")] == 1.75
@@ -610,7 +655,7 @@ def test_hydrosim_apply_time_series_event_update_merges_series_into_active_sessi
                         "object_id": 20300,
                         "object_type": "Station",
                         "object_name": "Station-20300",
-                        "metrics_code": "power",
+                        "metrics_code": "output_power",
                         "time_series": [{"step": 0, "value": 100.0}],
                     },
                 ]
@@ -672,7 +717,7 @@ def test_hydrosim_apply_time_series_event_update_preserves_unmodified_steps():
                         "object_ids": [20100, 20300, 20500],
                         "object_type": "Station",
                         "object_name": "三站出力",
-                        "metrics_code": "power",
+                        "metrics_code": "output_power",
                         "time_series_name": "power-plan",
                         "time_series": [
                             {"step": 0, "value": 100.0},
@@ -696,7 +741,7 @@ def test_hydrosim_apply_time_series_event_update_preserves_unmodified_steps():
                     object_ids=[20100, 20300, 20500],
                     object_type="Station",
                     object_name="三站出力-更新名称",
-                    metrics_code="power",
+                    metrics_code="output_power",
                     time_series_name="power-plan-updated",
                     time_series=[TimeSeriesValue(step=15, value=222.0)],
                 )

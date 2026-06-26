@@ -368,7 +368,7 @@ class HydroSimulationApi:
             {
                 "object_id": node_id,
                 "object_type": "Station",
-                "metrics_code": "power",
+                "metrics_code": "output_power",
                 "value": float(planning_values_by_node[node_id]),
             }
             for node_id in hydrosim_config.STATION_NODE_IDS
@@ -423,8 +423,8 @@ class HydroSimulationApi:
             object_id = int(model.object_id)
             object_type = model.object_type
             metrics_code = model.metrics_code
-            if object_type != "Station" or metrics_code != "power":
-                raise ValueError("current_step_power_planning_values 仅支持 Station/power 规划出力数据。")
+            if object_type != "Station" or metrics_code != "output_power":
+                raise ValueError("current_step_power_planning_values 仅支持 Station/output_power 规划出力数据。")
             if object_id not in station_names:
                 raise ValueError(f"current_step_power_planning_values 包含未配置的站点 object_id={object_id}。")
             normalized_values.append(
@@ -614,7 +614,7 @@ class HydroSimulationApi:
                 "object_id": int(station["node_id"]),
                 "object_type": "Station",
                 "object_name": station["station"],
-                "metrics_code": "power",
+                "metrics_code": "output_power",
                 "time_series": copy.deepcopy(station.get("time_series", [])),
             }
             for station in station_power_series
@@ -895,7 +895,7 @@ class HydroSimulationApi:
     def _merge_event_with_power_plan(self, base_event: Dict[str, Any], planning_payload: Dict[str, Any]) -> Dict[str, Any]:
         planning_series = self._extract_station_power_items(planning_payload)
         if not planning_series:
-            raise ValueError("发电需求时间序列文件中未找到 Station/power 时间序列。")
+            raise ValueError("发电需求时间序列文件中未找到 Station/output_power 时间序列。")
 
         merged_event = copy.deepcopy(base_event)
         object_time_series = list(merged_event.get("object_time_series", []) or [])
@@ -1048,7 +1048,7 @@ class HydroSimulationApi:
         object_ids = self._extract_identity_object_ids(item)
         if (
             item.get("object_type") == "Station"
-            and item.get("metrics_code") == "power"
+            and item.get("metrics_code") == "output_power"
             and len(object_ids) > 1
         ):
             collected = [
@@ -1092,7 +1092,7 @@ class HydroSimulationApi:
         return [item for item in items if self._is_station_power_item(item)]
 
     def _is_station_power_item(self, item: Dict[str, Any]) -> bool:
-        return item.get("object_type") == "Station" and item.get("metrics_code") == "power"
+        return item.get("object_type") == "Station" and item.get("metrics_code") == "output_power"
 
     def _extract_station_power_series_from_yaml(self, yaml_path: str) -> List[Dict[str, Any]]:
         with open(yaml_path, "r", encoding="utf-8") as handle:
@@ -1115,7 +1115,7 @@ class HydroSimulationApi:
         station_names = hydrosim_config.build_station_name_map()
         result = []
         for item in payload.get("object_time_series", []) or []:
-            if item.get("object_type") != "Station" or item.get("metrics_code") != "power":
+            if item.get("object_type") != "Station" or item.get("metrics_code") != "output_power":
                 continue
             object_ids = item.get("object_ids") or []
             if item.get("object_id") is not None:
@@ -1145,7 +1145,7 @@ class HydroSimulationApi:
             metrics_code = item.get("metrics_code")
             if object_type not in {"Turbine", "Gate"}:
                 continue
-            if metrics_code not in {"power", "water_flow", "gate_opening"}:
+            if metrics_code not in {"output_power", "water_flow", "gate_opening"}:
                 continue
             object_ids = item.get("object_ids") or []
             if item.get("object_id") is not None:

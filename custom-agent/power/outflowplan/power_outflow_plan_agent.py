@@ -2,7 +2,7 @@
 水电站出力时间序列智能体示例。
 
 该实现基于 OutflowPlanAgent 事件入口，在收到外发时间序列请求后，
-生成站点出力 `Station/power` 时间序列并回传给协调器。
+生成站点出力 `Station/output_power` 时间序列并回传给协调器。
 """
 
 import copy
@@ -390,7 +390,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             logger.info("HydroSim inflow-driven power planning completed, produced %s station series", len(station_power_plans))
             return station_power_plans
 
-        logger.warning("No Station/power or Station/water_flow planning series found in incoming event, fallback to sample logic.")
+        logger.warning("No Station/output_power or Station/water_flow planning series found in incoming event, fallback to sample logic.")
         return self._build_fallback_plans(hydro_event)
 
     def _build_power_planning_payload(
@@ -400,7 +400,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         planning_series = [
             item
             for item in object_time_series_list or []
-            if item.object_type == "Station" and item.metrics_code == "power"
+            if item.object_type == "Station" and item.metrics_code == "output_power"
         ]
         return planning_series or None
 
@@ -448,7 +448,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         planning_series = self._extract_station_power_series_from_payload(payload, str(planning_url))
         if planning_series:
             logger.info(
-                "Loaded Station/power planning series from properties.objects_time_series_url, count=%s, url=%s",
+                "Loaded Station/output_power planning series from properties.objects_time_series_url, count=%s, url=%s",
                 len(planning_series),
                 planning_url,
             )
@@ -457,7 +457,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
     def _build_power_planning_payload_from_event_url(self, hydro_event) -> Optional[List[ObjectTimeSeries]]:
         event_content_url = getattr(hydro_event, "event_content_url", None)
         if not event_content_url:
-            logger.info("No event_content_url available for loading Station/power planning payload.")
+            logger.info("No event_content_url available for loading Station/output_power planning payload.")
             return None
 
         payload = self._load_event_payload_from_url(event_content_url)
@@ -476,7 +476,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
 
         if planning_series:
             logger.info(
-                "Loaded Station/power planning series from event URL, count=%s, url=%s",
+                "Loaded Station/output_power planning series from event URL, count=%s, url=%s",
                 len(planning_series),
                 event_content_url,
             )
@@ -497,7 +497,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             except Exception:
                 logger.debug("Skipping invalid planning item from %s: %s", payload_source, item, exc_info=True)
                 continue
-            if parsed_item.object_type == "Station" and parsed_item.metrics_code == "power":
+            if parsed_item.object_type == "Station" and parsed_item.metrics_code == "output_power":
                 planning_series.append(parsed_item)
         return planning_series
 
@@ -521,7 +521,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             summary.append(type(item).__name__)
 
         logger.warning(
-            "No Station/power series matched for source=%s, candidates=%s",
+            "No Station/output_power series matched for source=%s, candidates=%s",
             source,
             summary,
         )
@@ -584,11 +584,11 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             "object_time_series": [
                 item.model_dump(mode="json", exclude_none=True)
                 for item in object_time_series_list
-                if item.object_type == "Station" and item.metrics_code == "power"
+                if item.object_type == "Station" and item.metrics_code == "output_power"
             ]
         }
         if not payload["object_time_series"]:
-            raise ValueError("输入事件中未找到可用于出力规划的 Station/power 时间序列。")
+            raise ValueError("输入事件中未找到可用于出力规划的 Station/output_power 时间序列。")
         planning_file = Path(temp_dir) / "time_series_power_planning.json"
         with open(planning_file, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
@@ -618,7 +618,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                     object_id=int(station["node_id"]),
                     object_type="Station",
                     object_name=station["station"],
-                    metrics_code="power",
+                    metrics_code="output_power",
                     time_series=[
                         TimeSeriesValue(step=int(row["step"]), value=float(row["value"]))
                         for row in station.get("time_series", [])
@@ -641,7 +641,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                     object_id=top_obj.object_id,
                     object_type="Station",
                     object_name=top_obj.object_name,
-                    metrics_code="power",
+                    metrics_code="output_power",
                     time_series=time_series_values
                 )
                 power_plans.append(power_plan)

@@ -1710,7 +1710,7 @@ def _apply_initial_conditions(
 
     turbine_power_by_node: Dict[int, float] = {node_id: 0.0 for node_id in STATION_NODE_IDS}
     for (obj_id, metric), value in initial.items():
-        if metric != "power":
+        if metric != "output_power":
             continue
         node_id = _infer_station_node_for_device(obj_id)
         if node_id in turbine_power_by_node:
@@ -1744,7 +1744,7 @@ def _power_series_by_station(event: Dict, steps: np.ndarray) -> Tuple[np.ndarray
     explicit: set[int] = set()
 
     for item in event.get("object_time_series", []):
-        if item.get("object_type") != "Station" or item.get("metrics_code") != "power":
+        if item.get("object_type") != "Station" or item.get("metrics_code") != "output_power":
             continue
         ids = [node_id for node_id in _object_ids(item) if node_id in NODE_TO_INDEX]
         if not ids:
@@ -1764,7 +1764,7 @@ def _power_series_by_station(event: Dict, steps: np.ndarray) -> Tuple[np.ndarray
     for series in station_power.values():
         total_power += series
     if not explicit:
-        raise ValueError("time_series 中未找到 Station/power 出力计划。")
+        raise ValueError("time_series 中未找到 Station/output_power 出力计划。")
     return total_power, station_power
 
 

@@ -34,8 +34,9 @@ class ControlCommandDispatcher:
             object_type = command.get("object_type")
 
             logger.info(
-                "准备下发控制指令: 目标机组[%s], 控制类型[%s], 下发数值[%s], 对象ID[%s]",
+                "准备下发控制指令: 目标智能体[%s], 控制对象类型[%s], 控制类型[%s], 下发数值[%s], 对象ID[%s]",
                 target_agent_code,
+                object_type,
                 target_command_type,
                 target_value,
                 object_id,

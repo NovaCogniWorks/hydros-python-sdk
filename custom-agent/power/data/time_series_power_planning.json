@@ -13,7 +13,7 @@
       ],
       "object_type": "Station",
       "object_name": "三站出力",
-      "metrics_code": "power",
+      "metrics_code": "output_power",
       "time_series": [
         {
           "step": 0,
@@ -408,7 +408,7 @@
       ],
       "object_type": "Station",
       "object_name": "沙坪坝出力",
-      "metrics_code": "power",
+      "metrics_code": "output_power",
       "time_series": [
         {
           "step": 0,

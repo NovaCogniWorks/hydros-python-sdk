@@ -45,28 +45,28 @@ class HydroSimDemoTest(unittest.TestCase):
                     "object_ids": [20100],
                     "object_type": "Station",
                     "object_name": "瀑布沟",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 1000.0}, {"step": 1, "value": 1100.0}],
                 },
                 {
                     "object_ids": [20300],
                     "object_type": "Station",
                     "object_name": "深溪沟",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 200.0}, {"step": 1, "value": 220.0}],
                 },
                 {
                     "object_ids": [20500],
                     "object_type": "Station",
                     "object_name": "枕头坝I期",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 250.0}, {"step": 1, "value": 260.0}],
                 },
                 {
                     "object_ids": [20700],
                     "object_type": "Station",
                     "object_name": "沙坪II期",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 120.0}, {"step": 1, "value": 130.0}],
                 },
             ],
@@ -77,28 +77,28 @@ class HydroSimDemoTest(unittest.TestCase):
                     "object_ids": [20100],
                     "object_type": "Station",
                     "object_name": "瀑布沟",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 1300.0}, {"step": 1, "value": 1400.0}],
                 },
                 {
                     "object_ids": [20300],
                     "object_type": "Station",
                     "object_name": "深溪沟",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 180.0}, {"step": 1, "value": 190.0}],
                 },
                 {
                     "object_ids": [20500],
                     "object_type": "Station",
                     "object_name": "枕头坝I期",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 210.0}, {"step": 1, "value": 220.0}],
                 },
                 {
                     "object_ids": [20700],
                     "object_type": "Station",
                     "object_name": "沙坪II期",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 0, "value": 90.0}, {"step": 1, "value": 100.0}],
                 },
             ]
@@ -271,10 +271,10 @@ class HydroSimDemoTest(unittest.TestCase):
 
         first_step = api.execute_step(
             current_step_power_planning_values=[
-                CurrentStepPowerPlanningValue(object_id=20100, object_type="Station", metrics_code="power", value=88.0),
-                CurrentStepPowerPlanningValue(object_id=20300, object_type="Station", metrics_code="power", value=99.0),
-                CurrentStepPowerPlanningValue(object_id=20500, object_type="Station", metrics_code="power", value=77.0),
-                CurrentStepPowerPlanningValue(object_id=20700, object_type="Station", metrics_code="power", value=66.0),
+                CurrentStepPowerPlanningValue(object_id=20100, object_type="Station", metrics_code="output_power", value=88.0),
+                CurrentStepPowerPlanningValue(object_id=20300, object_type="Station", metrics_code="output_power", value=99.0),
+                CurrentStepPowerPlanningValue(object_id=20500, object_type="Station", metrics_code="output_power", value=77.0),
+                CurrentStepPowerPlanningValue(object_id=20700, object_type="Station", metrics_code="output_power", value=66.0),
             ]
         )
         self.assertEqual(first_step["current_step_index"], 0)

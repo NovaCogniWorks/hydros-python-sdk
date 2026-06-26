@@ -67,7 +67,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.assertEqual(len(plans), 1)
         plan = plans[0]
         self.assertEqual(plan.object_type, "Station")
-        self.assertEqual(plan.metrics_code, "power")
+        self.assertEqual(plan.metrics_code, "output_power")
         self.assertEqual(plan.time_series_name, "StationA_power_plan")
         self.assertEqual([value.step for value in plan.time_series], [0, 1, 2, 3])
         self.assertEqual([value.value for value in plan.time_series], [100.0, 105.0, 110.0, 115.0])
@@ -106,7 +106,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
                         "object_id": 101,
                         "object_type": "Station",
                         "object_name": "StationA",
-                        "metrics_code": "power",
+                        "metrics_code": "output_power",
                         "time_series": [{"step": 0, "value": 88.0}],
                     }
                 ]
@@ -118,7 +118,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         sent_response = self.mock_client.enqueue.call_args[0][0]
         plans = sent_response.outflow_time_series_map["Station"]
         self.assertEqual(len(plans), 1)
-        self.assertEqual(plans[0].metrics_code, "power")
+        self.assertEqual(plans[0].metrics_code, "output_power")
         self.assertEqual(plans[0].time_series[0].value, 88.0)
 
     def test_on_outflow_time_series_calls_hydrosim_power_planning_from_event_url_without_direct_flag(self):
@@ -158,7 +158,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
                         "object_id": 101,
                         "object_type": "Station",
                         "object_name": "StationA",
-                        "metrics_code": "power",
+                        "metrics_code": "output_power",
                         "time_series": [{"step": 0, "value": 66.0}],
                     }
                 ]
@@ -206,7 +206,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
                         "object_id": 101,
                         "object_type": "Station",
                         "object_name": "StationA",
-                        "metrics_code": "power",
+                        "metrics_code": "output_power",
                         "time_series": [{"step": 0, "value": 77.0}],
                     }
                 ]
@@ -264,7 +264,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         plans = sent_response.outflow_time_series_map["Station"]
         self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0].object_id, 20100)
-        self.assertEqual(plans[0].metrics_code, "power")
+        self.assertEqual(plans[0].metrics_code, "output_power")
         self.assertEqual(plans[0].time_series[0].value, 500.0)
 
     def test_initialize_hydrosim_session_downloads_inputs_from_config_urls(self):

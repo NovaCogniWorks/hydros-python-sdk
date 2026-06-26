@@ -33,7 +33,7 @@ control_domains:
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 20105
+  - device_id: 20106
     node_id: 20100
     type: Turbine
     min_value: 0
@@ -174,67 +174,67 @@ control_domains:
     max_value: 5
     max_opening_increase: 0
 
-  - device_id: 2324 #沙坪
+  - device_id: 20706 #沙坪
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2325
+  - device_id: 20707
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2326
+  - device_id: 20708
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2327
+  - device_id: 20709
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2328
+  - device_id: 20710
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2329
+  - device_id: 20711
     node_id: 20700
     type: Turbine
     min_value: 0
     max_value: 3600
     max_opening_increase: 0
-  - device_id: 2421
+  - device_id: 20701
     node_id: 20700
     type: Gate
     min_value: 0
     max_value: 5
     max_opening_increase: 0
-  - device_id: 2422
+  - device_id: 20702
     node_id: 20700
     type: Gate
     min_value: 0
     max_value: 5
     max_opening_increase: 0
-  - device_id: 2423
+  - device_id: 20703
     node_id: 20700
     type: Gate
     min_value: 0
     max_value: 5
     max_opening_increase: 0
-  - device_id: 2424
+  - device_id: 20704
     node_id: 20700
     type: Gate
     min_value: 0
     max_value: 5
     max_opening_increase: 0
-  - device_id: 2425
+  - device_id: 20705
     node_id: 20700
     type: Gate
     min_value: 0

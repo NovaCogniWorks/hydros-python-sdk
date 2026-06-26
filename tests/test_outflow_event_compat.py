@@ -35,7 +35,7 @@ def test_outflow_time_series_event_accepts_object_ids():
                     "object_ids": [20100, 20300, 20500],
                     "object_type": "Station",
                     "object_name": "三站出力",
-                    "metrics_code": "power",
+                    "metrics_code": "output_power",
                     "time_series": [{"step": 1, "value": 123.0}],
                 }
             ],

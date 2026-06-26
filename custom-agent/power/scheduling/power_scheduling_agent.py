@@ -204,6 +204,48 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
             return []
 
+        turbine_commands = self._build_turbine_output_power_commands(session, step)
+        if turbine_commands:
+            return turbine_commands
+        return self._build_station_output_power_commands(session, step)
+
+    def _build_turbine_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+        commands: List[Dict[str, Any]] = []
+        for device in getattr(session, "latest_device_output_series", []) or []:
+            if str(device.get("object_type")) != HydroObjectType.TURBINE.value:
+                continue
+            if str(device.get("metrics_code")) != DeviceValueTypeEnum.OUTPUT_POWER.code:
+                continue
+
+            device_row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if device_row is None:
+                continue
+
+            object_id = int(device["object_id"])
+            target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
+                object_id=object_id,
+                device_type=HydroObjectType.TURBINE.value,
+            )
+            if target_agent is None:
+                logger.warning(
+                    "Skip turbine output-power command because target agent is unavailable: objectId=%s, step=%s",
+                    object_id,
+                    step,
+                )
+                continue
+
+            commands.append(
+                {
+                    "target_agent_code": target_agent.agent_code,
+                    "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
+                    "target_value": float(device_row["value"]),
+                    "object_id": object_id,
+                    "object_type": HydroObjectType.TURBINE.value,
+                }
+            )
+        return commands
+
+    def _build_station_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
         commands: List[Dict[str, Any]] = []
         for station in getattr(session, "latest_station_power_series", []) or []:
             station_row = self._get_series_row_for_step(station.get("time_series", []), step)
@@ -217,7 +259,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             )
             if target_agent is None:
                 logger.warning(
-                    "Skip station output-power command because target agent is unavailable: objectId=%s, step=%s",
+                    "Skip station output-power fallback command because target agent is unavailable: objectId=%s, step=%s",
                     object_id,
                     step,
                 )
@@ -232,7 +274,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                     "object_type": HydroObjectType.STATION.value,
                 }
             )
-
         return commands
 
     def _ensure_mpc_task_state(self, step: int) -> SchedulingTaskState:
@@ -356,20 +397,20 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         horizon_steps: List[HorizonStep] = []
         for absolute_step in range(window_start, window_end + 1):
             control_object_list = []
-            for station in station_series:
-                station_row = self._get_series_row_for_step(station.get("time_series", []), absolute_step)
-                if station_row is None:
-                    continue
-                control_object_list.append(
-                    MpcResultFactory.build_control_object_result(
-                        object_id=int(station["node_id"]),
-                        node_id=int(station["node_id"]),
-                        object_name=station.get("station"),
-                        target_value=float(station_row["value"]),
-                        object_type=HydroObjectType.STATION.value,
-                        target_value_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
-                    )
-                )
+            # for station in station_series:
+            #     station_row = self._get_series_row_for_step(station.get("time_series", []), absolute_step)
+            #     if station_row is None:
+            #         continue
+            #     control_object_list.append(
+            #         MpcResultFactory.build_control_object_result(
+            #             object_id=int(station["node_id"]),
+            #             node_id=int(station["node_id"]),
+            #             object_name=station.get("station"),
+            #             target_value=float(station_row["value"]),
+            #             object_type=HydroObjectType.STATION.value,
+            #             target_value_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
+            #         )
+            #     )
 
             for device in device_series:
                 device_row = self._get_series_row_for_step(device.get("time_series", []), absolute_step)
@@ -465,7 +506,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 result = self._hydrosim_api.get_station_power_planning_series(planning_file)
             except ValueError:
                 logger.info(
-                    "Power planning file has no Station/power series; trying inflow-driven planning: %s",
+                    "Power planning file has no Station/output_power series; trying inflow-driven planning: %s",
                     planning_file,
                 )
                 result = self._hydrosim_api.get_station_power_planning_series_from_inflow(planning_file)

@@ -208,7 +208,7 @@ class HydroSimulationResultFactory:
             if not ids or not metric:
                 continue
             seen_station_keys.add((ids, metric))
-            if metric == "power" and len(ids) > 1:
+            if metric == "output_power" and len(ids) > 1:
                 values = np.zeros(len(formal_steps), dtype=float)
                 for node_id in ids:
                     values += np.asarray(multi_stair.multi_stair[self.runtime.NODE_TO_INDEX[node_id]].history["current_power"], dtype=float)
@@ -232,7 +232,7 @@ class HydroSimulationResultFactory:
             )
 
         for node_id in self.runtime.STATION_NODE_IDS:
-            for metric in ("water_level", "water_flow", "power"):
+            for metric in ("water_level", "water_flow", "output_power"):
                 key = ((node_id,), metric)
                 if key in seen_station_keys:
                     continue
@@ -574,7 +574,7 @@ class HydroSimulationResultFactory:
             if idx == 0:
                 return flows_in[warm_steps:]
             return multi_reservoir.Capacity_Stairs[idx].history["current_inflow"]
-        if metric == "power":
+        if metric == "output_power":
             return multi_stair.multi_stair[idx].history["current_power"]
         if metric == "outflow":
             return multi_reservoir.Capacity_Stairs[idx].history["current_outflow"]
@@ -594,7 +594,7 @@ class HydroSimulationResultFactory:
             return []
         station_idx = self.runtime.NODE_TO_INDEX[node_id]
 
-        if control_type == "Turbine" and metric in ("power", "turbine_power"):
+        if control_type == "Turbine" and metric in ("output_power", "power", "turbine_power"):
             turbine_ids = [
                 int(row["device_id"])
                 for row in control_domains
@@ -663,7 +663,7 @@ class HydroSimulationResultFactory:
 
     def _device_metrics_for_control_type(self, control_type: str) -> Sequence[str]:
         if control_type == "Turbine":
-            return ("power", "water_flow")
+            return ("output_power", "water_flow")
         if control_type == "Gate":
             return ("water_flow", "gate_opening")
         return ()
