@@ -883,19 +883,19 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     u_flow_val = float(u_flow_list[i]) if i < len(u_flow_list) else None
                     u_eff_val = float(u_eff_list[i]) if i < len(u_eff_list) else None
                     
-                    # 根据用户要求，单机组水位从全局水位取
-                    predicted_result_list.append(
-                        MpcResultFactory.build_predicted_result(
-                            object_id=uid,
-                            object_type="PUMP_UNIT",
-                            front_water_level=st_front,
-                            final_target_value=None,
-                            final_target_value_type=None,
-                            back_water_level=st_back,
-                            out_flow=u_flow_val,
-                            efficiency=u_eff_val
-                        )
-                    )
+#                     # 根据用户要求，单机组水位从全局水位取
+#                     predicted_result_list.append(
+#                         MpcResultFactory.build_predicted_result(
+#                             object_id=uid,
+#                             object_type="PUMP_UNIT",
+#                             front_water_level=st_front,
+#                             final_target_value=None,
+#                             final_target_value_type=None,
+#                             back_water_level=st_back,
+#                             out_flow=u_flow_val,
+#                             efficiency=u_eff_val
+#                         )
+#                     )
                 
                 # 全站级预测
                 if i == 0:
@@ -913,7 +913,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         object_id=sid,
                         object_type="PUMP_STATION",
                         front_water_level=st_front,
-                        final_target_value=None,
+                        final_target_value=st_flow,
                         final_target_value_type=MetricsCodes.WATER_FLOW,
                         back_water_level=st_back,
                         out_flow=st_flow,
