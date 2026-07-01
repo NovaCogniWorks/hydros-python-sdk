@@ -17,7 +17,7 @@ if _SCRIPT_DIR not in sys.path:
 
 from hydros_agent_sdk import (
     ErrorCodes, handle_agent_errors,
-    DeviceValueTypeEnum, HydroObjectType
+    DeviceValueTypeEnum, HydroObjectType, MetricsCodes
 )
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
@@ -914,7 +914,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         object_type="PUMP_STATION",
                         front_water_level=st_front,
                         final_target_value=None,
-                        final_target_value_type=None,
+                        final_target_value_type=MetricsCodes.WATER_FLOW,
                         back_water_level=st_back,
                         out_flow=st_flow,
                         efficiency=st_eff_val
