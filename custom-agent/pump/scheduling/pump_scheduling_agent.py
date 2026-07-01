@@ -16,7 +16,7 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from hydros_agent_sdk import (
-    load_env_config, ErrorCodes, handle_agent_errors,
+    ErrorCodes, handle_agent_errors,
     DeviceValueTypeEnum, HydroObjectType
 )
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
@@ -112,28 +112,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             # 1. 加载智能体配置 (从 agent.properties)
             self.load_agent_configuration(request)
 
-            # 2. 初始化梯级泵站和优化模型 (模拟)
+            # 2. 先订阅现地指标，避免后续耗时初始化期间错过水动力首帧数据
+            self.subscribe_field_metrics()
+
+            # 3. 初始化梯级泵站和优化模型 (模拟)
             self._lazy_init_odd_mpc()
-
-            # 3. 订阅现地指标（从环境配置 env.properties 获取基础主题并渲染变量）
-            env_config = load_env_config()
-            base_metrics_topic = env_config.get('metrics_topic')
-            if base_metrics_topic:
-                # 手动替换 {hydros_cluster_id} 变量
-                cluster_id = env_config.get('hydros_cluster_id')
-                if not cluster_id:
-                    cluster_id = 'hydros-k3s-testing'
-                    logger.warning("在 env_config 中未找到 'hydros_cluster_id' 参数，默认使用 'hydros-k3s-testing'。")
-                base_metrics_topic = base_metrics_topic.replace('{hydros_cluster_id}', cluster_id)
-
-                # 从上下文获取业务场景实例 ID (biz_scene_instance_id)
-                task_id = self.context.biz_scene_instance_id
-
-                # 拼接完整主题实现任务隔离：base_topic/task_id
-                full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
-
-                logger.info(f"订阅渲染后的现地数据主题: {full_metrics_topic}")
-                self._metrics_subscriber.subscribe(full_metrics_topic)
 
             # 4. 在状态管理器中注册
             self.state_manager.init_task(self.context, [self])

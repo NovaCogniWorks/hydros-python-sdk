@@ -13,9 +13,11 @@ from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetVa
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
+from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
+from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
@@ -187,6 +189,34 @@ class CentralSchedulingAgent(TickableAgent):
             mqtt_client=sim_coordination_client.mqtt_client,
             metrics_data_cache=self._metrics_data_cache,
         )
+
+    def subscribe_field_metrics(self, metrics_topic: Optional[str] = None) -> Optional[str]:
+        """订阅当前任务的现地指标 topic，并返回实际订阅的完整 topic。"""
+        settings = load_runtime_env_settings()
+        base_topic = metrics_topic or PropertyParseUtils.get_string(
+            self.properties,
+            "metrics_topic",
+            settings.metrics_topic,
+        )
+        if not base_topic:
+            logger.info("No field metrics topic configured for central scheduling agent: %s", self.agent_id)
+            return None
+
+        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
+        rendered_topic = settings.render_topic(str(base_topic), cluster_id=cluster_id)
+        if not rendered_topic:
+            logger.info("No rendered field metrics topic for central scheduling agent: %s", self.agent_id)
+            return None
+
+        task_id = self.context.biz_scene_instance_id
+        full_topic = f"{rendered_topic.rstrip('/')}/{task_id}"
+        if self._metrics_subscriber.subscription_topic == full_topic:
+            logger.info("Field metrics topic already subscribed for central scheduling agent: %s", full_topic)
+            return full_topic
+
+        logger.info("Subscribing central field metrics topic: %s", full_topic)
+        self._metrics_subscriber.subscribe(full_topic)
+        return full_topic
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:

@@ -74,6 +74,26 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
             agent._control_command_builder,
         )
 
+    def test_generic_base_subscribes_field_metrics_topic_for_current_task(self):
+        mqtt_client = Mock()
+        agent = GenericCentralSchedulingAgentForTest(
+            sim_coordination_client=Mock(mqtt_client=mqtt_client),
+            agent_id="agent-generic-metrics",
+            agent_code="GENERIC_CENTRAL",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="Generic Central",
+            context=SimulationContext(biz_scene_instance_id="scene-generic-metrics"),
+            hydros_cluster_id="cluster",
+            hydros_node_id="node",
+        )
+        agent.properties["metrics_topic"] = "/hydros/data/edges/{hydros_cluster_id}"
+
+        topic = agent.subscribe_field_metrics()
+
+        self.assertEqual(topic, "/hydros/data/edges/cluster/scene-generic-metrics")
+        mqtt_client.message_callback_add.assert_called_once()
+        mqtt_client.subscribe.assert_called_once_with(topic)
+
     def test_mpc_base_owns_default_optimization_hook(self):
         agent = MpcCentralSchedulingAgentForTest(
             sim_coordination_client=Mock(mqtt_client=Mock()),
