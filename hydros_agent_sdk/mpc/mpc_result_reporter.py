@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
 MPC_DEVICE_CONTROL = "OPENING"
+MPC_OPERATION_WATER_FLOW = "WATER_FLOW"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
 
 
@@ -244,18 +245,22 @@ class MpcResultReporter:
         attributes = {
             "front_water_level": predicted_result.front_water_level,
             "back_water_level": predicted_result.back_water_level,
-            "final_target_water_level": predicted_result.final_target_water_level,
             "out_flow": predicted_result.out_flow,
             "efficiency": predicted_result.efficiency,
         }
+        target_value_type = predicted_result.final_target_value_type
+        if target_value_type and target_value_type.upper() == MPC_OPERATION_WATER_LEVEL:
+            attributes["final_target_water_level"] = predicted_result.final_target_value
+        if target_value_type and target_value_type.upper() == MPC_OPERATION_WATER_FLOW:
+            attributes["final_target_water_flow"] = predicted_result.final_target_value
         return MpcResultDetail(
             horizon_step=horizon_step,
-            command_type=MPC_OPERATION_WATER_LEVEL,
+            command_type=target_value_type,
             object_type=predicted_result.object_type,
             node_id=predicted_result.object_id,
-            object_id=0,
+            object_id=predicted_result.object_id,
             value=predicted_result.front_water_level,
-            target_value=predicted_result.final_target_water_level,
+            target_value=predicted_result.final_target_value,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
 

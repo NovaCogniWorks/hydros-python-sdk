@@ -32,7 +32,8 @@ class PredictedResult(HydroBaseModel):
     object_name: Optional[str] = None
     front_water_level: Optional[float] = None
     back_water_level: Optional[float] = None
-    final_target_water_level: Optional[float] = None
+    final_target_value: Optional[float] = None
+    final_target_value_type: Optional[str] = None
     out_flow: Optional[float] = None
     efficiency: Optional[float] = None
 

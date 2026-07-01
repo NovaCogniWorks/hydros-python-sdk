@@ -889,7 +889,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                             object_id=uid,
                             object_type="PUMP_UNIT",
                             front_water_level=st_front,
-                            final_target_water_level=None,
+                            final_target_value=None,
+                            final_target_value_type=None,
                             back_water_level=st_back,
                             out_flow=u_flow_val,
                             efficiency=u_eff_val
@@ -912,7 +913,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         object_id=sid,
                         object_type="PUMP_STATION",
                         front_water_level=st_front,
-                        final_target_water_level=None,
+                        final_target_value=None,
+                        final_target_value_type=None,
                         back_water_level=st_back,
                         out_flow=st_flow,
                         efficiency=st_eff_val

@@ -30,7 +30,8 @@ class MpcResultFactoryTest(unittest.TestCase):
             object_id=102,
             object_type="Canal",
             front_water_level=2.1,
-            final_target_water_level=2.3,
+            final_target_value=2.3,
+            final_target_value_type="WATER_LEVEL",
             back_water_level=1.9,
             out_flow=33.0,
         )
@@ -39,7 +40,8 @@ class MpcResultFactoryTest(unittest.TestCase):
         self.assertEqual(result.object_id, 102)
         self.assertEqual(result.object_type, "Canal")
         self.assertEqual(result.front_water_level, 2.1)
-        self.assertEqual(result.final_target_water_level, 2.3)
+        self.assertEqual(result.final_target_value, 2.3)
+        self.assertEqual(result.final_target_value_type, "WATER_LEVEL")
         self.assertEqual(result.back_water_level, 1.9)
         self.assertEqual(result.out_flow, 33.0)
 
