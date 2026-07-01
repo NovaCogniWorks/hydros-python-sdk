@@ -35,21 +35,6 @@ class MqttMetricsSubscriber:
 
     def handle_payload(self, topic: str, payload: Dict[str, Any]) -> Optional[str]:
         try:
-            logger.info(
-                "HYDROS_DIAG_FIELD_METRICS_CACHE_MISMATCH payload received: "
-                "topic=%s object_id=%s object_type=%s "
-                "metrics_code=%s position_code=%s has_attributes=%s "
-                "top_front_water_flow=%s top_back_water_flow=%s keys=%s",
-                topic,
-                payload.get("object_id"),
-                payload.get("object_type"),
-                payload.get("metrics_code"),
-                payload.get("position_code"),
-                "attributes" in payload,
-                payload.get("front_water_flow"),
-                payload.get("back_water_flow"),
-                sorted(payload.keys()),
-            )
             return self.metrics_data_cache.update(payload)
         except Exception as exc:
             logger.error("Error processing field metrics: %s", exc, exc_info=True)

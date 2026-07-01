@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from hydros_agent_sdk.sensor_data import SensorData
-
-logger = logging.getLogger(__name__)
 
 
 class FieldMetricsCache:
@@ -27,40 +24,8 @@ class FieldMetricsCache:
         position_code = payload.get("position_code")
         attributes = payload.get("attributes")
         if position_code != "none":
-            # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
-            logger.info(
-                "HYDROS_DIAG_FIELD_METRICS_CACHE_MISMATCH dropped by position_code: "
-                "object_id=%s object_type=%s metrics_code=%s "
-                "position_code=%s step_index=%s has_attributes=%s "
-                "top_front_water_flow=%s top_back_water_flow=%s keys=%s",
-                object_id,
-                object_type,
-                metrics_code,
-                position_code,
-                step_index,
-                attributes is not None,
-                payload.get("front_water_flow"),
-                payload.get("back_water_flow"),
-                sorted(payload.keys()),
-            )
             return None
         if object_id is None or not metrics_code:
-            # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
-            logger.info(
-                "HYDROS_DIAG_FIELD_METRICS_CACHE_MISMATCH dropped by required fields: "
-                "object_id=%s object_type=%s metrics_code=%s "
-                "position_code=%s step_index=%s has_attributes=%s "
-                "top_front_water_flow=%s top_back_water_flow=%s keys=%s",
-                object_id,
-                object_type,
-                metrics_code,
-                position_code,
-                step_index,
-                attributes is not None,
-                payload.get("front_water_flow"),
-                payload.get("back_water_flow"),
-                sorted(payload.keys()),
-            )
             return None
 
         cache_key = f"{object_id}_{metrics_code}"
@@ -79,23 +44,6 @@ class FieldMetricsCache:
             try:
                 step = int(step_index)
             except (TypeError, ValueError):
-                # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
-                logger.info(
-                    "HYDROS_DIAG_FIELD_METRICS_CACHE_MISMATCH failed to parse step_index: "
-                    "cache_key=%s object_id=%s object_type=%s "
-                    "metrics_code=%s position_code=%s step_index=%s has_attributes=%s "
-                    "top_front_water_flow=%s top_back_water_flow=%s keys=%s",
-                    cache_key,
-                    object_id,
-                    object_type,
-                    metrics_code,
-                    position_code,
-                    step_index,
-                    attributes is not None,
-                    payload.get("front_water_flow"),
-                    payload.get("back_water_flow"),
-                    sorted(payload.keys()),
-                )
                 raise
             self.metrics_by_step.setdefault(step, {})
             self.metrics_by_step[step][cache_key] = {
@@ -104,23 +52,6 @@ class FieldMetricsCache:
             }
             self.trim()
 
-        # 临时诊断日志：定位现地指标是否到达/入库，排查完成后删除。
-        logger.info(
-            "HYDROS_DIAG_FIELD_METRICS_CACHE_MISMATCH cached: "
-            "cache_key=%s object_id=%s object_type=%s metrics_code=%s "
-            "position_code=%s step_index=%s has_attributes=%s attributes=%s "
-            "top_front_water_flow=%s top_back_water_flow=%s",
-            cache_key,
-            object_id,
-            object_type,
-            metrics_code,
-            position_code,
-            step_index,
-            attributes is not None,
-            attributes,
-            payload.get("front_water_flow"),
-            payload.get("back_water_flow"),
-        )
         return cache_key
 
     def get_value(self, object_id: int, metrics_code: str) -> Optional[float]:
