@@ -11,6 +11,7 @@ from .models import (
 )
 from .base import HydroBaseModel
 from .mpc_results import MpcResult
+from hydros_agent_sdk.scenario_config import SimAgentProperties, SimulationRuntimeOptions
 
 # 指令类型常量
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"
@@ -63,6 +64,14 @@ class SimTaskInitRequest(SimCoordinationRequest):
     command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
     agent_list: List[HydroAgent]
     biz_scene_configuration_url: Optional[str] = None
+    simulation_runtime_options: Optional[SimulationRuntimeOptions] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_runtime_options", "simulationRuntimeOptions"),
+    )
+    sim_agent_properties: Optional[SimAgentProperties] = Field(
+        default=None,
+        validation_alias=AliasChoices("sim_agent_properties", "simAgentProperties"),
+    )
 
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE

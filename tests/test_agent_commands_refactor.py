@@ -59,7 +59,11 @@ from hydros_agent_sdk.protocol.models import (
     Waterway,
 )
 from hydros_agent_sdk.runtime import RuntimeEnvSettings
-from hydros_agent_sdk.scenario_config import BizScenarioConfiguration, SimAgentProperties
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimAgentProperties,
+    SimulationRuntimeOptions,
+)
 from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.utils import (
@@ -334,6 +338,55 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(config.sim_agent_properties.sim_step_size, 120)
         self.assertEqual(config.sim_agent_properties.output_step_size, 7200)
 
+    def test_scenario_config_parses_simulation_runtime_options(self):
+        config = BizScenarioConfiguration.model_validate(
+            {
+                "hydros_objects_modeling_url": "https://example.test/objects.yaml",
+                "simulationRuntimeOptions": {
+                    "tickSeconds": 120,
+                    "total_steps": 36,
+                    "output_precision_seconds": 7200,
+                    "business_start_time": "2026/07/04 08:00:00",
+                    "roll_steps": 60,
+                    "output_future_steps": 12,
+                    "properties": {"experiment_group": "A"},
+                },
+            }
+        )
+
+        self.assertIsNotNone(config.simulation_runtime_options)
+        self.assertEqual(config.simulation_runtime_options.tick_seconds, 120)
+        self.assertEqual(config.simulation_runtime_options.max_steps, 36)
+        self.assertEqual(config.simulation_runtime_options.output_step_seconds, 7200)
+        self.assertEqual(config.simulation_runtime_options.biz_start_time, "2026/07/04 08:00:00")
+        self.assertEqual(config.simulation_runtime_options.roll_steps, 60)
+        self.assertEqual(config.simulation_runtime_options.output_future_steps, 12)
+        self.assertEqual(config.simulation_runtime_options.runtime_properties["experiment_group"], "A")
+
+        self.assertIsNotNone(config.sim_agent_properties)
+        self.assertEqual(config.sim_agent_properties.sim_step_size, 120)
+        self.assertEqual(config.sim_agent_properties.total_steps, 36)
+        self.assertEqual(config.sim_agent_properties.output_step_size, 7200)
+        self.assertEqual(config.sim_agent_properties.properties["experiment_group"], "A")
+
+    def test_sim_task_init_request_parses_simulation_runtime_options(self):
+        context = SimulationContext(biz_scene_instance_id="scene-runtime-options")
+        request = SimTaskInitRequest(
+            command_id="cmd-runtime-options",
+            context=context,
+            agent_list=[],
+            simulationRuntimeOptions={
+                "tickSeconds": 300,
+                "maxSteps": 48,
+                "outputStepSeconds": 900,
+            },
+        )
+
+        self.assertIsInstance(request.simulation_runtime_options, SimulationRuntimeOptions)
+        self.assertEqual(request.simulation_runtime_options.tick_seconds, 300)
+        self.assertEqual(request.simulation_runtime_options.max_steps, 48)
+        self.assertEqual(request.simulation_runtime_options.output_step_seconds, 900)
+
     def test_context_repository_keeps_scenario_config_without_modeling_url(self):
         context = SimulationContext(biz_scene_instance_id="scene-sim-agent-only")
         repository = HydroModelContextRepository()
@@ -357,6 +410,39 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIsNone(model_context.topology)
         self.assertEqual(model_context.sim_agent_properties.roll_steps, 60)
         self.assertEqual(model_context.sim_agent_properties.total_steps, 36)
+
+    def test_context_repository_applies_request_simulation_runtime_options(self):
+        context = SimulationContext(biz_scene_instance_id="scene-runtime-options")
+        repository = HydroModelContextRepository()
+        request = SimpleNamespace(
+            context=context,
+            biz_scene_configuration_url="https://example.test/scenario.yaml",
+            simulation_runtime_options=SimulationRuntimeOptions(
+                tick_seconds=300,
+                max_steps=48,
+            ),
+        )
+
+        with patch(
+            "hydros_agent_sdk.context_manager.YamlLoader.from_url",
+            return_value={
+                "sim_agent_properties": {
+                    "roll_steps": 60,
+                    "total_steps": 36,
+                    "sim_step_size": 120,
+                },
+            },
+        ):
+            model_context = repository.create_from_init_request(request)
+
+        self.assertIsNotNone(model_context)
+        self.assertIsNone(model_context.topology)
+        self.assertEqual(model_context.simulation_runtime_options.tick_seconds, 300)
+        self.assertEqual(model_context.simulation_runtime_options.max_steps, 48)
+        self.assertEqual(model_context.simulation_runtime_options.roll_steps, 60)
+        self.assertEqual(model_context.sim_agent_properties.sim_step_size, 300)
+        self.assertEqual(model_context.sim_agent_properties.total_steps, 48)
+        self.assertEqual(model_context.sim_agent_properties.roll_steps, 60)
 
     def test_client_on_message_no_longer_filters_remote_target_early(self):
         client = AgentCommandClient(
@@ -978,6 +1064,63 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(runtime.task_state.rolling_interval_steps, 60)
         self.assertEqual(runtime.task_state.total_steps, 36)
         self.assertEqual(runtime.task_state.output_step_size, 1800)
+
+    def test_central_scheduling_agent_prefers_simulation_runtime_options(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011-runtime-options")
+        ContextManager.create(
+            context=context,
+            scenario_config=BizScenarioConfiguration(
+                simulation_runtime_options=SimulationRuntimeOptions(
+                    roll_steps=8,
+                    max_steps=32,
+                    output_step_seconds=900,
+                ),
+                sim_agent_properties=SimAgentProperties(
+                    roll_steps=60,
+                    total_steps=36,
+                    output_step_size=1800,
+                ),
+            ),
+        )
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011-runtime-options",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        agent.properties.update(
+            {
+                "roll_steps": "10",
+                "total_steps": "40",
+                "output_step_size": "7200",
+            }
+        )
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        runtime = agent._mpc_rolling_runtime
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 8)
+        self.assertEqual(runtime.task_state.total_steps, 32)
+        self.assertEqual(runtime.task_state.output_step_size, 900)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()

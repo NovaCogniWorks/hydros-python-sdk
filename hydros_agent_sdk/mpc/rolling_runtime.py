@@ -65,27 +65,46 @@ class MpcRollingRuntime:
     def task_state(self) -> Optional[SchedulingTaskState]:
         return self._task_state_lifecycle.task_state
 
-    def _get_scenario_sim_agent_properties(self):
+    def _get_model_context(self):
         from hydros_agent_sdk.context_manager import ContextManager
 
-        model_context = ContextManager.get_context(self.context)
+        return ContextManager.get_context(self.context)
+
+    def _get_scenario_runtime_options(self):
+        model_context = self._get_model_context()
+        if model_context is None:
+            return None
+        return getattr(model_context, "simulation_runtime_options", None)
+
+    def _get_scenario_sim_agent_properties(self):
+        model_context = self._get_model_context()
         if model_context is None:
             return None
         return model_context.sim_agent_properties
 
-    def _get_scenario_int(self, name: str) -> Optional[int]:
+    def _get_scenario_int(
+        self,
+        runtime_name: str,
+        legacy_name: Optional[str] = None,
+    ) -> Optional[int]:
+        runtime_options = self._get_scenario_runtime_options()
+        if runtime_options is not None:
+            value = getattr(runtime_options, runtime_name, None)
+            if value is not None:
+                return int(value)
+
         sim_agent_properties = self._get_scenario_sim_agent_properties()
         if sim_agent_properties is None:
             return None
 
-        value = getattr(sim_agent_properties, name, None)
+        value = getattr(sim_agent_properties, legacy_name or runtime_name, None)
         if value is None:
             return None
         return int(value)
 
     def get_roll_steps(self) -> int:
-        """返回滚动间隔，匹配 Java 侧 roll_steps 兜底规则。"""
-        scenario_roll_steps = self._get_scenario_int("roll_steps")
+        """返回滚动间隔，匹配 Java 侧 runtime options 优先的兜底规则。"""
+        scenario_roll_steps = self._get_scenario_int("roll_steps", "roll_steps")
         if scenario_roll_steps is not None:
             return scenario_roll_steps
 
@@ -97,15 +116,18 @@ class MpcRollingRuntime:
 
     def get_total_steps(self) -> int:
         """返回任务总步数，用于避免在任务结束时再次滚动。"""
-        scenario_total_steps = self._get_scenario_int("total_steps")
+        scenario_total_steps = self._get_scenario_int("max_steps", "total_steps")
         if scenario_total_steps is not None:
             return scenario_total_steps
 
         return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
     def get_output_step_size(self) -> Optional[int]:
-        """返回每步预测时长，匹配 Java 侧 output_step_size 兜底规则。"""
-        scenario_output_step_size = self._get_scenario_int("output_step_size")
+        """返回每步预测时长，匹配 Java 侧 runtime options 优先的兜底规则。"""
+        scenario_output_step_size = self._get_scenario_int(
+            "output_step_seconds",
+            "output_step_size",
+        )
         if scenario_output_step_size is not None:
             return scenario_output_step_size
 
