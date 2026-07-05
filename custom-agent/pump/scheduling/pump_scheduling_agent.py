@@ -413,7 +413,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     angle_val = "None"
                     status = "None"
                 
-                # 获取机组流量 (强制从 attributes 提取 front_water_flow，不允许降级)
+                # 获取机组流量 (强制从 attributes 或顶层 payload 提取 back_water_flow，不允许降级)
                 q = self._metrics_data_cache.get_attribute_from_any_metric(uid, "back_water_flow")
                 if q is None:
                     # 查找对应的组件名称
@@ -421,7 +421,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     station_name = station.name if station else f"S{sid}"
                     unit_name = station.unit_name_by_id.get(uid, f"U{uid}") if station else f"U{uid}"
                     raise ValueError(
-                        f"取值失败！无法从 metrics_data_cache 的 attributes JSON 字符串中提取[{self._metrics_data_cache}] 泵站[{station_name}]-机组[{unit_name}] (ID: {sid}-{uid}) 的 front_water_flow 最新流量数据"
+                        f"取值失败！无法从 metrics_data_cache 提取泵站[{station_name}]-机组[{unit_name}] (ID: {sid}-{uid}) 的 back_water_flow 最新流量数据"
                     )
                 total_q += float(q)
                 

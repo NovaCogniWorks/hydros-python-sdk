@@ -21,6 +21,12 @@ METRICS_VALUE_RANGES = {
     "water_flow": (0.0, 100000.0),
     "gate_opening_percentage": (0.0, 100.0),
 }
+ATTRIBUTE_COMPAT_FIELDS = {
+    "front_water_flow",
+    "back_water_flow",
+    "front_water_level",
+    "back_water_level",
+}
 
 
 class FieldMetricsCache:
@@ -56,6 +62,9 @@ class FieldMetricsCache:
             "step_index": step_index,
             "attributes": attributes,
         }
+        for field_name in ATTRIBUTE_COMPAT_FIELDS:
+            if field_name in payload:
+                metrics_data[field_name] = payload.get(field_name)
         self.latest_metrics[cache_key] = metrics_data
 
         if step_index is not None:
@@ -146,9 +155,16 @@ class FieldMetricsCache:
         return None
 
     def get_attribute_from_any_metric(self, object_id: int, attr_name: str) -> Optional[float]:
-        """在指定对象的全部缓存指标中查找 attributes JSON payload 里的属性。"""
+        """在指定对象的全部缓存指标中查找顶层属性或 attributes JSON payload 里的属性。"""
         for metrics_data in self.latest_metrics.values():
             if str(metrics_data.get("object_id")) == str(object_id):
+                direct_value = metrics_data.get(attr_name)
+                if direct_value is not None:
+                    try:
+                        return float(direct_value)
+                    except (ValueError, TypeError):
+                        pass
+
                 attributes = metrics_data.get("attributes")
                 if attributes:
                     if isinstance(attributes, str):

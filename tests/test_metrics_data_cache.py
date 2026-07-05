@@ -72,6 +72,27 @@ class FieldMetricsCacheTest(unittest.TestCase):
         self.assertEqual(cache_key, "TASK_001#1001#water_level#none")
         self.assertEqual(cache.by_step(2)["TASK_001#1001#water_level#none"]["position_code"], "none")
 
+    def test_reads_directional_attribute_from_top_level_payload(self):
+        cache = FieldMetricsCache(max_steps=3)
+
+        cache.update(
+            {
+                "biz_scene_instance_id": "TASK_001",
+                "object_id": 20001,
+                "object_type": "Pump",
+                "metrics_code": "blade_angle",
+                "value": 100.0,
+                "step_index": 1,
+                "back_water_flow": 3.5,
+            }
+        )
+
+        self.assertEqual(cache.get_attribute_from_any_metric(20001, "back_water_flow"), 3.5)
+        self.assertEqual(
+            cache.by_step(1)["TASK_001#20001#blade_angle#none"]["back_water_flow"],
+            3.5,
+        )
+
     def test_keeps_custom_metrics_but_excludes_them_from_sensor_data(self):
         cache = FieldMetricsCache(max_steps=3)
 

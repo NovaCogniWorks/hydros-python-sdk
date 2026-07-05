@@ -49,6 +49,11 @@ class MinimalTickableAgent(TickableAgent):
         )
 
 
+class FailingTickableAgent(MinimalTickableAgent):
+    def on_tick_simulation(self, request: TickCmdRequest):
+        raise ValueError("boom")
+
+
 def test_tickable_agent_can_be_instantiated():
     context = SimulationContext(biz_scene_instance_id="TASK_001")
     agent = MinimalTickableAgent(
@@ -89,3 +94,26 @@ def test_tickable_agent_exposes_runtime_context():
     assert runtime_context.client is client
     assert runtime_context.state_manager is client.state_manager
     assert runtime_context.config is agent.properties
+
+
+def test_tick_failure_response_includes_error_detail():
+    context = SimulationContext(biz_scene_instance_id="TASK_001")
+    agent = FailingTickableAgent(
+        sim_coordination_client=FakeClient(),
+        agent_id="AGT_TEST",
+        agent_code="TEST_AGENT",
+        agent_type="TEST_AGENT",
+        agent_name="Test Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+        agent_status=AgentStatus.INIT,
+        drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
+    )
+
+    response = agent.on_tick(TickCmdRequest(command_id="CMD_TICK", context=context, step=1))
+
+    assert response.command_status == CommandStatus.FAILED
+    assert response.error_code == "AGENT_TICK_FAILURE"
+    assert "TEST_AGENT" in response.error_message
+    assert "ValueError: boom" in response.error_message
