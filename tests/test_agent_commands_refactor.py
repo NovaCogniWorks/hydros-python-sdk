@@ -878,7 +878,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "metrics/topic",
                 {
                     "object_id": 1001,
-                    "metrics_code": "flow",
+                    "metrics_code": "water_flow",
                     "value": float(step_index),
                     "timestamp": f"ts-{step_index}",
                     "step_index": step_index,
@@ -886,10 +886,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 11.0)
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "water_flow"), 11.0)
         self.assertEqual(set(agent._metrics_data_cache.history().keys()), set(range(2, 12)))
         self.assertNotIn(1, agent._metrics_data_cache.history())
-        self.assertEqual(agent._metrics_data_cache.by_step(11)["1001_flow"]["value"], 11.0)
+        self.assertEqual(agent._metrics_data_cache.by_step(11)["1001_water_flow"]["value"], 11.0)
 
     def test_central_scheduling_agent_filters_field_metrics_by_position_code(self):
         state_manager = AgentStateManager()
@@ -920,26 +920,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             "metrics/topic",
             {
                 "object_id": 1001,
-                "metrics_code": "flow",
+                "metrics_code": "water_flow",
                 "value": 1.0,
                 "step_index": 1,
-                "position_code": "upstream",
+                "position_code": "up_stream",
             },
         )
         agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 1001,
-                "metrics_code": "flow",
+                "metrics_code": "water_flow",
                 "value": 2.0,
                 "step_index": 2,
                 "position_code": "none",
             },
         )
 
-        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 2.0)
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "water_flow"), 2.0)
         self.assertEqual(agent._metrics_data_cache.by_step(1), {})
-        self.assertEqual(agent._metrics_data_cache.by_step(2)["1001_flow"]["position_code"], "none")
+        self.assertEqual(agent._metrics_data_cache.by_step(2)["1001_water_flow"]["position_code"], "none")
 
     def test_central_scheduling_agent_activates_mpc_on_time_series_update(self):
         state_manager = AgentStateManager()

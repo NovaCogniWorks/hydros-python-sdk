@@ -7,6 +7,22 @@ from typing import Any, Dict, List, Optional
 from hydros_agent_sdk.sensor_data import SensorData
 
 
+SUPPORTED_METRICS_CODES = {
+    "water_level",
+    "water_flow",
+    "gate_opening",
+    "gate_opening_percentage",
+    "water_depth",
+}
+POSITION_NONE = "none"
+KNOWN_POSITION_CODES = {POSITION_NONE, "up_stream", "down_stream"}
+METRICS_VALUE_RANGES = {
+    "water_level": (0.0, 1000.0),
+    "water_flow": (0.0, 100000.0),
+    "gate_opening_percentage": (0.0, 100.0),
+}
+
+
 class FieldMetricsCache:
     """存储最新现地指标和有界的逐步历史数据。"""
 
@@ -21,11 +37,16 @@ class FieldMetricsCache:
         value = payload.get("value")
         step_index = payload.get("step_index")
         object_type = payload.get("object_type")
-        position_code = payload.get("position_code")
+        position_code = self._normalize_position_code(payload.get("position_code"))
         attributes = payload.get("attributes")
-        if position_code != "none":
-            return None
         if object_id is None or not metrics_code:
+            return None
+        metrics_code = str(metrics_code).lower()
+        if not self._is_supported_metrics_code(metrics_code):
+            return None
+        if position_code != POSITION_NONE:
+            return None
+        if not self._is_value_in_range(metrics_code, value):
             return None
 
         cache_key = f"{object_id}_{metrics_code}"
@@ -53,6 +74,33 @@ class FieldMetricsCache:
             self.trim()
 
         return cache_key
+
+    @staticmethod
+    def _normalize_position_code(position_code: Any) -> str:
+        if position_code is None:
+            return POSITION_NONE
+        text = str(position_code).strip()
+        if not text:
+            return POSITION_NONE
+        return text if text in KNOWN_POSITION_CODES else POSITION_NONE
+
+    @staticmethod
+    def _is_supported_metrics_code(metrics_code: str) -> bool:
+        return metrics_code in SUPPORTED_METRICS_CODES
+
+    @staticmethod
+    def _is_value_in_range(metrics_code: str, value: Any) -> bool:
+        if value is None:
+            return False
+        bounds = METRICS_VALUE_RANGES.get(metrics_code)
+        if bounds is None:
+            return True
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return False
+        min_value, max_value = bounds
+        return min_value <= numeric_value <= max_value
 
     def get_value(self, object_id: int, metrics_code: str) -> Optional[float]:
         metrics_data = self.latest_metrics.get(f"{object_id}_{metrics_code}")

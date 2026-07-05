@@ -113,7 +113,12 @@ class TickableAgent(BaseHydroAgent):
 
         self.time_series_cache = TimeSeriesCache()
         self._time_series_cache = self.time_series_cache.store
-        self.metrics_publisher = MqttMetricsPublisher.from_coordination_client(sim_coordination_client)
+        self.metrics_publisher = MqttMetricsPublisher.from_coordination_client(
+            sim_coordination_client,
+            biz_scene_instance_id=context.biz_scene_instance_id,
+            cluster_id=hydros_cluster_id,
+            edge_node_code=hydros_node_id,
+        )
 
         logger.info(f"TickableAgent initialized: {self.agent_id}")
 

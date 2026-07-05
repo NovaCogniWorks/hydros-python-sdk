@@ -30,7 +30,7 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
             payload=json.dumps(
                 {
                     "object_id": 1001,
-                    "metrics_code": "flow",
+                    "metrics_code": "water_flow",
                     "value": 2.5,
                     "step_index": 4,
                     "position_code": "none",
@@ -41,9 +41,9 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
         mqtt_client.callbacks["/metrics/topic"](None, None, msg)
 
         self.assertEqual(mqtt_client.subscriptions, ["/metrics/topic"])
-        self.assertEqual(cache.get_value(1001, "flow"), 2.5)
-        self.assertEqual(cache.by_step(4)["1001_flow"]["position_code"], "none")
-        self.assertEqual(cache.by_step(4)["1001_flow"]["attributes"], "{\"front_water_flow\":2.5}")
+        self.assertEqual(cache.get_value(1001, "water_flow"), 2.5)
+        self.assertEqual(cache.by_step(4)["1001_water_flow"]["position_code"], "none")
+        self.assertEqual(cache.by_step(4)["1001_water_flow"]["attributes"], "{\"front_water_flow\":2.5}")
 
     def test_invalid_json_is_ignored(self):
         cache = FieldMetricsCache(max_steps=3)
