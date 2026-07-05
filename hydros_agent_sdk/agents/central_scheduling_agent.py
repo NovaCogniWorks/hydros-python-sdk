@@ -182,7 +182,10 @@ class CentralSchedulingAgent(TickableAgent):
 
     def _init_field_metrics(self, sim_coordination_client) -> None:
         """初始化现地设备实时指标缓存和 MQTT 订阅适配器。"""
-        self._metrics_data_cache = FieldMetricsCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
+        self._metrics_data_cache = FieldMetricsCache(
+            max_steps=DEFAULT_METRICS_HISTORY_STEPS,
+            biz_scene_instance_id=self.context.biz_scene_instance_id,
+        )
         self._field_metrics_cache = self._metrics_data_cache.latest_metrics
         self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
         self._metrics_subscriber = MqttMetricsSubscriber(

@@ -26,12 +26,14 @@ METRICS_VALUE_RANGES = {
 class FieldMetricsCache:
     """存储最新现地指标和有界的逐步历史数据。"""
 
-    def __init__(self, max_steps: int):
+    def __init__(self, max_steps: int, biz_scene_instance_id: Optional[str] = None):
         self.max_steps = max_steps
+        self.biz_scene_instance_id = biz_scene_instance_id
         self.latest_metrics: Dict[str, Dict[str, Any]] = {}
         self.metrics_by_step: Dict[int, Dict[str, Dict[str, Any]]] = {}
 
     def update(self, payload: Dict[str, Any]) -> Optional[str]:
+        biz_scene_instance_id = self._resolve_biz_scene_instance_id(payload)
         object_id = payload.get("object_id")
         metrics_code = payload.get("metrics_code")
         value = payload.get("value")
@@ -39,18 +41,13 @@ class FieldMetricsCache:
         object_type = payload.get("object_type")
         position_code = self._normalize_position_code(payload.get("position_code"))
         attributes = payload.get("attributes")
-        if object_id is None or not metrics_code:
+        if not biz_scene_instance_id or object_id is None or not metrics_code:
             return None
         metrics_code = str(metrics_code).lower()
-        if not self._is_supported_metrics_code(metrics_code):
-            return None
-        if position_code != POSITION_NONE:
-            return None
-        if not self._is_value_in_range(metrics_code, value):
-            return None
 
-        cache_key = f"{object_id}_{metrics_code}"
+        cache_key = self._build_cache_key(biz_scene_instance_id, object_id, metrics_code, position_code)
         metrics_data = {
+            "biz_scene_instance_id": biz_scene_instance_id,
             "object_id": object_id,
             "object_type": object_type,
             "metrics_code": metrics_code,
@@ -74,6 +71,26 @@ class FieldMetricsCache:
             self.trim()
 
         return cache_key
+
+    def _resolve_biz_scene_instance_id(self, payload: Dict[str, Any]) -> Optional[str]:
+        for key in ("biz_scene_instance_id", "bizSceneInstanceId", "biz_scenario_instance_id", "bizScenarioInstanceId"):
+            value = payload.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        if self.biz_scene_instance_id is not None and str(self.biz_scene_instance_id).strip():
+            return str(self.biz_scene_instance_id).strip()
+        return None
+
+    @staticmethod
+    def _build_cache_key(biz_scene_instance_id: str, object_id: Any, metrics_code: str, position_code: str) -> str:
+        return "#".join(
+            [
+                str(biz_scene_instance_id),
+                str(object_id),
+                str(metrics_code).lower(),
+                FieldMetricsCache._normalize_position_code(position_code),
+            ]
+        )
 
     @staticmethod
     def _normalize_position_code(position_code: Any) -> str:
@@ -102,17 +119,36 @@ class FieldMetricsCache:
         min_value, max_value = bounds
         return min_value <= numeric_value <= max_value
 
-    def get_value(self, object_id: int, metrics_code: str) -> Optional[float]:
-        metrics_data = self.latest_metrics.get(f"{object_id}_{metrics_code}")
+    def get_value(
+        self,
+        object_id: int,
+        metrics_code: str,
+        position_code: str = POSITION_NONE,
+        biz_scene_instance_id: Optional[str] = None,
+    ) -> Optional[float]:
+        resolved_biz_scene_instance_id = biz_scene_instance_id or self.biz_scene_instance_id
+        normalized_metrics_code = str(metrics_code).lower()
+        normalized_position_code = self._normalize_position_code(position_code)
+        metrics_data = None
+        if resolved_biz_scene_instance_id:
+            metrics_data = self.latest_metrics.get(
+                self._build_cache_key(
+                    resolved_biz_scene_instance_id,
+                    object_id,
+                    normalized_metrics_code,
+                    normalized_position_code,
+                )
+            )
+        if metrics_data is None:
+            metrics_data = self._find_latest_metric(object_id, normalized_metrics_code, normalized_position_code)
         if metrics_data:
             return metrics_data.get("value")
         return None
 
     def get_attribute_from_any_metric(self, object_id: int, attr_name: str) -> Optional[float]:
         """在指定对象的全部缓存指标中查找 attributes JSON payload 里的属性。"""
-        prefix = f"{object_id}_"
-        for cache_key, metrics_data in self.latest_metrics.items():
-            if cache_key.startswith(prefix):
+        for metrics_data in self.latest_metrics.values():
+            if str(metrics_data.get("object_id")) == str(object_id):
                 attributes = metrics_data.get("attributes")
                 if attributes:
                     if isinstance(attributes, str):
@@ -133,6 +169,16 @@ class FieldMetricsCache:
                             pass
         return None
 
+    def _find_latest_metric(self, object_id: int, metrics_code: str, position_code: str) -> Optional[Dict[str, Any]]:
+        for metrics_data in self.latest_metrics.values():
+            if (
+                str(metrics_data.get("object_id")) == str(object_id)
+                and str(metrics_data.get("metrics_code") or "").lower() == metrics_code
+                and self._normalize_position_code(metrics_data.get("position_code")) == position_code
+            ):
+                return metrics_data
+        return None
+
     def by_step(self, step_index: int) -> Dict[str, Dict[str, Any]]:
         return dict(self.metrics_by_step.get(int(step_index), {}))
 
@@ -143,7 +189,23 @@ class FieldMetricsCache:
         return [
             SensorData.model_validate(value)
             for value in self.latest_metrics.values()
+            if self._is_central_sensor_metric(value)
         ]
+
+    def to_mpc_sensor_data(self) -> List["SensorData"]:
+        """Return Java central-compatible MPC sensor data from the broader local cache."""
+        return self.to_sensor_data()
+
+    @classmethod
+    def _is_central_sensor_metric(cls, metrics_data: Dict[str, Any]) -> bool:
+        metrics_code = str(metrics_data.get("metrics_code") or "").lower()
+        position_code = cls._normalize_position_code(metrics_data.get("position_code"))
+        value = metrics_data.get("value")
+        return (
+            cls._is_supported_metrics_code(metrics_code)
+            and position_code == POSITION_NONE
+            and cls._is_value_in_range(metrics_code, value)
+        )
 
     def trim(self) -> None:
         if self.max_steps <= 0:
