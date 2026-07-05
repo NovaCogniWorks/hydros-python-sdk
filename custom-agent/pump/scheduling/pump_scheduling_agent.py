@@ -870,6 +870,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     
                     control_object_list.append(
                         MpcResultFactory.build_control_object_result(
+                            node_id=sid,
                             object_id=uid,
                             target_value=target_value,
                             object_type=HydroObjectType.PUMP,
