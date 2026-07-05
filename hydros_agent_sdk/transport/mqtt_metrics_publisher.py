@@ -79,12 +79,27 @@ class MqttMetricsPublisher:
         )
 
     def _with_context(self, metrics: MqttMetrics) -> MqttMetrics:
+        metric_context_id = metrics.biz_scene_instance_id or metrics.job_instance_id
+        if metrics.biz_scene_instance_id and metrics.job_instance_id:
+            if metrics.biz_scene_instance_id != metrics.job_instance_id:
+                raise ValueError(
+                    "metrics biz_scene_instance_id and job_instance_id must match: "
+                    f"{metrics.biz_scene_instance_id} != {metrics.job_instance_id}"
+                )
+        if self.biz_scene_instance_id and metric_context_id:
+            if metric_context_id != self.biz_scene_instance_id:
+                raise ValueError(
+                    "metrics context does not match publisher context: "
+                    f"{metric_context_id} != {self.biz_scene_instance_id}"
+                )
+
+        context_id = metric_context_id or self.biz_scene_instance_id
         updates = {}
-        if self.biz_scene_instance_id:
-            if not metrics.biz_scene_instance_id:
-                updates["biz_scene_instance_id"] = self.biz_scene_instance_id
-            if not metrics.job_instance_id:
-                updates["job_instance_id"] = self.biz_scene_instance_id
+        if context_id:
+            if metrics.biz_scene_instance_id != context_id:
+                updates["biz_scene_instance_id"] = context_id
+            if metrics.job_instance_id != context_id:
+                updates["job_instance_id"] = context_id
         if self.edge_node_code and not metrics.edge_node_code:
             updates["edge_node_code"] = self.edge_node_code
         if not updates:

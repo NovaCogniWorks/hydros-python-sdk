@@ -2,7 +2,7 @@
 用于发送指标数据的 MQTT Metrics 工具。
 
 本模块提供通过 MQTT 发送指标数据的工具，并与 Java 实现
-com.hydros.agent.edge.channel.biz.model.MqttMetrics 保持匹配。
+com.hydros.edge.agent.channel.etl.model.MqttMetrics 保持匹配。
 """
 
 import time
@@ -89,7 +89,7 @@ def send_metrics(
     """
     try:
         # 序列化为 JSON
-        payload = metrics.model_dump_json()
+        payload = metrics.model_dump_json(exclude_none=True)
 
         # 通过 MQTT 发布
         result = mqtt_client.publish(topic, payload, qos=qos)

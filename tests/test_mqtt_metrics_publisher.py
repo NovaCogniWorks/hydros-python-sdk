@@ -71,6 +71,46 @@ class MqttMetricsPublisherTest(unittest.TestCase):
         self.assertIn('"job_instance_id":"task-a"', payload)
         self.assertIn('"edge_node_code":"node-a"', payload)
         self.assertIn('"metrics_code":"water_level"', payload)
+        self.assertNotIn('"attributes":null', payload)
+
+    def test_publish_batch_rejects_mismatched_context_ids(self):
+        client = FakeCoordinationClient()
+        publisher = MqttMetricsPublisher.from_coordination_client(
+            client,
+            biz_scene_instance_id="task-a",
+            cluster_id="cluster-a",
+        )
+        metrics = MqttMetrics(
+            source_id="agent-a",
+            biz_scene_instance_id="task-b",
+            object_id=1,
+            object_name="obj-a",
+            step_index=2,
+            source_timestamp_ms=123,
+            metrics_code="water_level",
+            value=73.2,
+        )
+
+        with self.assertRaises(ValueError):
+            publisher.publish_batch([metrics])
+
+    def test_publish_batch_rejects_mismatched_payload_instance_ids(self):
+        client = FakeCoordinationClient()
+        publisher = MqttMetricsPublisher.from_coordination_client(client)
+        metrics = MqttMetrics(
+            source_id="agent-a",
+            biz_scene_instance_id="task-a",
+            job_instance_id="task-b",
+            object_id=1,
+            object_name="obj-a",
+            step_index=2,
+            source_timestamp_ms=123,
+            metrics_code="water_level",
+            value=73.2,
+        )
+
+        with self.assertRaises(ValueError):
+            publisher.publish_batch([metrics])
 
 
 if __name__ == "__main__":
