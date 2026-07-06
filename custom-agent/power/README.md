@@ -8,7 +8,6 @@
 custom-agent/
 ├── power/
 │   ├── start_agents.sh           # 启动脚本
-│   ├── env.properties.example    # 共享环境配置模板
 │   ├── multi_agent_launcher.py   # MultiAgentLauncherApp 薄入口
 │   ├── outflowplan/
 │   │   ├── agent.properties
@@ -26,9 +25,9 @@ custom-agent/
 - 依赖安装（项目根目录执行）：
   ```bash
   pip install -e .
-  pip install -r requirements-power.txt
+  pip install -e ".[power]"
   ```
-- MQTT 配置：从 `custom-agent/power/env.properties.example` 复制本地 `env.properties`
+- MQTT 配置：在 `custom-agent/power/env.properties` 准备本地连接配置
 
 ## 配置说明
 

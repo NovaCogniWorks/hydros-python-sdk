@@ -75,18 +75,9 @@ show_help() {
 check_config() {
     if [ ! -f "${SCRIPT_DIR}/env.properties" ]; then
         echo -e "${YELLOW}警告: 共享配置文件不存在${NC}"
-        echo -e "${YELLOW}正在从模板创建配置文件...${NC}"
-
-        if [ -f "${SCRIPT_DIR}/env.properties.example" ]; then
-            cp "${SCRIPT_DIR}/env.properties.example" "${SCRIPT_DIR}/env.properties"
-            echo -e "${GREEN}✓ 配置文件已创建: ${SCRIPT_DIR}/env.properties${NC}"
-            echo -e "${YELLOW}请编辑配置文件，填入实际的 MQTT broker 信息${NC}"
-            echo ""
-            return 1
-        else
-            echo -e "${RED}错误: 找不到配置模板文件${NC}"
-            return 1
-        fi
+        echo -e "${YELLOW}请创建 ${SCRIPT_DIR}/env.properties 并填入实际的 MQTT broker、cluster 和 node 信息${NC}"
+        echo ""
+        return 1
     fi
     return 0
 }

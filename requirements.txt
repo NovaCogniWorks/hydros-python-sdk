@@ -1,11 +1,7 @@
-# Hydros Agent SDK minimal runtime dependencies.
+# Hydros Agent SDK runtime dependencies.
 #
 # For editable development use:
 #   pip install -e .
-#
-# This file intentionally mirrors the SDK core dependencies only. Business
-# examples, remote debugging, build/publish tooling, and numerical simulation
-# stacks live in the split requirements files.
 paho-mqtt==2.1.0
 pydantic==2.12.5
 PyYAML==6.0.3

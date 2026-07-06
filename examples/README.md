@@ -6,7 +6,6 @@
 
 ```text
 examples/
-├── env.properties.example
 ├── start_agents.sh
 ├── error_handling_example.py
 └── agents/
@@ -14,7 +13,6 @@ examples/
     │   ├── agent.properties
     │   └── central_scheduling_agent.py
     ├── template/
-    │   ├── README.md
     │   ├── agent.properties
     │   └── template_agent.py
     ├── ontology/
@@ -42,7 +40,7 @@ examples/
 从仓库根目录准备示例环境配置：
 
 ```bash
-cp examples/env.properties.example examples/env.properties
+$EDITOR examples/env.properties
 ```
 
 编辑 `examples/env.properties`，填写 MQTT broker、cluster 和 node。
@@ -110,7 +108,7 @@ launcher 的发现规则是：`examples/agents/<agent>/` 内存在 `agent.proper
 - `examples/agents/<agent>/` 下的业务 solver、rule engine、adapter 模块
 - `examples/env.properties` 的本地副本
 
-真实环境配置不应提交；提交 `env.properties.example` 模板即可。
+真实环境配置不应提交；文档中说明必需配置项即可。
 
 ## 调试
 

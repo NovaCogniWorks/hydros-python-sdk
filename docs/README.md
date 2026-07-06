@@ -74,7 +74,7 @@
 
 ```bash
 # 1. 准备本地示例配置
-cp examples/env.properties.example examples/env.properties
+$EDITOR examples/env.properties
 
 # 2. 查看当前真实可用的示例
 python -m hydros_agent_sdk.launcher --launcher-dir examples -- --list
@@ -188,7 +188,6 @@ docs/
 examples/
 ├── README.md                      # 示例导航
 ├── start_agents.sh                # 多 Agent 启动入口
-├── env.properties.example         # 环境配置模板
 ├── agents/
 │   ├── twins/                     # 孪生仿真示例
 │   ├── template/                  # 最小模板示例

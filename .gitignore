@@ -39,10 +39,9 @@ logs/
 examples/logs/
 *.log
 
-# Local configuration files (keep .example templates)
+# Local configuration files
 env.properties
 **/env.properties
-!**/env.properties.example
 
 
 # Testing
