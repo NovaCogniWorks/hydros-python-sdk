@@ -790,7 +790,7 @@ class LauncherDoctor:
             self._record(
                 False,
                 "env.properties",
-                f"{exc}. Copy env.properties.example to env.properties and fill local values.",
+                f"{exc}. Create env.properties in the launcher directory and fill local values.",
             )
             return
 
