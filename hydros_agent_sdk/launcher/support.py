@@ -59,6 +59,7 @@ class LauncherOptions:
     debug_port: int = 5678
     enable_system_central_scheduling_agent: bool = False
     list_only: bool = False
+    check_only: bool = False
     show_help: bool = False
     all_requested: bool = False
 
@@ -150,7 +151,11 @@ class AgentDirectoryResolver:
 class AgentClassResolver:
     """从智能体目录中寻找 BaseHydroAgent 子类。"""
 
+    def __init__(self):
+        self.last_import_errors: List[str] = []
+
     def find_agent_class(self, agent_dir: str) -> Optional[Type[BaseHydroAgent]]:
+        self.last_import_errors = []
         py_files = [
             f for f in os.listdir(agent_dir)
             if f.endswith(".py") and not f.startswith("__") and not f.startswith("test_")
@@ -177,6 +182,9 @@ class AgentClassResolver:
             try:
                 module = self._load_module(module_name, os.path.join(agent_dir, py_file))
             except Exception as exc:
+                import_error = f"{py_file}: {type(exc).__name__}: {exc}"
+                if import_error not in self.last_import_errors:
+                    self.last_import_errors.append(import_error)
                 logger.debug("Failed to import %s: %s", py_file, exc)
                 continue
 
@@ -296,9 +304,13 @@ class AgentModuleLoader:
 
         agent_class = self.class_resolver.find_agent_class(agent_dir)
         if agent_class is None:
+            import_details = ""
+            if self.class_resolver.last_import_errors:
+                import_details = " Import failures: " + "; ".join(self.class_resolver.last_import_errors)
             raise ValueError(
                 f"No BaseHydroAgent subclass found in {agent_dir}. "
                 f"Please ensure there is a Python file with a class that inherits from BaseHydroAgent."
+                f"{import_details}"
             )
 
         logger.debug("Found agent class: %s", agent_class.__name__)
@@ -587,6 +599,16 @@ class LauncherCli:
                 list_only=True,
             )
 
+        if "--check" in argv or "--doctor" in argv:
+            return LauncherOptions(
+                agent_names=[],
+                debug_enabled=debug_enabled,
+                debug_wait=debug_wait,
+                debug_port=debug_port,
+                enable_system_central_scheduling_agent=enable_system_central,
+                check_only=True,
+            )
+
         all_requested = "--all" in argv
         if all_requested:
             agent_names = self.discovery_service.discover_all()
@@ -627,6 +649,7 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
 选项:
     --all              - 启动所有可用的 agents
     --list             - 列出所有可用的 agents
+    --check, --doctor  - 检查配置、agent.properties 和 Agent 类加载，不连接 MQTT
     --debug            - 启用远程调试模式 (debugpy)
     --debug-port PORT  - 指定调试端口 (默认: 5678)
     --debug-nowait     - 不等待调试器连接，直接启动
@@ -638,6 +661,9 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
 示例:
     # 列出所有可用的 agents
     python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --list
+
+    # 检查 launcher 目录是否具备启动条件
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --check
 
     # 启动单个 agent
     python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- myagent
@@ -725,6 +751,92 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
             pass
 
         raise ValueError("Invalid --debug-port value")
+
+
+class LauncherDoctor:
+    """执行 launcher 目录的本地启动前检查。"""
+
+    def __init__(
+        self,
+        launcher_dir: str,
+        env_file: str,
+        discovery_service: AgentDiscoveryService,
+        module_loader: AgentModuleLoader,
+    ):
+        self.launcher_dir = launcher_dir
+        self.env_file = env_file
+        self.discovery_service = discovery_service
+        self.module_loader = module_loader
+        self._results: List[Tuple[bool, str, str]] = []
+
+    def run(self) -> int:
+        self._results = []
+        print("\n" + "=" * 70)
+        print("Hydros Launcher Doctor")
+        print("=" * 70)
+        print(f"Launcher directory: {self.launcher_dir}")
+        print(f"Environment file:   {self.env_file}")
+        print()
+
+        self._check_env_config()
+        self._check_agents()
+        self._print_summary()
+        return 0 if all(ok for ok, _title, _message in self._results) else 1
+
+    def _check_env_config(self) -> None:
+        try:
+            env_config = load_env_config(self.env_file)
+        except Exception as exc:
+            self._record(
+                False,
+                "env.properties",
+                f"{exc}. Copy env.properties.example to env.properties and fill local values.",
+            )
+            return
+
+        cluster_id = env_config.get("hydros_cluster_id", "(missing)")
+        node_id = env_config.get("hydros_node_id", "(missing)")
+        self._record(True, "env.properties", f"cluster={cluster_id}, node={node_id}")
+
+    def _check_agents(self) -> None:
+        agent_names = self.discovery_service.discover_all()
+        if not agent_names:
+            self._record(
+                False,
+                "agents",
+                "No agents discovered. Add directories with agent.properties and a BaseHydroAgent subclass.",
+            )
+            return
+
+        self._record(True, "agents", f"discovered {len(agent_names)}: {', '.join(agent_names)}")
+        for agent_name in agent_names:
+            try:
+                agent_info = self.module_loader.load(agent_name)
+            except Exception as exc:
+                self._record(False, f"agent:{agent_name}", str(exc))
+                continue
+
+            self._record(
+                True,
+                f"agent:{agent_name}",
+                f"{agent_info.agent_code} -> {agent_info.agent_class.__name__}",
+            )
+
+    def _record(self, ok: bool, title: str, message: str) -> None:
+        self._results.append((ok, title, message))
+        mark = "OK" if ok else "FAIL"
+        print(f"[{mark}] {title}: {message}")
+
+    def _print_summary(self) -> None:
+        total = len(self._results)
+        failed = len([result for result in self._results if not result[0]])
+        print()
+        print("=" * 70)
+        if failed:
+            print(f"Doctor found {failed} issue(s) out of {total} check(s).")
+        else:
+            print(f"Doctor passed {total} check(s).")
+        print("=" * 70 + "\n")
 
 
 class MultiAgentCoordinator:
@@ -915,6 +1027,14 @@ class MultiAgentLauncherApp:
         if options.list_only:
             cli.print_agent_list()
             return 0
+
+        if options.check_only:
+            return LauncherDoctor(
+                launcher_dir=self.launcher_dir,
+                env_file=self.env_file,
+                discovery_service=services.discovery_service,
+                module_loader=services.module_loader,
+            ).run()
 
         agent_names = options.agent_names
         if options.all_requested:

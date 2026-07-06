@@ -32,6 +32,7 @@ show_help() {
     echo "选项:"
     echo "  -h, --help          显示帮助信息"
     echo "  -l, --list          列出所有可用的 agent"
+    echo "  --check, --doctor   检查配置和 agent 加载，不连接 MQTT"
     echo "  -a, --all           启动所有 agent"
     echo "  -L, --logs          查看日志"
     echo "  -d, --debug         启用远程调试模式 (debugpy)"
@@ -40,11 +41,7 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  twins               Twins Simulation Agent"
-    echo "  ontology            Ontology Simulation Agent"
-    echo "  outflowplan         Outflow Plan Agent"
-    echo "  centralscheduling   Central Scheduling Agent"
-    echo "  lite                Lite Agent Example"
+    echo "  使用 $0 --list 查看当前目录自动发现的真实 agent 列表"
     echo ""
     echo "示例:"
     echo "  $0 twins                    # 启动 twins agent"
@@ -67,39 +64,6 @@ show_help() {
     echo "  • 前台运行，可以在控制台看到日志"
     echo "  • 所有日志保存到 examples/logs/hydros.log"
     echo "  • 使用 Ctrl+C 优雅停止所有 agents"
-    echo ""
-}
-
-# 列出所有可用的 agent
-list_agents() {
-    echo -e "${GREEN}可用的 Agents:${NC}"
-    echo ""
-
-    if [ -f "${SCRIPT_DIR}/agents/twins/twins_agent.py" ]; then
-        echo -e "  ${BLUE}twins${NC}      - Twins Simulation Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/twins/twins_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/ontology/ontology_agent.py" ]; then
-        echo -e "  ${BLUE}ontology${NC}   - Ontology Simulation Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/ontology/ontology_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Outflow Plan Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py" ]; then
-        echo -e "  ${BLUE}centralscheduling${NC} - Central Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/lite/agent_example.py" ]; then
-        echo -e "  ${BLUE}lite${NC}       - Lite Agent Example"
-        echo "                 路径: ${SCRIPT_DIR}/agents/lite/agent_example.py"
-    fi
-
     echo ""
 }
 
@@ -162,6 +126,7 @@ main() {
 
     # 收集 Python 参数
     PYTHON_ARGS=()
+    SKIP_CONFIG_CHECK=0
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -170,8 +135,14 @@ main() {
                 exit 0
                 ;;
             -l|--list)
-                list_agents
-                exit 0
+                PYTHON_ARGS+=("--list")
+                SKIP_CONFIG_CHECK=1
+                shift
+                ;;
+            --check|--doctor)
+                PYTHON_ARGS+=("$1")
+                SKIP_CONFIG_CHECK=1
+                shift
                 ;;
             -L|--logs)
                 view_logs
@@ -204,14 +175,17 @@ main() {
         esac
     done
 
-    # 检查配置
-    if ! check_config; then
-        exit 1
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        if ! check_config; then
+            exit 1
+        fi
     fi
 
     # 使用 SDK 统一启动器启动 agents
-    echo -e "${GREEN}启动 Hydros Agents...${NC}"
-    echo ""
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        echo -e "${GREEN}启动 Hydros Agents...${NC}"
+        echo ""
+    fi
 
     "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
         --launcher-dir "${SCRIPT_DIR}" \

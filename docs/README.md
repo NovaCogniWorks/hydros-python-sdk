@@ -22,7 +22,7 @@
 
 3. **[示例工程导航](../examples/README.md)**
    - 当前仓库内可直接运行的示例入口
-   - 包含 `twins`、`ontology`、`outflowplan` 和多 Agent 启动方式
+   - 包含 `template`、`twins`、`ontology`、`centralscheduling` 和多 Agent 启动方式
    - 适合基于现有示例改造自己的 Agent
 
 ---
@@ -73,15 +73,16 @@
 ### 5 分钟快速上手
 
 ```bash
-# 1. 进入示例目录
-cd examples
+# 1. 准备本地示例配置
+cp examples/env.properties.example examples/env.properties
 
-# 2. 先运行一个现成示例
-./start_agents.sh twins
+# 2. 查看当前真实可用的示例
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --list
 
-# 3. 再尝试多 Agent 或事件驱动示例
-./start_agents.sh twins ontology
-cd agents/outflowplan && python outflow_plan_agent.py
+# 3. 先检查并运行一个现成示例，再尝试多 Agent
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --check
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- template
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- twins ontology
 ```
 
 ### 学习路径
@@ -104,10 +105,10 @@ cd agents/outflowplan && python outflow_plan_agent.py
 
 ### 完整示例
 
+- **[最小模板智能体](../examples/agents/template/)** - 最小 TickableAgent 模板
 - **[孪生仿真智能体](../examples/agents/twins/)** - 高精度水力仿真
 - **[本体仿真智能体](../examples/agents/ontology/)** - 基于规则的推理
-- **[出流规划智能体](../examples/agents/outflowplan/)** - 事件驱动的 outflow planning 示例
-- **[中央调度目录](../examples/agents/centralscheduling/)** - 当前仅保留配置占位，暂无完整示例实现
+- **[中央调度智能体](../examples/agents/centralscheduling/)** - 复用 SDK 默认 MPC 路径的中央调度示例
 
 ### 代码片段
 
@@ -187,12 +188,12 @@ docs/
 examples/
 ├── README.md                      # 示例导航
 ├── start_agents.sh                # 多 Agent 启动入口
-├── env.properties                 # 默认环境配置
+├── env.properties.example         # 环境配置模板
 ├── agents/
 │   ├── twins/                     # 孪生仿真示例
+│   ├── template/                  # 最小模板示例
 │   ├── ontology/                  # 本体仿真示例
-│   ├── outflowplan/               # 事件驱动出流规划示例
-│   └── centralscheduling/         # 中央调度配置占位
+│   └── centralscheduling/         # 中央调度示例
 └── error_handling_example.py      # 错误处理示例
 
 hydros_agent_sdk/
@@ -211,9 +212,10 @@ hydros_agent_sdk/
 
 **A**: 按以下顺序学习：
 1. 阅读《新手智能体开发指南》前 3 章
-2. 运行 `examples/start_agents.sh twins`
-3. 查看 `twins` 或 `ontology` 示例
-4. 实现自己的业务逻辑
+2. 运行 `examples/start_agents.sh --check`
+3. 运行 `examples/start_agents.sh template`
+4. 查看 `twins` 或 `ontology` 示例
+5. 实现自己的业务逻辑
 
 ### Q2: 如何选择智能体类型？
 

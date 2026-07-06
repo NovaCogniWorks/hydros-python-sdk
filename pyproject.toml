@@ -29,7 +29,43 @@ classifiers = [
 ]
 
 [project.scripts]
-# hydros-sum = "hydros_sdk.cli:main"
+hydros-agent = "hydros_agent_sdk.launcher.cli:main"
+
+[project.optional-dependencies]
+debug = [
+    "debugpy>=1.8.0",
+]
+build = [
+    "build>=1.0.0",
+    "twine>=5.0.0",
+]
+examples = [
+    "debugpy>=1.8.0",
+]
+pump = [
+    "numpy>=2.2.0",
+    "pandas>=2.3.0",
+    "scipy>=1.16.0",
+    "scikit-learn>=1.6.0",
+    "openpyxl>=3.1.0",
+    "matplotlib>=3.10.0",
+    "pyomo>=6.9.0",
+    "sympy>=1.14.0",
+    "mpmath>=1.3.0",
+]
+power = [
+    "numpy>=2.2.0",
+    "pandas>=2.3.0",
+    "scipy>=1.16.0",
+    "matplotlib>=3.10.0",
+    "sympy>=1.14.0",
+    "mpmath>=1.3.0",
+]
+dev = [
+    "build>=1.0.0",
+    "twine>=5.0.0",
+    "debugpy>=1.8.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

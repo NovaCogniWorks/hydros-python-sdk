@@ -46,6 +46,83 @@ def test_launcher_cli_parses_system_default_central_opt_in():
     assert options.enable_system_central_scheduling_agent
 
 
+def test_launcher_cli_parses_check_and_doctor_aliases():
+    class DiscoveryService:
+        def discover_all(self):
+            return ["template"]
+
+    cli = LauncherCli(DiscoveryService())
+
+    check_options = cli.parse(["multi_agent_launcher.py", "--check"])
+    doctor_options = cli.parse(["multi_agent_launcher.py", "--doctor"])
+
+    assert check_options.check_only
+    assert doctor_options.check_only
+    assert not check_options.agent_names
+    assert not doctor_options.agent_names
+
+
+def test_launcher_doctor_returns_zero_when_env_and_agents_are_valid(monkeypatch, capsys):
+    class FakeAgent:
+        pass
+
+    class DiscoveryService:
+        def discover_all(self):
+            return ["template"]
+
+    class ModuleLoader:
+        def load(self, agent_name):
+            assert agent_name == "template"
+            return SimpleNamespace(
+                agent_code="TEMPLATE_AGENT",
+                agent_class=FakeAgent,
+            )
+
+    monkeypatch.setattr(
+        support_module,
+        "load_env_config",
+        lambda _env_file: {"hydros_cluster_id": "cluster", "hydros_node_id": "node"},
+    )
+
+    doctor = support_module.LauncherDoctor(
+        launcher_dir="/tmp/hydros-agents",
+        env_file="/tmp/hydros-agents/env.properties",
+        discovery_service=DiscoveryService(),
+        module_loader=ModuleLoader(),
+    )
+
+    assert doctor.run() == 0
+    output = capsys.readouterr().out
+    assert "[OK] env.properties" in output
+    assert "[OK] agent:template" in output
+
+
+def test_launcher_doctor_returns_nonzero_when_no_agents(monkeypatch, capsys):
+    class DiscoveryService:
+        def discover_all(self):
+            return []
+
+    class ModuleLoader:
+        pass
+
+    monkeypatch.setattr(
+        support_module,
+        "load_env_config",
+        lambda _env_file: {"hydros_cluster_id": "cluster", "hydros_node_id": "node"},
+    )
+
+    doctor = support_module.LauncherDoctor(
+        launcher_dir="/tmp/hydros-agents",
+        env_file="/tmp/hydros-agents/env.properties",
+        discovery_service=DiscoveryService(),
+        module_loader=ModuleLoader(),
+    )
+
+    assert doctor.run() == 1
+    output = capsys.readouterr().out
+    assert "[FAIL] agents" in output
+
+
 def test_multi_agent_coordinator_runs_generic_registration_flow():
     class Callback:
         def __init__(self):
