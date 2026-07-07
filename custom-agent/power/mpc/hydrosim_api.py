@@ -918,6 +918,7 @@ class HydroSimulationApi:
         merged_event = copy.deepcopy(base_event)
         existing_items = list(merged_event.get("object_time_series", []) or [])
         event_object_type = self._get_event_object_type(event_payload)
+        replace_matching_time_series = self._should_replace_matching_time_series(event_payload)
         index_by_key = {
             self._build_time_series_identity(item): idx
             for idx, item in enumerate(existing_items)
@@ -927,6 +928,12 @@ class HydroSimulationApi:
             normalized_item = copy.deepcopy(raw_item)
             if event_object_type and not normalized_item.get("object_type"):
                 normalized_item["object_type"] = event_object_type
+            if replace_matching_time_series:
+                existing_items = self._replace_matching_time_series_items(existing_items, normalized_item)
+                index_by_key = {
+                    self._build_time_series_identity(item): idx
+                    for idx, item in enumerate(existing_items)
+                }
             identity = self._build_time_series_identity(normalized_item)
             existing_index = index_by_key.get(identity)
             if existing_index is None:
@@ -936,6 +943,7 @@ class HydroSimulationApi:
                 existing_items[existing_index] = self._merge_object_time_series_item(
                     existing_items[existing_index],
                     normalized_item,
+                    replace_time_series=replace_matching_time_series,
                 )
 
         merged_event["object_time_series"] = existing_items
@@ -974,15 +982,58 @@ class HydroSimulationApi:
             item.get("object_name") if not normalized_object_ids else None,
         )
 
-    def _merge_object_time_series_item(self, existing_item: Dict[str, Any], update_item: Dict[str, Any]) -> Dict[str, Any]:
+    def _should_replace_matching_time_series(self, payload: Any) -> bool:
+        event_source_type = None
+        if hasattr(payload, "hydro_event_source_type"):
+            event_source_type = getattr(payload, "hydro_event_source_type")
+        elif isinstance(payload, dict):
+            event_source_type = payload.get("hydro_event_source_type") or payload.get("hydroEventSourceType")
+        return str(event_source_type) == "OUTFLOW_TIME_SERIES"
+
+    def _replace_matching_time_series_items(
+        self,
+        existing_items: List[Dict[str, Any]],
+        update_item: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        return [
+            item
+            for item in existing_items
+            if not self._should_replace_existing_time_series_item(item, update_item)
+        ]
+
+    def _should_replace_existing_time_series_item(
+        self,
+        existing_item: Dict[str, Any],
+        update_item: Dict[str, Any],
+    ) -> bool:
+        if existing_item.get("object_type") != update_item.get("object_type"):
+            return False
+        if existing_item.get("metrics_code") != update_item.get("metrics_code"):
+            return False
+
+        existing_ids = set(self._extract_identity_object_ids(existing_item))
+        update_ids = set(self._extract_identity_object_ids(update_item))
+        if existing_ids and update_ids:
+            return bool(existing_ids & update_ids)
+        return self._build_time_series_identity(existing_item) == self._build_time_series_identity(update_item)
+
+    def _merge_object_time_series_item(
+        self,
+        existing_item: Dict[str, Any],
+        update_item: Dict[str, Any],
+        replace_time_series: bool = False,
+    ) -> Dict[str, Any]:
         merged_item = copy.deepcopy(existing_item)
         for field in ("time_series_name", "object_id", "object_ids", "object_type", "object_name", "metrics_code"):
             if update_item.get(field) not in (None, []):
                 merged_item[field] = copy.deepcopy(update_item[field])
-        merged_item["time_series"] = self._merge_time_series_rows(
-            existing_item.get("time_series", []) or [],
-            update_item.get("time_series", []) or [],
-        )
+        if replace_time_series:
+            merged_item["time_series"] = copy.deepcopy(update_item.get("time_series", []) or [])
+        else:
+            merged_item["time_series"] = self._merge_time_series_rows(
+                existing_item.get("time_series", []) or [],
+                update_item.get("time_series", []) or [],
+            )
         return merged_item
 
     def _merge_time_series_rows(

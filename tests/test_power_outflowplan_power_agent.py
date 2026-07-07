@@ -302,6 +302,26 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.assertTrue(os.path.exists(init_kwargs["constraints_file"]))
         self.assertGreaterEqual(mock_urlopen.call_count, 4)
 
+    def test_initialize_hydrosim_session_uses_outflowplan_runtime_default_planning_file(self):
+        self.agent._hydrosim_api.initialize = MagicMock(
+            return_value={"session": {"session_id": "session-default-runtime-001"}}
+        )
+
+        with patch.object(self.agent._hydrosim_input_resolver, "resolve", side_effect=lambda **kwargs: kwargs["default_path"]):
+            self.agent._initialize_hydrosim_session()
+
+        init_kwargs = self.agent._hydrosim_api.initialize.call_args.kwargs
+        expected_path = os.path.abspath(
+            os.path.join(
+                POWER_OUTFLOWPLAN_DIR,
+                "..",
+                ".runtime",
+                "outflowplan",
+                "time_series_power_planning.json",
+            )
+        )
+        self.assertEqual(os.path.abspath(init_kwargs["time_series_file"]), expected_path)
+
     def test_on_terminate_returns_protocol_command_status_enum(self):
         request = SimTaskTerminateRequest(
             command_id="term-001",

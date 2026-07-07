@@ -15,6 +15,7 @@ CURRENT_DIR = Path(__file__).resolve().parent
 HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
 DATA_DIR = CURRENT_DIR.parent / "data"
 RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "scheduling"
+POWER_PLANNING_RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "outflowplan"
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
@@ -204,17 +205,15 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
             return []
 
-        turbine_commands = self._build_turbine_output_power_commands(session, step)
-        if turbine_commands:
-            return turbine_commands
+        device_commands = self._build_device_control_commands(session, step)
+        if device_commands:
+            return device_commands
         return self._build_station_output_power_commands(session, step)
 
-    def _build_turbine_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+    def _build_device_control_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
         commands: List[Dict[str, Any]] = []
         for device in getattr(session, "latest_device_output_series", []) or []:
-            if str(device.get("object_type")) != HydroObjectType.TURBINE.value:
-                continue
-            if str(device.get("metrics_code")) != DeviceValueTypeEnum.OUTPUT_POWER.code:
+            if not self._is_reportable_control_metric(device):
                 continue
 
             device_row = self._get_series_row_for_step(device.get("time_series", []), step)
@@ -222,14 +221,18 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 continue
 
             object_id = int(device["object_id"])
+            object_type = str(device["object_type"])
+            metrics_code = str(device["metrics_code"])
             target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
                 object_id=object_id,
-                device_type=HydroObjectType.TURBINE.value,
+                device_type=object_type,
             )
             if target_agent is None:
                 logger.warning(
-                    "Skip turbine output-power command because target agent is unavailable: objectId=%s, step=%s",
+                    "Skip device control command because target agent is unavailable: objectId=%s, objectType=%s, metric=%s, step=%s",
                     object_id,
+                    object_type,
+                    metrics_code,
                     step,
                 )
                 continue
@@ -237,10 +240,10 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             commands.append(
                 {
                     "target_agent_code": target_agent.agent_code,
-                    "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
+                    "target_command_type": metrics_code,
                     "target_value": float(device_row["value"]),
                     "object_id": object_id,
-                    "object_type": HydroObjectType.TURBINE.value,
+                    "object_type": object_type,
                 }
             )
         return commands
@@ -392,27 +395,13 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         if session is None:
             return []
 
-        station_series = getattr(session, "latest_station_power_series", []) or []
         device_series = getattr(session, "latest_device_output_series", []) or []
         horizon_steps: List[HorizonStep] = []
         for absolute_step in range(window_start, window_end + 1):
             control_object_list = []
-            # for station in station_series:
-            #     station_row = self._get_series_row_for_step(station.get("time_series", []), absolute_step)
-            #     if station_row is None:
-            #         continue
-            #     control_object_list.append(
-            #         MpcResultFactory.build_control_object_result(
-            #             object_id=int(station["node_id"]),
-            #             node_id=int(station["node_id"]),
-            #             object_name=station.get("station"),
-            #             target_value=float(station_row["value"]),
-            #             object_type=HydroObjectType.STATION.value,
-            #             target_value_type=DeviceValueTypeEnum.OUTPUT_POWER.code,
-            #         )
-            #     )
-
             for device in device_series:
+                if not self._is_reportable_control_metric(device):
+                    continue
                 device_row = self._get_series_row_for_step(device.get("time_series", []), absolute_step)
                 if device_row is None:
                     continue
@@ -437,6 +426,17 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 )
             )
         return horizon_steps
+
+    def _is_reportable_control_metric(self, device: Dict[str, Any]) -> bool:
+        object_type = str(device.get("object_type"))
+        metrics_code = str(device.get("metrics_code"))
+        return (
+            object_type == HydroObjectType.TURBINE.value
+            and metrics_code == DeviceValueTypeEnum.OUTPUT_POWER.code
+        ) or (
+            object_type == HydroObjectType.GATE.value
+            and metrics_code == DeviceValueTypeEnum.GATE_OPENING.code
+        )
 
     def _get_series_row_for_step(self, time_series: List[Dict[str, Any]], step: int) -> Optional[Dict[str, Any]]:
         for row in time_series:
@@ -468,7 +468,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             time_series_file=self._resolve_hydrosim_input_file(
                 url_property_names=["hydrosim_time_series_url"],
                 path_property_names=["hydrosim_time_series_file"],
-                default_path=str(DATA_DIR / "time_series_power_planning.json"),
+                default_path=str(POWER_PLANNING_RUNTIME_DIR / "time_series_power_planning.json"),
                 local_filename="time_series_power_planning.json",
             ),
             mpc_config_file=self._resolve_hydrosim_input_file(
@@ -551,7 +551,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         planning_file = self._resolve_hydrosim_input_file(
             url_property_names=["hydrosim_power_planning_url"],
             path_property_names=["hydrosim_power_planning_file"],
-            default_path=str(DATA_DIR / "time_series_power_planning.json"),
+            default_path=str(POWER_PLANNING_RUNTIME_DIR / "time_series_power_planning.json"),
             local_filename="time_series_power_planning.json",
         )
         return planning_file, None

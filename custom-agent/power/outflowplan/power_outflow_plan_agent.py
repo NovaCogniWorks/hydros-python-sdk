@@ -530,7 +530,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         time_series_file = self._resolve_hydrosim_input_file(
             url_property_names=["hydrosim_time_series_url", "objects_time_series_url"],
             path_property_names=["hydrosim_time_series_file", "hydrosim_power_planning_file"],
-            default_path=str(DATA_DIR / "time_series_power_planning.json"),
+            default_path=str(RUNTIME_DIR / "time_series_power_planning.json"),
             local_filename="time_series_power_planning.json",
         )
         mpc_config_file = self._resolve_hydrosim_input_file(
