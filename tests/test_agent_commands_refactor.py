@@ -1502,10 +1502,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         PredictedResult(
                             object_type="Canal",
                             object_id=102,
+                            object_name="Canal-102",
                             front_water_level=2.1,
                             final_target_water_level=2.3,
                             back_water_level=1.9,
                             out_flow=33.0,
+                            diversion_flow=5.5,
                         )
                     ],
                 )
@@ -1528,15 +1530,17 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_results"][0]["details"][0]["node_id"], 101)
         self.assertEqual(payload["mpc_results"][0]["details"][0]["object_id"], 501)
         self.assertEqual(payload["mpc_results"][0]["details"][0]["target_value"], 0.45)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "water_level")
         self.assertEqual(payload["mpc_results"][0]["details"][1]["node_id"], 102)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["object_id"], 0)
+        self.assertEqual(payload["mpc_results"][0]["details"][1]["object_id"], 102)
         self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
         attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
         self.assertEqual(attributes["front_water_level"], 2.1)
         self.assertEqual(attributes["back_water_level"], 1.9)
         self.assertEqual(attributes["final_target_water_level"], 2.3)
         self.assertEqual(attributes["out_flow"], 33.0)
+        self.assertEqual(attributes["diversion_flow"], 5.5)
+        self.assertEqual(attributes["object_name"], "Canal-102")
 
     def test_mpc_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
@@ -1565,10 +1569,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         PredictedResult(
                             object_type="Canal",
                             object_id=102,
+                            object_name="Canal-102",
                             front_water_level=2.1,
                             final_target_water_level=2.3,
                             back_water_level=1.9,
                             out_flow=33.0,
+                            diversion_flow=5.5,
                         )
                     ],
                 )
@@ -1591,10 +1597,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result.details[0].node_id, 101)
         self.assertEqual(result.details[0].object_id, 501)
         self.assertEqual(result.details[0].target_value, 0.45)
-        self.assertEqual(result.details[1].command_type, "WATER_LEVEL")
+        self.assertEqual(result.details[1].command_type, "water_level")
+        self.assertEqual(result.details[1].node_id, 102)
+        self.assertEqual(result.details[1].object_id, 102)
         self.assertEqual(result.details[1].object_type, "Canal")
         self.assertEqual(result.details[1].node_id, 102)
-        self.assertEqual(result.details[1].object_id, 0)
         self.assertEqual(result.details[1].target_value, 2.3)
 
     def test_mpc_result_reporter_builds_customize_report(self):
@@ -1705,10 +1712,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             {
                                 "object_type": "Canal",
                                 "object_id": 31400,
+                                "object_name": "Canal-31400",
                                 "front_water_level": 63.0,
                                 "final_target_water_level": 63.12,
                                 "back_water_level": 62.8,
                                 "out_flow": 18.5,
+                                "diversion_flow": 7.2,
                             }
                         ],
                     }
@@ -1722,10 +1731,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_water_level, 63.12)
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
-        self.assertEqual(detail["command_type"], "WATER_LEVEL")
+        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].diversion_flow, 7.2)
+        self.assertEqual(detail["command_type"], "water_level")
         self.assertEqual(detail["object_type"], "Canal")
         self.assertEqual(detail["node_id"], 31400)
-        self.assertEqual(detail["object_id"], 0)
+        self.assertEqual(detail["object_id"], 31400)
         self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
         attributes = json.loads(detail["attributes"])
@@ -1733,6 +1743,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(attributes["back_water_level"], 62.8)
         self.assertEqual(attributes["final_target_water_level"], 63.12)
         self.assertEqual(attributes["out_flow"], 18.5)
+        self.assertEqual(attributes["diversion_flow"], 7.2)
+        self.assertEqual(attributes["object_name"], "Canal-31400")
 
     def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")

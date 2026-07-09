@@ -1202,7 +1202,9 @@ class HydroSimulationApi:
             metrics_code = item.get("metrics_code")
             if object_type not in {"Turbine", "Gate"}:
                 continue
-            if metrics_code not in {"output_power", "water_flow", "gate_opening"}:
+            if object_type == "Turbine" and metrics_code not in {"output_power", "water_flow"}:
+                continue
+            if object_type == "Gate" and metrics_code not in {"water_flow", "gate_opening"}:
                 continue
             object_ids = item.get("object_ids") or []
             if item.get("object_id") is not None:

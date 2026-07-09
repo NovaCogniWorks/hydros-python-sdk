@@ -28,7 +28,7 @@ from hydros_agent_sdk import (
     load_env_config,
 )
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
-from hydros_agent_sdk.mpc.models import HorizonStep
+from hydros_agent_sdk.mpc.models import HorizonStep, PredictedResult
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
 from hydros_agent_sdk.protocol.commands import (
@@ -47,6 +47,10 @@ from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
+
+POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
+POWER_STATION_GATE = "POWER_STATION_GATE"
+MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
 
 
 class HydroSimInputFileResolver:
@@ -396,11 +400,12 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             return []
 
         device_series = getattr(session, "latest_device_output_series", []) or []
+        station_series = getattr(session, "latest_station_power_series", []) or []
         horizon_steps: List[HorizonStep] = []
-        for absolute_step in range(window_start, window_end + 1):
+        for relative_step, absolute_step in enumerate(range(window_start, window_end + 1), start=1):
             control_object_list = []
             for device in device_series:
-                if not self._is_reportable_control_metric(device):
+                if not self._is_reportable_window_control_metric(device):
                     continue
                 device_row = self._get_series_row_for_step(device.get("time_series", []), absolute_step)
                 if device_row is None:
@@ -411,21 +416,210 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                         node_id=int(device["node_id"]) if device.get("node_id") is not None else None,
                         object_name=device.get("object_name"),
                         target_value=float(device_row["value"]),
-                        object_type=str(device["object_type"]),
+                        object_type=self._resolve_window_report_object_type(str(device["object_type"])),
                         target_value_type=str(device["metrics_code"]),
                     )
                 )
 
-            if not control_object_list:
+            predicted_result_list = self._build_station_predicted_results(
+                device_series=device_series,
+                station_series=station_series,
+                step=absolute_step,
+            )
+
+            if not control_object_list and not predicted_result_list:
                 continue
             horizon_steps.append(
                 HorizonStep(
-                    horizon_step=absolute_step,
+                    horizon_step=relative_step,
                     control_object_list=control_object_list,
-                    predicted_result_list=[],
+                    predicted_result_list=predicted_result_list,
                 )
             )
         return horizon_steps
+
+    def _build_station_predicted_results(
+        self,
+        device_series: List[Dict[str, Any]],
+        station_series: List[Dict[str, Any]],
+        step: int,
+    ) -> List[PredictedResult]:
+        station_ids: List[int] = []
+        station_names: Dict[int, str] = {}
+        for station in station_series:
+            node_id = station.get("node_id")
+            if node_id is None:
+                continue
+            station_id = int(node_id)
+            if station_id not in station_ids:
+                station_ids.append(station_id)
+            station_names[station_id] = str(station.get("station") or station.get("object_name") or f"Station-{station_id}")
+
+        for device in device_series:
+            node_id = device.get("node_id")
+            if node_id is None:
+                continue
+            station_id = int(node_id)
+            if station_id not in station_ids:
+                station_ids.append(station_id)
+
+        session = getattr(self._hydrosim_api, "_session", None)
+        step_runtime = getattr(session, "step_runtime", None)
+        merged_event = getattr(step_runtime, "merged_event", {}) or {}
+        for item in merged_event.get("object_time_series", []) or []:
+            if item.get("object_type") != HydroObjectType.STATION.value:
+                continue
+            object_ids = item.get("object_ids") or []
+            if item.get("object_id") is not None:
+                object_ids = list(object_ids) + [item["object_id"]]
+            for object_id in object_ids:
+                station_id = int(object_id)
+                if station_id not in station_ids:
+                    station_ids.append(station_id)
+                station_names.setdefault(
+                    station_id,
+                    str(item.get("object_name") or f"Station-{station_id}"),
+                )
+        for station_id in (getattr(step_runtime, "target_stage_by_node", {}) or {}).keys():
+            normalized_station_id = int(station_id)
+            if normalized_station_id not in station_ids:
+                station_ids.append(normalized_station_id)
+            station_names.setdefault(normalized_station_id, f"Station-{normalized_station_id}")
+
+        predicted_results = []
+        for station_id in station_ids:
+            station_name = station_names.get(station_id, f"Station-{station_id}")
+            front_water_level = self._resolve_station_front_water_level(station_id=station_id, step=step)
+            final_target_water_level = self._resolve_station_target_water_level(station_id=station_id, step=step)
+            back_water_level = self._resolve_station_back_water_level(
+                station_ids=station_ids,
+                station_id=station_id,
+                step=step,
+            )
+            station_out_flow = self._sum_device_metric_for_station_step(
+                device_series=device_series,
+                station_id=station_id,
+                object_type=HydroObjectType.TURBINE.value,
+                metrics_code=DeviceValueTypeEnum.WATER_FLOW.code,
+                step=step,
+            )
+            station_diversion_flow = self._sum_device_metric_for_station_step(
+                device_series=device_series,
+                station_id=station_id,
+                object_type=HydroObjectType.GATE.value,
+                metrics_code=DeviceValueTypeEnum.WATER_FLOW.code,
+                step=step,
+            )
+            station_efficiency = self._sum_device_metric_for_station_step(
+                device_series=device_series,
+                station_id=station_id,
+                object_type=HydroObjectType.TURBINE.value,
+                metrics_code=DeviceValueTypeEnum.OUTPUT_POWER.code,
+                step=step,
+            )
+            if station_out_flow is not None or station_efficiency is not None:
+                predicted_results.append(
+                    MpcResultFactory.build_predicted_result(
+                        object_id=station_id,
+                        object_type=POWER_STATION_TURBINE,
+                        object_name=station_name,
+                        front_water_level=front_water_level,
+                        final_target_water_level=final_target_water_level,
+                        back_water_level=back_water_level,
+                        out_flow=station_out_flow,
+                        diversion_flow=None,
+                        efficiency=station_efficiency,
+                        command_type=MPC_STATION_FLOW_COMMAND_TYPE,
+                    )
+                )
+
+            if station_diversion_flow is not None:
+                predicted_results.append(
+                    MpcResultFactory.build_predicted_result(
+                        object_id=station_id,
+                        object_type=POWER_STATION_GATE,
+                        object_name=station_name,
+                        front_water_level=front_water_level,
+                        final_target_water_level=final_target_water_level,
+                        back_water_level=back_water_level,
+                        out_flow=None,
+                        diversion_flow=station_diversion_flow,
+                        efficiency=None,
+                        command_type=MPC_STATION_FLOW_COMMAND_TYPE,
+                    )
+                )
+        return predicted_results
+
+    def _sum_device_metric_for_station_step(
+        self,
+        device_series: List[Dict[str, Any]],
+        station_id: int,
+        object_type: str,
+        metrics_code: str,
+        step: int,
+    ) -> Optional[float]:
+        total = 0.0
+        found = False
+        for device in device_series:
+            if int(device.get("node_id", -1)) != int(station_id):
+                continue
+            if str(device.get("object_type")) != object_type:
+                continue
+            if str(device.get("metrics_code")) != metrics_code:
+                continue
+            device_row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if device_row is None:
+                continue
+            total += float(device_row["value"])
+            found = True
+        if not found:
+            return None
+        return total
+
+    def _resolve_station_front_water_level(self, station_id: int, step: int) -> Optional[float]:
+        session = getattr(self._hydrosim_api, "_session", None)
+        step_runtime = getattr(session, "step_runtime", None)
+        merged_event = getattr(step_runtime, "merged_event", {}) or {}
+        for item in merged_event.get("object_time_series", []) or []:
+            if item.get("object_type") != HydroObjectType.STATION.value:
+                continue
+            if item.get("metrics_code") != DeviceValueTypeEnum.WATER_LEVEL.code:
+                continue
+            object_ids = item.get("object_ids") or []
+            if item.get("object_id") is not None:
+                object_ids = list(object_ids) + [item["object_id"]]
+            if int(station_id) not in [int(object_id) for object_id in object_ids]:
+                continue
+            row = self._get_series_row_for_step(item.get("time_series", []), step)
+            if row is not None:
+                return float(row["value"])
+        return self._resolve_station_target_water_level(station_id=station_id, step=step)
+
+    def _resolve_station_target_water_level(self, station_id: int, step: int) -> Optional[float]:
+        session = getattr(self._hydrosim_api, "_session", None)
+        step_runtime = getattr(session, "step_runtime", None)
+        target_stage_by_node = getattr(step_runtime, "target_stage_by_node", {}) or {}
+        values = target_stage_by_node.get(int(station_id))
+        if values is None:
+            return None
+        if 0 <= int(step) < len(values):
+            return float(values[int(step)])
+        return None
+
+    def _resolve_station_back_water_level(
+        self,
+        station_ids: List[int],
+        station_id: int,
+        step: int,
+    ) -> Optional[float]:
+        ordered_station_ids = sorted({int(item) for item in station_ids})
+        if int(station_id) not in ordered_station_ids:
+            return None
+        station_index = ordered_station_ids.index(int(station_id))
+        if station_index + 1 >= len(ordered_station_ids):
+            return None
+        downstream_station_id = ordered_station_ids[station_index + 1]
+        return self._resolve_station_front_water_level(station_id=downstream_station_id, step=step)
 
     def _is_reportable_control_metric(self, device: Dict[str, Any]) -> bool:
         object_type = str(device.get("object_type"))
@@ -437,6 +631,16 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             object_type == HydroObjectType.GATE.value
             and metrics_code == DeviceValueTypeEnum.GATE_OPENING.code
         )
+
+    def _is_reportable_window_control_metric(self, device: Dict[str, Any]) -> bool:
+        return self._is_reportable_control_metric(device)
+
+    def _resolve_window_report_object_type(self, object_type: str) -> str:
+        if object_type == HydroObjectType.TURBINE.value:
+            return POWER_STATION_TURBINE
+        if object_type == HydroObjectType.GATE.value:
+            return POWER_STATION_GATE
+        return object_type
 
     def _get_series_row_for_step(self, time_series: List[Dict[str, Any]], step: int) -> Optional[Dict[str, Any]]:
         for row in time_series:

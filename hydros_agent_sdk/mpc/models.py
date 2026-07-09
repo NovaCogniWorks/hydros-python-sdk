@@ -27,6 +27,7 @@ class ControlObjectResult(HydroBaseModel):
 
 
 class PredictedResult(HydroBaseModel):
+    command_type: Optional[str] = None
     object_type: Optional[str] = None
     object_id: Optional[int] = None
     object_name: Optional[str] = None
@@ -34,6 +35,7 @@ class PredictedResult(HydroBaseModel):
     back_water_level: Optional[float] = None
     final_target_water_level: Optional[float] = None
     out_flow: Optional[float] = None
+    diversion_flow: Optional[float] = None
     efficiency: Optional[float] = None
 
 

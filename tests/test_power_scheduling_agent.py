@@ -1,3 +1,4 @@
+import json
 import importlib
 import os
 import sys
@@ -10,12 +11,17 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
 )
+from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+
+POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
+POWER_STATION_GATE = "POWER_STATION_GATE"
+MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
 
 
 def _load_power_scheduling_module():
@@ -157,13 +163,24 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     assert report.mpc_results[0].plan_type == "optimal"
     assert report.mpc_results[0].step == 3
     horizon_steps = {detail.horizon_step for detail in report.mpc_results[0].details}
-    assert horizon_steps == {3}
+    assert horizon_steps == {1}
     report_details = {
         (detail.object_id, detail.object_type, detail.command_type): detail.target_value
         for detail in report.mpc_results[0].details
     }
-    assert report_details[(20304, "Turbine", "output_power")] == 83.0
-    assert report_details[(20101, "Gate", "gate_opening")] == 1.3
+    assert report_details[(20304, POWER_STATION_TURBINE, "output_power")] == 83.0
+    assert report_details[(20101, POWER_STATION_GATE, "gate_opening")] == 1.3
+    assert (20304, POWER_STATION_TURBINE, MPC_STATION_FLOW_COMMAND_TYPE) not in report_details
+    assert (20101, POWER_STATION_GATE, MPC_STATION_FLOW_COMMAND_TYPE) not in report_details
+    turbine_station_detail = next(
+        detail
+        for detail in report.mpc_results[0].details
+        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    assert turbine_station_detail.node_id == 20300
+    assert turbine_station_detail.object_id == 20300
+    assert turbine_station_detail.value is None
+    assert turbine_station_detail.target_value is None
     agent._control_command_dispatcher.dispatch.assert_called_once()
     dispatched_commands = agent._control_command_dispatcher.dispatch.call_args.args[0]
     assert dispatched_commands == [
@@ -343,7 +360,7 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert len(enqueued) == 2
     second_report = enqueued[1]
     assert second_report.mpc_results[0].step == 11
-    assert {detail.horizon_step for detail in second_report.mpc_results[0].details} == set(range(11, 21))
+    assert {detail.horizon_step for detail in second_report.mpc_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
     assert agent._control_command_dispatcher.dispatch.call_count == 2
@@ -489,7 +506,7 @@ def test_power_scheduling_report_only_contains_control_metrics():
                 "object_id": 20304,
                 "object_type": "Turbine",
                 "object_name": "Turbine-20304",
-                "metrics_code": "water_flow",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
                 "node_id": 20300,
                 "time_series": [{"step": 2, "value": 42.0}],
             },
@@ -505,11 +522,28 @@ def test_power_scheduling_report_only_contains_control_metrics():
                 "object_id": 20101,
                 "object_type": "Gate",
                 "object_name": "Gate-20101",
-                "metrics_code": "water_flow",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
                 "node_id": 20100,
                 "time_series": [{"step": 2, "value": 16.0}],
             },
         ],
+        step_runtime=SimpleNamespace(
+            merged_event={
+                "object_time_series": [
+                    {
+                        "object_ids": [20300],
+                        "object_type": "Station",
+                        "object_name": "Station-20300",
+                        "metrics_code": "water_level",
+                        "time_series": [{"step": 2, "value": 658.0}],
+                    }
+                ]
+            },
+            target_stage_by_node={
+                20300: [658.0, 658.0, 658.0],
+                20100: [819.0, 819.0, 819.0],
+            },
+        ),
     )
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(2))
 
@@ -523,14 +557,218 @@ def test_power_scheduling_report_only_contains_control_metrics():
     )
 
     report = enqueued[0]
-    detail_keys = {
+    control_detail_keys = {
         (detail.object_id, detail.object_type, detail.command_type)
         for detail in report.mpc_results[0].details
+        if detail.object_type in {POWER_STATION_TURBINE, POWER_STATION_GATE} and detail.command_type != MPC_STATION_FLOW_COMMAND_TYPE
     }
-    assert detail_keys == {
-        (20304, "Turbine", "output_power"),
-        (20101, "Gate", "gate_opening"),
+    assert control_detail_keys == {
+        (20304, POWER_STATION_TURBINE, "output_power"),
+        (20101, POWER_STATION_GATE, "gate_opening"),
     }
+    turbine_station_detail = next(
+        detail
+        for detail in report.mpc_results[0].details
+        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    turbine_attributes = json.loads(turbine_station_detail.attributes)
+    assert turbine_station_detail.node_id == 20300
+    assert turbine_station_detail.object_id == 20300
+    assert turbine_station_detail.value == 42.0
+    assert turbine_station_detail.target_value == 42.0
+    assert turbine_attributes["object_name"] == "Station-20300"
+    assert turbine_attributes["front_water_level"] == 658.0
+    assert turbine_attributes["back_water_level"] is None
+    assert turbine_attributes["final_target_water_level"] == 658.0
+    assert turbine_attributes["out_flow"] == 42.0
+    assert turbine_attributes["diversion_flow"] is None
+    assert turbine_attributes["efficiency"] == 82.0
+
+    gate_station_detail = next(
+        detail
+        for detail in report.mpc_results[0].details
+        if detail.object_type == POWER_STATION_GATE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    gate_attributes = json.loads(gate_station_detail.attributes)
+    assert gate_station_detail.node_id == 20100
+    assert gate_station_detail.object_id == 20100
+    assert gate_station_detail.value == 16.0
+    assert gate_station_detail.target_value == 16.0
+    assert gate_attributes["object_name"] == "Station-20100"
+    assert gate_attributes["front_water_level"] == 819.0
+    assert gate_attributes["back_water_level"] == 658.0
+    assert gate_attributes["final_target_water_level"] == 819.0
+    assert gate_attributes["out_flow"] is None
+    assert gate_attributes["diversion_flow"] == 16.0
+    assert gate_attributes["efficiency"] is None
+
+
+def test_power_scheduling_report_includes_station_predicted_aggregates():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-station-predict-001")
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(
+            return_value=SchedulingTaskState(
+                context=context,
+                rolling_interval_steps=1,
+                start_step=2,
+                current_step=2,
+                total_steps=4,
+            )
+        ),
+        get_roll_steps=lambda: 1,
+    )
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[
+            {
+                "node_id": 20300,
+                "station": "Station-20300",
+                "time_series": [
+                    {"step": 0, "value": 200.0},
+                    {"step": 1, "value": 220.0},
+                    {"step": 2, "value": 262.0},
+                    {"step": 3, "value": 240.0},
+                ],
+            }
+        ],
+        latest_device_output_series=[
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": "output_power",
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 82.0}],
+            },
+            {
+                "object_id": 20305,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20305",
+                "metrics_code": "output_power",
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 180.0}],
+            },
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 42.0}],
+            },
+            {
+                "object_id": 20305,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20305",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 58.0}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": "gate_opening",
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 1.25}],
+            },
+            {
+                "object_id": 20102,
+                "object_type": "Gate",
+                "object_name": "Gate-20102",
+                "metrics_code": "gate_opening",
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 1.75}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 16.0}],
+            },
+            {
+                "object_id": 20102,
+                "object_type": "Gate",
+                "object_name": "Gate-20102",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 14.0}],
+            },
+        ],
+        step_runtime=SimpleNamespace(
+            merged_event={
+                "object_time_series": [
+                    {
+                        "object_ids": [20300],
+                        "object_type": "Station",
+                        "object_name": "Station-20300",
+                        "metrics_code": "water_level",
+                        "time_series": [{"step": 2, "value": 658.0}],
+                    },
+                    {
+                        "object_ids": [20500],
+                        "object_type": "Station",
+                        "object_name": "Station-20500",
+                        "metrics_code": "water_level",
+                        "time_series": [{"step": 2, "value": 620.0}],
+                    },
+                ]
+            },
+            target_stage_by_node={
+                20300: [658.0, 658.0, 658.0],
+                20500: [619.0, 619.0, 619.0],
+            },
+        ),
+    )
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(2))
+
+    agent.on_tick_simulation(
+        TickCmdRequest(
+            command_id="tick-station-predict-002",
+            context=context,
+            step=2,
+            broadcast=False,
+        )
+    )
+
+    report = enqueued[0]
+    turbine_station_detail = next(
+        detail
+        for detail in report.mpc_results[0].details
+        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    turbine_attributes = json.loads(turbine_station_detail.attributes)
+    assert turbine_station_detail.node_id == 20300
+    assert turbine_station_detail.object_id == 20300
+    assert turbine_station_detail.value == 100.0
+    assert turbine_station_detail.target_value == 100.0
+    assert turbine_attributes["object_name"] == "Station-20300"
+    assert turbine_attributes["front_water_level"] == 658.0
+    assert turbine_attributes["back_water_level"] == 620.0
+    assert turbine_attributes["final_target_water_level"] == 658.0
+    assert turbine_attributes["out_flow"] == 100.0
+    assert turbine_attributes["diversion_flow"] is None
+    assert turbine_attributes["efficiency"] == 262.0
+
+    gate_station_detail = next(
+        detail
+        for detail in report.mpc_results[0].details
+        if detail.object_type == POWER_STATION_GATE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    gate_attributes = json.loads(gate_station_detail.attributes)
+    assert gate_station_detail.node_id == 20300
+    assert gate_station_detail.object_id == 20300
+    assert gate_station_detail.value == 30.0
+    assert gate_station_detail.target_value == 30.0
+    assert gate_attributes["object_name"] == "Station-20300"
+    assert gate_attributes["front_water_level"] == 658.0
+    assert gate_attributes["back_water_level"] == 620.0
+    assert gate_attributes["final_target_water_level"] == 658.0
+    assert gate_attributes["out_flow"] is None
+    assert gate_attributes["diversion_flow"] == 30.0
+    assert gate_attributes["efficiency"] is None
 
 
 def test_power_scheduling_optimization_falls_back_to_station_series_when_turbine_series_missing():
@@ -557,6 +795,67 @@ def test_power_scheduling_optimization_falls_back_to_station_series_when_turbine
             "object_id": 20300,
             "object_type": "Station",
         }
+    ]
+
+
+def test_power_scheduling_optimization_still_ignores_water_flow_metrics():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-command-filter-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[],
+        latest_device_output_series=[
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": "output_power",
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 82.0}],
+            },
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 42.0}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": "gate_opening",
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 1.25}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 16.0}],
+            },
+        ],
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert commands == [
+        {
+            "target_agent_code": "TARGET_AGENT_20304",
+            "target_command_type": "output_power",
+            "target_value": 82.0,
+            "object_id": 20304,
+            "object_type": "Turbine",
+        },
+        {
+            "target_agent_code": "TARGET_AGENT_20101",
+            "target_command_type": "gate_opening",
+            "target_value": 1.25,
+            "object_id": 20101,
+            "object_type": "Gate",
+        },
     ]
 
 

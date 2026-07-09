@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
 MPC_DEVICE_CONTROL = "OPENING"
-MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
+MPC_OPERATION_WATER_LEVEL = "water_level"
 
 
 class MpcResultReporter:
@@ -241,21 +241,33 @@ class MpcResultReporter:
         predicted_result: PredictedResult,
         horizon_step: Optional[int],
     ) -> MpcResultDetail:
+        command_type = predicted_result.command_type or MPC_OPERATION_WATER_LEVEL
         attributes = {
+            "object_name": predicted_result.object_name,
             "front_water_level": predicted_result.front_water_level,
             "back_water_level": predicted_result.back_water_level,
             "final_target_water_level": predicted_result.final_target_water_level,
             "out_flow": predicted_result.out_flow,
+            "diversion_flow": predicted_result.diversion_flow,
             "efficiency": predicted_result.efficiency,
         }
+        detail_value = predicted_result.front_water_level
+        detail_target_value = predicted_result.final_target_water_level
+        if command_type == "water_flow":
+            if predicted_result.object_type == "POWER_STATION_GATE":
+                detail_value = predicted_result.diversion_flow
+                detail_target_value = predicted_result.diversion_flow
+            else:
+                detail_value = predicted_result.out_flow
+                detail_target_value = predicted_result.out_flow
         return MpcResultDetail(
             horizon_step=horizon_step,
-            command_type=MPC_OPERATION_WATER_LEVEL,
+            command_type=command_type,
             object_type=predicted_result.object_type,
             node_id=predicted_result.object_id,
-            object_id=0,
-            value=predicted_result.front_water_level,
-            target_value=predicted_result.final_target_water_level,
+            object_id=predicted_result.object_id,
+            value=detail_value,
+            target_value=detail_target_value,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
 

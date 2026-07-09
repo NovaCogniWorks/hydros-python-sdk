@@ -29,19 +29,23 @@ class MpcResultFactoryTest(unittest.TestCase):
         result = MpcResultFactory.build_predicted_result(
             object_id=102,
             object_type="Canal",
+            object_name="Canal-102",
             front_water_level=2.1,
             final_target_water_level=2.3,
             back_water_level=1.9,
             out_flow=33.0,
+            diversion_flow=12.5,
         )
 
         self.assertIsInstance(result, PredictedResult)
         self.assertEqual(result.object_id, 102)
         self.assertEqual(result.object_type, "Canal")
+        self.assertEqual(result.object_name, "Canal-102")
         self.assertEqual(result.front_water_level, 2.1)
         self.assertEqual(result.final_target_water_level, 2.3)
         self.assertEqual(result.back_water_level, 1.9)
         self.assertEqual(result.out_flow, 33.0)
+        self.assertEqual(result.diversion_flow, 12.5)
 
 
 if __name__ == "__main__":

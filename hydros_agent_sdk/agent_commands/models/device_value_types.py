@@ -11,6 +11,7 @@ class DeviceValueTypeEnum(Enum):
     """贴近 Java 的设备值类型定义。"""
 
     WATER_LEVEL = ("water_level", "水位", float)
+    WATER_FLOW = ("water_flow", "水流", float)
     GATE_OPENING = ("gate_opening", "闸门开度", float)
     BLADE_ANGLE = ("blade_angle", "叶片角度", float)
     OUTPUT_POWER = ("output_power", "输出功率", float)

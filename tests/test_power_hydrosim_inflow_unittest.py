@@ -55,7 +55,7 @@ class TestPowerHydroSimInflowPlanning(unittest.TestCase):
             (item["object_type"], item["metrics_code"])
             for item in step_result["device_step_outputs"]
         }
-        self.assertIn(("Turbine", "power"), device_metrics)
+        self.assertIn(("Turbine", "output_power"), device_metrics)
         self.assertIn(("Turbine", "water_flow"), device_metrics)
         self.assertIn(("Gate", "water_flow"), device_metrics)
         self.assertIn(("Gate", "gate_opening"), device_metrics)
