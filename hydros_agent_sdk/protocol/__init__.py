@@ -7,6 +7,7 @@ from .commands import (
     AgentInstanceStatusReport,
     CommandUnion,
     DeviceStatusChangeResponse,
+    EdgeControlExecutionReport,
     HydroEventAckResponse,
     HydroEventCommand,
     HydroAlertUpdatedReport,
