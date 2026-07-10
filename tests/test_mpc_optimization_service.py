@@ -26,7 +26,7 @@ class FakeMpcPlanningClient:
         return self.responses
 
 
-class FakeMpcResultReporter:
+class FakeMpcPredictionResultReporter:
     def __init__(self):
         self.published = []
 
@@ -74,12 +74,12 @@ class MpcOptimizationServiceTest(unittest.TestCase):
         )
         response = MpcOptimizeResponse(plan_type="OPTIMAL")
         mpc_client = FakeMpcPlanningClient([response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         service = MpcOptimizationService(
             properties=AgentProperties(),
             metrics_data_cache=cache,
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
         )
 
         responses = service.optimize(source, state, step=4)
@@ -99,7 +99,7 @@ class MpcOptimizationServiceTest(unittest.TestCase):
             properties=AgentProperties(),
             metrics_data_cache=FieldMetricsCache(max_steps=3),
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=FakeMpcResultReporter(),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
             mpc_sensor_provider=lambda agent, task_state: [
                 SensorData(object_id=2001, metrics_code="flow", value=3.5, step_index=task_state.current_step)
             ],

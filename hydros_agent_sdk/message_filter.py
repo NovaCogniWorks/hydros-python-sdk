@@ -12,7 +12,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimCoordinationRequest,
     AgentInstanceStatusReport,
-    MpcResultReport,
+    MpcPredictionResultReport,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -114,7 +114,7 @@ class MessageFilter:
             return True
 
         # 显式报告只接收远端智能体发出的消息
-        if isinstance(sim_command, (AgentInstanceStatusReport, MpcResultReport)):
+        if isinstance(sim_command, (AgentInstanceStatusReport, MpcPredictionResultReport)):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:
                 logger.debug(f"Receiving report from remote agent: {sim_command.command_type}")

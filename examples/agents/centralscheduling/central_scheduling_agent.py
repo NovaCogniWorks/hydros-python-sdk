@@ -2,7 +2,7 @@
 面向生产的中央调度智能体示例。
 
 本示例刻意保持业务逻辑轻量，让 SDK 默认 MpcCentralSchedulingAgent 路径负责
-滚动 MPC、MpcResultReport 发布和智能体指令分派。
+滚动 MPC、MpcPredictionResultReport 发布和智能体指令分派。
 """
 
 import logging

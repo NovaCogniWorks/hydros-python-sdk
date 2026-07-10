@@ -839,9 +839,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
         
-        # 按照用户要求，生成 MpcResultReport 并发送
+        # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
-        from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+        from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep
 
         try:
@@ -931,7 +931,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             )
 
         try:
-            reporter = MpcResultReporter(sim_coordination_client=self.sim_coordination_client)
+            reporter = MpcPredictionResultReporter(sim_coordination_client=self.sim_coordination_client)
             reporter.publish_customize_report(
                 source_agent_instance=self,
                 mpc_task_state=self._ensure_scheduling_task_state(step),

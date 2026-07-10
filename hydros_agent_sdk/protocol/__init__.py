@@ -46,4 +46,4 @@ from .models import (
     TopHydroObject,
     Waterway,
 )
-from .mpc_results import MpcResult, MpcResultDetail
+from .mpc_prediction_results import MpcPredictionResult, MpcPredictionResultDetail

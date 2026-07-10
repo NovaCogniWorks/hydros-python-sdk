@@ -1,11 +1,13 @@
 import unittest
 
+from pydantic import ValidationError
+
 from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
     DeviceStatusChangeResponse,
     EdgeControlExecutionReport,
+    EdgeControlResultReport,
     MpcExecutionStatusReport,
-    PidControlExecutionReport,
     SimCommandEnvelope,
     SimTaskInitResponse,
 )
@@ -195,26 +197,49 @@ def test_device_status_change_response_envelope_matches_java_command_type():
     assert envelope.command.object_time_series == []
 
 
-class CoordinationReportCompatibilityTest(unittest.TestCase):
-    def test_pid_control_execution_report_envelope_matches_java_command_type(self):
+class CoordinationReportContractTest(unittest.TestCase):
+    def test_edge_control_result_report_envelope_matches_java_command_type(self):
         context = make_context()
         agent = make_agent(context, agent_code="GATE_STATION_AGENT")
         payload = {
-            "command_id": "CMD_PID_REPORT",
-            "command_type": "pid_control_execution_report",
+            "command_id": "CMD_EDGE_CONTROL_RESULT_REPORT",
+            "command_type": "edge_control_result_report",
             "context": context.model_dump(mode="json"),
             "broadcast": True,
             "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
-            "run_result": {"status": "SUCCEED", "message": "ok"},
-            "actuator_results": [{"object_id": 1001, "target_value": 1.25}],
+            "report": {
+                "status": "SUCCEED",
+                "message": "ok",
+                "control_group_id": "control-group-001",
+                "main_step_index": 12,
+            },
+            "details": [{"object_id": 1001, "target_value": 1.25}],
         }
 
         envelope = SimCommandEnvelope(command=payload)
 
-        self.assertIsInstance(envelope.command, PidControlExecutionReport)
-        self.assertEqual(envelope.command.command_id, "CMD_PID_REPORT")
-        self.assertEqual(envelope.command.run_result["status"], "SUCCEED")
-        self.assertEqual(envelope.command.actuator_results[0]["object_id"], 1001)
+        self.assertIsInstance(envelope.command, EdgeControlResultReport)
+        self.assertEqual(envelope.command.command_id, "CMD_EDGE_CONTROL_RESULT_REPORT")
+        self.assertEqual(envelope.command.report["status"], "SUCCEED")
+        self.assertEqual(envelope.command.report["control_group_id"], "control-group-001")
+        self.assertEqual(envelope.command.report["main_step_index"], 12)
+        self.assertEqual(envelope.command.details[0]["object_id"], 1001)
+
+    def test_pid_control_execution_report_discriminator_is_not_supported(self):
+        context = make_context()
+        agent = make_agent(context, agent_code="GATE_STATION_AGENT")
+        payload = {
+            "command_id": "CMD_OLD_REPORT",
+            "command_type": "pid_control_execution_report",
+            "context": context.model_dump(mode="json"),
+            "broadcast": True,
+            "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+            "run_result": {},
+            "actuator_results": [],
+        }
+
+        with self.assertRaises(ValidationError):
+            SimCommandEnvelope(command=payload)
 
     def test_edge_control_execution_report_envelope_matches_java_command_type(self):
         context = make_context()
@@ -228,7 +253,7 @@ class CoordinationReportCompatibilityTest(unittest.TestCase):
             "source_agent_instance": source_agent.model_dump(mode="json", by_alias=True),
             "target_agent_instance": target_agent.model_dump(mode="json", by_alias=True),
             "exec_command_id": "CMD_EXEC",
-            "exec_run_id": "RUN_001",
+            "control_run_id": "RUN_001",
             "object_type": "GATE",
             "object_id": 1001,
             "target_value_type": "GATE_OPENING",
@@ -247,11 +272,21 @@ class CoordinationReportCompatibilityTest(unittest.TestCase):
 
         self.assertIsInstance(envelope.command, EdgeControlExecutionReport)
         self.assertEqual(envelope.command.exec_command_id, "CMD_EXEC")
+        self.assertEqual(envelope.command.control_run_id, "RUN_001")
         self.assertEqual(envelope.command.target_agent_instance.agent_code, "CENTRAL_SCHEDULING_AGENT")
         self.assertEqual(envelope.command.exec_status, "COMPLETED")
         self.assertEqual(envelope.command.group_id, "control-group-001")
         self.assertEqual(envelope.command.session_id, "hydraulic-session-001")
         self.assertEqual(envelope.command.sub_step_index, 6)
+        serialized = envelope.command.model_dump(mode="json", by_alias=True)
+        self.assertEqual(serialized["control_run_id"], "RUN_001")
+        self.assertNotIn("exec_run_id", serialized)
+
+        unsupported_payload = dict(payload)
+        unsupported_payload.pop("control_run_id")
+        unsupported_payload["exec_run_id"] = "UNSUPPORTED_RUN_001"
+        unsupported_envelope = SimCommandEnvelope(command=unsupported_payload)
+        self.assertIsNone(unsupported_envelope.command.control_run_id)
 
     def test_mpc_execution_status_report_envelope_matches_java_command_type(self):
         context = make_context()

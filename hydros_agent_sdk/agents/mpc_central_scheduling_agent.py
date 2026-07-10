@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
 from hydros_agent_sdk.protocol.commands import (
@@ -38,7 +38,7 @@ class MpcSchedulingOptions:
     mpc_service_base_url: Optional[str] = None
     mpc_request_timeout_seconds: Optional[float] = None
     mpc_planning_client: Optional[MpcPlanningClient] = None
-    mpc_result_reporter: Optional[MpcResultReporter] = None
+    mpc_prediction_result_reporter: Optional[MpcPredictionResultReporter] = None
     mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = None
 
     @classmethod
@@ -55,7 +55,7 @@ class MpcSchedulingOptions:
                 None,
             ),
             mpc_planning_client=kwargs.pop("mpc_planning_client", None),
-            mpc_result_reporter=kwargs.pop("mpc_result_reporter", None),
+            mpc_prediction_result_reporter=kwargs.pop("mpc_prediction_result_reporter", None),
             mpc_sensor_provider=kwargs.pop("mpc_sensor_provider", None),
         )
 
@@ -130,9 +130,9 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         self._mpc_planning_client: Optional[MpcPlanningClient] = (
             mpc_options.mpc_planning_client
         )
-        self._mpc_result_reporter: MpcResultReporter = (
-            mpc_options.mpc_result_reporter
-            or MpcResultReporter(sim_coordination_client=sim_coordination_client)
+        self._mpc_prediction_result_reporter: MpcPredictionResultReporter = (
+            mpc_options.mpc_prediction_result_reporter
+            or MpcPredictionResultReporter(sim_coordination_client=sim_coordination_client)
         )
 
     def _init_default_mpc_runtime(
@@ -147,7 +147,7 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
             configured_mpc_service_base_url=self._configured_mpc_service_base_url,
             configured_mpc_request_timeout_seconds=self._configured_mpc_request_timeout_seconds,
             mpc_planning_client=self._mpc_planning_client,
-            mpc_result_reporter=self._mpc_result_reporter,
+            mpc_prediction_result_reporter=self._mpc_prediction_result_reporter,
             mpc_sensor_provider=self._mpc_sensor_provider,
         )
         self._mpc_rolling_runtime = MpcRollingRuntime(
@@ -203,8 +203,8 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         """
         执行默认 MPC 优化逻辑。
 
-        默认实现会调用独立的 MpcPlanningClient，并通过 MpcResultReporter
-        回传 mpc_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
+        默认实现会调用独立的 MpcPlanningClient，并通过 MpcPredictionResultReporter
+        回传 mpc_prediction_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
         """
         task_state = self._mpc_rolling_runtime.require_task_state()
         responses = self._mpc_optimization_service.optimize(

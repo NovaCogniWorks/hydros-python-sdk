@@ -9,7 +9,7 @@ from typing import Optional
 
 from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
-    MpcResultReport,
+    MpcPredictionResultReport,
     SimCommand,
     SimCoordinationRequest,
     SimCoordinationResponse,
@@ -60,7 +60,7 @@ class CoordinationOutboxPublisher:
             node_id = self.state_manager.get_node_id()
             return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
 
-        if isinstance(command, MpcResultReport):
+        if isinstance(command, MpcPredictionResultReport):
             return self.state_manager.is_local_agent(command.source_agent_instance)
 
         return False
@@ -76,14 +76,14 @@ class CoordinationOutboxPublisher:
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
 
-                if isinstance(command, MpcResultReport):
+                if isinstance(command, MpcPredictionResultReport):
                     self.logger.info(
-                        "MPC result report sent to coordinator: topic=%s, command_id=%s, "
+                        "MPC prediction result report sent to coordinator: topic=%s, command_id=%s, "
                         "result_count=%s, detail_count=%s",
                         self.topic,
                         command_id,
-                        len(command.mpc_results or []),
-                        self.count_mpc_result_details(command),
+                        len(command.mpc_prediction_results or []),
+                        self.count_mpc_prediction_result_details(command),
                     )
                 return
 
@@ -112,7 +112,7 @@ class CoordinationOutboxPublisher:
 
     @classmethod
     def format_command_for_log(cls, command: SimCommand) -> str:
-        if isinstance(command, MpcResultReport):
+        if isinstance(command, MpcPredictionResultReport):
             summary = {
                 "command_type": command.command_type,
                 "command_id": command.command_id,
@@ -121,12 +121,12 @@ class CoordinationOutboxPublisher:
                     if command.context is not None
                     else None
                 ),
-                "result_count": len(command.mpc_results or []),
-                "detail_count": cls.count_mpc_result_details(command),
+                "result_count": len(command.mpc_prediction_results or []),
+                "detail_count": cls.count_mpc_prediction_result_details(command),
             }
             return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
         return command.model_dump_json(indent=None)
 
     @staticmethod
-    def count_mpc_result_details(command: MpcResultReport) -> int:
-        return sum(len(result.details or []) for result in command.mpc_results or [])
+    def count_mpc_prediction_result_details(command: MpcPredictionResultReport) -> int:
+        return sum(len(result.details or []) for result in command.mpc_prediction_results or [])

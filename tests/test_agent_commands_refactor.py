@@ -32,10 +32,11 @@ from hydros_agent_sdk.mpc.models import (
     MpcOptimizeResponse,
     PredictedResult,
 )
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.commands import (
-    MpcResultReport,
+    MpcPredictionResultReport,
+    SimCommandEnvelope,
     SimTaskInitRequest,
     SimTaskInitResponse,
     SimTaskTerminateRequest,
@@ -185,7 +186,7 @@ class FakeMpcPlanningClient:
         return self.responses
 
 
-class FakeMpcResultReporter:
+class FakeMpcPredictionResultReporter:
     def __init__(self):
         self.published = []
 
@@ -1607,7 +1608,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("MPC sensor_data is empty; request will not be sent", log_output)
         opener.assert_not_called()
 
-    def test_mpc_result_reporter_builds_result_report_payload(self):
+    def test_mpc_prediction_result_reporter_builds_result_report_payload(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014",
             tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
@@ -1656,33 +1657,37 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
 
-        report = MpcResultReporter().build_report(source, state, [response])
+        report = MpcPredictionResultReporter().build_report(source, state, [response])
         payload = report.model_dump(by_alias=True)
 
-        self.assertIsInstance(report, MpcResultReport)
-        self.assertEqual(report.command_type, "mpc_result_report")
+        self.assertIsInstance(report, MpcPredictionResultReport)
+        self.assertEqual(report.command_type, "mpc_prediction_result_report")
+        parsed_report = SimCommandEnvelope.model_validate({"command": payload}).command
+        self.assertIsInstance(parsed_report, MpcPredictionResultReport)
         self.assertTrue(report.broadcast)
         self.assertEqual(payload["source_agent_instance"]["agent_id"], "agent-014")
-        self.assertEqual(payload["mpc_results"][0]["biz_scene_instance_id"], "scene-014")
-        self.assertEqual(payload["mpc_results"][0]["waterway_id"], "waterway-014")
-        self.assertEqual(payload["mpc_results"][0]["tenant_id"], "tenant-014")
-        self.assertEqual(payload["mpc_results"][0]["biz_scenario_id"], "scenario-014")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["command_type"], "OPENING")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["object_type"], "Gate")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["node_id"], 101)
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["object_id"], 501)
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["target_value"], 0.45)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["node_id"], 102)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["object_id"], 102)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
-        attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
+        self.assertEqual(payload["mpc_prediction_results"][0]["biz_scene_instance_id"], "scene-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["waterway_id"], "waterway-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["tenant_id"], "tenant-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["biz_scenario_id"], "scenario-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["total_step"], 36)
+        self.assertEqual(payload["mpc_prediction_results"][0]["execution_status"], "PENDING")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["command_type"], "OPENING")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_type"], "Gate")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["node_id"], 101)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_id"], 501)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["target_value"], 0.45)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["node_id"], 102)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["object_id"], 102)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["target_value"], 2.3)
+        attributes = json.loads(payload["mpc_prediction_results"][0]["details"][1]["attributes"])
         self.assertEqual(attributes["front_water_level"], 2.1)
         self.assertEqual(attributes["back_water_level"], 1.9)
         self.assertEqual(attributes["final_target_water_level"], 2.3)
         self.assertEqual(attributes["out_flow"], 33.0)
 
-    def test_mpc_result_reporter_builds_single_result_from_horizon_steps(self):
+    def test_mpc_prediction_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
         state = SchedulingTaskState(
             context=context,
@@ -1691,7 +1696,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             current_step=4,
         )
 
-        result = MpcResultReporter.build_result(
+        result = MpcPredictionResultReporter.build_prediction_result(
             mpc_task_state=state,
             horizon_step=[
                 HorizonStep(
@@ -1742,7 +1747,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result.details[1].object_id, 102)
         self.assertEqual(result.details[1].target_value, 2.3)
 
-    def test_mpc_result_reporter_builds_customize_report(self):
+    def test_mpc_prediction_result_reporter_builds_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-report")
         source = build_agent_instance("agent-014-customize-report", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
         state = SchedulingTaskState(
@@ -1752,7 +1757,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             current_step=4,
         )
 
-        report = MpcResultReporter().build_customize_report(
+        report = MpcPredictionResultReporter().build_customize_report(
             source_agent_instance=source,
             mpc_task_state=state,
             horizon_step=[
@@ -1772,16 +1777,16 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             plan_type="CUSTOMIZE",
         )
 
-        self.assertIsInstance(report, MpcResultReport)
+        self.assertIsInstance(report, MpcPredictionResultReport)
         self.assertEqual(report.context.biz_scene_instance_id, "scene-014-customize-report")
         self.assertEqual(report.source_agent_instance.agent_id, "agent-014-customize-report")
-        self.assertEqual(len(report.mpc_results), 1)
-        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
-        self.assertEqual(report.mpc_results[0].details[0].object_type, "Gate")
-        self.assertEqual(report.mpc_results[0].details[0].node_id, 101)
-        self.assertEqual(report.mpc_results[0].details[0].object_id, 501)
+        self.assertEqual(len(report.mpc_prediction_results), 1)
+        self.assertEqual(report.mpc_prediction_results[0].plan_type, "CUSTOMIZE")
+        self.assertEqual(report.mpc_prediction_results[0].details[0].object_type, "Gate")
+        self.assertEqual(report.mpc_prediction_results[0].details[0].node_id, 101)
+        self.assertEqual(report.mpc_prediction_results[0].details[0].object_id, 501)
 
-    def test_mpc_result_reporter_publishes_customize_report(self):
+    def test_mpc_prediction_result_reporter_publishes_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-publish")
         source = build_agent_instance("agent-014-customize-publish", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
         state = SchedulingTaskState(
@@ -1791,7 +1796,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             current_step=4,
         )
         enqueued = []
-        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+        reporter = MpcPredictionResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
 
         with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
             report = reporter.publish_customize_report(
@@ -1815,15 +1820,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             )
 
         self.assertIs(enqueued[0], report)
-        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
+        self.assertEqual(report.mpc_prediction_results[0].plan_type, "CUSTOMIZE")
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC customize result report prepared for coordinator", log_output)
-        self.assertIn("MPC customize result report enqueued to coordinator", log_output)
+        self.assertIn("MPC customize prediction result report prepared for coordinator", log_output)
+        self.assertIn("MPC customize prediction result report enqueued to coordinator", log_output)
         self.assertIn(report.command_id, log_output)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=1", log_output)
 
-    def test_mpc_result_reporter_accepts_current_predicted_result_fields(self):
+    def test_mpc_prediction_result_reporter_accepts_current_predicted_result_fields(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014-renamed-fields",
             tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
@@ -1862,9 +1867,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             }
         )
 
-        report = MpcResultReporter().build_report(source, state, [response])
+        report = MpcPredictionResultReporter().build_report(source, state, [response])
         payload = report.model_dump(by_alias=True)
-        detail = payload["mpc_results"][0]["details"][0]
+        detail = payload["mpc_prediction_results"][0]["details"][0]
 
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_value, 63.12)
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_value_type, "WATER_LEVEL")
@@ -1881,14 +1886,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(attributes["final_target_water_level"], 63.12)
         self.assertEqual(attributes["out_flow"], 18.5)
 
-    def test_mpc_result_reporter_converts_water_flow_target_attribute(self):
+    def test_mpc_prediction_result_reporter_converts_water_flow_target_attribute(self):
         state = SchedulingTaskState(
             context=SimulationContext(biz_scene_instance_id="scene-014-flow-target"),
             rolling_interval_steps=3,
             start_step=1,
             current_step=4,
         )
-        result = MpcResultReporter.build_result(
+        result = MpcPredictionResultReporter.build_prediction_result(
             mpc_task_state=state,
             horizon_step=[
                 HorizonStep(
@@ -1921,7 +1926,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(attributes["final_target_water_flow"], 18.7)
         self.assertNotIn("final_target_water_level", attributes)
 
-    def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
+    def test_mpc_prediction_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
         source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
         state = SchedulingTaskState(
@@ -1972,21 +1977,21 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
         enqueued = []
-        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+        reporter = MpcPredictionResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
 
         with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
             report = reporter.publish(source, state, [response])
 
         self.assertIs(enqueued[0], report)
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC result report prepared for coordinator", log_output)
-        self.assertIn("MPC result report enqueued to coordinator", log_output)
+        self.assertIn("MPC prediction result report prepared for coordinator", log_output)
+        self.assertIn("MPC prediction result report enqueued to coordinator", log_output)
         self.assertIn("scene-014-log", log_output)
         self.assertIn(report.command_id, log_output)
-        self.assertEqual(len(report.mpc_results[0].details), 3)
+        self.assertEqual(len(report.mpc_prediction_results[0].details), 3)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
-        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertNotIn('"object_id":501', log_output)
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
@@ -2029,7 +2034,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015",
@@ -2040,7 +2045,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
             object_agent_code_map={501: "GATE_AGENT_015"},
         )
         agent._metrics_subscriber.handle_payload(
@@ -2150,7 +2155,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015-managed",
@@ -2161,7 +2166,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
         )
         agent._metrics_subscriber.handle_payload(
             "metrics/topic",
@@ -2249,7 +2254,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015-parent-map",
@@ -2260,7 +2265,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
             object_agent_code_map={20600: "GATE_AGENT_015_PARENT"},
         )
         agent._metrics_subscriber.handle_payload(
@@ -2293,7 +2298,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(sent_commands[0].target_value_type, "OPENING")
         self.assertEqual(sent_commands[0].target_value, 1.68)
 
-    def test_coordination_client_sends_local_mpc_result_report(self):
+    def test_coordination_client_sends_local_mpc_prediction_result_report(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -2307,17 +2312,17 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        report = MpcResultReport(
+        report = MpcPredictionResultReport(
             command_id="report-016",
             context=context,
             source_agent_instance=source,
-            mpc_results=[],
+            mpc_prediction_results=[],
             broadcast=True,
         )
 
         self.assertTrue(client.outbox_publisher.should_send(report))
 
-    def test_coordination_client_logs_mpc_result_report_payload_when_sent(self):
+    def test_coordination_client_logs_mpc_prediction_result_report_payload_when_sent(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -2334,7 +2339,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         publish_result = Mock()
         client.outbox_publisher.mqtt_client = Mock()
         client.outbox_publisher.mqtt_client.publish.return_value = publish_result
-        report = MpcResultReporter().build_report(
+        report = MpcPredictionResultReporter().build_report(
             source,
             SchedulingTaskState(
                 context=context,
@@ -2393,16 +2398,16 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         client.outbox_publisher.mqtt_client.publish.assert_called_once()
         publish_result.wait_for_publish.assert_called_once()
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC result report sent to coordinator", log_output)
+        self.assertIn("MPC prediction result report sent to coordinator", log_output)
         self.assertIn(report.command_id, log_output)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
-        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertNotIn('"object_id":501', log_output)
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
-    def test_coordination_client_truncates_mpc_result_report_when_enqueued(self):
+    def test_coordination_client_truncates_mpc_prediction_result_report_when_enqueued(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -2416,7 +2421,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        report = MpcResultReporter().build_report(
+        report = MpcPredictionResultReporter().build_report(
             source,
             SchedulingTaskState(
                 context=context,
@@ -2474,7 +2479,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         log_output = "\n".join(logs.output)
         self.assertIn("Enqueued command", log_output)
-        self.assertIn('"command_type":"mpc_result_report"', log_output)
+        self.assertIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertIn('"result_count":1', log_output)
         self.assertIn('"detail_count":3', log_output)
         self.assertNotIn('"object_id":501', log_output)

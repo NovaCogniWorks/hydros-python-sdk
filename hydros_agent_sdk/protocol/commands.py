@@ -10,7 +10,7 @@ from .models import (
     CommandStatus,
 )
 from .base import HydroBaseModel
-from .mpc_results import MpcResult
+from .mpc_prediction_results import MpcPredictionResult
 from hydros_agent_sdk.scenario_config import SimAgentProperties, SimulationRuntimeOptions
 
 # 指令类型常量
@@ -27,9 +27,9 @@ SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
 SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
-SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
+SIMCMD_MPC_PREDICTION_RESULT_REPORT = "mpc_prediction_result_report"
 SIMCMD_MPC_EXECUTION_STATUS_REPORT = "mpc_execution_status_report"
-SIMCMD_PID_CONTROL_EXECUTION_REPORT = "pid_control_execution_report"
+SIMCMD_EDGE_CONTROL_RESULT_REPORT = "edge_control_result_report"
 SIMCMD_EDGE_CONTROL_EXECUTION_REPORT = "edge_control_execution_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
@@ -163,14 +163,14 @@ class AgentInstanceStatusReport(SimCommand):
     )
     init_result: Optional[Dict[str, Any]] = None
 
-class MpcResultReport(SimCommand):
+class MpcPredictionResultReport(SimCommand):
     """
-    MPC 优化结果报告。
+    MPC 预测结果报告。
     由中央调度智能体发送，并由协调器或数据侧消费。
     """
-    command_type: Literal["mpc_result_report"] = SIMCMD_MPC_RESULT_REPORT
+    command_type: Literal["mpc_prediction_result_report"] = SIMCMD_MPC_PREDICTION_RESULT_REPORT
     source_agent_instance: HydroAgentInstance
-    mpc_results: List[MpcResult]
+    mpc_prediction_results: List[MpcPredictionResult]
 
 class MpcExecutionStatusReport(SimCommand):
     """
@@ -217,17 +217,15 @@ class MpcExecutionStatusReport(SimCommand):
         validation_alias=AliasChoices("executed_at", "executedAt"),
     )
 
-class PidControlExecutionReport(SimCommand):
+class EdgeControlResultReport(SimCommand):
     """
-    PID 控制执行报告。
-    run_result/actuator_results 保持轻量 dict，避免在 SDK 内复制 Java 深层模型。
+    Edge 控制结果报告。
+    report/details 保持轻量 dict，避免在 SDK 内复制 Java 深层模型。
     """
-    command_type: Literal["pid_control_execution_report"] = SIMCMD_PID_CONTROL_EXECUTION_REPORT
+    command_type: Literal["edge_control_result_report"] = SIMCMD_EDGE_CONTROL_RESULT_REPORT
     source_agent_instance: HydroAgentInstance
-    run_result: Dict[str, Any] = Field(validation_alias=AliasChoices("run_result", "runResult"))
-    actuator_results: List[Dict[str, Any]] = Field(
-        validation_alias=AliasChoices("actuator_results", "actuatorResults")
-    )
+    report: Dict[str, Any]
+    details: List[Dict[str, Any]]
 
 class EdgeControlExecutionReport(SimCommand):
     """
@@ -238,7 +236,7 @@ class EdgeControlExecutionReport(SimCommand):
     source_agent_instance: HydroAgentInstance
     target_agent_instance: HydroAgentInstance
     exec_command_id: str
-    exec_run_id: Optional[str] = None
+    control_run_id: Optional[str] = None
     object_type: str
     object_id: int
     target_value_type: str
@@ -292,9 +290,9 @@ CommandUnion = Union[
     OutflowTimeSeriesDataUpdateResponse,
     DeviceStatusChangeResponse,
     AgentInstanceStatusReport,
-    MpcResultReport,
+    MpcPredictionResultReport,
     MpcExecutionStatusReport,
-    PidControlExecutionReport,
+    EdgeControlResultReport,
     EdgeControlExecutionReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,

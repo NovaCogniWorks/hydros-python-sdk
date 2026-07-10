@@ -10,7 +10,7 @@ from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
     HydroEventAckResponse,
     HydroEventCommand,
-    MpcResultReport,
+    MpcPredictionResultReport,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
     OutflowTimeSeriesRequest,
@@ -25,7 +25,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateResponse,
     SIMCMD_AGENT_INSTANCE_STATUS_REPORT,
     SIMCMD_HYDRO_EVENT_COMMAND,
-    SIMCMD_MPC_RESULT_REPORT,
+    SIMCMD_MPC_PREDICTION_RESULT_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST,
     SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_TASK_INIT_REQUEST,
@@ -71,7 +71,7 @@ class CoordinationCommandRouter:
             SIMCMD_HYDRO_EVENT_COMMAND: self.handle_hydro_event_command,
             SIMCMD_TIME_SERIES_CALCULATION_REQUEST: self.handle_time_series_calculation,
             SIMCMD_AGENT_INSTANCE_STATUS_REPORT: self.handle_agent_status_report,
-            SIMCMD_MPC_RESULT_REPORT: self.handle_mpc_result_report,
+            SIMCMD_MPC_PREDICTION_RESULT_REPORT: self.handle_mpc_prediction_result_report,
             SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self.handle_outflow_time_series_request,
             SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self.handle_outflow_time_series_data_update,
         }
@@ -237,11 +237,11 @@ class CoordinationCommandRouter:
             return self.callback.on_agent_instance_sibling_status_updated(report)
         return None
 
-    def handle_mpc_result_report(self, command: SimCommand):
+    def handle_mpc_prediction_result_report(self, command: SimCommand):
         report = command
-        assert isinstance(report, MpcResultReport)
+        assert isinstance(report, MpcPredictionResultReport)
         if self.callback.is_remote_agent(report.source_agent_instance):
-            return self.callback.on_mpc_result(report)
+            return self.callback.on_mpc_prediction_result(report)
         return None
 
     def handle_outflow_time_series_request(self, command: SimCommand):
