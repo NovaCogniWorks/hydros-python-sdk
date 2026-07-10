@@ -31,6 +31,7 @@ class MpcPredictionResult(HydroBaseModel):
     biz_scenario_id: Optional[str] = None
     step: int
     total_step: Optional[int] = None
+    roll_steps: Optional[int] = None
     execution_status: Optional[str] = None
     plan_type: Optional[str] = None
     loss: Optional[float] = None

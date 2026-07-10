@@ -198,11 +198,20 @@ class MpcPredictionResultReporter:
             biz_scenario_id=cls._context_biz_scenario_id(context) if context else None,
             step=mpc_task_state.current_step if mpc_task_state else 0,
             total_step=mpc_task_state.total_steps if mpc_task_state else None,
+            roll_steps=mpc_task_state.rolling_interval_steps if mpc_task_state else None,
             execution_status=MPC_PLAN_DISPATCH_PENDING,
             plan_type=plan_type,
             loss=loss,
             gate_operations=gate_operations,
             gate_amplitude=gate_amplitude,
+            attributes=json.dumps(
+                {
+                    "loss": loss,
+                    "gate_operations": gate_operations,
+                    "gate_amplitude": gate_amplitude,
+                },
+                ensure_ascii=False,
+            ),
             details=details,
         )
 
