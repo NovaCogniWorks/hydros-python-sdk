@@ -18,6 +18,9 @@ class MpcPredictionResultDetail(HydroBaseModel):
     object_id: Optional[int] = None
     value: Optional[float] = None
     target_value: Optional[float] = None
+    front_water_level: Optional[float] = None
+    back_water_level: Optional[float] = None
+    out_flow: Optional[float] = None
     horizon_time: Optional[str] = None
     attributes: Optional[str] = None
 

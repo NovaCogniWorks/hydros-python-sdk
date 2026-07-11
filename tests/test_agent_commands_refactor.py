@@ -1687,11 +1687,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["node_id"], 102)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["object_id"], 102)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["target_value"], 2.3)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["front_water_level"], 2.1)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["back_water_level"], 1.9)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["out_flow"], 33.0)
         attributes = json.loads(payload["mpc_prediction_results"][0]["details"][1]["attributes"])
-        self.assertEqual(attributes["front_water_level"], 2.1)
-        self.assertEqual(attributes["back_water_level"], 1.9)
         self.assertEqual(attributes["final_target_water_level"], 2.3)
-        self.assertEqual(attributes["out_flow"], 33.0)
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
 
     def test_mpc_prediction_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
@@ -1886,11 +1889,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(detail["object_id"], 31400)
         self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
+        self.assertEqual(detail["front_water_level"], 63.0)
+        self.assertEqual(detail["back_water_level"], 62.8)
+        self.assertEqual(detail["out_flow"], 18.5)
         attributes = json.loads(detail["attributes"])
-        self.assertEqual(attributes["front_water_level"], 63.0)
-        self.assertEqual(attributes["back_water_level"], 62.8)
         self.assertEqual(attributes["final_target_water_level"], 63.12)
-        self.assertEqual(attributes["out_flow"], 18.5)
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
 
     def test_mpc_prediction_result_reporter_converts_water_flow_target_attribute(self):
         state = SchedulingTaskState(
@@ -1927,10 +1933,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(detail.node_id, 31401)
         self.assertEqual(detail.object_id, 31401)
         self.assertEqual(detail.target_value, 18.7)
-        self.assertEqual(attributes["front_water_level"], 63.0)
-        self.assertEqual(attributes["back_water_level"], 62.8)
+        self.assertEqual(detail.front_water_level, 63.0)
+        self.assertEqual(detail.back_water_level, 62.8)
+        self.assertEqual(detail.out_flow, 18.5)
         self.assertEqual(attributes["final_target_water_flow"], 18.7)
         self.assertNotIn("final_target_water_level", attributes)
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
 
     def test_mpc_prediction_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")

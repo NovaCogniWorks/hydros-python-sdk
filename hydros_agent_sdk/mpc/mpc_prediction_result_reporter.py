@@ -255,9 +255,6 @@ class MpcPredictionResultReporter:
         horizon_step: Optional[int],
     ) -> MpcPredictionResultDetail:
         attributes = {
-            "front_water_level": predicted_result.front_water_level,
-            "back_water_level": predicted_result.back_water_level,
-            "out_flow": predicted_result.out_flow,
             "efficiency": predicted_result.efficiency,
         }
         target_value_type = predicted_result.final_target_value_type
@@ -273,6 +270,9 @@ class MpcPredictionResultReporter:
             object_id=predicted_result.object_id,
             value=predicted_result.front_water_level,
             target_value=predicted_result.final_target_value,
+            front_water_level=predicted_result.front_water_level,
+            back_water_level=predicted_result.back_water_level,
+            out_flow=predicted_result.out_flow,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
 
