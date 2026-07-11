@@ -135,6 +135,22 @@ from hydros_agent_sdk.agent_commands import (
     AgentCommandClient,
     StationTargetValueCommandBuilder,
 )
+from hydros_agent_sdk.control_algorithms import (
+    ControlActuator,
+    ControlActuatorTarget,
+    ControlAlgorithm,
+    ControlAlgorithmHttpService,
+    ControlAlgorithmContext,
+    ControlAlgorithmInput,
+    ControlAlgorithmOutput,
+    ControlAlgorithmRuntime,
+    ControlAlgorithmStatus,
+    ControlSignal,
+    ControlTaskType,
+    ControlValueRange,
+    SignalType,
+    create_control_algorithm_http_server,
+)
 
 __all__ = [
     "__version__",
@@ -237,6 +253,22 @@ __all__ = [
     "AgentCommandRuntime",
     "AgentCommandClient",
     "StationTargetValueCommandBuilder",
+
+    # 控制算法开发接口
+    "ControlAlgorithm",
+    "ControlAlgorithmHttpService",
+    "ControlAlgorithmRuntime",
+    "ControlAlgorithmInput",
+    "ControlAlgorithmOutput",
+    "ControlAlgorithmContext",
+    "ControlSignal",
+    "ControlActuator",
+    "ControlActuatorTarget",
+    "ControlValueRange",
+    "ControlTaskType",
+    "ControlAlgorithmStatus",
+    "SignalType",
+    "create_control_algorithm_http_server",
 
     # 工具类
     "HydroObjectUtilsV2",
