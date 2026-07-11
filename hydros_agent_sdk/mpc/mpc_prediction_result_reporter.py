@@ -201,9 +201,6 @@ class MpcPredictionResultReporter:
             roll_steps=mpc_task_state.rolling_interval_steps if mpc_task_state else None,
             execution_status=MPC_PLAN_DISPATCH_PENDING,
             plan_type=plan_type,
-            loss=loss,
-            gate_operations=gate_operations,
-            gate_amplitude=gate_amplitude,
             attributes=json.dumps(
                 {
                     "loss": loss,

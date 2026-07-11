@@ -37,8 +37,5 @@ class MpcPredictionResult(HydroBaseModel):
     roll_steps: Optional[int] = None
     execution_status: Optional[str] = None
     plan_type: Optional[str] = None
-    loss: Optional[float] = None
-    gate_operations: Optional[int] = None
-    gate_amplitude: Optional[float] = None
     attributes: Optional[str] = None
     details: List[MpcPredictionResultDetail] = Field(default_factory=list)
