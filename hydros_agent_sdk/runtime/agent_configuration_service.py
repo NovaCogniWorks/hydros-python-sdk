@@ -26,6 +26,8 @@ class AgentConfigurationService:
             )
             return
 
+        self._apply_request_properties(agent, matching_agent, request)
+
         if not matching_agent.agent_configuration_url:
             logger.warning(f"No agent_configuration_url provided for agent '{agent.agent_code}'")
             return
@@ -45,6 +47,27 @@ class AgentConfigurationService:
         except Exception as exc:
             logger.error(f"Failed to load agent configuration from {agent_config_url}: {exc}")
             raise
+
+    @staticmethod
+    def _apply_request_properties(agent, matching_agent, request) -> None:
+        config_params = getattr(request, "agent_config_params", None) or {}
+        if not config_params:
+            return
+
+        properties = (
+            config_params.get(getattr(matching_agent, "agent_code", None))
+            or config_params.get(getattr(matching_agent, "agent_type", None))
+            or {}
+        )
+        if not isinstance(properties, dict):
+            raise ValueError("agent_config_params values must be objects")
+        if properties:
+            agent.properties.update(properties)
+            logger.info(
+                "Applied %s inline initialization properties for agent '%s'",
+                len(properties),
+                agent.agent_code,
+            )
 
     def _find_matching_agent(self, agent, request):
         for requested_agent in request.agent_list:

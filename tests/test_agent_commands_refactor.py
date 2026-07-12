@@ -35,6 +35,7 @@ from hydros_agent_sdk.mpc.models import (
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     MpcPredictionResultReport,
     SimCommandEnvelope,
     SimTaskInitRequest,
@@ -2095,6 +2096,95 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(sent_commands[0].object_type, "Gate")
         self.assertEqual(sent_commands[0].target_value_type, "OPENING")
         self.assertEqual(sent_commands[0].target_value, 0.45)
+
+    def test_mpc_central_dispatches_the_current_horizon_on_each_tick(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+        execution_reports = []
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            mqtt_client=Mock(),
+            sim_coordination_callback=callback,
+            enqueue=execution_reports.append,
+        )
+        context = SimulationContext(biz_scene_instance_id="scene-current-horizon")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
+        target = build_agent_instance("gate-agent-current", "GATE_AGENT_CURRENT", "node-b", context)
+        callback._store_sibling_agent_instance(target)
+        mpc_response = MpcOptimizeResponse(
+            plan_type="optimal",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        ControlObjectResult(object_type="Gate", object_id=501, target_value=0.45, target_value_type="OPENING")
+                    ],
+                ),
+                HorizonStep(
+                    horizon_step=2,
+                    control_object_list=[
+                        ControlObjectResult(object_type="Gate", object_id=501, target_value=0.55, target_value_type="OPENING")
+                    ],
+                ),
+            ],
+        )
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-current-horizon",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            mpc_planning_client=FakeMpcPlanningClient([mpc_response]),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
+            object_agent_code_map={501: "GATE_AGENT_CURRENT"},
+        )
+        sent_commands = []
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
+            agent.on_time_series_data_update(
+                build_time_series_update_request(context, auto_schedule_at_step=1)
+            )
+            agent.on_tick(TickCmdRequest(command_id="tick-current-horizon", context=context, step=2))
+
+        self.assertEqual([command.target_value for command in sent_commands], [0.45, 0.55])
+        self.assertEqual(
+            [report.execution_status for report in execution_reports],
+            ["DISPATCHED", "DISPATCHED"],
+        )
+
+        agent._handle_agent_command_response(
+            HydroStationTargetValueResponse.from_request(
+                sent_commands[0],
+                command_status=CommandStatus.SUCCEED,
+                success=True,
+            )
+        )
+        agent.on_station_control_execution(
+            EdgeControlExecutionReport(
+                command_id="edge-terminal-current-horizon",
+                context=context,
+                broadcast=True,
+                source_agent_instance=target,
+                target_agent_instance=agent,
+                exec_command_id=sent_commands[0].command_id,
+                object_type="Gate",
+                object_id=501,
+                target_value_type="OPENING",
+                target_value=0.45,
+                exec_status="COMPLETED",
+            )
+        )
+        self.assertEqual(
+            [report.execution_status for report in execution_reports],
+            ["DISPATCHED", "DISPATCHED", "STARTED", "COMPLETED"],
+        )
 
     def test_central_scheduling_agent_resolves_mpc_target_from_managed_top_objects(self):
         state_manager = AgentStateManager()

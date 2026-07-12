@@ -8,7 +8,7 @@ import logging
 import time
 from queue import Empty, Queue
 from threading import Event, Thread
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from hydros_agent_sdk.protocol.models import CommandStatus
 
@@ -37,6 +37,8 @@ class AgentCommandQueueService:
         pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
         pending_retry_delay_ms: int = 50,
         max_workers: int = 8,
+        ack_listeners: Optional[List[Callable[[HydroCommandReceivedAckReply], None]]] = None,
+        response_listeners: Optional[List[Callable[[AgentCommandResponse], None]]] = None,
     ):
         self.handler_registry = handler_registry
         self.state_manager = state_manager
@@ -56,6 +58,8 @@ class AgentCommandQueueService:
             enqueue_command=self._command_queue.put,
             max_workers=self.max_workers,
         )
+        self._ack_listeners = list(ack_listeners or [])
+        self._response_listeners = list(response_listeners or [])
 
     def start(self) -> None:
         if self._running.is_set():
@@ -89,11 +93,15 @@ class AgentCommandQueueService:
         if isinstance(command, HydroCommandReceivedAckReply):
             if not self.route_planner.should_track_inbound(command):
                 logger.debug("忽略非本地 ACK: type=%s id=%s", command.command_type, command.command_id)
+                return
+            self._notify(self._ack_listeners, command, "ack")
             return
 
         if isinstance(command, AgentCommandResponse):
             if not self.route_planner.should_track_inbound(command):
                 logger.debug("忽略非本地 response: type=%s id=%s", command.command_type, command.command_id)
+                return
+            self._notify(self._response_listeners, command, "response")
             return
 
         logger.debug("忽略未知入站命令: type=%s id=%s", command.command_type, command.command_id)
@@ -112,6 +120,26 @@ class AgentCommandQueueService:
         predicate: Optional[Callable[[AgentCommand], bool]],
     ) -> None:
         self.route_planner.set_pending_command_predicate(predicate)
+
+    def add_ack_listener(
+        self,
+        listener: Callable[[HydroCommandReceivedAckReply], None],
+    ) -> None:
+        self._ack_listeners.append(listener)
+
+    def add_response_listener(
+        self,
+        listener: Callable[[AgentCommandResponse], None],
+    ) -> None:
+        self._response_listeners.append(listener)
+
+    @staticmethod
+    def _notify(listeners, command: AgentCommand, kind: str) -> None:
+        for listener in list(listeners):
+            try:
+                listener(command)
+            except Exception:
+                logger.exception("Agent command %s listener failed: id=%s", kind, command.command_id)
 
     def _queue_loop(self) -> None:
         while self._running.is_set():

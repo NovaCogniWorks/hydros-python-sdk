@@ -17,6 +17,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
+    EdgeControlExecutionReport,
 )
 from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
@@ -270,6 +271,8 @@ class MultiAgentCallback(SimCoordinationCallback):
         created_agents = []
         context_agents = {}
         routed_agent_codes = set()
+        failed_agents = []
+        init_error_messages = []
 
         # 逐个处理 agent_list 中的智能体
         for agent_def in request.agent_list:
@@ -289,6 +292,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
             logger.info(f"  Creating agent: {routed_agent_code} (requested: {agent_code})")
 
+            agent = None
             try:
                 # 创建智能体实例
                 agent = factory.create_agent(
@@ -327,6 +331,9 @@ class MultiAgentCallback(SimCoordinationCallback):
                 logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
 
             except Exception as e:
+                if agent is not None:
+                    failed_agents.append(agent)
+                init_error_messages.append(f"{routed_agent_code}: {e}")
                 logger.error(f"  ✗ Failed to create agent {routed_agent_code}: {e}", exc_info=True)
                 # 继续处理其他智能体
 
@@ -349,6 +356,13 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.info(f"SimTaskInitResponse created with {len(created_agents)} agent(s)")
             return response
         else:
+            if failed_agents:
+                return ResponseFactory.init_failed(
+                    failed_agents[0],
+                    request,
+                    error_code="AGENT_INIT_FAILURE",
+                    error_message="; ".join(init_error_messages),
+                )
             logger.warning(f"No agents created for task {context_id}")
             return None
 
@@ -597,3 +611,11 @@ class MultiAgentCallback(SimCoordinationCallback):
                 exc_info=True
             )
             return None
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport):
+        """把 edge 控制终态交给同一任务中的中心调度 Agent。"""
+        context_agents = self.agents.get(report.context.biz_scene_instance_id, {})
+        for agent in context_agents.values():
+            handler = getattr(agent, "on_station_control_execution", None)
+            if callable(handler):
+                handler(report)

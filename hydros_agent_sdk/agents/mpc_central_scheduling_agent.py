@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -12,7 +13,10 @@ from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilde
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
+from hydros_agent_sdk.agent_commands.models import HydroStationTargetValueRequest, HydroStationTargetValueResponse
 from hydros_agent_sdk.protocol.commands import (
+    MpcExecutionStatusReport,
+    EdgeControlExecutionReport,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
@@ -25,6 +29,7 @@ from hydros_agent_sdk.protocol.models import (
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
+from hydros_agent_sdk.utils import generate_coordination_command_id
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +106,7 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         )
 
         self._mpc_options = mpc_options
+        self._pending_mpc_dispatches: Dict[str, Dict[str, Any]] = {}
         self._init_mpc_configuration(mpc_options, sim_coordination_client)
         self._init_default_mpc_runtime(context, mpc_options)
 
@@ -155,6 +161,8 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
             properties=self.properties,
             optimize_step=self.on_optimization,
             dispatch_control_commands=self._control_command_dispatcher.dispatch,
+            build_control_commands=self._control_command_builder.build_from_mpc_responses,
+            record_dispatched_control_commands=self._record_dispatched_control_commands,
             set_current_step=lambda step: setattr(self, "_current_step", step),
             get_current_step=lambda: self._current_step,
             set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
@@ -163,6 +171,119 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
                 mpc_options.target_and_constrain_config_url
             ),
             configured_mpc_service_base_url=self._configured_mpc_service_base_url,
+        )
+        self._agent_command_gateway.add_response_listener(self._handle_agent_command_response)
+
+    def _record_dispatched_control_commands(
+        self,
+        commands: List[Any],
+        horizon_step: int,
+    ) -> None:
+        task_state = self._mpc_rolling_runtime.require_task_state()
+        dispatched_at = datetime.now().isoformat()
+        for command in commands:
+            if not isinstance(command, HydroStationTargetValueRequest):
+                continue
+            dispatch_key = self._build_dispatch_key(command, task_state.current_step, horizon_step)
+            self._pending_mpc_dispatches[command.command_id] = {
+                "optimize_step": task_state.latest_control_plan_start_step,
+                "horizon_step": horizon_step,
+                "dispatch_key": dispatch_key,
+                "object_id": command.object_id,
+                "object_type": command.object_type,
+                "target_value_type": command.target_value_type,
+                "target_value": command.target_value,
+                "dispatched_at": dispatched_at,
+            }
+            self._publish_mpc_execution_status(
+                command.command_id,
+                execution_status="DISPATCHED",
+                dispatched_at=dispatched_at,
+            )
+
+    def _handle_agent_command_response(self, response) -> None:
+        if not isinstance(response, HydroStationTargetValueResponse):
+            return
+        if response.command_id not in self._pending_mpc_dispatches:
+            return
+        accepted = response.command_status == "SUCCEED"
+        self._publish_mpc_execution_status(
+            response.command_id,
+            execution_status="STARTED" if accepted else "FAILED",
+            error_code=response.error_code,
+            error_message=response.error_message,
+            executed_at=datetime.now().isoformat(),
+        )
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport) -> None:
+        if report.exec_command_id not in self._pending_mpc_dispatches:
+            return
+        completed = report.exec_status == "COMPLETED"
+        self._publish_mpc_execution_status(
+            report.exec_command_id,
+            execution_status="COMPLETED" if completed else "FAILED",
+            error_code=report.error_code,
+            error_message=report.error_message,
+            executed_at=report.finished_time or datetime.now().isoformat(),
+        )
+        self._pending_mpc_dispatches.pop(report.exec_command_id, None)
+
+    def _publish_mpc_execution_status(
+        self,
+        command_id: str,
+        execution_status: str,
+        dispatched_at: Optional[str] = None,
+        executed_at: Optional[str] = None,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        dispatch = self._pending_mpc_dispatches.get(command_id)
+        if dispatch is None:
+            return
+        enqueue = getattr(self.sim_coordination_client, "enqueue", None)
+        if not callable(enqueue):
+            logger.warning(
+                "Skip MPC execution status report because the coordination outbox is unavailable: command=%s",
+                command_id,
+            )
+            return
+        enqueue(
+            MpcExecutionStatusReport(
+                command_id=generate_coordination_command_id(),
+                context=self.context,
+                broadcast=True,
+                source_agent_instance=self,
+                optimize_step=dispatch["optimize_step"],
+                horizon_step=dispatch["horizon_step"],
+                object_id=dispatch["object_id"],
+                object_type=dispatch["object_type"],
+                target_value_type=dispatch["target_value_type"],
+                target_value=dispatch["target_value"],
+                execution_command_id=command_id,
+                dispatch_key=dispatch["dispatch_key"],
+                execution_status=execution_status,
+                dispatched_at=dispatched_at or dispatch["dispatched_at"],
+                executed_at=executed_at,
+                execution_error_code=error_code,
+                execution_error_message=error_message,
+            )
+        )
+
+    def _build_dispatch_key(
+        self,
+        command: HydroStationTargetValueRequest,
+        optimize_step: int,
+        horizon_step: int,
+    ) -> str:
+        return ":".join(
+            str(value)
+            for value in (
+                self.context.biz_scene_instance_id,
+                optimize_step,
+                horizon_step,
+                command.object_id,
+                command.target_value_type,
+            )
         )
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
@@ -207,12 +328,8 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         回传 mpc_prediction_result_report。子类仍可覆盖此方法以接入自定义优化逻辑。
         """
         task_state = self._mpc_rolling_runtime.require_task_state()
-        responses = self._mpc_optimization_service.optimize(
+        return self._mpc_optimization_service.optimize(
             self,
             task_state,
             step,
         )
-        if not responses:
-            return None
-
-        return self._control_command_builder.build_from_mpc_responses(responses)

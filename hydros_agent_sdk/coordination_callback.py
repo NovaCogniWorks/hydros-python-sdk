@@ -23,6 +23,8 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
     MpcPredictionResultReport,
+    MpcExecutionStatusReport,
+    EdgeControlExecutionReport,
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.context_manager import ContextManager
@@ -325,6 +327,22 @@ class SimCoordinationCallback(ABC):
             "MPC prediction result report received: source=%s, result_count=%s",
             report.source_agent_instance.agent_id,
             len(report.mpc_prediction_results),
+        )
+
+    def on_mpc_execution_status(self, report: MpcExecutionStatusReport):
+        """处理远端 central 回传的 MPC 控制执行状态。"""
+        logger.info(
+            "MPC execution status report received: command=%s, status=%s",
+            report.execution_command_id,
+            report.execution_status,
+        )
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport):
+        """处理远端 edge 回传的站点控制终态。"""
+        logger.info(
+            "Station control execution report received: command=%s, status=%s",
+            report.exec_command_id,
+            report.exec_status,
         )
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):

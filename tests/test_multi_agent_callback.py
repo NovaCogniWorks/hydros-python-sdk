@@ -78,6 +78,7 @@ class FakeAgent:
             context=request.context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self.instance,
+            completed_step=request.step,
             broadcast=False,
         )
 

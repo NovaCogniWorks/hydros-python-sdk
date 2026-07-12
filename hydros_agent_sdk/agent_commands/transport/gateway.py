@@ -26,6 +26,8 @@ class AgentCommandGateway:
         self.client_factory = client_factory
         self._agent_command_client: Optional[AgentCommandClient] = None
         self._agent_command_client_started = False
+        self._ack_listeners = []
+        self._response_listeners = []
 
     @property
     def client(self) -> Optional[AgentCommandClient]:
@@ -49,6 +51,10 @@ class AgentCommandGateway:
                 state_manager=self.state_manager,
                 sender=client.publish_command,
             )
+            for listener in self._ack_listeners:
+                runtime.add_ack_listener(listener)
+            for listener in self._response_listeners:
+                runtime.add_response_listener(listener)
             client.bind_runtime(runtime)
             self._agent_command_client = client
         return self._agent_command_client
@@ -70,3 +76,13 @@ class AgentCommandGateway:
     def send_command(self, command: AgentCommand) -> None:
         self.start()
         self.get_or_create_agent_command_client().send_command(command)
+
+    def add_ack_listener(self, listener) -> None:
+        self._ack_listeners.append(listener)
+        if self._agent_command_client is not None:
+            self._agent_command_client.runtime.add_ack_listener(listener)
+
+    def add_response_listener(self, listener) -> None:
+        self._response_listeners.append(listener)
+        if self._agent_command_client is not None:
+            self._agent_command_client.runtime.add_response_listener(listener)

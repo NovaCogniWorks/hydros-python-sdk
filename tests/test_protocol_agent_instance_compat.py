@@ -253,7 +253,7 @@ class CoordinationReportContractTest(unittest.TestCase):
             "source_agent_instance": source_agent.model_dump(mode="json", by_alias=True),
             "target_agent_instance": target_agent.model_dump(mode="json", by_alias=True),
             "exec_command_id": "CMD_EXEC",
-            "control_run_id": "RUN_001",
+            "exec_run_id": "RUN_001",
             "object_type": "GATE",
             "object_id": 1001,
             "target_value_type": "GATE_OPENING",
@@ -263,30 +263,24 @@ class CoordinationReportContractTest(unittest.TestCase):
             "error_message": None,
             "started_time": "2026-06-23T15:58:00+08:00",
             "finished_time": "2026-06-23T15:58:01+08:00",
-            "group_id": "control-group-001",
-            "session_id": "hydraulic-session-001",
-            "sub_step_index": 6,
         }
 
         envelope = SimCommandEnvelope(command=payload)
 
         self.assertIsInstance(envelope.command, EdgeControlExecutionReport)
         self.assertEqual(envelope.command.exec_command_id, "CMD_EXEC")
-        self.assertEqual(envelope.command.control_run_id, "RUN_001")
+        self.assertEqual(envelope.command.exec_run_id, "RUN_001")
         self.assertEqual(envelope.command.target_agent_instance.agent_code, "CENTRAL_SCHEDULING_AGENT")
         self.assertEqual(envelope.command.exec_status, "COMPLETED")
-        self.assertEqual(envelope.command.group_id, "control-group-001")
-        self.assertEqual(envelope.command.session_id, "hydraulic-session-001")
-        self.assertEqual(envelope.command.sub_step_index, 6)
         serialized = envelope.command.model_dump(mode="json", by_alias=True)
-        self.assertEqual(serialized["control_run_id"], "RUN_001")
-        self.assertNotIn("exec_run_id", serialized)
+        self.assertEqual(serialized["exec_run_id"], "RUN_001")
+        self.assertNotIn("control_run_id", serialized)
 
-        unsupported_payload = dict(payload)
-        unsupported_payload.pop("control_run_id")
-        unsupported_payload["exec_run_id"] = "UNSUPPORTED_RUN_001"
-        unsupported_envelope = SimCommandEnvelope(command=unsupported_payload)
-        self.assertIsNone(unsupported_envelope.command.control_run_id)
+        old_field_payload = dict(payload)
+        old_field_payload.pop("exec_run_id")
+        old_field_payload["control_run_id"] = "OLD_RUN_001"
+        with self.assertRaises(ValidationError):
+            SimCommandEnvelope(command=old_field_payload)
 
     def test_mpc_execution_status_report_envelope_matches_java_command_type(self):
         context = make_context()

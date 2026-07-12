@@ -79,6 +79,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
             context=context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=agent,
+            completed_step=1,
         )
 
         result = support.execute_with_status(
@@ -107,6 +108,7 @@ class AgentInstanceStatusSupportTest(unittest.TestCase):
             context=context,
             command_status=CommandStatus.FAILED,
             source_agent_instance=agent,
+            completed_step=1,
         )
 
         support.execute_with_status(

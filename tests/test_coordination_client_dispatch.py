@@ -71,6 +71,7 @@ class ReturningCallback(SimCoordinationCallback):
             context=request.context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self.agent,
+            completed_step=request.step,
             broadcast=False,
         )
 
@@ -177,6 +178,7 @@ class TaskIsolatedBlockingCallback(ReturningCallback):
             context=request.context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=agent,
+            completed_step=request.step,
             broadcast=False,
         )
 

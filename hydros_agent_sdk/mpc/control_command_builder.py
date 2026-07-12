@@ -10,7 +10,7 @@ from hydros_agent_sdk.agent_commands.models import (
     HydroStationTargetValueRequest,
 )
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
-from hydros_agent_sdk.mpc.models import ControlObjectResult, MpcOptimizeResponse
+from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, MpcOptimizeResponse
 from hydros_agent_sdk.utils import generate_agent_command_id
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
     def build_from_mpc_responses(
         self,
         responses: List[MpcOptimizeResponse],
+        horizon_step: Optional[int] = None,
     ) -> List[AgentCommand]:
         control_commands: List[AgentCommand] = []
         for response in responses:
@@ -38,8 +39,14 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                 )
                 continue
 
-            first_control = response.horizon_controls[0]
-            for control_object_result in first_control.control_object_list or []:
+            selected_horizon = self._select_horizon(response, horizon_step)
+            if selected_horizon is None:
+                logger.debug(
+                    "Skip MPC response because requested horizon is missing: horizon_step=%s",
+                    horizon_step,
+                )
+                continue
+            for control_object_result in selected_horizon.control_object_list or []:
                 if self._is_incomplete_control_object(control_object_result):
                     logger.debug(
                         "Skip incomplete MPC object control: objectId=%s, objectType=%s, targetValueType=%s",
@@ -81,6 +88,18 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
             len(responses or []),
         )
         return control_commands
+
+    @staticmethod
+    def _select_horizon(
+        response: MpcOptimizeResponse,
+        horizon_step: Optional[int],
+    ) -> Optional[HorizonStep]:
+        if horizon_step is None:
+            return response.horizon_controls[0] if response.horizon_controls else None
+        for horizon in response.horizon_controls:
+            if horizon.horizon_step == horizon_step:
+                return horizon
+        return None
 
     @staticmethod
     def _is_incomplete_control_object(control_object_result: ControlObjectResult) -> bool:

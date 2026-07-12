@@ -9,6 +9,8 @@ from typing import Optional
 
 from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
+    EdgeControlExecutionReport,
+    MpcExecutionStatusReport,
     MpcPredictionResultReport,
     SimCommand,
     SimCoordinationRequest,
@@ -60,10 +62,19 @@ class CoordinationOutboxPublisher:
             node_id = self.state_manager.get_node_id()
             return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
 
-        if isinstance(command, MpcPredictionResultReport):
-            return self.state_manager.is_local_agent(command.source_agent_instance)
+        if isinstance(
+            command,
+            (MpcPredictionResultReport, MpcExecutionStatusReport, EdgeControlExecutionReport),
+        ):
+            return self._is_local_source(command.source_agent_instance)
 
         return False
+
+    def _is_local_source(self, source_agent_instance) -> bool:
+        if self.state_manager.is_local_agent(source_agent_instance):
+            return True
+        node_id = self.state_manager.get_node_id()
+        return bool(node_id and source_agent_instance.hydros_node_id == node_id)
 
     def send_with_retry(self, command: SimCommand) -> None:
         """Publish a coordination command to MQTT with retry/backoff."""

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import Field, AliasChoices
+from pydantic import ConfigDict, Field, AliasChoices
 from .models import (
     AgentInstanceStatus,
     SimulationContext,
@@ -64,6 +64,10 @@ class SimTaskInitRequest(SimCoordinationRequest):
     command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
     agent_list: List[HydroAgent]
     biz_scene_configuration_url: Optional[str] = None
+    agent_config_params: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("agent_config_params", "agentConfigParams"),
+    )
     simulation_runtime_options: Optional[SimulationRuntimeOptions] = Field(
         default=None,
         validation_alias=AliasChoices("simulation_runtime_options", "simulationRuntimeOptions"),
@@ -91,6 +95,9 @@ class TickCmdRequest(SimCoordinationRequest):
 
 class TickCmdResponse(SimCoordinationResponse):
     command_type: Literal["tick_cmd_response"] = SIMCMD_TICK_CMD_RESPONSE
+    completed_step: int = Field(
+        validation_alias=AliasChoices("completed_step", "completedStep")
+    )
 
 # --- 时间序列指令 ---
 
@@ -230,13 +237,17 @@ class EdgeControlResultReport(SimCommand):
 class EdgeControlExecutionReport(SimCommand):
     """
     Edge 站点控制执行终态报告。
-    Python 侧只补齐协议反序列化，是否消费由后续路由/filter 决定。
+    严格对齐当前 Java protocol；不要在 SDK 中预埋未发布的扩展字段。
     """
+    model_config = ConfigDict(extra="forbid")
     command_type: Literal["edge_control_execution_report"] = SIMCMD_EDGE_CONTROL_EXECUTION_REPORT
     source_agent_instance: HydroAgentInstance
     target_agent_instance: HydroAgentInstance
     exec_command_id: str
-    control_run_id: Optional[str] = None
+    exec_run_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("exec_run_id", "execRunId"),
+    )
     object_type: str
     object_id: int
     target_value_type: str

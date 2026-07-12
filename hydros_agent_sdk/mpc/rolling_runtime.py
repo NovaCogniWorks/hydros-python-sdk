@@ -26,9 +26,11 @@ class MpcRollingRuntime:
         properties: AgentProperties,
         optimize_step: Callable[[int], Optional[List[Any]]],
         dispatch_control_commands: Callable[[List[Any]], None],
+        build_control_commands: Callable[[List[Any], int], List[Any]],
         set_current_step: Callable[[int], None],
         get_current_step: Callable[[], int],
         set_agent_status: Callable[[AgentStatus], None],
+        record_dispatched_control_commands: Optional[Callable[[List[Any], int], None]] = None,
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
@@ -38,6 +40,8 @@ class MpcRollingRuntime:
         self.properties = properties
         self.optimize_step = optimize_step
         self.dispatch_control_commands = dispatch_control_commands
+        self.build_control_commands = build_control_commands
+        self.record_dispatched_control_commands = record_dispatched_control_commands
         self.set_current_step = set_current_step
         self.get_current_step = get_current_step
         self.set_agent_status = set_agent_status
@@ -85,7 +89,7 @@ class MpcRollingRuntime:
     def _get_scenario_int(
         self,
         runtime_name: str,
-        legacy_name: Optional[str] = None,
+        scenario_property_name: Optional[str] = None,
     ) -> Optional[int]:
         runtime_options = self._get_scenario_runtime_options()
         if runtime_options is not None:
@@ -97,7 +101,7 @@ class MpcRollingRuntime:
         if sim_agent_properties is None:
             return None
 
-        value = getattr(sim_agent_properties, legacy_name or runtime_name, None)
+        value = getattr(sim_agent_properties, scenario_property_name or runtime_name, None)
         if value is None:
             return None
         return int(value)
@@ -188,6 +192,8 @@ class MpcRollingRuntime:
             if should_roll:
                 self.do_rolling_optimal(task_state)
                 self._last_optimization_step = step
+
+            self.dispatch_control_for_current_step(task_state)
 
             self.set_agent_status(AgentStatus.ACTIVE)
 
@@ -280,12 +286,27 @@ class MpcRollingRuntime:
             self.context.biz_scene_instance_id,
             task_state.current_step,
         )
-        control_commands = self.optimize_step(task_state.current_step)
+        control_plan = self.optimize_step(task_state.current_step)
         task_state.current_loop += 1
-        if control_commands:
-            self.dispatch_control_commands(control_commands)
+        task_state.latest_control_plan = list(control_plan or [])
+        task_state.latest_control_plan_start_step = task_state.current_step
+        task_state.dispatched_horizon_steps.clear()
         logger.info("MPC optimization completed at step %s", task_state.current_step)
-        return control_commands
+        self.dispatch_control_for_current_step(task_state)
+        return control_plan
+
+    def dispatch_control_for_current_step(self, task_state: SchedulingTaskState) -> None:
+        if not task_state.latest_control_plan or task_state.latest_control_plan_start_step is None:
+            return
+        horizon_step = task_state.current_step - task_state.latest_control_plan_start_step + 1
+        if horizon_step <= 0 or horizon_step in task_state.dispatched_horizon_steps:
+            return
+        control_commands = self.build_control_commands(task_state.latest_control_plan, horizon_step)
+        if control_commands:
+            if self.record_dispatched_control_commands is not None:
+                self.record_dispatched_control_commands(control_commands, horizon_step)
+            self.dispatch_control_commands(control_commands)
+        task_state.dispatched_horizon_steps.add(horizon_step)
 
     def _create_task_state(
         self,

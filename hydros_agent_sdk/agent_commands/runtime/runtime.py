@@ -57,3 +57,9 @@ class AgentCommandRuntime:
         predicate: Optional[Callable[[AgentCommand], bool]],
     ) -> None:
         self.queue_service.set_pending_command_predicate(predicate)
+
+    def add_ack_listener(self, listener) -> None:
+        self.queue_service.add_ack_listener(listener)
+
+    def add_response_listener(self, listener) -> None:
+        self.queue_service.add_response_listener(listener)

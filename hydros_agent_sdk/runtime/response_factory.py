@@ -71,6 +71,7 @@ class ResponseFactory:
             context=request.context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=agent,
+            completed_step=request.step,
             broadcast=False,
         )
 
@@ -88,6 +89,7 @@ class ResponseFactory:
             error_code=error_code,
             error_message=error_message,
             source_agent_instance=agent,
+            completed_step=request.step,
             broadcast=False,
         )
 
