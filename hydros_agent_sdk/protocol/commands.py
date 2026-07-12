@@ -1,4 +1,5 @@
 from __future__ import annotations
+from enum import Enum
 from typing import List, Optional, Dict, Any, Union, Literal
 from pydantic import ConfigDict, Field, AliasChoices
 from .models import (
@@ -38,6 +39,26 @@ SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE = "outflow_time_series_response"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_update_request"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
 SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
+
+
+class MpcExecutionStatus(str, Enum):
+    """Wire values of Java ``MpcExecutionStatus``."""
+
+    PENDING = "PENDING"
+    DISPATCHED = "DISPATCHED"
+    STARTED = "STARTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ExecutionStatus(str, Enum):
+    """Wire values of Java edge ``ExecutionStatus``."""
+
+    COMPLETED = "COMPLETED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+    TIMEOUT = "TIMEOUT"
+    CANCELLED = "CANCELLED"
 
 class HydroCmd(HydroBaseModel):
     command_id: str
@@ -206,7 +227,9 @@ class MpcExecutionStatusReport(SimCommand):
         validation_alias=AliasChoices("execution_command_id", "executionCommandId")
     )
     dispatch_key: str = Field(validation_alias=AliasChoices("dispatch_key", "dispatchKey"))
-    execution_status: str = Field(validation_alias=AliasChoices("execution_status", "executionStatus"))
+    execution_status: MpcExecutionStatus = Field(
+        validation_alias=AliasChoices("execution_status", "executionStatus")
+    )
     execution_error_code: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("execution_error_code", "executionErrorCode"),
@@ -239,7 +262,9 @@ class EdgeControlExecutionReport(SimCommand):
     Edge 站点控制执行终态报告。
     严格对齐当前 Java protocol；不要在 SDK 中预埋未发布的扩展字段。
     """
-    model_config = ConfigDict(extra="forbid")
+    # Java's protocol parser ignores an unknown old wire field. Keep that
+    # boundary behavior without mapping the old name to this V2 DTO field.
+    model_config = ConfigDict(extra="ignore")
     command_type: Literal["edge_control_execution_report"] = SIMCMD_EDGE_CONTROL_EXECUTION_REPORT
     source_agent_instance: HydroAgentInstance
     target_agent_instance: HydroAgentInstance
@@ -252,14 +277,11 @@ class EdgeControlExecutionReport(SimCommand):
     object_id: int
     target_value_type: str
     target_value: float
-    exec_status: str
+    exec_status: ExecutionStatus
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     started_time: Optional[str] = None
     finished_time: Optional[str] = None
-    group_id: Optional[str] = None
-    session_id: Optional[str] = None
-    sub_step_index: Optional[int] = None
 
 class ParameterIdentifiedReport(SimCommand):
     """

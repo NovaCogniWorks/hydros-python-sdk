@@ -339,6 +339,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         # 存储该上下文下的智能体
         if context_agents:
+            self._initialize_composed_agent_task(request.context, context_agents)
             self.agents[context_id] = context_agents
 
         # 返回包含全部已创建实例的单个响应
@@ -377,6 +378,9 @@ class MultiAgentCallback(SimCoordinationCallback):
                 "agent_configuration_url",
                 agent_def.agent_configuration_url,
             )
+        refresh_identity = getattr(agent, "refresh_execution_context_identity", None)
+        if callable(refresh_identity):
+            refresh_identity()
 
     @classmethod
     def _sync_init_response_agent_definition(
@@ -492,9 +496,45 @@ class MultiAgentCallback(SimCoordinationCallback):
 
         # 从跟踪结构中移除智能体
         del self.agents[context_id]
+        self._terminate_composed_agent_task(request.context, context_agents)
         super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
+
+    @staticmethod
+    def _is_composed_agent(agent: Any) -> bool:
+        from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
+
+        return isinstance(agent, BehaviorAgentAdapter)
+
+    def _initialize_composed_agent_task(self, context, context_agents: Dict[str, Any]) -> None:
+        """由协调器持有组合式 Agent 的任务状态，而不是交给业务类。"""
+        composed_agents = [agent for agent in context_agents.values() if self._is_composed_agent(agent)]
+        if not composed_agents:
+            return
+
+        if len(composed_agents) == len(context_agents):
+            self._client.state_manager.init_task(context, composed_agents)
+            for agent in composed_agents:
+                self._client.state_manager.add_local_agent(agent)
+            return
+
+        self._client.state_manager.add_active_context(context)
+        for agent in composed_agents:
+            self._client.state_manager.register_agent_instance(agent)
+            self._client.state_manager.add_local_agent(agent)
+
+    def _terminate_composed_agent_task(self, context, context_agents: Dict[str, Any]) -> None:
+        """对组合式 Agent 做统一清理，避免业务代码直接操作全局状态。"""
+        composed_agents = [agent for agent in context_agents.values() if self._is_composed_agent(agent)]
+        if not composed_agents:
+            return
+
+        if len(composed_agents) == len(context_agents):
+            self._client.state_manager.terminate_task(context)
+        for agent in composed_agents:
+            self._client.state_manager.remove_local_agent(agent)
+            self._client.state_manager.unregister_agent_instance(agent.agent_id)
 
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """处理上下文中全部智能体的时间序列数据更新。"""

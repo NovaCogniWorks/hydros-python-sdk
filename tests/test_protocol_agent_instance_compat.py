@@ -7,7 +7,9 @@ from hydros_agent_sdk.protocol.commands import (
     DeviceStatusChangeResponse,
     EdgeControlExecutionReport,
     EdgeControlResultReport,
+    ExecutionStatus,
     MpcExecutionStatusReport,
+    MpcExecutionStatus,
     SimCommandEnvelope,
     SimTaskInitResponse,
 )
@@ -272,6 +274,10 @@ class CoordinationReportContractTest(unittest.TestCase):
         self.assertEqual(envelope.command.exec_run_id, "RUN_001")
         self.assertEqual(envelope.command.target_agent_instance.agent_code, "CENTRAL_SCHEDULING_AGENT")
         self.assertEqual(envelope.command.exec_status, "COMPLETED")
+        self.assertIs(envelope.command.exec_status, ExecutionStatus.COMPLETED)
+        self.assertNotIn("group_id", EdgeControlExecutionReport.model_fields)
+        self.assertNotIn("session_id", EdgeControlExecutionReport.model_fields)
+        self.assertNotIn("sub_step_index", EdgeControlExecutionReport.model_fields)
         serialized = envelope.command.model_dump(mode="json", by_alias=True)
         self.assertEqual(serialized["exec_run_id"], "RUN_001")
         self.assertNotIn("control_run_id", serialized)
@@ -279,8 +285,8 @@ class CoordinationReportContractTest(unittest.TestCase):
         old_field_payload = dict(payload)
         old_field_payload.pop("exec_run_id")
         old_field_payload["control_run_id"] = "OLD_RUN_001"
-        with self.assertRaises(ValidationError):
-            SimCommandEnvelope(command=old_field_payload)
+        ignored_old_field = SimCommandEnvelope(command=old_field_payload)
+        self.assertIsNone(ignored_old_field.command.exec_run_id)
 
     def test_mpc_execution_status_report_envelope_matches_java_command_type(self):
         context = make_context()
@@ -314,3 +320,9 @@ class CoordinationReportContractTest(unittest.TestCase):
         self.assertEqual(envelope.command.execution_command_id, "CMD_EXEC")
         self.assertEqual(envelope.command.dispatch_key, "dispatch-1")
         self.assertEqual(envelope.command.execution_status, "DISPATCHED")
+        self.assertIs(envelope.command.execution_status, MpcExecutionStatus.DISPATCHED)
+
+        invalid_status_payload = dict(payload)
+        invalid_status_payload["execution_status"] = "NOT_A_JAVA_MPC_EXECUTION_STATUS"
+        with self.assertRaises(ValidationError):
+            SimCommandEnvelope(command=invalid_status_payload)

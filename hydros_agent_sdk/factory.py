@@ -18,6 +18,7 @@ from hydros_agent_sdk.agent_constants import (
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
+    from hydros_agent_sdk.developer_api import AgentBehavior
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,41 @@ class HydroAgentFactory(Generic[AgentType]):
         logger.info(f"Created agent: {agent_id}")
 
         return agent
+
+
+class BehaviorAgentFactory(HydroAgentFactory):
+    """创建组合式 ``AgentBehavior`` 的运行时适配器。"""
+
+    def __init__(
+        self,
+        behavior_class: Type['AgentBehavior'],
+        config_file: str = "./agent.properties",
+        env_config: Optional[Dict[str, str]] = None,
+    ):
+        from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
+
+        super().__init__(BehaviorAgentAdapter, config_file=config_file, env_config=env_config)
+        self.behavior_class = behavior_class
+
+    def create_agent(self, sim_coordination_client: 'SimCoordinationClient', context: SimulationContext):
+        config = self._load_config(self.config_file)
+        if self.env_config is None:
+            from hydros_agent_sdk.config_loader import load_env_config
+
+            self.env_config = load_env_config(os.path.join(os.path.dirname(self.config_file), "env.properties"))
+
+        behavior = self.behavior_class()
+        return self.agent_class(
+            behavior=behavior,
+            sim_coordination_client=sim_coordination_client,
+            agent_id=generate_agent_instance_id(config["agent_code"]),
+            agent_code=config["agent_code"],
+            agent_type=config["agent_type"],
+            agent_name=config["agent_name"],
+            context=context,
+            hydros_cluster_id=self.env_config["hydros_cluster_id"],
+            hydros_node_id=self.env_config["hydros_node_id"],
+        )
 
     def _load_config(self, config_file: str) -> Dict[str, str]:
         """

@@ -14,7 +14,14 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
-from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config, setup_logging
+from hydros_agent_sdk import (
+    AgentBehavior,
+    BehaviorAgentFactory,
+    HydroAgentFactory,
+    SimCoordinationClient,
+    load_env_config,
+    setup_logging,
+)
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
@@ -32,7 +39,7 @@ class AgentModuleInfo:
     """启动器发现到的智能体模块信息。"""
 
     name: str
-    agent_class: Type[BaseHydroAgent]
+    agent_class: Type
     script_dir: str
     agent_code: str
     agent_type: str
@@ -149,12 +156,12 @@ class AgentDirectoryResolver:
 
 
 class AgentClassResolver:
-    """从智能体目录中寻找 BaseHydroAgent 子类。"""
+    """从智能体目录中寻找组合式 AgentBehavior 或旧式 BaseHydroAgent。"""
 
     def __init__(self):
         self.last_import_errors: List[str] = []
 
-    def find_agent_class(self, agent_dir: str) -> Optional[Type[BaseHydroAgent]]:
+    def find_agent_class(self, agent_dir: str) -> Optional[Type]:
         self.last_import_errors = []
         py_files = [
             f for f in os.listdir(agent_dir)
@@ -176,7 +183,7 @@ class AgentClassResolver:
         agent_dir: str,
         py_files: List[str],
         preferred_only: bool,
-    ) -> Optional[Type[BaseHydroAgent]]:
+    ) -> Optional[Type]:
         for py_file in py_files:
             module_name = py_file[:-3]
             try:
@@ -191,7 +198,7 @@ class AgentClassResolver:
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if not self._is_agent_class(obj, module_name):
                     continue
-                if preferred_only and any(marker in name for marker in ["With", "Test", "Mock", "Demo"]):
+                if preferred_only and any(marker in name for marker in ["With", "Test", "Demo"]):
                     continue
                 logger.debug("Found agent class: %s in %s", name, py_file)
                 return obj
@@ -210,10 +217,11 @@ class AgentClassResolver:
 
     @staticmethod
     def _is_agent_class(obj, module_name: str) -> bool:
+        if obj.__module__ != module_name:
+            return False
         return (
-            obj != BaseHydroAgent
-            and issubclass(obj, BaseHydroAgent)
-            and obj.__module__ == module_name
+            (obj != AgentBehavior and issubclass(obj, AgentBehavior))
+            or (obj != BaseHydroAgent and issubclass(obj, BaseHydroAgent))
         )
 
 
@@ -308,8 +316,8 @@ class AgentModuleLoader:
             if self.class_resolver.last_import_errors:
                 import_details = " Import failures: " + "; ".join(self.class_resolver.last_import_errors)
             raise ValueError(
-                f"No BaseHydroAgent subclass found in {agent_dir}. "
-                f"Please ensure there is a Python file with a class that inherits from BaseHydroAgent."
+                f"No AgentBehavior or BaseHydroAgent subclass found in {agent_dir}. "
+                f"Please define an AgentBehavior implementation (recommended) or an existing BaseHydroAgent subclass."
                 f"{import_details}"
             )
 
@@ -379,11 +387,7 @@ class AgentFactoryRegistrationService:
                 self.logger.info("  Node ID: %s", env_config["hydros_node_id"])
 
             config_file = os.path.join(agent_info.script_dir, "agent.properties")
-            agent_factory = HydroAgentFactory(
-                agent_class=agent_info.agent_class,
-                config_file=config_file,
-                env_config=env_config,
-            )
+            agent_factory = self._create_agent_factory(agent_info, config_file, env_config)
             callback.register_agent_factory(agent_info.agent_code, agent_factory)
 
             registered_agent = RegisteredAgentInfo.from_module(agent_info)
@@ -406,6 +410,24 @@ class AgentFactoryRegistrationService:
                 self._log_registered_agent(registered_agent.name, registered_agent)
 
         return env_config, registered_agents
+
+    @staticmethod
+    def _create_agent_factory(
+        agent_info: AgentModuleInfo,
+        config_file: str,
+        env_config: Dict[str, str],
+    ):
+        if issubclass(agent_info.agent_class, AgentBehavior):
+            return BehaviorAgentFactory(
+                behavior_class=agent_info.agent_class,
+                config_file=config_file,
+                env_config=env_config,
+            )
+        return HydroAgentFactory(
+            agent_class=agent_info.agent_class,
+            config_file=config_file,
+            env_config=env_config,
+        )
 
     def _log_registered_agent(self, agent_name: str, agent: RegisteredAgentInfo) -> None:
         self.logger.info("  ✓ %s agent registered", agent_name.upper())

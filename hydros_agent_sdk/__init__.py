@@ -16,6 +16,7 @@ from hydros_agent_sdk.context_manager import (
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.developer_api import AgentBehavior, AgentExecutionContext, AgentIdentity
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
@@ -68,7 +69,7 @@ from hydros_agent_sdk.logging_config import (
 )
 
 # 导入工厂和多智能体支持
-from hydros_agent_sdk.factory import HydroAgentFactory, SystemCentralSchedulingAgentFactory
+from hydros_agent_sdk.factory import BehaviorAgentFactory, HydroAgentFactory, SystemCentralSchedulingAgentFactory
 from hydros_agent_sdk.multi_agent import (
     MultiAgentCallback,
 )
@@ -165,6 +166,9 @@ __all__ = [
     "HydroModelContext",
     "HydroModelContextRepository",
     "BaseHydroAgent",
+    "AgentBehavior",
+    "AgentExecutionContext",
+    "AgentIdentity",
     "HydrosTopics",
 
     # 状态管理
@@ -213,6 +217,7 @@ __all__ = [
     "generate_sse_session_id",
     "generate_user_id",
     "HydroAgentFactory",
+    "BehaviorAgentFactory",
     "SystemCentralSchedulingAgentFactory",
     "MultiAgentCallback",
 
