@@ -27,6 +27,9 @@ by the SDK's main coordination path:
 - `TickCmdResponse`
 - `MpcExecutionStatusReport`
 - `EdgeControlExecutionReport`
+- Agent-command baseline: `HydroCmd`, the agent-command base hierarchy, ACK,
+  event report request/response, station target-value request/response,
+  `AgentCommandCatalog`, and `DeviceValueTypeEnum`.
 
 The command prints Java subtype annotations, direct Java field declarations and
 their wire keys, plus Python field declarations. Give that output to an AI reviewer.
@@ -42,6 +45,12 @@ FAIL    Python differs from current Java source or Java's focused contract test.
 If Java DTO source and a Java focused serialization test disagree, report that
 as a Java-internal `FAIL` first. Do not silently change Python to match a stale
 test or introduce a second V2 wire field.
+
+For the agent-command section, compare only the DTO subset explicitly listed in
+the snapshot. `AgentCommandDecoder` and `AgentCommandAckFactory` are Python
+runtime components and must be excluded from DTO field comparison. The Python
+protocol export list is evidence too: registry APIs and artificial envelopes
+must not reappear as public wire-contract types.
 
 ## Phase 0 baseline result
 
@@ -60,6 +69,7 @@ The current AI review baseline records the following outcome:
 | `TickCmdResponse` | PASS | `completed_step` is required on both sides. |
 | `MpcExecutionStatusReport` | PASS | Field set and wire keys match. Python constrains `execution_status` to the current Java enum values. Timestamp values remain ISO-8601 wire strings in Python. |
 | `EdgeControlExecutionReport` | PASS | Java source, Java subtype test, and Python all use `exec_run_id`; unknown `control_run_id` is ignored on both sides rather than mapped. Python-only `group_id`, `session_id`, and `sub_step_index` were removed. Python constrains `exec_status` to the Java enum values. |
+| Agent-command DTO subset | REVIEW | Python now mirrors Java's current station target-value fields, uses a single `HydroCmd` root, mirrors the five supported `AGTCMD_*` constants and `DeviceValueTypeEnum`, and keeps decoder / ACK construction out of the protocol public API. `HydroEventReportRequest.risk_alert` remains an untyped JSON-object mirror of Java `HydroRiskAlert`; its nested object shape needs a dedicated future surface before Python introduces a typed model. |
 
 ## Required verification
 
@@ -69,7 +79,10 @@ Run all three after a Phase 0 change:
 python scripts/contract_sync_snapshot.py \
   --java-protocol-root ../../hydros-agent-parent/hydros-agent-protocol
 
-python -m pytest -q tests/test_protocol_agent_instance_compat.py
+python -m pytest -q \
+  tests/test_contract_sync_snapshot.py \
+  tests/test_protocol_agent_commands.py \
+  tests/test_protocol_agent_instance_compat.py
 
 mvn -q -Dtest=CommandSubtypeRegistrationTest test
 ```

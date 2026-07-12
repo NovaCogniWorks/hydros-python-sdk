@@ -25,6 +25,21 @@ DEFAULT_JAVA_PROTOCOL_ROOT = (
 JAVA_SUBTYPE_TEST_RELATIVE_PATH = (
     "src/test/java/com/hydros/protocol/CommandSubtypeRegistrationTest.java"
 )
+JAVA_COMMAND_TYPES_RELATIVE_PATH = (
+    "src/main/java/com/hydros/protocol/agent/commands/CommandTypes.java"
+)
+JAVA_DEVICE_VALUE_TYPE_RELATIVE_PATH = (
+    "src/main/java/com/hydros/protocol/agent/common/enums/DeviceValueTypeEnum.java"
+)
+PYTHON_AGENT_COMMAND_CATALOG_RELATIVE_PATH = (
+    "hydros_agent_sdk/protocol/agent_commands/catalog.py"
+)
+PYTHON_DEVICE_VALUE_TYPE_RELATIVE_PATH = (
+    "hydros_agent_sdk/protocol/agent_common/enums.py"
+)
+PYTHON_AGENT_COMMAND_PUBLIC_API_RELATIVE_PATH = (
+    "hydros_agent_sdk/protocol/agent_commands/__init__.py"
+)
 
 
 @dataclass(frozen=True)
@@ -77,6 +92,82 @@ PHASE_ZERO_SURFACES = (
     ),
 )
 
+AGENT_COMMAND_SURFACES = (
+    ContractSurface(
+        name="HydroCmd",
+        java_relative_path="src/main/java/com/hydros/protocol/common/HydroCmd.java",
+        python_relative_path="hydros_agent_sdk/protocol/base.py",
+        python_class_name="HydroCmd",
+    ),
+    ContractSurface(
+        name="AgentCommand",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/base/AgentCommand.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/base.py",
+        python_class_name="AgentCommand",
+    ),
+    ContractSurface(
+        name="AgentCommandRequest",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/base/AgentCommandRequest.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/base.py",
+        python_class_name="AgentCommandRequest",
+    ),
+    ContractSurface(
+        name="AgentCommandResponse",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/base/AgentCommandResponse.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/base.py",
+        python_class_name="AgentCommandResponse",
+    ),
+    ContractSurface(
+        name="HydroCommandReceivedAckReply",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/"
+            "HydroCommandReceivedAckReply.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/commands.py",
+        python_class_name="HydroCommandReceivedAckReply",
+    ),
+    ContractSurface(
+        name="HydroEventReportRequest",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/HydroEventReportRequest.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/commands.py",
+        python_class_name="HydroEventReportRequest",
+    ),
+    ContractSurface(
+        name="HydroEventReportResponse",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/HydroEventReportResponse.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/commands.py",
+        python_class_name="HydroEventReportResponse",
+    ),
+    ContractSurface(
+        name="HydroStationTargetValueRequest",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/"
+            "HydroStationTargetValueRequest.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/commands.py",
+        python_class_name="HydroStationTargetValueRequest",
+    ),
+    ContractSurface(
+        name="HydroStationTargetValueResponse",
+        java_relative_path=(
+            "src/main/java/com/hydros/protocol/agent/commands/"
+            "HydroStationTargetValueResponse.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/agent_commands/commands.py",
+        python_class_name="HydroStationTargetValueResponse",
+    ),
+)
+
 
 def find_class(module: ast.Module, class_name: str) -> ast.ClassDef:
     for node in module.body:
@@ -115,7 +206,7 @@ def java_fields(source: str) -> List[str]:
     """
     field_pattern = re.compile(
         r"^\s*(?:(?:private|protected|public)\s+)?(?:(?:final)\s+)?"
-        r"(?P<type>[\w<>?, ]+)\s+(?P<name>\w+)\s*;$"
+        r"(?P<type>[\w<>?, ]+)\s+(?P<name>\w+)(?:\s*=.+)?\s*;$"
     )
     class_started = False
     depth = 0
@@ -133,6 +224,8 @@ def java_fields(source: str) -> List[str]:
                 name_match = re.search(r'@JsonProperty\("([^"]+)"\)', stripped)
                 json_name = name_match.group(1) if name_match else None
                 required = "required = true" in stripped
+            elif stripped.startswith("@NonNull"):
+                required = True
             else:
                 match = field_pattern.match(line)
                 if match and " static " not in f" {line} ":
@@ -149,6 +242,68 @@ def java_fields(source: str) -> List[str]:
             depth += line.count("{") - line.count("}")
 
     return fields
+
+
+def java_string_constants(source: str) -> List[str]:
+    pattern = re.compile(
+        r'public\s+static\s+final\s+String\s+(?P<name>\w+)\s*=\s*"(?P<value>[^"]+)"\s*;'
+    )
+    return [f"{match.group('name')} = {match.group('value')}" for match in pattern.finditer(source)]
+
+
+def python_string_constants(source: str, class_name: str) -> List[str]:
+    class_node = find_class(ast.parse(source), class_name)
+    values: List[str] = []
+    for node in class_node.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        if not isinstance(node.targets[0], ast.Name):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            values.append(f"{node.targets[0].id} = {node.value.value}")
+    return values
+
+
+def java_enum_members(source: str) -> List[str]:
+    pattern = re.compile(
+        r'(?P<name>[A-Z][A-Z0-9_]*)\(\s*"(?P<code>[^"]+)"\s*,\s*'
+        r'"(?P<label>[^"]+)"\s*,\s*(?P<value_type>\w+)\.class\s*\)'
+    )
+    return [
+        f"{match.group('name')} = ({match.group('code')}, {match.group('label')}, {match.group('value_type')})"
+        for match in pattern.finditer(source)
+    ]
+
+
+def python_enum_members(source: str, class_name: str) -> List[str]:
+    class_node = find_class(ast.parse(source), class_name)
+    members: List[str] = []
+    for node in class_node.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        if not isinstance(node.targets[0], ast.Name):
+            continue
+        if not node.targets[0].id.isupper():
+            continue
+        members.append(f"{node.targets[0].id} = {ast.unparse(node.value)}")
+    return members
+
+
+def python_public_exports(source: str) -> List[str]:
+    module = ast.parse(source)
+    for node in module.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        if not isinstance(node.targets[0], ast.Name) or node.targets[0].id != "__all__":
+            continue
+        if not isinstance(node.value, (ast.List, ast.Tuple)):
+            continue
+        return [
+            element.value
+            for element in node.value.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        ]
+    raise ValueError("Python __all__ export list not found")
 
 
 def java_subtype(source: str) -> Optional[str]:
@@ -216,6 +371,82 @@ def render_surface(
     return "\n".join(lines)
 
 
+def render_agent_command_baseline(java_protocol_root: Path) -> str:
+    """Render the agent-command subset the Python SDK currently supports.
+
+    DTO surfaces are compared with Java. Decoder, ACK factory and similar
+    Python-only behavior are reported as scope facts, not as alternate wire
+    contracts.
+    """
+    java_catalog_path = java_protocol_root / JAVA_COMMAND_TYPES_RELATIVE_PATH
+    python_catalog_path = PROJECT_ROOT / PYTHON_AGENT_COMMAND_CATALOG_RELATIVE_PATH
+    java_enum_path = java_protocol_root / JAVA_DEVICE_VALUE_TYPE_RELATIVE_PATH
+    python_enum_path = PROJECT_ROOT / PYTHON_DEVICE_VALUE_TYPE_RELATIVE_PATH
+    python_public_api_path = PROJECT_ROOT / PYTHON_AGENT_COMMAND_PUBLIC_API_RELATIVE_PATH
+    required_paths = (
+        java_catalog_path,
+        python_catalog_path,
+        java_enum_path,
+        python_enum_path,
+        python_public_api_path,
+    )
+    for path in required_paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"Agent-command baseline source not found: {path}")
+
+    lines = [
+        "# Agent-command baseline scope",
+        "",
+        "- Scope: Java agent-command DTOs that the Python SDK currently supports.",
+        "- Out of scope: Java sim/system command constants not implemented by this SDK.",
+        "- Python decoder and ACK factory are runtime behavior, not Java/Python wire DTO mirrors.",
+        "",
+    ]
+    lines.extend(render_surface(java_protocol_root, surface, None) for surface in AGENT_COMMAND_SURFACES)
+
+    java_catalog = java_string_constants(java_catalog_path.read_text(encoding="utf-8"))
+    python_catalog = python_string_constants(
+        python_catalog_path.read_text(encoding="utf-8"), "AgentCommandCatalog"
+    )
+    lines.extend(
+        [
+            "## AgentCommandCatalog",
+            "",
+            f"- Java source: `{java_catalog_path}`",
+            f"- Python mirror: `{python_catalog_path}`",
+            "- Java constants:",
+            *(f"  - `{value}`" for value in java_catalog if value.startswith("AGTCMD_")),
+            "- Python constants:",
+            *(f"  - `{value}`" for value in python_catalog),
+            "",
+        ]
+    )
+
+    java_enum = java_enum_members(java_enum_path.read_text(encoding="utf-8"))
+    python_enum = python_enum_members(
+        python_enum_path.read_text(encoding="utf-8"), "DeviceValueTypeEnum"
+    )
+    lines.extend(
+        [
+            "## DeviceValueTypeEnum",
+            "",
+            f"- Java source: `{java_enum_path}`",
+            f"- Python mirror: `{python_enum_path}`",
+            "- Java members:",
+            *(f"  - `{value}`" for value in java_enum),
+            "- Python members:",
+            *(f"  - `{value}`" for value in python_enum),
+            "",
+            "## Python protocol public API boundary",
+            "",
+            f"- Public exports: `{', '.join(python_public_exports(python_public_api_path.read_text(encoding='utf-8')))}`",
+            "- Required exclusion: parser registry, command envelope, MQTT decoder and ACK factory are not protocol exports.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_snapshot(java_protocol_root: Path, surfaces: Iterable[ContractSurface]) -> str:
     surface_list = list(surfaces)
     java_subtype_test_source = None
@@ -238,6 +469,7 @@ def render_snapshot(java_protocol_root: Path, surfaces: Iterable[ContractSurface
         render_surface(java_protocol_root, surface, java_subtype_test_source)
         for surface in surface_list
     )
+    sections.append(render_agent_command_baseline(java_protocol_root))
     return "\n".join(sections)
 
 

@@ -1,6 +1,7 @@
 from hydros_agent_sdk.protocol.agent_commands import (
     AgentCommandCatalog,
     HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
@@ -38,3 +39,19 @@ def test_all_command_families_share_one_protocol_hydro_cmd() -> None:
     assert issubclass(SimCommand, HydroCmd)
     assert issubclass(SystemCmd, HydroCmd)
     assert issubclass(AgentCommand, HydroCmd)
+
+
+def test_station_target_value_dtos_include_java_direct_fields() -> None:
+    assert {
+        "object_id",
+        "object_type",
+        "target_value_type",
+        "target_value",
+        "target_value_map",
+        "group_id",
+        "group_size",
+        "main_step_index",
+    } <= HydroStationTargetValueRequest.model_fields.keys()
+    assert {"object_id", "target_value_type", "target_value", "target_value_map"} <= (
+        HydroStationTargetValueResponse.model_fields.keys()
+    )
