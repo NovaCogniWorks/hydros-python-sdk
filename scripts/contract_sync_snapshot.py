@@ -348,8 +348,8 @@ def render_surface(
     subtype = java_subtype(java_source)
 
     lines = [f"## {surface.name}", ""]
-    lines.append(f"- Java source: `{java_path}`")
-    lines.append(f"- Python mirror: `{python_path}`")
+    lines.append(f"- Java source: `{surface.java_relative_path}`")
+    lines.append(f"- Python mirror: `{surface.python_relative_path}`")
     lines.append(f"- Java subtype: `{subtype or '(none found)'}`")
     lines.append(
         "- Java direct field declarations (wire key inferred as snake case when no explicit annotation):"
@@ -412,8 +412,8 @@ def render_agent_command_baseline(java_protocol_root: Path) -> str:
         [
             "## AgentCommandCatalog",
             "",
-            f"- Java source: `{java_catalog_path}`",
-            f"- Python mirror: `{python_catalog_path}`",
+            f"- Java source: `{JAVA_COMMAND_TYPES_RELATIVE_PATH}`",
+            f"- Python mirror: `{PYTHON_AGENT_COMMAND_CATALOG_RELATIVE_PATH}`",
             "- Java constants:",
             *(f"  - `{value}`" for value in java_catalog if value.startswith("AGTCMD_")),
             "- Python constants:",
@@ -430,8 +430,8 @@ def render_agent_command_baseline(java_protocol_root: Path) -> str:
         [
             "## DeviceValueTypeEnum",
             "",
-            f"- Java source: `{java_enum_path}`",
-            f"- Python mirror: `{python_enum_path}`",
+            f"- Java source: `{JAVA_DEVICE_VALUE_TYPE_RELATIVE_PATH}`",
+            f"- Python mirror: `{PYTHON_DEVICE_VALUE_TYPE_RELATIVE_PATH}`",
             "- Java members:",
             *(f"  - `{value}`" for value in java_enum),
             "- Python members:",

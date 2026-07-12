@@ -52,6 +52,25 @@ runtime components and must be excluded from DTO field comparison. The Python
 protocol export list is evidence too: registry APIs and artificial envelopes
 must not reappear as public wire-contract types.
 
+## Phase 2 AI review gate
+
+The SDK does not introduce JSON Schema or DTO generation. Instead, a tracked
+AI review record binds the reviewer decision to the exact source-derived
+snapshot using SHA-256. The gate regenerates the snapshot and fails if the
+record is stale, omits a selected surface, contains `FAIL`, or adds an
+unapproved `REVIEW`.
+
+```bash
+python scripts/contract_ai_review_gate.py \
+  --java-protocol-root ../../hydros-agent-parent/hydros-agent-protocol
+```
+
+The reviewer writes [`docs/contract-review/phase-zero-baseline.md`](contract-review/phase-zero-baseline.md)
+after inspecting the generated input. The only temporarily allowed `REVIEW` is
+`HydroEventReportRequest`: Java's nested `HydroRiskAlert` does not yet have a
+typed Python mirror. Every other selected surface must be `PASS`; a new review
+record is required whenever the source snapshot changes.
+
 ## Phase 0 baseline result
 
 `EdgeControlExecutionReport` uses the Java source key `exec_run_id`. The Java
