@@ -19,23 +19,12 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.topics import HydrosTopics
-from hydros_agent_sdk.logging_config import (
-    set_biz_scene_instance_id,
-    set_biz_component,
-    set_hydros_cluster_id,
-    set_hydros_node_id
-)
 from hydros_agent_sdk.protocol.commands import (
-    HydroEventCommand,
     SimCommand,
     SimCommandEnvelope,
 )
-from hydros_agent_sdk.runtime.coordination_error_response_factory import CoordinationErrorResponseFactory
-from hydros_agent_sdk.runtime.coordination_inbound import (
-    CoordinationInboundRuntime,
-)
 from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
-from hydros_agent_sdk.runtime.coordination_router import CoordinationCommandRouter
+from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
 import json
 
 logger = logging.getLogger(__name__)
@@ -182,17 +171,16 @@ class SimCoordinationClient:
             log=logger,
         )
 
-        # 入站消息队列。MQTT 回调必须保持轻量，
-        # 可能较慢的业务处理器由工作线程执行。
-        self.running = Event()
-        self.inbound_runtime = CoordinationInboundRuntime(
-            running=self.running,
-            handler=self._handle_incoming_message,
-            context_id_getter=self._command_context_id,
+        self.task_runtime = TaskRuntime(
+            callback=self.sim_coordination_callback,
+            state_manager=self.state_manager,
+            outbound_submitter=self.enqueue,
             control_queue_size=control_queue_size,
             business_queue_size=business_queue_size,
             log=logger,
         )
+        self.running = self.task_runtime.running
+        self.inbound_runtime = self.task_runtime.inbound
         self.control_message_queue = self.inbound_runtime.control_message_queue
         self.business_queue_size = self.inbound_runtime.business_queue_size
         self.business_message_queues = self.inbound_runtime.business_message_queues
@@ -204,18 +192,8 @@ class SimCoordinationClient:
         self.business_worker_threads = self.inbound_runtime.business_worker_threads
         self.connected = Event()
 
-        # 注册指令处理器
-        self.command_router = CoordinationCommandRouter(
-            callback=self.sim_coordination_callback,
-            context_id_getter=self._command_context_id,
-            event_type_getter=self._command_event_type,
-            log=logger,
-        )
-        self.error_response_factory = CoordinationErrorResponseFactory(
-            state_manager=self.state_manager,
-            callback=self.sim_coordination_callback,
-            log=logger,
-        )
+        self.command_router = self.task_runtime.router
+        self.error_response_factory = self.task_runtime.error_response_factory
         logger.info(f"Registered {len(self.command_router.handlers)} command handlers")
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
@@ -253,8 +231,7 @@ class SimCoordinationClient:
             )
 
         # 启动队列处理线程
-        self.running.set()
-        self.inbound_runtime.start_workers()
+        self.task_runtime.start()
         self.control_worker_thread = self.inbound_runtime.control_worker_thread
         self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
         self.queue_thread.start()
@@ -295,8 +272,7 @@ class SimCoordinationClient:
         logger.info("Stopping SimCoordinationClient...")
 
         # 停止队列线程
-        self.running.clear()
-        self.inbound_runtime.stop_workers()
+        self.task_runtime.stop()
         self.control_worker_thread = self.inbound_runtime.control_worker_thread
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
@@ -431,7 +407,7 @@ class SimCoordinationClient:
 
             # 将业务处理推迟给 SDK 工作线程，避免 MQTT 网络回调
             # 被较慢的 tick/event/MPC 处理阻塞。
-            self.inbound_runtime.enqueue(command)
+            self.task_runtime.enqueue(command)
 
         except Exception as e:
             logger.error(
@@ -459,105 +435,9 @@ class SimCoordinationClient:
             return False
         return data.get("command_type") in IGNORED_COORDINATION_COMMAND_TYPES
 
-    @staticmethod
-    def _command_context_id(command: SimCommand):
-        context = getattr(command, "context", None)
-        return getattr(context, "biz_scene_instance_id", None)
-
-    @staticmethod
-    def _command_event_type(command: SimCommand):
-        if isinstance(command, HydroEventCommand):
-            return getattr(command.payload, "hydro_event_type", None)
-        event = getattr(command, "time_series_data_changed_event", None)
-        if event is not None:
-            return getattr(event, "hydro_event_type", None)
-        event = getattr(command, "outflow_time_series_data_changed_event", None)
-        if event is not None:
-            return getattr(event, "hydro_event_type", None)
-        event = getattr(command, "hydro_event", None)
-        if event is not None:
-            return getattr(event, "hydro_event_type", None)
-        return None
-
-    def _set_logging_context(self, command: SimCommand):
-        """
-        从指令设置日志上下文，用于结构化日志。
-
-        从指令中提取上下文信息并写入日志上下文，确保后续日志包含这些信息。
-
-        日志上下文包括：
-        - hydros_cluster_id: 来自 state_manager（从 env.properties 加载）
-        - hydros_node_id: 来自 state_manager（从 env.properties 加载）
-        - biz_scene_instance_id: 来自指令的 SimulationContext
-        - biz_component: 智能体 ID 或组件名称（例如 "SIM_COORDINATOR"）
-
-        Args:
-            command: 用于提取上下文的指令
-        """
-        # 从 state_manager 设置 hydros_cluster_id
-        cluster_id = self.state_manager.get_cluster_id()
-        if cluster_id:
-            set_hydros_cluster_id(cluster_id)
-
-        # 从 state_manager 设置 hydros_node_id
-        node_id = self.state_manager.get_node_id()
-        if node_id:
-            set_hydros_node_id(node_id)
-
-        # 从指令上下文（SimulationContext）设置 biz_scene_instance_id
-        if hasattr(command, 'context') and command.context:
-            biz_scene_instance_id = command.context.biz_scene_instance_id
-            if biz_scene_instance_id:
-                set_biz_scene_instance_id(biz_scene_instance_id)
-
-        # 从 callback 的 component 设置 biz_component
-        # 在智能体上下文中为 agent_id，在基础设施上下文中为 component 名称
-        component = self.sim_coordination_callback.get_component()
-        if component:
-            set_biz_component(component)
-
     def _handle_incoming_message(self, command: SimCommand):
-        """
-        处理入站指令，并路由到合适的处理器。
-
-        调用处理器前会自动设置日志上下文（task_id、biz_component、node_id），
-        使处理器内的全部日志都包含该上下文。
-
-        Args:
-            command: 要处理的指令
-        """
-        # 根据指令设置日志上下文
-        self._set_logging_context(command)
-
-        try:
-            result = self.command_router.dispatch(command)
-            self._handle_callback_result(result)
-        except Exception as e:
-            logger.error(f"Error handling command {command.command_type}: {e}", exc_info=True)
-            error_response = self.error_response_factory.create(command, e)
-            if error_response:
-                self.enqueue(error_response)
-
-    def _handle_callback_result(self, result):
-        """
-        通过正常出站队列发送回调返回值。
-
-        这样既保留现有副作用式回调的工作方式，也支持从回调直接返回响应的
-        更简单模式。
-        """
-        if result is None:
-            return
-
-        if isinstance(result, SimCommand):
-            self.enqueue(result)
-            return
-
-        if isinstance(result, (list, tuple)):
-            for item in result:
-                self._handle_callback_result(item)
-            return
-
-        logger.debug("Ignoring unsupported callback result type: %s", type(result).__name__)
+        """Delegate parsed coordination commands to the task runtime."""
+        self.task_runtime.handle(command)
 
     # ========================================================================
     # 出站消息队列

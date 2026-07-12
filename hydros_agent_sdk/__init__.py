@@ -85,6 +85,7 @@ from hydros_agent_sdk.runtime import (
     AgentLoggingContextSetter,
     RuntimeEnvSettings,
     ResponseFactory,
+    TaskRuntime,
     TimeSeriesCache,
     load_runtime_env_settings,
 )
@@ -189,6 +190,7 @@ __all__ = [
     "FieldMetricsCache",
     "RuntimeEnvSettings",
     "ResponseFactory",
+    "TaskRuntime",
     "TimeSeriesCache",
     "load_runtime_env_settings",
     "InMemoryTransport",

@@ -228,6 +228,7 @@ def test_callback_returned_response_is_enqueued():
     assert isinstance(response, TickCmdResponse)
     assert response.command_status == CommandStatus.SUCCEED
     assert response.command_id == "CMD_TICK"
+    assert client.task_runtime.router is client.command_router
 
 
 def test_handler_exception_becomes_failed_response_when_agent_context_exists():

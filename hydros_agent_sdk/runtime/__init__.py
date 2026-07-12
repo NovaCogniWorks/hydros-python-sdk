@@ -13,6 +13,7 @@ from hydros_agent_sdk.runtime.agent_logging_context import AgentLoggingContextSe
 from hydros_agent_sdk.runtime.env_settings import RuntimeEnvSettings, load_runtime_env_settings
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.runtime.time_series_cache import TimeSeriesCache
+from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
 
 __all__ = [
     "AgentContext",
@@ -24,4 +25,5 @@ __all__ = [
     "load_runtime_env_settings",
     "ResponseFactory",
     "TimeSeriesCache",
+    "TaskRuntime",
 ]

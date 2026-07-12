@@ -20,7 +20,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgentInstance
-from hydros_agent_sdk.runtime import ResponseFactory
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.state_manager import AgentStateManager
 
 
