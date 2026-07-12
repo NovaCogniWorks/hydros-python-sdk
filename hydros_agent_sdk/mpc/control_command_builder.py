@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from hydros_agent_sdk.agent_commands.models import (
-    AgentCommand,
+from hydros_agent_sdk.protocol.agent_commands import (
     HydroStationTargetValueRequest,
 )
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
 from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, MpcOptimizeResponse
 from hydros_agent_sdk.utils import generate_agent_command_id

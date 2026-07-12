@@ -1,30 +1,25 @@
 """
-具体的 agent command 模型。
+具体的 agent command 协议模型。
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import Field, field_validator, model_validator
-
-from hydros_agent_sdk.protocol.base import HydroBaseModel
+from pydantic import Field, field_validator
 
 from .base import (
     AgentCommand,
     AgentCommandRequest,
     AgentCommandResponse,
-    parse_agent_command,
-    register_agent_command,
 )
-from .types import AgentCommandTypes
+from .catalog import AgentCommandCatalog
 
 
-@register_agent_command
 class HydroCommandReceivedAckReply(AgentCommand):
     """收到请求后的 ACK 回执。"""
 
-    command_type: Literal["request_revived_ack"] = AgentCommandTypes.AGTCMD_REQUEST_RECEIVED_ACK
+    command_type: Literal["request_revived_ack"] = AgentCommandCatalog.AGTCMD_REQUEST_RECEIVED_ACK
 
     @classmethod
     def from_request(cls, request: AgentCommandRequest) -> "HydroCommandReceivedAckReply":
@@ -36,28 +31,25 @@ class HydroCommandReceivedAckReply(AgentCommand):
         )
 
 
-@register_agent_command
 class HydroEventReportRequest(AgentCommandRequest):
     """风险事件上报请求。"""
 
-    command_type: Literal["agent_event_report_request"] = AgentCommandTypes.AGTCMD_AGENT_EVENT_REPORT_REQUEST
+    command_type: Literal["agent_event_report_request"] = AgentCommandCatalog.AGTCMD_AGENT_EVENT_REPORT_REQUEST
     risk_alert: Dict[str, Any] = Field(default_factory=dict)
 
 
-@register_agent_command
 class HydroEventReportResponse(AgentCommandResponse):
     """风险事件上报响应。"""
 
-    command_type: Literal["agent_event_report_response"] = AgentCommandTypes.AGTCMD_AGENT_EVENT_REPORT_RESPONSE
+    command_type: Literal["agent_event_report_response"] = AgentCommandCatalog.AGTCMD_AGENT_EVENT_REPORT_RESPONSE
 
 
-@register_agent_command
 class HydroStationTargetValueRequest(AgentCommandRequest):
     """更通用的站点目标值下发请求。"""
 
     command_type: Literal[
         "update_station_target_value_request"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST
+    ] = AgentCommandCatalog.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST
     object_id: Optional[int] = None
     object_type: str = Field(..., min_length=1)
     target_value: Any
@@ -78,31 +70,11 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
         return value
 
 
-@register_agent_command
 class HydroStationTargetValueResponse(AgentCommandResponse):
     """更通用的站点目标值下发响应。"""
 
     command_type: Literal[
         "update_station_target_value_response"
-    ] = AgentCommandTypes.AGTCMD_UPDATE_STATION_TARGET_VALUE_RESPONSE
+    ] = AgentCommandCatalog.AGTCMD_UPDATE_STATION_TARGET_VALUE_RESPONSE
     target_value_type: Optional[str] = None
     target_value: Optional[Any] = None
-
-
-class AgentCommandEnvelope(HydroBaseModel):
-    """用于基于注册表进行多态解析的包裹模型。"""
-
-    command: AgentCommand
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_command(cls, data):
-        if isinstance(data, dict) and "command" in data:
-            payload = dict(data)
-            payload["command"] = parse_agent_command(payload["command"])
-            return payload
-        return data
-
-
-def build_ack_reply(request: AgentCommandRequest) -> HydroCommandReceivedAckReply:
-    return HydroCommandReceivedAckReply.from_request(request)

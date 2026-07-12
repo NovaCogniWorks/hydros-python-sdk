@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Optional
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand, AgentCommandRequest
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand, AgentCommandRequest
 
 
 logger = logging.getLogger(__name__)

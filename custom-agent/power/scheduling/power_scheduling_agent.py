@@ -17,8 +17,9 @@ if _SCRIPT_DIR not in sys.path:
 
 from hydros_agent_sdk import (
     ErrorCodes,
-    handle_agent_errors, DeviceValueTypeEnum, HydroObjectType,
+    handle_agent_errors, HydroObjectType,
 )
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,

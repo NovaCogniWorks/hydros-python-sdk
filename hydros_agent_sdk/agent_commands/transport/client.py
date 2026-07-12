@@ -16,7 +16,9 @@ import paho.mqtt.client as mqtt
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.topics import HydrosTopics
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand, AgentCommandEnvelope
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
+
+from .codec import AgentCommandDecoder
 
 if TYPE_CHECKING:
     from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
@@ -64,6 +66,7 @@ class AgentCommandClient:
         self._pending_retry_delay_ms = pending_retry_delay_ms
         self._max_workers = max_workers
         self._runtime: Optional["AgentCommandRuntime"] = runtime
+        self._decoder = AgentCommandDecoder()
 
         self.mqtt_client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -152,8 +155,7 @@ class AgentCommandClient:
         try:
             payload_str = msg.payload.decode("utf-8")
             payload = json.loads(payload_str)
-            envelope = AgentCommandEnvelope(command=payload)
-            self.runtime.handle_incoming_command(envelope.command)
+            self.runtime.handle_incoming_command(self._decoder.decode(payload))
         except Exception as exc:
             logger.error("处理 agent command 消息失败: %s", exc, exc_info=True)
 

@@ -13,7 +13,7 @@ from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilde
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
-from hydros_agent_sdk.agent_commands.models import HydroStationTargetValueRequest, HydroStationTargetValueResponse
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest, HydroStationTargetValueResponse
 from hydros_agent_sdk.protocol.commands import (
     MpcExecutionStatusReport,
     EdgeControlExecutionReport,

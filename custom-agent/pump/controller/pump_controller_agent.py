@@ -17,8 +17,9 @@ if _SCRIPT_DIR not in sys.path:
 
 from hydros_agent_sdk import (
     load_env_config, ErrorCodes, handle_agent_errors,
-    DeviceValueTypeEnum, HydroObjectType
+    HydroObjectType
 )
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.controller_agent import ControllerAgent
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *

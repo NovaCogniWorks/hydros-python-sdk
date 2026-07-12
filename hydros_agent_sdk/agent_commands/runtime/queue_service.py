@@ -12,11 +12,11 @@ from typing import Callable, List, Optional
 
 from hydros_agent_sdk.protocol.models import CommandStatus
 
-from hydros_agent_sdk.agent_commands.models import (
+from hydros_agent_sdk.protocol.agent_commands import HydroCommandReceivedAckReply
+from hydros_agent_sdk.protocol.agent_commands.base import (
     AgentCommand,
     AgentCommandRequest,
     AgentCommandResponse,
-    HydroCommandReceivedAckReply,
 )
 
 from .execution_service import AgentCommandExecutionService
@@ -80,8 +80,6 @@ class AgentCommandQueueService:
 
     def enqueue_incoming(self, command: AgentCommand) -> None:
         """从这里接收 MQTT 收到的命令。"""
-        command.auth()
-
         if isinstance(command, AgentCommandRequest):
             if not self.route_planner.should_execute_locally(command):
                 logger.debug("忽略非本地 request: type=%s id=%s", command.command_type, command.command_id)
@@ -108,8 +106,6 @@ class AgentCommandQueueService:
 
     def enqueue_outbound(self, command: AgentCommand) -> None:
         """本地业务代码想发命令，就从这里进。"""
-        command.auth()
-
         if isinstance(command, AgentCommandRequest):
             command.command_status = command.command_status or CommandStatus.INIT
 

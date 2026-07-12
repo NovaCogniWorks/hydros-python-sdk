@@ -1,6 +1,4 @@
-"""
-设备目标值类型枚举。
-"""
+"""Java ``protocol.agent.common.enums`` 的 Python 镜像。"""
 
 from __future__ import annotations
 
@@ -8,7 +6,7 @@ from enum import Enum
 
 
 class DeviceValueTypeEnum(Enum):
-    """贴近 Java 的设备值类型定义。"""
+    """设备目标值类型。"""
 
     WATER_LEVEL = ("water_level", "水位", float)
     GATE_OPENING = ("gate_opening", "闸门开度", float)

@@ -17,8 +17,9 @@ if _SCRIPT_DIR not in sys.path:
 
 from hydros_agent_sdk import (
     ErrorCodes, handle_agent_errors,
-    DeviceValueTypeEnum, HydroObjectType, MetricsCodes
+    HydroObjectType, MetricsCodes
 )
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
@@ -804,8 +805,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 按照 dispatching.py 的解析格式，生成 commands 列表
         commands = []
 
-
-        from hydros_agent_sdk.agent_commands.models.device_value_types import DeviceValueTypeEnum
 
         for sid in self.system_config.station_ids:
             action = actions[sid]

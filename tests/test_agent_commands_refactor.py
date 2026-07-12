@@ -12,13 +12,12 @@ from hydros_agent_sdk import HydroObjectType, generate_agent_command_id, get_def
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.agent_commands import (
     AgentCommandClient,
-    AgentCommandEnvelope,
     AgentCommandHandler,
     AgentCommandRuntime,
-    HydroStationTargetValueRequest,
-    HydroStationTargetValueResponse,
 )
-from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest, HydroStationTargetValueResponse
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
+from hydros_agent_sdk.agent_commands.transport.codec import AgentCommandDecoder
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -274,13 +273,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self._temp_dir.cleanup()
         ContextManager.clear()
 
-    def test_agent_command_envelope_uses_registry_parser(self):
+    def test_agent_command_decoder_uses_command_catalog(self):
         context = SimulationContext(biz_scene_instance_id="scene-001")
         source = build_agent_instance("source-001", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-001", "TARGET_AGENT", "node-b", context)
 
-        envelope = AgentCommandEnvelope(
-            command={
+        command = AgentCommandDecoder().decode(
+            {
                 "command_id": "cmd-001",
                 "command_type": "update_station_target_value_request",
                 "source": source.model_dump(mode="json"),
@@ -292,9 +291,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             }
         )
 
-        self.assertIsInstance(envelope.command, HydroStationTargetValueRequest)
-        self.assertEqual(envelope.command.command_id, "cmd-001")
-        self.assertAlmostEqual(envelope.command.target_value, 0.75)
+        self.assertIsInstance(command, HydroStationTargetValueRequest)
+        self.assertEqual(command.command_id, "cmd-001")
+        self.assertAlmostEqual(command.target_value, 0.75)
 
     def test_context_repository_keeps_instance_state_isolated(self):
         context = SimulationContext(biz_scene_instance_id="scene-repository")

@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
-from hydros_agent_sdk.agent_commands.models import (
-    DeviceValueTypeEnum,
-    HydroStationTargetValueRequest,
-)
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
 from hydros_agent_sdk.utils import generate_agent_command_id
 

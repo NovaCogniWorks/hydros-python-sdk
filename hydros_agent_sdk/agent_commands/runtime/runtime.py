@@ -8,7 +8,7 @@ from typing import Callable, Optional
 
 from hydros_agent_sdk.state_manager import AgentStateManager
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 
 from .queue_service import AgentCommandQueueService
 from .registry import AgentCommandHandlerRegistry

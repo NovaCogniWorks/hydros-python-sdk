@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
 from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
 from hydros_agent_sdk.state_manager import AgentStateManager

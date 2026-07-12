@@ -10,7 +10,7 @@ from typing import Generic, Type, TypeVar
 from hydros_agent_sdk.error_codes import ErrorCode, ErrorCodes
 from hydros_agent_sdk.protocol.models import CommandStatus
 
-from hydros_agent_sdk.agent_commands.models.base import AgentCommandRequest, AgentCommandResponse
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommandRequest, AgentCommandResponse
 
 
 RequestType = TypeVar("RequestType", bound=AgentCommandRequest)

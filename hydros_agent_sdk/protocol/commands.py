@@ -10,7 +10,7 @@ from .models import (
     TopHydroObject,
     CommandStatus,
 )
-from .base import HydroBaseModel
+from .base import HydroBaseModel, HydroCmd
 from .mpc_prediction_results import MpcPredictionResult
 from hydros_agent_sdk.scenario_config import SimAgentProperties, SimulationRuntimeOptions
 
@@ -59,9 +59,6 @@ class ExecutionStatus(str, Enum):
     FAILED = "FAILED"
     TIMEOUT = "TIMEOUT"
     CANCELLED = "CANCELLED"
-
-class HydroCmd(HydroBaseModel):
-    command_id: str
 
 class SimCommand(HydroCmd):
     command_type: str

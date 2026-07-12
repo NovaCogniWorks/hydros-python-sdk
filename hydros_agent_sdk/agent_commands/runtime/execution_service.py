@@ -11,11 +11,8 @@ from typing import Callable, Dict, Optional
 
 from hydros_agent_sdk.protocol.models import CommandStatus
 
-from hydros_agent_sdk.agent_commands.models import (
-    AgentCommand,
-    AgentCommandRequest,
-    build_ack_reply,
-)
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand, AgentCommandRequest
+from .ack_factory import AgentCommandAckFactory
 from .handlers import AgentCommandHandler
 from .registry import AgentCommandHandlerRegistry
 
@@ -39,6 +36,7 @@ class AgentCommandExecutionService:
         self._worker_executor: Optional[ThreadPoolExecutor] = None
         self._inflight_requests: Dict[str, AgentCommandRequest] = {}
         self._lock = Lock()
+        self._ack_factory = AgentCommandAckFactory()
 
     def start(self) -> None:
         if self._worker_executor is not None:
@@ -70,7 +68,7 @@ class AgentCommandExecutionService:
             request.command_status = CommandStatus.PROCESSING
 
             if request.need_ack_reply and request.source is not None:
-                self.enqueue_command(build_ack_reply(request))
+                self.enqueue_command(self._ack_factory.build(request))
 
             response = handler.execute(request)
             if response is None:
