@@ -12,6 +12,7 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.protocol.commands import SimCommand
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.transport import InMemoryTransport
 
 
 class FakeRuntime:
@@ -30,12 +31,14 @@ class FakeRuntime:
     ):
         self.state_manager = state_manager or AgentStateManager()
         self.callback = callback
+        self.transport = InMemoryTransport()
         self.client = SimCoordinationClient(
             broker_url="tcp://localhost",
             broker_port=1883,
             topic=topic,
             sim_coordination_callback=callback,
             state_manager=self.state_manager,
+            transport=self.transport,
         )
         if hasattr(callback, "set_client"):
             callback.set_client(self.client)
@@ -44,7 +47,7 @@ class FakeRuntime:
     def send(self, command: SimCommand) -> List[SimCommand]:
         """分派指令并返回该指令产生的响应。"""
         before = self.client.out_message_queue.qsize()
-        self.client._handle_incoming_message(command)
+        self.client.task_runtime.handle(command)
         produced = self._drain_new_responses(before)
         self.responses.extend(produced)
         return produced
@@ -72,8 +75,8 @@ class FakeRuntime:
         return produced[:new_count]
 
     def publish_all(self) -> None:
-        """通过 fake MQTT 客户端同步发布队列中的响应。"""
-        self.client.connected.set()
+        """通过进程内 transport 同步发布队列中的响应。"""
+        self.transport.start()
         while not self.client.out_message_queue.empty():
             command = self.client.out_message_queue.get_nowait()
             if self.client.outbox_publisher.should_send(command):

@@ -194,21 +194,17 @@ def make_client(callback, state_manager):
 
 
 def start_inbound_workers(client):
-    client.running.set()
-    client.inbound_runtime.start_workers()
-    client.control_worker_thread = client.inbound_runtime.control_worker_thread
+    client.task_runtime.start()
 
 
 def stop_inbound_workers(client):
-    client.running.clear()
-    client.inbound_runtime.stop_workers()
-    client.control_worker_thread = client.inbound_runtime.control_worker_thread
+    client.task_runtime.stop()
 
 
-def mqtt_message(command):
-    return SimpleNamespace(
-        topic="/hydros/commands/coordination/test",
-        payload=command.model_dump_json(by_alias=True).encode("utf-8"),
+def deliver_raw_command(client, command):
+    client._handle_transport_payload(
+        "/hydros/commands/coordination/test",
+        command.model_dump_json(by_alias=True),
     )
 
 
@@ -222,13 +218,13 @@ def test_callback_returned_response_is_enqueued():
     client = make_client(ReturningCallback(agent), state_manager)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     response = client.out_message_queue.get_nowait()
     assert isinstance(response, TickCmdResponse)
     assert response.command_status == CommandStatus.SUCCEED
     assert response.command_id == "CMD_TICK"
-    assert client.task_runtime.router is client.command_router
+    assert client.task_runtime.router.handlers
 
 
 def test_handler_exception_becomes_failed_response_when_agent_context_exists():
@@ -241,7 +237,7 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     client = make_client(RaisingCallback(agent), state_manager)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     response = client.out_message_queue.get_nowait()
     assert isinstance(response, TickCmdResponse)
@@ -250,7 +246,7 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     assert "boom" in response.error_message
 
 
-def test_on_message_enqueues_and_returns_before_slow_tick_finishes():
+def test_transport_payload_is_enqueued_and_returns_before_slow_tick_finishes():
     context = make_context()
     agent = make_agent(context)
     state_manager = AgentStateManager()
@@ -264,7 +260,7 @@ def test_on_message_enqueues_and_returns_before_slow_tick_finishes():
     try:
         request = TickCmdRequest(command_id="CMD_SLOW_TICK", context=context, step=1)
         started_at = time.monotonic()
-        client._on_message(None, None, mqtt_message(request))
+        deliver_raw_command(client, request)
         elapsed_ms = (time.monotonic() - started_at) * 1000
 
         assert elapsed_ms < 200
@@ -295,7 +291,7 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
 
     try:
         tick_request = TickCmdRequest(command_id="CMD_BLOCKING_TICK", context=old_context, step=1)
-        client._on_message(None, None, mqtt_message(tick_request))
+        deliver_raw_command(client, tick_request)
         assert callback.tick_started.wait(timeout=1)
 
         init_request = SimTaskInitRequest(
@@ -303,7 +299,7 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
             context=new_context,
             agent_list=[],
         )
-        client._on_message(None, None, mqtt_message(init_request))
+        deliver_raw_command(client, init_request)
 
         assert callback.init_handled.wait(timeout=1)
         init_response = client.out_message_queue.get(timeout=1)
@@ -343,10 +339,10 @@ def test_business_commands_are_isolated_by_task_context():
     try:
         slow_tick = TickCmdRequest(command_id="CMD_SLOW_TASK_TICK", context=slow_context, step=1)
         fast_tick = TickCmdRequest(command_id="CMD_FAST_TASK_TICK", context=fast_context, step=1)
-        client._on_message(None, None, mqtt_message(slow_tick))
+        deliver_raw_command(client, slow_tick)
         assert callback.blocked_tick_started.wait(timeout=1)
 
-        client._on_message(None, None, mqtt_message(fast_tick))
+        deliver_raw_command(client, fast_tick)
 
         assert callback.fast_tick_handled.wait(timeout=1)
         fast_response = client.out_message_queue.get(timeout=1)
@@ -370,7 +366,7 @@ def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
     state_manager.init_task(context, [agent])
     state_manager.add_local_agent(agent)
     client = make_client(ReturningCallback(agent), state_manager)
-    client._handle_incoming_message = _fail_if_called
+    client.task_runtime.enqueue = _fail_if_called
 
     for command_type, agent_field in (
         ("update_monitor_rule_request", "target_agent_instance"),
@@ -391,13 +387,9 @@ def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
             ],
         }
 
-        client._on_message(
-            None,
-            None,
-            SimpleNamespace(
-                topic="/hydros/commands/coordination/test",
-                payload=json.dumps(payload).encode("utf-8"),
-            ),
+        client._handle_transport_payload(
+            "/hydros/commands/coordination/test",
+            json.dumps(payload),
         )
 
     assert client.out_message_queue.empty()
@@ -453,7 +445,7 @@ def test_hydro_event_command_routes_time_series_payload_and_returns_ack():
         payload=event,
     )
 
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     assert len(callback.time_series_updates) == 1
     forwarded = callback.time_series_updates[0]
@@ -489,7 +481,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
         payload=event,
     )
 
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     assert len(callback.outflow_requests) == 1
     forwarded = callback.outflow_requests[0]
@@ -523,7 +515,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
         payload=event,
     )
 
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     assert len(callback.outflow_requests) == 1
     forwarded = callback.outflow_requests[0]
@@ -567,7 +559,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
         payload=event,
     )
 
-    client._handle_incoming_message(request)
+    client.task_runtime.handle(request)
 
     assert len(callback.outflow_data_updates) == 1
     forwarded = callback.outflow_data_updates[0]

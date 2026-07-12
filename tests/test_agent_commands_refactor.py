@@ -2442,9 +2442,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        publish_result = Mock()
-        client.outbox_publisher.mqtt_client = Mock()
-        client.outbox_publisher.mqtt_client.publish.return_value = publish_result
+        client.outbox_publisher.transport = Mock()
         report = MpcPredictionResultReporter().build_report(
             source,
             SchedulingTaskState(
@@ -2501,8 +2499,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
             client.outbox_publisher.send_with_retry(report)
 
-        client.outbox_publisher.mqtt_client.publish.assert_called_once()
-        publish_result.wait_for_publish.assert_called_once()
+        client.outbox_publisher.transport.publish.assert_called_once()
         log_output = "\n".join(logs.output)
         self.assertIn("MPC prediction result report sent to coordinator", log_output)
         self.assertIn(report.command_id, log_output)

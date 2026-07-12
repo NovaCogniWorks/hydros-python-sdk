@@ -189,7 +189,7 @@ class CentralSchedulingAgent(TickableAgent):
         self._field_metrics_cache = self._metrics_data_cache.latest_metrics
         self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
         self._metrics_subscriber = MqttMetricsSubscriber(
-            mqtt_client=sim_coordination_client.mqtt_client,
+            transport=sim_coordination_client.transport,
             metrics_data_cache=self._metrics_data_cache,
         )
 

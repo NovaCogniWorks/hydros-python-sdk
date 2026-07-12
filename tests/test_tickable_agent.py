@@ -17,7 +17,7 @@ class FakeClient:
     def __init__(self):
         self.state_manager = AgentStateManager()
         self.topic = "/hydros/commands/coordination/test"
-        self.mqtt_client = object()
+        self.transport = object()
         self.enqueued = []
 
     def enqueue(self, response):

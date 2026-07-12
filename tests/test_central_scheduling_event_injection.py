@@ -59,7 +59,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
         event = self._build_time_series_event(auto_schedule_at_step=5)
 
-        client._handle_incoming_message(
+        client.task_runtime.handle(
             HydroEventCommand(
                 command_id="event-ts-001",
                 context=context,
@@ -86,7 +86,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             "hydros_agent_sdk.agents.mpc_central_scheduling_agent",
             level="ERROR",
         ) as logs:
-            client._handle_incoming_message(
+            client.task_runtime.handle(
                 HydroEventCommand(
                     command_id="event-ts-missing-config",
                     context=context,
@@ -109,7 +109,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
         event = self._build_time_series_event(auto_schedule_at_step=7)
 
-        client._handle_incoming_message(
+        client.task_runtime.handle(
             TimeSeriesDataUpdateRequest(
                 command_id="direct-ts-001",
                 context=context,
@@ -128,7 +128,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         context = SimulationContext(biz_scene_instance_id="scene-outflow-noop")
         client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
 
-        client._handle_incoming_message(
+        client.task_runtime.handle(
             HydroEventCommand(
                 command_id="event-outflow-data-001",
                 context=context,
@@ -195,7 +195,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             agent_status=AgentStatus.ACTIVE,
             drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
         )
-        agent._metrics_subscriber.mqtt_client = Mock()
+        agent._metrics_subscriber.transport = Mock()
         callback.agents[context.biz_scene_instance_id] = {
             agent.agent_code: agent,
         }

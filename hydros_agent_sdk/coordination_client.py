@@ -250,7 +250,6 @@ class SimCoordinationClient:
 
     def _handle_transport_payload(self, topic: str, payload_str: str) -> None:
         """Decode, filter and enqueue one raw payload delivered by the transport."""
-        payload_str = None
         data = None
         try:
             logger.debug("Received message on topic %s: %s...", topic, payload_str[:200])
@@ -320,7 +319,7 @@ class SimCoordinationClient:
         该循环运行在独立线程中，并使用重试逻辑发送消息。
         """
         logger.info("Queue processing thread started")
-        while self.running.is_set():
+        while self.task_runtime.running.is_set():
             try:
                 # 从队列获取下一条指令（带超时，以便检查运行标记）
                 command = self.out_message_queue.get(timeout=1)

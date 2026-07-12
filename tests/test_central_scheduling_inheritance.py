@@ -33,7 +33,7 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
 
     def test_generic_base_does_not_install_default_mpc_runtime(self):
         agent = GenericCentralSchedulingAgentForTest(
-            sim_coordination_client=Mock(mqtt_client=Mock()),
+            sim_coordination_client=Mock(transport=Mock()),
             agent_id="agent-generic",
             agent_code="GENERIC_CENTRAL",
             agent_type="CENTRAL_SCHEDULING_AGENT",
@@ -58,7 +58,7 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
 
     def test_generic_base_uses_default_control_command_builder(self):
         agent = GenericCentralSchedulingAgentForTest(
-            sim_coordination_client=Mock(mqtt_client=Mock()),
+            sim_coordination_client=Mock(transport=Mock()),
             agent_id="agent-generic-builder",
             agent_code="GENERIC_CENTRAL",
             agent_type="CENTRAL_SCHEDULING_AGENT",
@@ -75,9 +75,9 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
         )
 
     def test_generic_base_subscribes_field_metrics_topic_for_current_task(self):
-        mqtt_client = Mock()
+        transport = Mock()
         agent = GenericCentralSchedulingAgentForTest(
-            sim_coordination_client=Mock(mqtt_client=mqtt_client),
+            sim_coordination_client=Mock(transport=transport),
             agent_id="agent-generic-metrics",
             agent_code="GENERIC_CENTRAL",
             agent_type="CENTRAL_SCHEDULING_AGENT",
@@ -91,12 +91,11 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
         topic = agent.subscribe_field_metrics()
 
         self.assertEqual(topic, "/hydros/data/edges/cluster/scene-generic-metrics")
-        mqtt_client.message_callback_add.assert_called_once()
-        mqtt_client.subscribe.assert_called_once_with(topic)
+        transport.subscribe.assert_called_once_with(topic, agent._metrics_subscriber._handle_transport_payload)
 
     def test_mpc_base_owns_default_optimization_hook(self):
         agent = MpcCentralSchedulingAgentForTest(
-            sim_coordination_client=Mock(mqtt_client=Mock()),
+            sim_coordination_client=Mock(transport=Mock()),
             agent_id="agent-mpc-optimization",
             agent_code="MPC_CENTRAL",
             agent_type="CENTRAL_SCHEDULING_AGENT",
@@ -110,7 +109,7 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
 
     def test_mpc_base_uses_mpc_control_command_builder_without_rebinding_dispatcher(self):
         agent = MpcCentralSchedulingAgentForTest(
-            sim_coordination_client=Mock(mqtt_client=Mock()),
+            sim_coordination_client=Mock(transport=Mock()),
             agent_id="agent-mpc-builder",
             agent_code="MPC_CENTRAL",
             agent_type="CENTRAL_SCHEDULING_AGENT",

@@ -69,7 +69,7 @@ def test_fake_runtime_dispatches_command_and_captures_response():
     assert runtime.responses == responses
 
 
-def test_fake_runtime_can_publish_queued_responses_through_fake_mqtt_client():
+def test_fake_runtime_can_publish_queued_responses_through_transport():
     context = make_context()
     agent = make_agent(context)
     state_manager = AgentStateManager()
@@ -81,8 +81,8 @@ def test_fake_runtime_can_publish_queued_responses_through_fake_mqtt_client():
     runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
     runtime.publish_all()
 
-    assert len(runtime.client.mqtt_client.published) == 1
-    topic, payload, qos = runtime.client.mqtt_client.published[0]
-    assert topic == "/hydros/commands/coordination/test"
-    assert '"command_id":"CMD_TICK"' in payload
-    assert qos == 1
+    assert len(runtime.transport.published) == 1
+    published = runtime.transport.published[0]
+    assert published.topic == "/hydros/commands/coordination/test"
+    assert '"command_id":"CMD_TICK"' in published.payload
+    assert published.qos == 1

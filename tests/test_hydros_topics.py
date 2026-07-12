@@ -6,6 +6,7 @@ import unittest
 from paho.mqtt.reasoncodes import ReasonCode
 
 from hydros_agent_sdk import AgentCommandClient, HydrosTopics, SimCoordinationCallback, SimCoordinationClient
+from hydros_agent_sdk.transport import MqttCoordinationTransport
 
 
 class DummyCoordinationCallback(SimCoordinationCallback):
@@ -29,25 +30,26 @@ class HydrosTopicsTest(unittest.TestCase):
         os.chdir(self._cwd)
         self._temp_dir.cleanup()
 
-    def test_coordination_client_on_connect_accepts_reason_code_object(self):
-        client = SimCoordinationClient(
+    def test_coordination_transport_on_connect_accepts_reason_code_object(self):
+        transport = MqttCoordinationTransport(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
-            hydros_cluster_id="demo_cluster",
-            sim_coordination_callback=DummyCoordinationCallback(),
+            client_id="test-client",
+            topic="/hydros/commands/coordination/demo_cluster",
+            handler=lambda _topic, _payload: None,
         )
 
         subscriptions = []
-        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
+        transport.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
 
-        client._on_connect(
+        transport._on_connect(
             None,
             None,
             None,
             ReasonCode(packetType=2, aName="Success"),
         )
 
-        self.assertTrue(client.connected.is_set())
+        self.assertTrue(transport.connected.is_set())
         self.assertEqual(subscriptions, [("/hydros/commands/coordination/demo_cluster", 1)])
 
     def test_agent_command_client_on_connect_accepts_reason_code_object(self):
@@ -145,7 +147,7 @@ class HydrosTopicsTest(unittest.TestCase):
         def fail_connect(*_args, **_kwargs):
             raise socket.gaierror(-2, "Name or service not known")
 
-        client.mqtt_client.connect = fail_connect
+        client.transport.mqtt_client.connect = fail_connect
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -156,7 +158,7 @@ class HydrosTopicsTest(unittest.TestCase):
 
         self.assertIn("env.properties mqtt_broker_url/mqtt_broker_port", str(context.exception))
         self.assertIn("DNS resolution", str(context.exception))
-        self.assertFalse(client.running.is_set())
+        self.assertFalse(client.task_runtime.running.is_set())
 
 
 if __name__ == "__main__":

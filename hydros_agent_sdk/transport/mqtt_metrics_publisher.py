@@ -13,17 +13,17 @@ class MqttMetricsPublisher:
 
     def __init__(
         self,
-        mqtt_client,
+        transport,
         topic: str,
         qos: int = 0,
         biz_scene_instance_id: Optional[str] = None,
         edge_node_code: Optional[str] = None,
     ):
-        if mqtt_client is None:
-            raise ValueError("mqtt_client is required")
+        if transport is None:
+            raise ValueError("transport is required")
         if not topic:
             raise ValueError("topic is required")
-        self.mqtt_client = mqtt_client
+        self.transport = transport
         self.topic = topic
         self.qos = qos
         self.biz_scene_instance_id = biz_scene_instance_id
@@ -46,7 +46,7 @@ class MqttMetricsPublisher:
             cluster_id=resolved_cluster_id,
         )
         return cls(
-            mqtt_client=coordination_client.mqtt_client,
+            transport=coordination_client.transport,
             topic=topic,
             qos=qos,
             biz_scene_instance_id=biz_scene_instance_id,
@@ -72,7 +72,7 @@ class MqttMetricsPublisher:
     def publish_batch(self, metrics_list: List[MqttMetrics]) -> int:
         normalized_metrics = [self._with_context(metrics) for metrics in metrics_list]
         return send_metrics_batch(
-            mqtt_client=self.mqtt_client,
+            mqtt_client=self.transport,
             topic=self.topic,
             metrics_list=normalized_metrics,
             qos=self.qos,
