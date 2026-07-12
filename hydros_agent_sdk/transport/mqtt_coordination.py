@@ -81,7 +81,8 @@ class MqttCoordinationTransport:
     def connection_failure_message(self, cause) -> str:
         return (
             f"Failed to connect to MQTT broker {self.broker_url}:{self.broker_port} "
-            f"for topic {self.topic}: {cause}. Check env.properties, DNS and network reachability."
+            f"for topic {self.topic}: {cause}. Check env.properties mqtt_broker_url/mqtt_broker_port, "
+            "DNS resolution, Kubernetes namespace/service name, and network reachability from this runtime."
         )
 
     def _on_connect(self, _client, _userdata, _flags, reason_code, _properties=None) -> None:

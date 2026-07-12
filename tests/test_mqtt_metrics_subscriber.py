@@ -17,7 +17,7 @@ class FakeTransport:
 class MqttMetricsSubscriberTest(unittest.TestCase):
     def test_subscribes_and_caches_parsed_metrics_payload(self):
         transport = FakeTransport()
-        cache = FieldMetricsCache(max_steps=3)
+        cache = FieldMetricsCache(max_steps=3, biz_scene_instance_id="task-a")
         subscriber = MqttMetricsSubscriber(transport, cache)
 
         subscriber.subscribe("/metrics/topic")
@@ -38,8 +38,9 @@ class MqttMetricsSubscriberTest(unittest.TestCase):
 
         self.assertEqual(qos, 1)
         self.assertEqual(cache.get_value(1001, "water_flow"), 2.5)
-        self.assertEqual(cache.by_step(4)["1001_water_flow"]["position_code"], "none")
-        self.assertEqual(cache.by_step(4)["1001_water_flow"]["attributes"], "{\"front_water_flow\":2.5}")
+        cache_key = "task-a#1001#water_flow#none"
+        self.assertEqual(cache.by_step(4)[cache_key]["position_code"], "none")
+        self.assertEqual(cache.by_step(4)[cache_key]["attributes"], "{\"front_water_flow\":2.5}")
 
     def test_invalid_json_is_ignored(self):
         cache = FieldMetricsCache(max_steps=3)
