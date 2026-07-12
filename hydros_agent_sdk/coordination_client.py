@@ -7,13 +7,12 @@
 功能类似 Java 侧的 SimCoordinationSlave 类。
 """
 
+import json
 import logging
 import time
-import socket
-from typing import Optional
 from queue import Empty, Queue
-from threading import Thread, Event
-import paho.mqtt.client as mqtt
+from threading import Thread
+from typing import Optional
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.state_manager import AgentStateManager
@@ -25,7 +24,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
 from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
-import json
+from hydros_agent_sdk.transport import MqttCoordinationTransport, Transport
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +38,10 @@ class SimCoordinationClient:
     """
     基于回调架构的高层仿真协调客户端。
 
-    该类封装全部通用 MQTT 和消息处理逻辑：
-    - MQTT 连接和订阅
-    - 消息解析和序列化
-    - 消息过滤（活跃上下文、本地/远端）
-    - 自动将消息路由到回调
-    - 带重试逻辑的出站消息队列
-    - 线程管理
+    该类只装配协调传输、消息过滤和任务运行时：
+    - 将 transport raw payload 解码、过滤并投递给 TaskRuntime
+    - 创建并管理出站协调命令队列
+    - 把 MQTT/Paho 生命周期交给 CoordinationTransport
 
     开发者只需要实现 SimCoordinationCallback 来提供业务逻辑。
 
@@ -90,6 +86,7 @@ class SimCoordinationClient:
         mqtt_password: Optional[str] = None,
         control_queue_size: int = 1000,
         business_queue_size: int = 1000,
+        transport: Optional[Transport] = None,
     ):
         """
         初始化协调客户端。
@@ -137,40 +134,8 @@ class SimCoordinationClient:
         # 初始化消息过滤器
         self.message_filter = MessageFilter(self.state_manager)
 
-        # 初始化 MQTT 客户端
-        self.mqtt_client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self.client_id,
-            protocol=mqtt.MQTTv311,
-        )
-        self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.on_disconnect = self._on_disconnect
-
-        # 使用指数退避配置自动重连
-        # min_delay=1s，max_delay=120s（每次尝试翻倍：1、2、4、8、...、120）
-        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
-
-        # 如果提供凭据，则设置 MQTT 认证
-        if mqtt_username:
-            self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
-            logger.info(f"MQTT authentication configured for user: {mqtt_username}")
-
-        # 跟踪主动断开，用于区分非预期断开
-        self._intentional_disconnect = False
-
         # 出站消息队列
         self.out_message_queue: Queue[SimCommand] = Queue()
-        self.outbox_publisher = CoordinationOutboxPublisher(
-            transport=self,
-            state_manager=self.state_manager,
-            topic=self.topic,
-            qos=self.qos,
-            max_retry_count=self.max_retry_count,
-            base_retry_delay_ms=self.base_retry_delay_ms,
-            log=logger,
-        )
-
         self.task_runtime = TaskRuntime(
             callback=self.sim_coordination_callback,
             state_manager=self.state_manager,
@@ -179,22 +144,32 @@ class SimCoordinationClient:
             business_queue_size=business_queue_size,
             log=logger,
         )
-        self.running = self.task_runtime.running
-        self.inbound_runtime = self.task_runtime.inbound
-        self.control_message_queue = self.inbound_runtime.control_message_queue
-        self.business_queue_size = self.inbound_runtime.business_queue_size
-        self.business_message_queues = self.inbound_runtime.business_message_queues
-        self._business_workers_lock = self.inbound_runtime.business_workers_lock
+        if transport is None:
+            transport = MqttCoordinationTransport(
+                broker_url=self.broker_url,
+                broker_port=self.broker_port,
+                client_id=self.client_id,
+                topic=self.topic,
+                handler=self._handle_transport_payload,
+                qos=self.qos,
+                mqtt_username=mqtt_username,
+                mqtt_password=mqtt_password,
+            )
+        else:
+            transport.subscribe(self.topic, self._handle_transport_payload, qos=self.qos)
+        self.transport = transport
+        self.outbox_publisher = CoordinationOutboxPublisher(
+            transport=self.transport,
+            state_manager=self.state_manager,
+            topic=self.topic,
+            qos=self.qos,
+            max_retry_count=self.max_retry_count,
+            base_retry_delay_ms=self.base_retry_delay_ms,
+            log=logger,
+        )
 
-        # 线程管理
         self.queue_thread: Optional[Thread] = None
-        self.control_worker_thread = self.inbound_runtime.control_worker_thread
-        self.business_worker_threads = self.inbound_runtime.business_worker_threads
-        self.connected = Event()
-
-        self.command_router = self.task_runtime.router
-        self.error_response_factory = self.task_runtime.error_response_factory
-        logger.info(f"Registered {len(self.command_router.handlers)} command handlers")
+        logger.info("Registered %s command handlers", len(self.task_runtime.router.handlers))
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
 
@@ -207,54 +182,22 @@ class SimCoordinationClient:
         2. 订阅协调 topic
         3. 启动出站消息队列线程
         """
-        if self.running.is_set():
+        if self.task_runtime.running.is_set():
             logger.warning("Client already running")
             return
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
 
-        # 连接 MQTT 代理
-        logger.info(f"Connecting to MQTT broker: {self.broker_url}:{self.broker_port}")
-        try:
-            self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
-            self.mqtt_client.loop_start()
-        except (OSError, socket.gaierror) as exc:
-            raise RuntimeError(self._connection_failure_message(exc)) from exc
-
-        # 等待连接建立
-        if not self.connected.wait(timeout=10):
-            self._cleanup_failed_start()
-            raise RuntimeError(
-                self._connection_failure_message(
-                    "connection acknowledgement timed out after 10 seconds"
-                )
-            )
-
-        # 启动队列处理线程
         self.task_runtime.start()
-        self.control_worker_thread = self.inbound_runtime.control_worker_thread
+        try:
+            self.transport.start()
+        except Exception:
+            self.task_runtime.stop()
+            raise
         self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
         self.queue_thread.start()
 
         logger.info(f"SimCoordinationClient started successfully")
-
-    def _connection_failure_message(self, cause) -> str:
-        return (
-            "Failed to connect to MQTT broker "
-            f"{self.broker_url}:{self.broker_port} for topic {self.topic}: {cause}. "
-            "Check env.properties mqtt_broker_url/mqtt_broker_port, DNS resolution, "
-            "Kubernetes namespace/service name, and network reachability from this runtime."
-        )
-
-    def _cleanup_failed_start(self) -> None:
-        try:
-            self.mqtt_client.loop_stop()
-        except Exception:
-            logger.debug("Failed to stop MQTT loop after startup failure", exc_info=True)
-        try:
-            self.mqtt_client.disconnect()
-        except Exception:
-            logger.debug("Failed to disconnect MQTT client after startup failure", exc_info=True)
 
     def stop(self):
         """
@@ -265,7 +208,7 @@ class SimCoordinationClient:
         2. 断开 MQTT broker
         3. 清理资源
         """
-        if not self.running.is_set():
+        if not self.task_runtime.running.is_set():
             logger.warning("Client not running")
             return
 
@@ -273,14 +216,10 @@ class SimCoordinationClient:
 
         # 停止队列线程
         self.task_runtime.stop()
-        self.control_worker_thread = self.inbound_runtime.control_worker_thread
         if self.queue_thread and self.queue_thread.is_alive():
             self.queue_thread.join(timeout=5)
 
-        # 断开 MQTT 连接
-        self._intentional_disconnect = True
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        self.transport.stop()
 
         logger.info("SimCoordinationClient stopped")
 
@@ -309,88 +248,18 @@ class SimCoordinationClient:
         """
         self.outbox_publisher.send_with_retry(command)
 
-    def publish(self, topic: str, payload: str, qos: int = 1) -> None:
-        """Current coordination transport seam; delegated to MQTT in the next slice."""
-        result = self.mqtt_client.publish(topic, payload, qos=qos)
-        result.wait_for_publish()
-
-    # ========================================================================
-    # MQTT 回调
-    # ========================================================================
-
-    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        """MQTT 连接回调，同时处理自动重连后的重新订阅。"""
-        rc = reason_code.value
-        if rc == 0:
-            was_connected = self.connected.is_set()
-            if was_connected:
-                logger.info(f"Reconnected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            else:
-                logger.info(f"Connected to MQTT broker: {self.broker_url}:{self.broker_port}")
-            # 每次连接或重连后都重新订阅主题
-            self.mqtt_client.subscribe(self.topic, qos=self.qos)
-            logger.info(f"Subscribed to topic: {self.topic}")
-            self.connected.set()
-        else:
-            rc_reasons = {
-                1: "incorrect protocol version",
-                2: "invalid client identifier",
-                3: "server unavailable",
-                4: "bad username or password",
-                5: "not authorized",
-                128: "unspecified error",
-                129: "malformed packet",
-                130: "protocol error",
-                131: "implementation specific error",
-                132: "unsupported protocol version",
-                133: "client identifier not valid",
-                134: "bad username or password",
-                135: "not authorized",
-                136: "server unavailable",
-                137: "server busy",
-                138: "banned",
-                139: "bad authentication method",
-                140: "topic name invalid",
-                141: "packet too large",
-                142: "quota exceeded",
-                143: "payload format invalid",
-                144: "retain not supported",
-                145: "QoS not supported",
-                146: "use another server",
-                147: "server moved",
-                148: "connection rate exceeded",
-            }
-            reason = rc_reasons.get(rc, "unknown")
-            logger.error(f"Failed to connect to MQTT broker, return code: {rc} ({reason})")
-
-    def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
-        """MQTT 断开连接回调。"""
-        rc = reason_code.value
-        self.connected.clear()
-        if rc == 0 or self._intentional_disconnect:
-            logger.info("Disconnected from MQTT broker (clean)")
-        else:
-            rc_reasons = {
-                1: "unexpected disconnect",
-                7: "connection lost (keepalive timeout or broker idle disconnect)",
-            }
-            reason = rc_reasons.get(rc, f"unexpected, code={rc}")
-            logger.warning(f"Disconnected from MQTT broker: {reason}. Auto-reconnecting...")
-
-    def _on_message(self, client, userdata, msg):
-        """MQTT 消息接收回调。"""
+    def _handle_transport_payload(self, topic: str, payload_str: str) -> None:
+        """Decode, filter and enqueue one raw payload delivered by the transport."""
         payload_str = None
         data = None
         try:
-            # 解析消息
-            payload_str = msg.payload.decode("utf-8")
-            logger.debug(f"Received message on topic {msg.topic}: {payload_str[:200]}...")
+            logger.debug("Received message on topic %s: %s...", topic, payload_str[:200])
 
             # 解析 JSON
             data = json.loads(payload_str)
             logger.debug(
                 "MQTT command received: topic=%s, rawType=%s, commandId=%s, context=%s",
-                msg.topic,
+                topic,
                 data.get("command_type") if isinstance(data, dict) else None,
                 data.get("command_id") if isinstance(data, dict) else None,
                 self._raw_context_id(data),
@@ -439,10 +308,6 @@ class SimCoordinationClient:
         if not isinstance(data, dict):
             return False
         return data.get("command_type") in IGNORED_COORDINATION_COMMAND_TYPES
-
-    def _handle_incoming_message(self, command: SimCommand):
-        """Delegate parsed coordination commands to the task runtime."""
-        self.task_runtime.handle(command)
 
     # ========================================================================
     # 出站消息队列

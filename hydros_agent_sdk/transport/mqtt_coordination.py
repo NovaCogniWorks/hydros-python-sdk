@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import socket
 from threading import Event
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 
@@ -33,8 +33,8 @@ class MqttCoordinationTransport:
         self.broker_port = broker_port
         self.client_id = client_id
         self.topic = topic
-        self.handler = handler
         self.qos = qos
+        self._subscriptions: Dict[str, Tuple[MessageHandler, int]] = {}
         self.connected = Event()
         self._intentional_disconnect = False
         self.mqtt_client = mqtt.Client(
@@ -48,6 +48,7 @@ class MqttCoordinationTransport:
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
         if mqtt_username:
             self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
+        self.subscribe(topic, handler, qos=qos)
 
     def start(self) -> None:
         self._intentional_disconnect = False
@@ -71,6 +72,12 @@ class MqttCoordinationTransport:
         result = self.mqtt_client.publish(topic, payload, qos=qos)
         result.wait_for_publish()
 
+    def subscribe(self, topic: str, handler: MessageHandler, qos: int = 1) -> None:
+        """Register one raw-payload handler owned by this Paho client."""
+        self._subscriptions[topic] = (handler, qos)
+        if self.connected.is_set():
+            self.mqtt_client.subscribe(topic, qos=qos)
+
     def connection_failure_message(self, cause) -> str:
         return (
             f"Failed to connect to MQTT broker {self.broker_url}:{self.broker_port} "
@@ -81,7 +88,8 @@ class MqttCoordinationTransport:
         if reason_code.value != 0:
             logger.error("Failed to connect to MQTT broker: rc=%s", reason_code.value)
             return
-        self.mqtt_client.subscribe(self.topic, qos=self.qos)
+        for topic, (_handler, qos) in self._subscriptions.items():
+            self.mqtt_client.subscribe(topic, qos=qos)
         self.connected.set()
         logger.info("Coordination MQTT connected and subscribed: topic=%s", self.topic)
 
@@ -93,4 +101,9 @@ class MqttCoordinationTransport:
             logger.warning("Coordination MQTT disconnected unexpectedly: rc=%s", reason_code.value)
 
     def _on_message(self, _client, _userdata, message) -> None:
-        self.handler(message.topic, message.payload.decode("utf-8"))
+        subscription = self._subscriptions.get(message.topic)
+        if subscription is None:
+            logger.debug("Ignoring MQTT message without registered handler: topic=%s", message.topic)
+            return
+        handler, _qos = subscription
+        handler(message.topic, message.payload.decode("utf-8"))
