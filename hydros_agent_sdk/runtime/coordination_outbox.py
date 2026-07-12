@@ -28,7 +28,7 @@ class CoordinationOutboxPublisher:
 
     def __init__(
         self,
-        mqtt_client,
+        transport,
         state_manager: AgentStateManager,
         topic: str,
         qos: int = 1,
@@ -36,7 +36,7 @@ class CoordinationOutboxPublisher:
         base_retry_delay_ms: int = 1000,
         log: Optional[logging.Logger] = None,
     ) -> None:
-        self.mqtt_client = mqtt_client
+        self.transport = transport
         self.state_manager = state_manager
         self.topic = topic
         self.qos = qos
@@ -84,8 +84,7 @@ class CoordinationOutboxPublisher:
         while attempt <= self.max_retry_count:
             try:
                 payload = command.model_dump_json(by_alias=True)
-                result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
-                result.wait_for_publish()
+                self.transport.publish(self.topic, payload, qos=self.qos)
 
                 if isinstance(command, MpcPredictionResultReport):
                     self.logger.info(

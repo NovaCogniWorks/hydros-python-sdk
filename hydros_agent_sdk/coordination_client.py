@@ -162,7 +162,7 @@ class SimCoordinationClient:
         # 出站消息队列
         self.out_message_queue: Queue[SimCommand] = Queue()
         self.outbox_publisher = CoordinationOutboxPublisher(
-            mqtt_client=self.mqtt_client,
+            transport=self,
             state_manager=self.state_manager,
             topic=self.topic,
             qos=self.qos,
@@ -308,6 +308,11 @@ class SimCoordinationClient:
             command: 要发送的指令
         """
         self.outbox_publisher.send_with_retry(command)
+
+    def publish(self, topic: str, payload: str, qos: int = 1) -> None:
+        """Current coordination transport seam; delegated to MQTT in the next slice."""
+        result = self.mqtt_client.publish(topic, payload, qos=qos)
+        result.wait_for_publish()
 
     # ========================================================================
     # MQTT 回调
