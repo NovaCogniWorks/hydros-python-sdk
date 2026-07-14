@@ -21,15 +21,29 @@ import hydrosim_demo
 from hydrosim_api import (
     CurrentStepPowerPlanningValue,
     HydroSimulationApi,
+    HydroConfiguredSimulationRequest,
     HydroSimulationSession,
     HydroSimulationService,
     describe_simulation_capabilities,
     run_random_simulation,
 )
+from hydrosim.input_resolver import HydroSimulationInputResolver
 from hydrosim.types import HydroRandomSimulationRequest
 
 
 class HydroSimDemoTest(unittest.TestCase):
+    def _load_input_bundle(self, files: dict):
+        resolver = HydroSimulationInputResolver()
+        return resolver.resolve_bundle(
+            time_series_file=files["time_series_file"],
+            mpc_config_file=files["mpc_config_file"],
+            initial_states_file=files["initial_states_file"],
+            constraints_file=files["constraints_file"],
+        )
+
+    def _load_event_data(self, path: str):
+        return HydroSimulationInputResolver().load_event_data_from_file(path)
+
     def _write_configured_case_files(self, root_dir: str) -> dict:
         base_event = {
             "valid": True,
@@ -256,15 +270,14 @@ class HydroSimDemoTest(unittest.TestCase):
         api = HydroSimulationApi()
 
         init_result = api.initialize(
-            time_series_file=files["time_series_file"],
-            mpc_config_file=files["mpc_config_file"],
-            initial_states_file=files["initial_states_file"],
-            constraints_file=files["constraints_file"],
+            self._load_input_bundle(files),
         )
         self.assertIn("session", init_result)
         self.assertEqual(init_result["time_axis_length"], 2)
 
-        planning_result = api.get_station_power_planning_series(files["power_planning_file"])
+        planning_result = api.get_station_power_planning_series(
+            self._load_event_data(files["power_planning_file"])
+        )
         self.assertIn("station_power_series", planning_result)
         self.assertEqual(len(planning_result["station_power_series"]), 4)
         self.assertEqual(planning_result["station_power_series"][0]["time_series"][0]["step"], 0)
@@ -297,14 +310,13 @@ class HydroSimDemoTest(unittest.TestCase):
         files = self._write_configured_case_files(root_dir)
         api = HydroSimulationApi()
         api.initialize(
-            time_series_file=files["time_series_file"],
-            mpc_config_file=files["mpc_config_file"],
-            initial_states_file=files["initial_states_file"],
-            constraints_file=files["constraints_file"],
+            self._load_input_bundle(files),
         )
-        api.get_station_power_planning_series(files["power_planning_file"])
+        api.get_station_power_planning_series(self._load_event_data(files["power_planning_file"]))
 
-        injected = api.inject_operating_conditions(initial_states_file=files["initial_states_file"])
+        injected = api.inject_operating_conditions(
+            {"initial_states": HydroSimulationInputResolver().load_initial_states_from_file(files["initial_states_file"])}
+        )
 
         self.assertEqual(injected["session"]["current_step_index"], 0)
         self.assertIsNone(injected["session"]["latest_power_planning_file"])

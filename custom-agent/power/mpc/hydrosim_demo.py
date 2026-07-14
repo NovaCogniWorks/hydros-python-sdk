@@ -9,8 +9,10 @@ from typing import Dict
 
 from hydrosim_api import (
     HydroSimulationApi,
+    HydroConfiguredSimulationRequest,
     HydroOutputMode,
 )
+from hydrosim.input_resolver import HydroSimulationInputResolver
 
 
 class HydroSimulationDemo:
@@ -18,6 +20,7 @@ class HydroSimulationDemo:
 
     def __init__(self, api: HydroSimulationApi | None = None) -> None:
         self.api = api or HydroSimulationApi()
+        self.input_resolver = HydroSimulationInputResolver()
 
     def describe_capabilities(self) -> Dict[str, object]:
         return self.api.describe_capabilities()
@@ -67,14 +70,19 @@ class HydroSimulationDemo:
         make_plots: bool = False,
         output_mode: HydroOutputMode = "mixed",
     ) -> Dict[str, object]:
-        return self.api.run_configured(
+        bundle = self.input_resolver.resolve_bundle(
             time_series_file=time_series_file,
             mpc_config_file=mpc_config_file,
             initial_states_file=initial_states_file,
             constraints_file=constraints_file,
-            output_dir=output_dir,
-            make_plots=make_plots,
-            progress_interval=0,
+        )
+        return self.api.run_configured(
+            input_bundle=bundle,
+            request=HydroConfiguredSimulationRequest(
+                output_dir=output_dir,
+                make_plots=make_plots,
+                progress_interval=0,
+            ),
             output_mode=output_mode,
         )
 

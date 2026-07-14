@@ -3,11 +3,9 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import json
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
@@ -17,9 +15,13 @@ from pydantic.alias_generators import to_snake
 from hydrosim import config as hydrosim_config
 from hydrosim import (
     HydroConfiguredSimulationRequest,
+    HydroSimulationEventData,
+    HydroSimulationInputBundle,
+    HydroSimulationInputPatch,
     HydroOutputMode,
     HydroRandomSimulationRequest,
     HydroSimulationArtifacts,
+    HydroSimulationInputResolver,
     HydroSimulationService,
 )
 
@@ -56,10 +58,7 @@ class HydroSimulationSession:
     """HydroSim 算法会话。"""
 
     session_id: str
-    time_series_file: str
-    mpc_config_file: str
-    initial_states_file: str
-    constraints_file: str
+    inputs: HydroSimulationInputBundle | None = None
     latest_power_planning_file: str | None = None
     latest_station_power_series: List[Dict[str, Any]] = field(default_factory=list)
     latest_device_output_series: List[Dict[str, Any]] = field(default_factory=list)
@@ -70,13 +69,22 @@ class HydroSimulationSession:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "session_id": self.session_id,
-            "time_series_file": self.time_series_file,
-            "mpc_config_file": self.mpc_config_file,
-            "initial_states_file": self.initial_states_file,
-            "constraints_file": self.constraints_file,
+            "input_summary": self._build_input_summary(),
             "latest_power_planning_file": self.latest_power_planning_file,
             "current_step_index": self.current_step_index,
             "cancelled": self.cancelled,
+        }
+
+    def _build_input_summary(self) -> Dict[str, Any] | None:
+        if self.inputs is None:
+            return None
+        return {
+            "event_series_count": len(self.inputs.event.object_time_series),
+            "has_initial_states": bool(self.inputs.initial_states.initial_states),
+            "has_constraints": bool(
+                self.inputs.constraints.control_targets or self.inputs.constraints.control_domains
+            ),
+            "has_mpc_config": bool(self.inputs.mpc_config.raw),
         }
 
 
@@ -104,10 +112,18 @@ class HydroSimulationApi:
 
     def __init__(self, service: HydroSimulationService | None = None) -> None:
         self.service = service or HydroSimulationService()
+        self.input_resolver = HydroSimulationInputResolver()
         self._session: HydroSimulationSession | None = None
 
     def _normalize_output_value(self, value: Any) -> float:
         return round(float(value), 6)
+
+    def _normalize_event_payload(
+        self,
+        payload: HydroSimulationEventData | dict[str, Any],
+    ) -> Dict[str, Any]:
+        model = payload if isinstance(payload, HydroSimulationEventData) else HydroSimulationEventData.model_validate(payload)
+        return model.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     def describe_capabilities(self) -> Dict[str, object]:
         """获取算法能力摘要。"""
@@ -126,45 +142,23 @@ class HydroSimulationApi:
         self,
         request: HydroConfiguredSimulationRequest | None = None,
         output_mode: HydroOutputMode = "mixed",
-        **kwargs,
+        input_bundle: HydroSimulationInputBundle | dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """执行配置驱动仿真。"""
-        return self.service.run_configured(request=request, output_mode=output_mode, **kwargs)
+        if request is None or input_bundle is None:
+            raise ValueError("run_configured requires both request and input_bundle.")
+        return self.service.run_configured(request=request, output_mode=output_mode, input_bundle=input_bundle)
 
     def initialize(
         self,
-        time_series_file: str,
-        mpc_config_file: str = "mpc_config.yaml",
-        initial_states_file: str = "initial_states.yaml",
-        constraints_file: str = "constrains_targets.yaml",
+        input_bundle: HydroSimulationInputBundle | dict[str, Any],
     ) -> Dict[str, Any]:
-        """算法初始化接口。
-
-        入参：
-        - `time_series_file`：基础工况时间序列文件
-        - `mpc_config_file`：MPC 配置文件
-        - `initial_states_file`：初始状态文件
-        - `constraints_file`：约束条件文件
-
-        返回：
-        - 会话 ID
-        - 初始化后的文件路径
-        - 基础时间轴长度
-        - 电站能力摘要
-        """
-
-        event = self._load_json_file(time_series_file, "基础时间序列文件")
-        self._load_yaml_file(mpc_config_file, "MPC 配置文件")
-        self._load_yaml_file(initial_states_file, "初始状态文件")
-        self._load_yaml_file(constraints_file, "约束文件")
-
+        bundle = self.input_resolver.resolve_bundle(input_bundle=input_bundle)
+        event = bundle.event.model_dump(mode="json", by_alias=True, exclude_none=True)
         steps = self.service.core.runtime._time_axis_from_event(event)
         self._session = HydroSimulationSession(
             session_id=uuid.uuid4().hex,
-            time_series_file=str(Path(time_series_file).resolve()),
-            mpc_config_file=str(Path(mpc_config_file).resolve()),
-            initial_states_file=str(Path(initial_states_file).resolve()),
-            constraints_file=str(Path(constraints_file).resolve()),
+            inputs=bundle,
         )
         return {
             "message": "HydroSim 算法初始化成功。",
@@ -176,31 +170,13 @@ class HydroSimulationApi:
 
     def inject_operating_conditions(
         self,
-        time_series_file: str | None = None,
-        mpc_config_file: str | None = None,
-        initial_states_file: str | None = None,
-        constraints_file: str | None = None,
+        patch: HydroSimulationInputPatch | dict[str, Any],
     ) -> Dict[str, Any]:
-        """注入工况接口。
-
-        用于在已初始化会话中替换基础工况文件或约束配置。
-        调用后会清空上一次规划结果，并将步进游标重置为 0。
-        """
-
         session = self._require_session()
-        if time_series_file is not None:
-            self._load_json_file(time_series_file, "基础时间序列文件")
-            session.time_series_file = str(Path(time_series_file).resolve())
-        if mpc_config_file is not None:
-            self._load_yaml_file(mpc_config_file, "MPC 配置文件")
-            session.mpc_config_file = str(Path(mpc_config_file).resolve())
-        if initial_states_file is not None:
-            self._load_yaml_file(initial_states_file, "初始状态文件")
-            session.initial_states_file = str(Path(initial_states_file).resolve())
-        if constraints_file is not None:
-            self._load_yaml_file(constraints_file, "约束文件")
-            session.constraints_file = str(Path(constraints_file).resolve())
-
+        if session.inputs is None:
+            raise RuntimeError("当前会话缺少输入快照。")
+        patch_model = self.input_resolver.resolve_patch(patch=patch)
+        session.inputs = self.input_resolver.merge_patch(session.inputs, patch_model)
         session.latest_power_planning_file = None
         session.latest_station_power_series = []
         session.latest_device_output_series = []
@@ -212,28 +188,22 @@ class HydroSimulationApi:
             "session": session.to_dict(),
         }
 
-    def get_station_power_planning_series(self, time_series_power_planning_file: str) -> Dict[str, Any]:
-        """获取规划出力时间序列接口。
-
-        入参：
-        - `time_series_power_planning_file`：发电需求时间序列文件
-
-        返回：
-        - 各个站点的出力时间序列
-        - 对应的运行摘要
-        - 当前会话信息
-        """
-
+    def get_station_power_planning_series(
+        self,
+        planning_event: HydroSimulationEventData | dict[str, Any],
+    ) -> Dict[str, Any]:
         session = self._require_session()
-        base_event = self._load_json_file(session.time_series_file, "基础时间序列文件")
-        planning_payload = self._load_json_file(time_series_power_planning_file, "发电需求时间序列文件")
+        if session.inputs is None:
+            raise RuntimeError("当前会话缺少输入快照。")
+        base_event = session.inputs.event.model_dump(mode="json", by_alias=True, exclude_none=True)
+        planning_payload = self._normalize_event_payload(planning_event)
         merged_event = self._merge_event_with_power_plan(base_event, planning_payload)
         run_summary, station_power_series, device_output_series = self._run_configured_with_event(
             session,
             merged_event,
         )
 
-        session.latest_power_planning_file = str(Path(time_series_power_planning_file).resolve())
+        session.latest_power_planning_file = None
         session.latest_station_power_series = station_power_series
         session.latest_device_output_series = device_output_series
         session.step_runtime = self._build_step_runtime(session, merged_event)
@@ -247,12 +217,15 @@ class HydroSimulationApi:
             "station_power_series": station_power_series,
         }
 
-    def get_station_power_planning_series_from_inflow(self, time_series_inflow_file: str) -> Dict[str, Any]:
-        """Generate station power planning from Station/water_flow time series."""
-
+    def get_station_power_planning_series_from_inflow(
+        self,
+        inflow_event: HydroSimulationEventData | dict[str, Any],
+    ) -> Dict[str, Any]:
         session = self._require_session()
-        base_event = self._load_json_file(session.time_series_file, "base time series file")
-        inflow_payload = self._load_json_file(time_series_inflow_file, "inflow time series file")
+        if session.inputs is None:
+            raise RuntimeError("当前会话缺少输入快照。")
+        base_event = session.inputs.event.model_dump(mode="json", by_alias=True, exclude_none=True)
+        inflow_payload = self._normalize_event_payload(inflow_event)
         merged_event = self._merge_event_with_updates(base_event, inflow_payload)
 
         generated_event, station_power_series, device_output_series = self._run_inflow_power_planning(
@@ -260,7 +233,7 @@ class HydroSimulationApi:
             merged_event,
         )
 
-        session.latest_power_planning_file = str(Path(time_series_inflow_file).resolve())
+        session.latest_power_planning_file = None
         session.latest_station_power_series = station_power_series
         session.latest_device_output_series = device_output_series
         session.step_runtime = self._build_step_runtime(session, generated_event)
@@ -276,7 +249,7 @@ class HydroSimulationApi:
 
     def apply_time_series_event_update(
         self,
-        event_payload: Any,
+        event_payload: HydroSimulationEventData | dict[str, Any],
         current_step: int | None = None,
         current_step_metrics: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
@@ -446,8 +419,10 @@ class HydroSimulationApi:
         merged_event: Dict[str, Any],
     ) -> HydroSimulationStepRuntime:
         runtime = self.service.core.runtime
-        initial_states = self._load_yaml_file(session.initial_states_file, "初始状态文件")
-        constraints = self._load_yaml_file(session.constraints_file, "约束文件")
+        if session.inputs is None:
+            raise RuntimeError("当前会话缺少输入快照。")
+        initial_states = session.inputs.initial_states.model_dump(mode="json", by_alias=True, exclude_none=True)
+        constraints = session.inputs.constraints.model_dump(mode="json", by_alias=True, exclude_none=True)
         steps = runtime._time_axis_from_event(merged_event)
         flow_configs, default_target_stage_by_node = runtime._apply_yaml_basic_parameters(
             list(self.service.core.flow_configs),
@@ -506,8 +481,10 @@ class HydroSimulationApi:
         merged_event: Dict[str, Any],
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         runtime = self.service.core.runtime
-        initial_states = self._load_yaml_file(session.initial_states_file, "initial states file")
-        constraints = self._load_yaml_file(session.constraints_file, "constraints file")
+        if session.inputs is None:
+            raise RuntimeError("current session is missing inputs snapshot")
+        initial_states = session.inputs.initial_states.model_dump(mode="json", by_alias=True, exclude_none=True)
+        constraints = session.inputs.constraints.model_dump(mode="json", by_alias=True, exclude_none=True)
         steps = runtime._time_axis_from_event(merged_event)
         if len(steps) <= 0:
             raise ValueError("inflow time series has no steps")
@@ -850,40 +827,29 @@ class HydroSimulationApi:
             raise RuntimeError("HydroSim 尚未初始化，请先调用算法初始化接口。")
         return self._session
 
-    def _load_json_file(self, path: str, label: str) -> Dict[str, Any]:
-        path_obj = Path(path).resolve()
-        if not path_obj.is_file():
-            raise FileNotFoundError(f"{label}不存在: {path_obj}")
-        with open(path_obj, "r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def _load_yaml_file(self, path: str, label: str) -> Dict[str, Any]:
-        path_obj = Path(path).resolve()
-        if not path_obj.is_file():
-            raise FileNotFoundError(f"{label}不存在: {path_obj}")
-        with open(path_obj, "r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle) or {}
-
     def _run_configured_with_event(
         self,
         session: HydroSimulationSession,
         merged_event: Dict[str, Any],
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
         with tempfile.TemporaryDirectory(prefix="hydrosim_api_") as temp_dir:
-            merged_event_path = Path(temp_dir) / "merged_time_series_power_planning.json"
-            with open(merged_event_path, "w", encoding="utf-8") as handle:
-                json.dump(merged_event, handle, ensure_ascii=False, indent=2)
-
             with contextlib.redirect_stdout(io.StringIO()):
+                if session.inputs is None:
+                    raise RuntimeError("current session is missing inputs snapshot")
+                bundle = HydroSimulationInputBundle(
+                    event=HydroSimulationEventData.model_validate(merged_event),
+                    initial_states=session.inputs.initial_states,
+                    constraints=session.inputs.constraints,
+                    mpc_config=session.inputs.mpc_config,
+                )
                 result = self.run_configured(
-                    time_series_file=str(merged_event_path),
-                    mpc_config_file=session.mpc_config_file,
-                    initial_states_file=session.initial_states_file,
-                    constraints_file=session.constraints_file,
+                    request=HydroConfiguredSimulationRequest(
+                        output_dir=temp_dir,
+                        make_plots=False,
+                        progress_interval=0,
+                    ),
+                    input_bundle=bundle,
                     output_mode="mixed",
-                    output_dir=temp_dir,
-                    make_plots=False,
-                    progress_interval=0,
                 )
 
             files = result["files"]
@@ -896,7 +862,9 @@ class HydroSimulationApi:
         step_runtime = getattr(session, "step_runtime", None)
         if step_runtime is not None and getattr(step_runtime, "merged_event", None):
             return copy.deepcopy(step_runtime.merged_event)
-        return self._load_json_file(session.time_series_file, "基础时间序列文件")
+        if session.inputs is None:
+            raise RuntimeError("当前会话缺少输入快照。")
+        return session.inputs.event.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     def _merge_event_with_power_plan(self, base_event: Dict[str, Any], planning_payload: Dict[str, Any]) -> Dict[str, Any]:
         planning_series = self._extract_station_power_items(planning_payload)
@@ -1291,7 +1259,9 @@ def run_configured_simulation(
     request: HydroConfiguredSimulationRequest | None = None,
     output_mode: HydroOutputMode = "mixed",
     service: HydroSimulationService | None = None,
-    **kwargs,
+    input_bundle: HydroSimulationInputBundle | dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     api = HydroSimulationApi(service=service)
-    return api.run_configured(request=request, output_mode=output_mode, **kwargs)
+    return api.run_configured(request=request, output_mode=output_mode, input_bundle=input_bundle)
+
+

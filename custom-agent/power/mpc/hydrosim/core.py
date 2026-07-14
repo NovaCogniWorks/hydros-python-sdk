@@ -6,8 +6,9 @@ from typing import Any, Dict, Sequence, Tuple
 
 from . import config as hydrosim_config
 from . import runtime as default_runtime
+from .input_resolver import HydroSimulationInputResolver
 from .result_factory import HydroSimulationResultFactory
-from .types import HydroConfiguredSimulationRequest, HydroRandomSimulationRequest, HydroSimulationArtifacts
+from .types import HydroConfiguredSimulationRequest, HydroRandomSimulationRequest, HydroSimulationArtifacts, HydroSimulationInputBundle
 
 
 class HydroSimulationCore:
@@ -30,6 +31,7 @@ class HydroSimulationCore:
         self.capa_loc = list(capa_loc or hydrosim_config.CAPA_LOC)
         self.version = hydrosim_config.__version__
         self.result_factory = HydroSimulationResultFactory(self.runtime)
+        self.input_resolver = HydroSimulationInputResolver()
 
     def run_random(self, request: HydroRandomSimulationRequest) -> HydroSimulationArtifacts:
         if request.sim_steps <= 0 or request.warm_steps <= 0:
@@ -152,15 +154,19 @@ class HydroSimulationCore:
         print("联合仿真结束。")
         return self.result_factory.build_random_artifacts(out, formal_results_csv, min_p_path, report_path, summary_path, multi_stair)
 
-    def run_configured(self, request: HydroConfiguredSimulationRequest) -> HydroSimulationArtifacts:
+    def run_configured(
+        self,
+        request: HydroConfiguredSimulationRequest,
+        input_bundle: HydroSimulationInputBundle | dict[str, Any],
+    ) -> HydroSimulationArtifacts:
         t0 = time.perf_counter()
         out = self.runtime._configure_output_dir(request.output_dir)
         self._validate_configs()
 
-        event = self.runtime._read_json(request.time_series_file)
-        self.runtime._read_yaml(request.mpc_config_file)
-        initial_states = self.runtime._read_yaml(request.initial_states_file)
-        constraints = self.runtime._read_yaml(request.constraints_file)
+        event, initial_states, constraints, event_source = self._resolve_configured_inputs(
+            request,
+            input_bundle=input_bundle,
+        )
         if not event.get("valid", True):
             raise ValueError("time_series_file 标记为 valid=false。")
 
@@ -181,7 +187,7 @@ class HydroSimulationCore:
 
         print(f"输出目录: {out}")
         print(f"配置驱动仿真: 总步数={n_total}, 预热步数={request.warm_steps}, 正式步数={n_total - request.warm_steps}")
-        print(f"输入文件: {os.path.abspath(request.time_series_file)}")
+        print(f"输入文件: {event_source}")
 
         multi_river = self.runtime.RiverArray(
             1,
@@ -264,10 +270,10 @@ class HydroSimulationCore:
         elapsed = time.perf_counter() - t0
         summary_path = self.result_factory.export_run_summary_json_v16(
             output_dir=out,
-            event_path=request.time_series_file,
-            mpc_config_path=request.mpc_config_file,
-            initial_states_path=request.initial_states_file,
-            constraints_path=request.constraints_file,
+            event_path=event_source,
+            mpc_config_path=os.path.abspath(request.mpc_config_file),
+            initial_states_path=os.path.abspath(request.initial_states_file),
+            constraints_path=os.path.abspath(request.constraints_file),
             sim_steps=n_total - request.warm_steps,
             warm_steps=request.warm_steps,
             elapsed_seconds=elapsed,
@@ -324,3 +330,16 @@ class HydroSimulationCore:
             self.unit_configs,
         )
         return multi_river, multi_reservoir, multi_stair
+
+    def _resolve_configured_inputs(
+        self,
+        request: HydroConfiguredSimulationRequest,
+        input_bundle: HydroSimulationInputBundle | dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], str]:
+        bundle = self.input_resolver.resolve_bundle(input_bundle)
+        return (
+            bundle.event.model_dump(mode="json", by_alias=True, exclude_none=True),
+            bundle.initial_states.model_dump(mode="json", by_alias=True, exclude_none=True),
+            bundle.constraints.model_dump(mode="json", by_alias=True, exclude_none=True),
+            "<in-memory>",
+        )

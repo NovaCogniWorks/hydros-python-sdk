@@ -3,8 +3,86 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Tuple
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 HydroOutputMode = Literal["file", "json", "mixed"]
+
+
+class HydroSimulationModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+
+class TimeSeriesValue(HydroSimulationModel):
+    step: int | None = None
+    time: Any | None = None
+    value: float | None = None
+
+
+class ObjectTimeSeries(HydroSimulationModel):
+    time_series_name: str | None = None
+    object_id: int | None = None
+    object_ids: list[int] = Field(default_factory=list)
+    object_type: str | None = None
+    object_name: str | None = None
+    metrics_code: str | None = None
+    time_series: list[TimeSeriesValue] = Field(default_factory=list)
+
+
+class HydroSimulationEventData(HydroSimulationModel):
+    valid: bool = True
+    object_time_series: list[ObjectTimeSeries] = Field(default_factory=list)
+
+
+class HydroInitialStateOverride(HydroSimulationModel):
+    id: Any
+    name: str | None = None
+    metrics_code: str
+    value: float
+
+
+class HydroInitialStateSection(HydroSimulationModel):
+    overrides: list[HydroInitialStateOverride] | Dict[str, list[HydroInitialStateOverride]] = Field(default_factory=list)
+
+
+class HydroInitialStatesData(HydroSimulationModel):
+    initial_states: Dict[str, HydroInitialStateSection] = Field(default_factory=dict)
+
+
+class HydroControlTarget(HydroSimulationModel):
+    node_id: int
+    min_water_level: float | None = None
+    max_water_level: float | None = None
+    max_flow: float | None = None
+
+
+class HydroControlDomain(HydroSimulationModel):
+    device_id: int
+    node_id: int | None = None
+    type: str
+
+
+class HydroConstraintsData(HydroSimulationModel):
+    control_targets: list[HydroControlTarget] = Field(default_factory=list)
+    control_domains: list[HydroControlDomain] = Field(default_factory=list)
+
+
+class HydroMpcConfigData(HydroSimulationModel):
+    raw: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HydroSimulationInputBundle(HydroSimulationModel):
+    event: HydroSimulationEventData
+    initial_states: HydroInitialStatesData
+    constraints: HydroConstraintsData
+    mpc_config: HydroMpcConfigData = Field(default_factory=HydroMpcConfigData)
+
+
+class HydroSimulationInputPatch(HydroSimulationModel):
+    event: HydroSimulationEventData | None = None
+    initial_states: HydroInitialStatesData | None = None
+    constraints: HydroConstraintsData | None = None
+    mpc_config: HydroMpcConfigData | None = None
 
 
 @dataclass(frozen=True)
@@ -48,7 +126,7 @@ class HydroSimulationJsonOutputs:
 
 @dataclass(frozen=True)
 class HydroSimulationArtifacts:
-    """仿真输出契约：文件输出、JSON 输出、以及显式混合输出。"""
+    """仿真输出契约：文件输出、JSON 输出，以及显式混合输出。"""
 
     files: HydroSimulationFileOutputs
     json: HydroSimulationJsonOutputs
