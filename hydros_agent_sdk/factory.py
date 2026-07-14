@@ -110,6 +110,57 @@ class HydroAgentFactory(Generic[AgentType]):
 
         return agent
 
+    def _load_config(self, config_file: str) -> Dict[str, str]:
+        """
+        从 properties 文件加载智能体配置。
+
+        Args:
+            config_file: 配置文件路径
+
+        Returns:
+            配置字典
+
+        Raises:
+            FileNotFoundError: 配置文件不存在时抛出
+            ValueError: 缺少必填属性时抛出
+        """
+        if not os.path.exists(config_file):
+            raise FileNotFoundError(f"Config file not found: {config_file}")
+
+        config = ConfigParser()
+
+        try:
+            # 读取 properties 文件
+            with open(config_file, "r") as config_stream:
+                config_string = "[DEFAULT]\n" + config_stream.read()
+            config.read_string(config_string)
+
+            # 必填属性
+            required_props = ["agent_code", "agent_type", "agent_name"]
+            missing_props = []
+
+            for prop in required_props:
+                if not config.has_option("DEFAULT", prop):
+                    missing_props.append(prop)
+
+            if missing_props:
+                raise ValueError(
+                    f"Missing required properties in {config_file}: "
+                    f"{', '.join(missing_props)}"
+                )
+
+            # 加载配置
+            # 注意：hydros_cluster_id 和 hydros_node_id 不应放在 agent.properties 中，
+            # 它们从 env.properties 加载。
+            return {
+                "agent_code": config.get("DEFAULT", "agent_code"),
+                "agent_type": config.get("DEFAULT", "agent_type"),
+                "agent_name": config.get("DEFAULT", "agent_name"),
+            }
+        except Exception as error:
+            logger.error(f"Error loading config file: {error}")
+            raise
+
 
 class BehaviorAgentFactory(HydroAgentFactory):
     """创建组合式 ``AgentBehavior`` 的运行时适配器。"""
@@ -144,59 +195,6 @@ class BehaviorAgentFactory(HydroAgentFactory):
             hydros_cluster_id=self.env_config["hydros_cluster_id"],
             hydros_node_id=self.env_config["hydros_node_id"],
         )
-
-    def _load_config(self, config_file: str) -> Dict[str, str]:
-        """
-        从 properties 文件加载智能体配置。
-
-        Args:
-            config_file: 配置文件路径
-
-        Returns:
-            配置字典
-
-        Raises:
-            FileNotFoundError: 配置文件不存在时抛出
-            ValueError: 缺少必填属性时抛出
-        """
-        if not os.path.exists(config_file):
-            raise FileNotFoundError(f"Config file not found: {config_file}")
-
-        config = ConfigParser()
-
-        try:
-            # 读取 properties 文件
-            with open(config_file, 'r') as f:
-                config_string = '[DEFAULT]\n' + f.read()
-            config.read_string(config_string)
-
-            # 必填属性
-            required_props = ['agent_code', 'agent_type', 'agent_name']
-            missing_props = []
-
-            for prop in required_props:
-                if not config.has_option('DEFAULT', prop):
-                    missing_props.append(prop)
-
-            if missing_props:
-                raise ValueError(
-                    f"Missing required properties in {config_file}: "
-                    f"{', '.join(missing_props)}"
-                )
-
-            # 加载配置
-            # 注意：hydros_cluster_id 和 hydros_node_id 不应放在 agent.properties 中，
-            # 它们从 env.properties 加载。
-            return {
-                'agent_code': config.get('DEFAULT', 'agent_code'),
-                'agent_type': config.get('DEFAULT', 'agent_type'),
-                'agent_name': config.get('DEFAULT', 'agent_name'),
-            }
-
-        except Exception as e:
-            logger.error(f"Error loading config file: {e}")
-            raise
-
 
 class SystemCentralSchedulingAgentFactory:
     """内置 CENTRAL_SCHEDULING_AGENT 的工厂。"""
