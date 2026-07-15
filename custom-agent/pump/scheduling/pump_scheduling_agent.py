@@ -14,7 +14,6 @@ from typing import Optional, List, Dict, Any
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
-
 from hydros_agent_sdk import (
     ErrorCodes, handle_agent_errors,
     HydroObjectType, MetricsCodes
@@ -841,7 +840,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
-        from hydros_agent_sdk.mpc.models import HorizonStep
+        from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
 
         try:
             first_sid = self.system_config.station_ids[0]
@@ -867,15 +866,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     st = st_action.unit_status.get(uid, 0)
                     target_value = 100.0 if st == 0 else float(op)
                     
-                    control_object_list.append(
-                        MpcResultFactory.build_control_object_result(
-                            node_id=sid,
-                            object_id=uid,
-                            target_value=target_value,
-                            object_type=HydroObjectType.PUMP,
-                            target_value_type=DeviceValueTypeEnum.BLADE_ANGLE.code,
-                        )
-                    )
                     
                     # 单机组预测流量和效率
                     u_flow_list = st_action.predicted_unit_flows.get(uid, [])
@@ -908,16 +898,25 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 st_eff_list = getattr(st_action, "predicted_efficiencies", [])
                 st_eff_val = float(st_eff_list[i]) if i < len(st_eff_list) else None
 
-                predicted_result_list.append(
-                    MpcResultFactory.build_predicted_result(
+                control_object_list.append(
+                    MpcResultFactory.build_control_object_result(
                         object_id=sid,
-                        object_type="PUMP_STATION",
-                        front_water_level=st_front,
-                        final_target_value=st_flow,
-                        final_target_value_type=MetricsCodes.WATER_FLOW,
-                        back_water_level=st_back,
-                        out_flow=st_flow,
-                        efficiency=st_eff_val
+                        object_type=str(HydroObjectType.PUMP_STATION),
+                        target_value_list=[
+                            ValueItem(value_type=MetricsCodes.WATER_FLOW, value=float(st_flow))
+                        ] if st_flow is not None else [],
+                    )
+                )
+
+                predicted_result_list.append(
+                    self._build_station_predicted_result(
+                        sid=sid,
+                        st_front=st_front,
+                        st_back=st_back,
+                        st_flow=st_flow,
+                        st_eff_val=st_eff_val,
+                        st_action=st_action,
+                        horizon_idx=i,
                     )
                 )
 
@@ -988,6 +987,129 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             len(getattr(event, "object_time_series", None) or []),
         )
         return task_state
+
+
+    def _build_station_predicted_result(
+        self,
+        sid: int,
+        st_front,
+        st_back,
+        st_flow,
+        st_eff_val,
+        st_action,
+        horizon_idx: int,
+    ):
+        """Build PredictedResult contract-correct for one station at one horizon step.
+
+        Matches the MpcResultContractModel shape:
+        - predicted_value_list: front_water_level, back_water_level, out_flow, efficiency
+        - target_value: water_flow = station target flow
+        - device_result_list: per-pump-unit blade_angle, flow, efficiency
+        """
+        from hydros_agent_sdk.mpc.models import ValueItem, DeviceResult
+
+        # --- station name lookup ---
+        station_name = None
+        unit_name_map = {}
+        if hasattr(self, "system_config") and hasattr(self.system_config, "stations"):
+            for station in self.system_config.stations:
+                if station.id == sid:
+                    station_name = station.name
+                    for unit in getattr(station, "units", []):
+                        unit_name_map[unit.id] = getattr(unit, "name", None)
+                    break
+
+        # --- predicted_value_list ---
+        predicted_value_list = []
+        if st_front is not None:
+            predicted_value_list.append(
+                ValueItem(value_type="front_water_level", value=float(st_front))
+            )
+        if st_back is not None:
+            predicted_value_list.append(
+                ValueItem(value_type="back_water_level", value=float(st_back))
+            )
+        if st_flow is not None:
+            predicted_value_list.append(
+                ValueItem(value_type="out_flow", value=float(st_flow))
+            )
+        if st_eff_val is not None:
+            predicted_value_list.append(
+                ValueItem(value_type="efficiency", value=float(st_eff_val))
+            )
+
+        # --- target_value (station-level flow target) ---
+        target_value = None
+        if st_flow is not None:
+            target_value = ValueItem(
+                value_type="water_flow", value=float(st_flow)
+            )
+
+        # --- device_result_list: per-unit predictions ---
+        device_result_list = []
+        for uid in self._device_ids_for_station(sid, st_action):
+            uv_list = []
+
+            # blade_angle from predicted openings
+            blade_angle = self._get_predicted_value(
+                st_action, "predicted_unit_openings", uid, horizon_idx
+            )
+            if blade_angle is not None:
+                uv_list.append(ValueItem(value_type="blade_angle", value=float(blade_angle)))
+
+            # unit flow
+            u_flow = self._get_predicted_value(
+                st_action, "predicted_unit_flows", uid, horizon_idx
+            )
+            if u_flow is not None:
+                uv_list.append(ValueItem(value_type="flow", value=float(u_flow)))
+
+            # unit efficiency
+            u_eff = self._get_predicted_value(
+                st_action, "predicted_unit_efficiencies", uid, horizon_idx
+            )
+            if u_eff is not None:
+                uv_list.append(ValueItem(value_type="efficiency", value=float(u_eff)))
+
+            if uv_list:
+                device_result_list.append(
+                    DeviceResult(
+                        object_id=int(uid),
+                        object_type="PUMP",
+                        object_name=unit_name_map.get(uid),
+                        value_list=uv_list,
+                    )
+                )
+
+        return MpcResultFactory.build_predicted_result(
+            object_id=int(sid),
+            object_type="PUMP_STATION",
+            predicted_value_list=predicted_value_list,
+            target_value=target_value,
+            object_name=station_name,
+            device_result_list=device_result_list if device_result_list else None,
+        )
+
+    @staticmethod
+    def _device_ids_for_station(sid: int, st_action) -> list:
+        """Collect unit IDs from station action."""
+        ids = []
+        for attr in ("unit_openings", "predicted_unit_openings", "unit_status"):
+            mapping = getattr(st_action, attr, None)
+            if isinstance(mapping, dict):
+                ids.extend(mapping.keys())
+        return list(dict.fromkeys(ids))  # deduplicate, preserve order
+
+    @staticmethod
+    def _get_predicted_value(st_action, attr_name: str, uid: int, horizon_idx: int):
+        """Safely get predicted value for a unit at a horizon index."""
+        mapping = getattr(st_action, attr_name, None)
+        if not isinstance(mapping, dict):
+            return None
+        values = mapping.get(uid)
+        if not values or horizon_idx >= len(values):
+            return None
+        return values[horizon_idx]
 
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
