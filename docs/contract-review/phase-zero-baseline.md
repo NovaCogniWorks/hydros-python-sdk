@@ -1,6 +1,6 @@
 # Phase 0 Java → Python AI contract review
 
-Snapshot-SHA256: `57bb367ce41763c41f28fd35fe405b023cce8afe5a18ca6f54dc47dc5564ff49`
+Snapshot-SHA256: `baa057cad13578ceac3f9cdf3dccbd081734f2760417712f07ca6fd752563ce8`
 
 The reviewer inspected the source-derived snapshot emitted by
 `scripts/contract_sync_snapshot.py` against the current Java protocol source.
@@ -24,5 +24,5 @@ verdict in isolation.
 | HydroStationTargetValueRequest | PASS | Python now includes target-value map and control-group fields present in Java. |
 | HydroStationTargetValueResponse | PASS | Python now includes object id and target-value map present in Java. |
 | AgentCommandCatalog | PASS | The five supported AGTCMD constants and values match Java CommandTypes. |
-| DeviceValueTypeEnum | PASS | Names, codes, labels and scalar value categories match the Java enum. |
+| DeviceValueTypeEnum | PASS | Names, codes, labels and scalar value categories match the Java enum, including the shared `WATER_FLOW` member with `water_flow`, `水流量`, and corresponding Java `Float` / Python `float` scalar types. |
 | Python protocol public API boundary | PASS | Only DTOs and catalog are public; registry, envelope, decoder and ACK factory are excluded. |
