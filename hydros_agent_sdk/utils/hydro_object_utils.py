@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class HydroObjectType(str, Enum):
     """水利对象类型枚举。"""
     GATE_STATION = "GateStation"
+    PUMP_STATION = "PumpStation"
     DIVERSION_POINT = "DiversionPoint"
     CROSS_SECTION = "CrossSection"
     STATION = "Station"
