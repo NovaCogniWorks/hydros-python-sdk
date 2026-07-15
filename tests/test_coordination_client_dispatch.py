@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
+from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
     HydroEventAckResponse,
     HydroEventCommand,
@@ -225,6 +226,65 @@ def test_callback_returned_response_is_enqueued():
     assert response.command_status == CommandStatus.SUCCEED
     assert response.command_id == "CMD_TICK"
     assert client.task_runtime.router.handlers
+
+
+def test_remote_init_response_is_cached_while_local_task_is_initializing():
+    context = make_context()
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("central-node")
+    callback = MultiAgentCallback(node_id="central-node")
+    client = make_client(callback, state_manager)
+    callback.set_client(client)
+    state_manager.begin_task_initialization(context)
+
+    gate_agent = HydroAgentInstance(
+        agent_code="GATE_STATION_AGENT",
+        agent_type="GATE_STATION_AGENT",
+        agent_name="Gate Station Agent",
+        agent_configuration_url="",
+        agent_id="AGT_GATE",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        hydros_cluster_id="cluster",
+        hydros_node_id="edge-node",
+        context=context,
+        agent_status=AgentStatus.ACTIVE,
+        drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
+    )
+    response = SimTaskInitResponse(
+        command_id="CMD_EDGE_INIT",
+        context=context,
+        command_status=CommandStatus.SUCCEED,
+        source_agent_instance=gate_agent,
+        created_agent_instances=[gate_agent],
+        managed_top_objects={},
+        broadcast=True,
+    )
+
+    start_inbound_workers(client)
+    try:
+        deliver_raw_command(client, response)
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            cached_agent = callback.get_sibling_agent_instance(
+                "GATE_STATION_AGENT",
+                biz_scene_instance_id=context.biz_scene_instance_id,
+            )
+            if cached_agent is not None and cached_agent.agent_id == gate_agent.agent_id:
+                break
+            time.sleep(0.01)
+
+        cached_gate_agent = callback.get_sibling_agent_instance(
+            "GATE_STATION_AGENT",
+            biz_scene_instance_id=context.biz_scene_instance_id,
+        )
+        assert cached_gate_agent is not None
+        assert cached_gate_agent.agent_id == gate_agent.agent_id
+        assert cached_gate_agent.agent_code == gate_agent.agent_code
+        assert client.message_filter.should_process_message(
+            TickCmdRequest(command_id="CMD_EARLY_TICK", context=context, step=1)
+        ) is False
+    finally:
+        stop_inbound_workers(client)
 
 
 def test_handler_exception_becomes_failed_response_when_agent_context_exists():

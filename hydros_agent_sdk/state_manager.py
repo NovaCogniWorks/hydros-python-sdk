@@ -141,6 +141,40 @@ class AgentStateManager:
         logger.debug(f"Context {context.biz_scene_instance_id} active: {is_active}")
         return is_active
 
+    def begin_task_initialization(self, context: SimulationContext):
+        """登记任务初始化窗口，但不提前接收普通业务指令。"""
+        if not context or not context.biz_scene_instance_id:
+            logger.warning("Cannot begin task initialization: invalid context")
+            return
+
+        context_id = context.biz_scene_instance_id
+        with self._lock:
+            task_state = self._task_states.get(context_id)
+            if task_state is None or task_state.status == TaskStatus.TERMINATED:
+                self._task_states[context_id] = TaskState(context_id)
+                logger.info("Task initialization started: %s", context_id)
+
+    def has_initializing_context(self, context: SimulationContext) -> bool:
+        """判断任务是否正处于可接收初始化响应、但尚不可处理业务指令的阶段。"""
+        if not context or not context.biz_scene_instance_id:
+            return False
+
+        with self._lock:
+            task_state = self._task_states.get(context.biz_scene_instance_id)
+            return task_state is not None and task_state.status == TaskStatus.INITIALIZING
+
+    def cancel_task_initialization(self, context: SimulationContext):
+        """清理未成功激活的初始化任务，避免接受迟到的初始化响应。"""
+        if not context or not context.biz_scene_instance_id:
+            return
+
+        context_id = context.biz_scene_instance_id
+        with self._lock:
+            task_state = self._task_states.get(context_id)
+            if task_state is not None and task_state.status == TaskStatus.INITIALIZING:
+                self._task_states.pop(context_id, None)
+                logger.info("Task initialization cancelled: %s", context_id)
+
     def get_active_contexts(self) -> Set[str]:
         """
         获取全部活跃上下文 ID。

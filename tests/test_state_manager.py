@@ -40,6 +40,24 @@ def test_init_task_registers_active_context_and_agents():
     assert state_manager.get_agents_for_context(context.biz_scene_instance_id) == [agent]
 
 
+def test_initializing_context_promotes_to_active_only_after_task_init():
+    state_manager = AgentStateManager()
+    context = make_context()
+    agent = make_agent(context)
+
+    state_manager.begin_task_initialization(context)
+
+    assert state_manager.has_initializing_context(context) is True
+    assert state_manager.has_active_context(context) is False
+    assert state_manager.get_task_state(context.biz_scene_instance_id).status == TaskStatus.INITIALIZING
+
+    state_manager.init_task(context, [agent])
+
+    assert state_manager.has_initializing_context(context) is False
+    assert state_manager.has_active_context(context) is True
+    assert state_manager.get_task_state(context.biz_scene_instance_id).status == TaskStatus.ACTIVE
+
+
 def test_local_remote_tracking_and_unregister_cleanup():
     state_manager = AgentStateManager()
     state_manager.set_node_id("node")

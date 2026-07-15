@@ -254,6 +254,10 @@ class MultiAgentCallback(SimCoordinationCallback):
         if self._client is None:
             raise RuntimeError("Coordination client not set")
 
+        # 先登记初始化态，避免远端 edge 在本地耗时 on_init 期间返回的
+        # task_init_response 被 MQTT message filter 当作 inactive context 丢弃。
+        self._client.state_manager.begin_task_initialization(request.context)
+
         logger.debug("Task configuration URL: %s", request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
         logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
@@ -357,6 +361,7 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.info(f"SimTaskInitResponse created with {len(created_agents)} agent(s)")
             return response
         else:
+            self._client.state_manager.cancel_task_initialization(request.context)
             if failed_agents:
                 return ResponseFactory.init_failed(
                     failed_agents[0],

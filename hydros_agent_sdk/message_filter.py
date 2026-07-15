@@ -65,6 +65,18 @@ class MessageFilter:
             logger.debug(f"Accepting SimTaskInitRequest: {sim_command.command_id}")
             return True
 
+        # edge 可能在本地 Agent 耗时初始化期间先返回初始化响应。
+        # 只放行当前 task 的 response 建立 sibling cache；tick/event 仍必须等待 ACTIVE。
+        if (
+            isinstance(sim_command, SimTaskInitResponse)
+            and self.context_manager.has_initializing_context(sim_command.context)
+        ):
+            logger.debug(
+                "Accepting SimTaskInitResponse for initializing context: %s",
+                sim_command.context.biz_scene_instance_id,
+            )
+            return True
+
         # 检查指令上下文是否处于活跃状态
         if hasattr(sim_command, 'context') and sim_command.context:
             has_context = self.context_manager.has_active_context(sim_command.context)
