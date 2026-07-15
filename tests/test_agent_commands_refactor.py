@@ -30,6 +30,7 @@ from hydros_agent_sdk.mpc.models import (
     HorizonStep,
     MpcOptimizeResponse,
     PredictedResult,
+    ValueItem,
 )
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
@@ -87,6 +88,59 @@ def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: 
         context=context,
         agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.PROACTIVE,
+    )
+
+
+def build_control_object_result(
+    *,
+    object_type: str,
+    object_id: int,
+    target_value: float,
+    target_value_type: str,
+    object_name: str | None = None,
+    **_unused,
+) -> ControlObjectResult:
+    return ControlObjectResult(
+        object_type=object_type,
+        object_id=object_id,
+        object_name=object_name,
+        target_value_list=[
+            ValueItem(value_type=target_value_type, value=target_value)
+        ],
+    )
+
+
+def build_predicted_result(
+    *,
+    object_type: str,
+    object_id: int,
+    front_water_level: float | None = None,
+    final_target_value: float | None = None,
+    final_target_value_type: str | None = None,
+    back_water_level: float | None = None,
+    out_flow: float | None = None,
+    efficiency: float | None = None,
+    object_name: str | None = None,
+) -> PredictedResult:
+    return PredictedResult(
+        object_type=object_type,
+        object_id=object_id,
+        object_name=object_name,
+        target_value=(
+            ValueItem(value_type=final_target_value_type, value=final_target_value)
+            if final_target_value is not None and final_target_value_type is not None
+            else None
+        ),
+        predicted_value_list=[
+            ValueItem(value_type=value_type, value=value)
+            for value_type, value in (
+                ("front_water_level", front_water_level),
+                ("back_water_level", back_water_level),
+                ("out_flow", out_flow),
+                ("efficiency", efficiency),
+            )
+            if value is not None
+        ],
     )
 
 
@@ -777,13 +831,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_id=501,
                             object_type=" ",
                             target_value_type="gate_opening",
                             target_value=0.45,
                         ),
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_id=502,
                             object_type="Gate",
                             target_value_type=" ",
@@ -1634,7 +1688,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=101,
                             object_id=501,
@@ -1643,7 +1697,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         )
                     ],
                     predicted_result_list=[
-                        PredictedResult(
+                        build_predicted_result(
                             object_type="Canal",
                             object_id=102,
                             front_water_level=2.1,
@@ -1680,7 +1734,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result_attributes["gate_amplitude"], 0.4)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["command_type"], "OPENING")
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_type"], "Gate")
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["node_id"], 101)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["node_id"], 501)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_id"], 501)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["target_value"], 0.45)
         self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["command_type"], "WATER_LEVEL")
@@ -1711,7 +1765,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=101,
                             object_id=501,
@@ -1720,7 +1774,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         )
                     ],
                     predicted_result_list=[
-                        PredictedResult(
+                        build_predicted_result(
                             object_type="Canal",
                             object_id=102,
                             front_water_level=2.1,
@@ -1748,7 +1802,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(result.details), 2)
         self.assertEqual(result.details[0].command_type, "OPENING")
         self.assertEqual(result.details[0].object_type, "Gate")
-        self.assertEqual(result.details[0].node_id, 101)
+        self.assertEqual(result.details[0].node_id, 501)
         self.assertEqual(result.details[0].object_id, 501)
         self.assertEqual(result.details[0].target_value, 0.45)
         self.assertEqual(result.details[1].command_type, "WATER_LEVEL")
@@ -1774,7 +1828,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=101,
                             object_id=501,
@@ -1793,7 +1847,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(report.mpc_prediction_results), 1)
         self.assertEqual(report.mpc_prediction_results[0].plan_type, "CUSTOMIZE")
         self.assertEqual(report.mpc_prediction_results[0].details[0].object_type, "Gate")
-        self.assertEqual(report.mpc_prediction_results[0].details[0].node_id, 101)
+        self.assertEqual(report.mpc_prediction_results[0].details[0].node_id, 501)
         self.assertEqual(report.mpc_prediction_results[0].details[0].object_id, 501)
 
     def test_mpc_prediction_result_reporter_publishes_customize_report(self):
@@ -1816,7 +1870,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     HorizonStep(
                         horizon_step=1,
                         control_object_list=[
-                            ControlObjectResult(
+                            build_control_object_result(
                                 object_type="Gate",
                                 node_id=101,
                                 object_id=501,
@@ -1865,11 +1919,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             {
                                 "object_type": "Canal",
                                 "object_id": 31400,
-                                "front_water_level": 63.0,
-                                "final_target_value": 63.12,
-                                "final_target_value_type": "WATER_LEVEL",
-                                "back_water_level": 62.8,
-                                "out_flow": 18.5,
+                                "target_value": {
+                                    "value_type": "WATER_LEVEL",
+                                    "value": 63.12,
+                                },
+                                "predicted_value_list": [
+                                    {"value_type": "front_water_level", "value": 63.0},
+                                    {"value_type": "back_water_level", "value": 62.8},
+                                    {"value_type": "out_flow", "value": 18.5},
+                                ],
                             }
                         ],
                     }
@@ -1881,9 +1939,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         payload = report.model_dump(by_alias=True)
         detail = payload["mpc_prediction_results"][0]["details"][0]
 
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_value, 63.12)
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_value_type, "WATER_LEVEL")
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
+        prediction = response.horizon_controls[0].predicted_result_list[0]
+        self.assertEqual(prediction.target_value.value, 63.12)
+        self.assertEqual(prediction.target_value.value_type, "WATER_LEVEL")
+        self.assertEqual(prediction.predicted_value_list[1].value, 62.8)
         self.assertEqual(detail["command_type"], "WATER_LEVEL")
         self.assertEqual(detail["object_type"], "Canal")
         self.assertEqual(detail["node_id"], 31400)
@@ -1912,7 +1971,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     predicted_result_list=[
-                        PredictedResult(
+                        build_predicted_result(
                             object_type="Canal",
                             object_id=31401,
                             front_water_level=63.0,
@@ -1958,7 +2017,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=101,
                             object_id=501,
@@ -1970,7 +2029,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=2,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=102,
                             object_id=502,
@@ -1982,7 +2041,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=3,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=103,
                             object_id=503,
@@ -2038,7 +2097,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=101,
                             object_id=501,
@@ -2121,13 +2180,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(object_type="Gate", object_id=501, target_value=0.45, target_value_type="OPENING")
+                        build_control_object_result(object_type="Gate", object_id=501, target_value=0.45, target_value_type="OPENING")
                     ],
                 ),
                 HorizonStep(
                     horizon_step=2,
                     control_object_list=[
-                        ControlObjectResult(object_type="Gate", object_id=501, target_value=0.55, target_value_type="OPENING")
+                        build_control_object_result(object_type="Gate", object_id=501, target_value=0.55, target_value_type="OPENING")
                     ],
                 ),
             ],
@@ -2248,7 +2307,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=20600,
                             object_id=20601,
@@ -2347,7 +2406,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=20600,
                             object_id=20601,
@@ -2458,7 +2517,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=1,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=101,
                                     object_id=501,
@@ -2470,7 +2529,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=2,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=102,
                                     object_id=502,
@@ -2482,7 +2541,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=3,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=103,
                                     object_id=503,
@@ -2539,7 +2598,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=1,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=101,
                                     object_id=501,
@@ -2551,7 +2610,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=2,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=102,
                                     object_id=502,
@@ -2563,7 +2622,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=3,
                             control_object_list=[
-                                ControlObjectResult(
+                                build_control_object_result(
                                     object_type="Gate",
                                     node_id=103,
                                     object_id=503,

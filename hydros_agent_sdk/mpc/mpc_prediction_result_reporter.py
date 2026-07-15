@@ -11,9 +11,11 @@ from hydros_agent_sdk.utils import generate_coordination_command_id
 
 from .models import (
     ControlObjectResult,
+    DeviceResult,
     HorizonStep,
     MpcOptimizeResponse,
     PredictedResult,
+    ValueItem,
 )
 
 if TYPE_CHECKING:
@@ -187,9 +189,25 @@ class MpcPredictionResultReporter:
         details: List[MpcPredictionResultDetail] = []
         for control in horizon_step or []:
             for control_object_result in control.control_object_list or []:
-                details.append(cls._control_object_to_detail(control_object_result, control.horizon_step))
+                details.extend(
+                    cls._control_object_to_details(
+                        control_object_result,
+                        control.horizon_step,
+                    )
+                )
             for predicted_result in control.predicted_result_list or []:
-                details.append(cls._predicted_result_to_detail(predicted_result, control.horizon_step))
+                details.append(
+                    cls._predicted_result_to_detail(
+                        predicted_result,
+                        control.horizon_step,
+                    )
+                )
+                details.extend(
+                    cls._device_result_to_details(
+                        predicted_result,
+                        control.horizon_step,
+                    )
+                )
 
         return MpcPredictionResult(
             biz_scene_instance_id=context.biz_scene_instance_id if context else "",
@@ -232,46 +250,125 @@ class MpcPredictionResultReporter:
         )
 
     @staticmethod
-    def _control_object_to_detail(
+    def _control_object_to_details(
         control_object_result: ControlObjectResult,
         horizon_step: Optional[int],
-    ) -> MpcPredictionResultDetail:
-        return MpcPredictionResultDetail(
-            horizon_step=horizon_step,
-            command_type=control_object_result.target_value_type or MPC_DEVICE_CONTROL,
-            node_id=control_object_result.node_id,
-            object_type=control_object_result.object_type,
-            object_id=control_object_result.object_id,
-            target_value=control_object_result.target_value,
-            value=control_object_result.target_value,
-        )
+    ) -> List[MpcPredictionResultDetail]:
+        details = []
+        for target_value in control_object_result.target_value_list or []:
+            numeric_value = target_value.numeric_value()
+            if numeric_value is None:
+                continue
+            details.append(
+                MpcPredictionResultDetail(
+                    horizon_step=horizon_step,
+                    command_type=target_value.value_type or MPC_DEVICE_CONTROL,
+                    node_id=control_object_result.object_id,
+                    object_type=control_object_result.object_type,
+                    object_id=control_object_result.object_id,
+                    target_value=numeric_value,
+                    value=numeric_value,
+                )
+            )
+        return details
 
     @staticmethod
     def _predicted_result_to_detail(
         predicted_result: PredictedResult,
         horizon_step: Optional[int],
     ) -> MpcPredictionResultDetail:
+        target_value = predicted_result.target_value
+        target_value_type = target_value.value_type if target_value else None
+        final_target_value = target_value.numeric_value() if target_value else None
+        front_water_level = MpcPredictionResultReporter._find_numeric_value(
+            predicted_result.predicted_value_list,
+            "front_water_level",
+        )
+        back_water_level = MpcPredictionResultReporter._find_numeric_value(
+            predicted_result.predicted_value_list,
+            "back_water_level",
+        )
+        out_flow = MpcPredictionResultReporter._find_numeric_value(
+            predicted_result.predicted_value_list,
+            "out_flow",
+        )
         attributes = {
-            "efficiency": predicted_result.efficiency,
+            "efficiency": MpcPredictionResultReporter._find_numeric_value(
+                predicted_result.predicted_value_list,
+                "efficiency",
+            ),
         }
-        target_value_type = predicted_result.final_target_value_type
         if target_value_type and target_value_type.upper() == MPC_OPERATION_WATER_LEVEL:
-            attributes["final_target_water_level"] = predicted_result.final_target_value
+            attributes["final_target_water_level"] = final_target_value
         if target_value_type and target_value_type.upper() == MPC_OPERATION_WATER_FLOW:
-            attributes["final_target_water_flow"] = predicted_result.final_target_value
+            attributes["final_target_water_flow"] = final_target_value
         return MpcPredictionResultDetail(
             horizon_step=horizon_step,
             command_type=target_value_type,
             object_type=predicted_result.object_type,
             node_id=predicted_result.object_id,
             object_id=predicted_result.object_id,
-            value=predicted_result.front_water_level,
-            target_value=predicted_result.final_target_value,
-            front_water_level=predicted_result.front_water_level,
-            back_water_level=predicted_result.back_water_level,
-            out_flow=predicted_result.out_flow,
+            value=front_water_level,
+            target_value=final_target_value,
+            front_water_level=front_water_level,
+            back_water_level=back_water_level,
+            out_flow=out_flow,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
         )
+
+    @staticmethod
+    def _device_result_to_details(
+        predicted_result: PredictedResult,
+        horizon_step: Optional[int],
+    ) -> List[MpcPredictionResultDetail]:
+        details = []
+        for device_result in predicted_result.device_result_list or []:
+            details.extend(
+                MpcPredictionResultReporter._device_values_to_details(
+                    predicted_result.object_id,
+                    device_result,
+                    horizon_step,
+                )
+            )
+        return details
+
+    @staticmethod
+    def _device_values_to_details(
+        station_id: Optional[int],
+        device_result: DeviceResult,
+        horizon_step: Optional[int],
+    ) -> List[MpcPredictionResultDetail]:
+        details = []
+        for value_item in device_result.value_list or []:
+            numeric_value = value_item.numeric_value()
+            if numeric_value is None:
+                continue
+            details.append(
+                MpcPredictionResultDetail(
+                    horizon_step=horizon_step,
+                    command_type=value_item.value_type,
+                    node_id=station_id,
+                    object_type=device_result.object_type,
+                    object_id=device_result.object_id,
+                    value=numeric_value,
+                    attributes=json.dumps(
+                        {"value_role": "forecast", "station_id": station_id},
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+            )
+        return details
+
+    @staticmethod
+    def _find_numeric_value(
+        value_items: List[ValueItem],
+        value_type: str,
+    ) -> Optional[float]:
+        for value_item in value_items or []:
+            if value_item.value_type.lower() == value_type.lower():
+                return value_item.numeric_value()
+        return None
 
     @staticmethod
     def _context_tenant_id(context: SimulationContext) -> Optional[str]:

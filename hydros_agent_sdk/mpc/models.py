@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 from hydros_agent_sdk.sensor_data import SensorData as _SensorData
@@ -16,29 +16,59 @@ def _payload_field(name: str, default: Any = None, default_factory: Any = None) 
     )
 
 
-class ControlObjectResult(HydroBaseModel):
+ScalarValue = Union[float, int, bool, str]
+
+
+class MpcResultContractModel(HydroBaseModel):
+    """Strict base model that exposes planning contract drift immediately."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ValueItem(MpcResultContractModel):
+    """A typed scalar value returned by the planning service."""
+
+    value_type: str
+    value: ScalarValue
+
+    def numeric_value(self) -> Optional[float]:
+        """Return a numeric value without treating booleans as numbers."""
+
+        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
+            return None
+        return float(self.value)
+
+
+class DeviceResult(MpcResultContractModel):
+    """Prediction values for one device nested under a station result."""
+
     object_type: Optional[str] = None
-    node_id: Optional[int] = None
-    node_name: Optional[str] = None
     object_id: Optional[int] = None
     object_name: Optional[str] = None
-    target_value: Optional[float] = None
-    target_value_type: Optional[str] = None
+    value_list: List[ValueItem] = Field(default_factory=list)
 
 
-class PredictedResult(HydroBaseModel):
+class ControlObjectResult(MpcResultContractModel):
+    """Executable control intents for one station in a horizon step."""
+
     object_type: Optional[str] = None
     object_id: Optional[int] = None
     object_name: Optional[str] = None
-    front_water_level: Optional[float] = None
-    back_water_level: Optional[float] = None
-    final_target_value: Optional[float] = None
-    final_target_value_type: Optional[str] = None
-    out_flow: Optional[float] = None
-    efficiency: Optional[float] = None
+    target_value_list: List[ValueItem] = Field(default_factory=list)
 
 
-class HorizonStep(HydroBaseModel):
+class PredictedResult(MpcResultContractModel):
+    """Station and device predictions for reporting, replay, and analysis only."""
+
+    object_type: Optional[str] = None
+    object_id: Optional[int] = None
+    object_name: Optional[str] = None
+    target_value: Optional[ValueItem] = None
+    predicted_value_list: List[ValueItem] = Field(default_factory=list)
+    device_result_list: List[DeviceResult] = Field(default_factory=list)
+
+
+class HorizonStep(MpcResultContractModel):
     horizon_step: Optional[int] = None
     # Executable control intents returned by planning. Consumers should build
     # control commands from this list, not from predicted_result_list.

@@ -10,7 +10,12 @@ from hydros_agent_sdk.protocol.agent_commands import (
 )
 from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
-from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, MpcOptimizeResponse
+from hydros_agent_sdk.mpc.models import (
+    ControlObjectResult,
+    HorizonStep,
+    MpcOptimizeResponse,
+    ValueItem,
+)
 from hydros_agent_sdk.utils import generate_agent_command_id
 
 logger = logging.getLogger(__name__)
@@ -47,15 +52,19 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                 )
                 continue
             for control_object_result in selected_horizon.control_object_list or []:
-                if self._is_incomplete_control_object(control_object_result):
+                if (
+                    self._is_incomplete_control_object(control_object_result)
+                    or not any(
+                        not self._is_incomplete_control_target(target_value)
+                        for target_value in control_object_result.target_value_list or []
+                    )
+                ):
                     logger.debug(
-                        "Skip incomplete MPC object control: objectId=%s, objectType=%s, targetValueType=%s",
+                        "Skip incomplete MPC control object: objectId=%s, objectType=%s",
                         control_object_result.object_id,
                         control_object_result.object_type,
-                        control_object_result.target_value_type,
                     )
                     continue
-
                 target_agent = self.resolve_target_agent_for_object(
                     control_object_result.object_id,
                     control_object_result.object_type,
@@ -68,19 +77,28 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                     )
                     continue
 
-                control_commands.append(
-                    HydroStationTargetValueRequest(
-                        command_id=generate_agent_command_id(),
-                        context=self.source_agent.context,
-                        source=self.source_agent,
-                        target=target_agent,
-                        object_id=control_object_result.object_id,
-                        object_type=control_object_result.object_type,
-                        target_value=control_object_result.target_value,
-                        target_value_type=control_object_result.target_value_type,
-                        need_ack_reply=True,
+                for target_value in control_object_result.target_value_list or []:
+                    if self._is_incomplete_control_target(target_value):
+                        logger.debug(
+                            "Skip incomplete MPC object control: objectId=%s, objectType=%s, targetValueType=%s",
+                            control_object_result.object_id,
+                            control_object_result.object_type,
+                            target_value.value_type,
+                        )
+                        continue
+                    control_commands.append(
+                        HydroStationTargetValueRequest(
+                            command_id=generate_agent_command_id(),
+                            context=self.source_agent.context,
+                            source=self.source_agent,
+                            target=target_agent,
+                            object_id=control_object_result.object_id,
+                            object_type=control_object_result.object_type,
+                            target_value=target_value.numeric_value(),
+                            target_value_type=target_value.value_type,
+                            need_ack_reply=True,
+                        )
                     )
-                )
 
         logger.info(
             "Built %s control commands from %s MPC responses",
@@ -106,8 +124,13 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
         return (
             control_object_result.object_id is None
             or not MpcControlCommandBuilder._has_text(control_object_result.object_type)
-            or control_object_result.target_value is None
-            or not MpcControlCommandBuilder._has_text(control_object_result.target_value_type)
+        )
+
+    @staticmethod
+    def _is_incomplete_control_target(target_value: ValueItem) -> bool:
+        return (
+            target_value.numeric_value() is None
+            or not MpcControlCommandBuilder._has_text(target_value.value_type)
         )
 
     @staticmethod
