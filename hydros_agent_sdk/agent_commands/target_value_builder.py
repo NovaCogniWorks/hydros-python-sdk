@@ -33,6 +33,9 @@ class StationTargetValueCommandBuilder:
         target_value: Any,
         object_id: int,
         object_type: str,
+        group_id: Optional[str] = None,
+        group_size: Optional[int] = None,
+        main_step_index: Optional[int] = None,
     ) -> Optional[HydroStationTargetValueRequest]:
         target_agent = self.get_sibling_agent_instance(target_agent_code)
         if target_agent is None:
@@ -73,5 +76,8 @@ class StationTargetValueCommandBuilder:
             object_type=object_type,
             target_value_type=value_type.code,
             target_value=typed_target_value,
+            group_id=group_id,
+            group_size=group_size,
+            main_step_index=main_step_index,
             need_ack_reply=True,
         )

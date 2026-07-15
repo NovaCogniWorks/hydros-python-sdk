@@ -802,42 +802,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             transfer_bundles=transfer_bundles
         )
         
-        # 按照 dispatching.py 的解析格式，生成 commands 列表
-        commands = []
-
-
-        for sid in self.system_config.station_ids:
-            action = actions[sid]
-            
-            # 下发机组开度 / 叶片角，去掉机组启停状态
-            for uid, op in action.unit_openings.items():
-                st = action.unit_status.get(uid, 0)
-                # 控制值 target_value 是叶片角（100 是关机）
-                target_value = 100.0 if st == 0 else float(op)
-
-                # 当前配置中 uid 本身就是真实的 pump object_id
-                unit_object_id = uid
-
-                # 目标智能体编码 target_agent_code 可从 TargetAgentResolver 获取
-                # 示例：target_agent_code = None
-                # 示例：if unit_object_id is not None:
-                # 示例：    agent_instance = self._target_agent_resolver.resolve_target_agent_for_object(object_id=int(unit_object_id))
-                # 示例：    if agent_instance:
-                # 示例：        target_agent_code = agent_instance.agent_code
-
-                # 示例：if unit_object_id is None or target_agent_code is None:
-                # 示例：    raise ValueError(f"无法解析机组真实的映射信息: S{sid}-U{uid}, unit_object_id={unit_object_id}, target_agent_code={target_agent_code}")
-
-                commands.append({
-                    "target_agent_code": "ONTOLOGY_SIMULATION_AGENT",
-                    "target_command_type": DeviceValueTypeEnum.BLADE_ANGLE.code,
-                    "target_value": str(round(target_value, 2)),
-                    "object_id": str(unit_object_id),
-                    "object_type": HydroObjectType.PUMP
-                })
-                
-        logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
-        
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
@@ -870,22 +834,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     # 单机组预测流量和效率
                     u_flow_list = st_action.predicted_unit_flows.get(uid, [])
                     u_eff_list = getattr(st_action, "predicted_unit_efficiencies", {}).get(uid, [])
-                    u_flow_val = float(u_flow_list[i]) if i < len(u_flow_list) else None
-                    u_eff_val = float(u_eff_list[i]) if i < len(u_eff_list) else None
-                    
-#                     # 根据用户要求，单机组水位从全局水位取
-#                     predicted_result_list.append(
-#                         MpcResultFactory.build_predicted_result(
-#                             object_id=uid,
-#                             object_type="PUMP_UNIT",
-#                             front_water_level=st_front,
-#                             final_target_value=None,
-#                             final_target_value_type=None,
-#                             back_water_level=st_back,
-#                             out_flow=u_flow_val,
-#                             efficiency=u_eff_val
-#                         )
-#                     )
                 
                 # 全站级预测
                 if i == 0:
@@ -901,7 +849,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 control_object_list.append(
                     MpcResultFactory.build_control_object_result(
                         object_id=sid,
-                        object_type=str(HydroObjectType.PUMP_STATION),
+                        object_type=HydroObjectType.PUMP_STATION.value,
                         target_value_list=[
                             ValueItem(value_type=MetricsCodes.WATER_FLOW, value=float(st_flow))
                         ] if st_flow is not None else [],
@@ -927,6 +875,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     predicted_result_list=predicted_result_list
                 )
             )
+
+        commands = self._build_station_flow_control_commands(
+            horizon_step_list=horizon_step_list,
+            current_step=step,
+        )
 
         try:
             reporter = MpcPredictionResultReporter(sim_coordination_client=self.sim_coordination_client)
@@ -959,6 +912,68 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.info(f"启机总次数: {self.total_startup_count}")
             logger.info(f"停机总次数: {self.total_shutdown_count}")
 
+        return commands
+
+    @staticmethod
+    def _build_station_flow_control_commands(
+        horizon_step_list: List[Any],
+        current_step: int,
+    ) -> List[Dict[str, Any]]:
+        """将首个预测步的 PumpStation 水流目标转换为 edge 控制命令。
+
+        ``control_object_list`` 是 MPC 的可执行控制事实；``predicted_result_list``
+        仅用于展示和回放。本方法只消费第一个 horizon，避免把未来规划步提前
+        下发到 edge。该 step 内的所有泵站目标归入同一 control group，由
+        ``STATION_AGENT`` 的 remote DMPC 会话统一执行。
+        """
+        if not horizon_step_list:
+            logger.warning("MPC 未生成 horizon 控制结果，跳过泵站水流指令下发")
+            return []
+
+        current_horizon = horizon_step_list[0]
+        commands: List[Dict[str, Any]] = []
+        for control_object in current_horizon.control_object_list or []:
+            if (
+                control_object.object_id is None
+                or control_object.object_type != HydroObjectType.PUMP_STATION.value
+            ):
+                continue
+            for target_value in control_object.target_value_list or []:
+                if target_value.value_type != MetricsCodes.WATER_FLOW:
+                    continue
+                water_flow = target_value.numeric_value()
+                if water_flow is None:
+                    logger.warning(
+                        "跳过非数值泵站水流控制目标: stationId=%s, targetValue=%s",
+                        control_object.object_id,
+                        target_value.value,
+                    )
+                    continue
+                commands.append(
+                    {
+                        "target_agent_code": "STATION_AGENT",
+                        "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
+                        "target_value": str(round(water_flow, 2)),
+                        "object_id": int(control_object.object_id),
+                        "object_type": control_object.object_type,
+                    }
+                )
+
+        if not commands:
+            logger.warning("首个 MPC horizon 没有可下发的 PumpStation water_flow 控制目标")
+            return []
+
+        group_id = f"pump-station-flow:{current_step}"
+        for command in commands:
+            command["group_id"] = group_id
+            command["group_size"] = len(commands)
+            command["main_step_index"] = current_step
+
+        logger.info(
+            "生成了 %s 条 PumpStation water_flow 控制指令准备下发: groupId=%s",
+            len(commands),
+            group_id,
+        )
         return commands
 
     def _get_current_scheduling_step(self) -> int:

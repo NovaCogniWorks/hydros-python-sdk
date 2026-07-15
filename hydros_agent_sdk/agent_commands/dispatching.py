@@ -51,6 +51,9 @@ class ControlCommandDispatcher:
                 target_value=target_value,
                 object_id=object_id,
                 object_type=object_type,
+                group_id=command.get("group_id"),
+                group_size=command.get("group_size"),
+                main_step_index=command.get("main_step_index"),
             )
             if command_request is not None:
                 self.send_command(command_request)

@@ -4,7 +4,9 @@ import sys
 import types
 from unittest.mock import Mock
 
+from hydros_agent_sdk import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, ValueItem
 from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, TickCmdRequest, TimeSeriesDataUpdateRequest
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgent, ObjectTimeSeries, SimulationContext
@@ -74,6 +76,66 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert result is None
     agent.on_optimization.assert_called_once_with(7)
     agent._control_command_dispatcher.dispatch.assert_called_once_with(commands)
+
+
+def test_pump_scheduling_builds_grouped_station_flow_commands_from_current_horizon(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    horizon_step_list = [
+        HorizonStep(
+            horizon_step=1,
+            control_object_list=[
+                ControlObjectResult(
+                    object_id=1001,
+                    object_type=HydroObjectType.PUMP_STATION,
+                    target_value_list=[
+                        ValueItem(value_type=MetricsCodes.WATER_FLOW, value=123.456),
+                    ],
+                ),
+                ControlObjectResult(
+                    object_id=2001,
+                    object_type=HydroObjectType.PUMP,
+                    target_value_list=[
+                        ValueItem(value_type="blade_angle", value=4.5),
+                    ],
+                ),
+            ],
+        ),
+        HorizonStep(
+            horizon_step=2,
+            control_object_list=[
+                ControlObjectResult(
+                    object_id=1001,
+                    object_type=HydroObjectType.PUMP_STATION,
+                    target_value_list=[
+                        ValueItem(value_type=MetricsCodes.WATER_FLOW, value=999.0),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+    commands = module.PumpCentralSchedulingAgent._build_station_flow_control_commands(
+        horizon_step_list=horizon_step_list,
+        current_step=8,
+    )
+
+    assert commands == [
+        {
+            "target_agent_code": "STATION_AGENT",
+            "target_command_type": "water_flow",
+            "target_value": "123.46",
+            "object_id": 1001,
+            "object_type": "PumpStation",
+            "group_id": "pump-station-flow:8",
+            "group_size": 1,
+            "main_step_index": 8,
+        }
+    ]
 
 
 def test_pump_scheduling_agent_subscribes_metrics_before_lazy_init(monkeypatch):
