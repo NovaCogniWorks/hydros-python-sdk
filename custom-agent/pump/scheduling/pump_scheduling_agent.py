@@ -1058,18 +1058,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 uv_list.append(ValueItem(value_type="blade_angle", value=float(blade_angle)))
 
             # unit flow
-            u_flow = self._get_predicted_value(
-                st_action, "predicted_unit_flows", uid, horizon_idx
-            )
-            if u_flow is not None:
-                uv_list.append(ValueItem(value_type="flow", value=float(u_flow)))
+            # u_flow = self._get_predicted_value(
+            #     st_action, "predicted_unit_flows", uid, horizon_idx
+            # )
+            # if u_flow is not None:
+            #     uv_list.append(ValueItem(value_type="flow", value=float(u_flow)))
 
             # unit efficiency
-            u_eff = self._get_predicted_value(
-                st_action, "predicted_unit_efficiencies", uid, horizon_idx
-            )
-            if u_eff is not None:
-                uv_list.append(ValueItem(value_type="efficiency", value=float(u_eff)))
+            # u_eff = self._get_predicted_value(
+            #     st_action, "predicted_unit_efficiencies", uid, horizon_idx
+            # )
+            # if u_eff is not None:
+            #     uv_list.append(ValueItem(value_type="efficiency", value=float(u_eff)))
 
             if uv_list:
                 device_result_list.append(
