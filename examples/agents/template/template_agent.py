@@ -2,7 +2,7 @@
 
 import logging
 
-from hydros_agent_sdk import AgentBehavior, AgentExecutionContext
+from hydros_agent_sdk import CustomAgent, AgentExecutionContext
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskTerminateRequest,
@@ -12,7 +12,7 @@ from hydros_agent_sdk.protocol.commands import (
 logger = logging.getLogger(__name__)
 
 
-class TemplateAgent(AgentBehavior):
+class TemplateAgent(CustomAgent):
     """Smallest useful time-step driven Agent implementation."""
 
     def on_init(self, runtime: AgentExecutionContext, request: SimTaskInitRequest) -> None:

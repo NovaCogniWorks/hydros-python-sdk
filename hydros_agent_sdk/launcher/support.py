@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from hydros_agent_sdk import (
-    AgentBehavior,
-    BehaviorAgentFactory,
+    CustomAgent,
+    CustomAgentFactory,
     HydroAgentFactory,
     SimCoordinationClient,
     load_env_config,
@@ -156,7 +156,7 @@ class AgentDirectoryResolver:
 
 
 class AgentClassResolver:
-    """从智能体目录中寻找组合式 AgentBehavior 或旧式 BaseHydroAgent。"""
+    """从智能体目录中寻找组合式 CustomAgent 或旧式 BaseHydroAgent。"""
 
     def __init__(self):
         self.last_import_errors: List[str] = []
@@ -220,7 +220,7 @@ class AgentClassResolver:
         if obj.__module__ != module_name:
             return False
         return (
-            (obj != AgentBehavior and issubclass(obj, AgentBehavior))
+            (obj != CustomAgent and issubclass(obj, CustomAgent))
             or (obj != BaseHydroAgent and issubclass(obj, BaseHydroAgent))
         )
 
@@ -316,8 +316,8 @@ class AgentModuleLoader:
             if self.class_resolver.last_import_errors:
                 import_details = " Import failures: " + "; ".join(self.class_resolver.last_import_errors)
             raise ValueError(
-                f"No AgentBehavior or BaseHydroAgent subclass found in {agent_dir}. "
-                f"Please define an AgentBehavior implementation (recommended) or an existing BaseHydroAgent subclass."
+                f"No CustomAgent or BaseHydroAgent subclass found in {agent_dir}. "
+                f"Please define a CustomAgent implementation (recommended) or an existing BaseHydroAgent subclass."
                 f"{import_details}"
             )
 
@@ -417,9 +417,9 @@ class AgentFactoryRegistrationService:
         config_file: str,
         env_config: Dict[str, str],
     ):
-        if issubclass(agent_info.agent_class, AgentBehavior):
-            return BehaviorAgentFactory(
-                behavior_class=agent_info.agent_class,
+        if issubclass(agent_info.agent_class, CustomAgent):
+            return CustomAgentFactory(
+                custom_agent_class=agent_info.agent_class,
                 config_file=config_file,
                 env_config=env_config,
             )

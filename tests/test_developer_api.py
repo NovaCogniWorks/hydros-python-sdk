@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from hydros_agent_sdk import AgentBehavior, AgentIdentity, BehaviorAgentFactory
+from hydros_agent_sdk import (
+    AgentBehavior,
+    AgentIdentity,
+    BehaviorAgentFactory,
+    CustomAgent,
+    CustomAgentFactory,
+)
 from hydros_agent_sdk.launcher.support import AgentClassResolver, AgentFactoryRegistrationService
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
@@ -12,6 +18,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.models import HydroAgent, SimulationContext
 from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
+from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 from hydros_agent_sdk.state_manager import AgentStateManager
 
 
@@ -24,7 +31,7 @@ class FakeClient:
         self.enqueued.append(response)
 
 
-class RecordingBehavior(AgentBehavior):
+class RecordingCustomAgent(CustomAgent):
     def __init__(self):
         self.events = []
 
@@ -57,12 +64,12 @@ def make_init_request(context, agent_type="COMPOSED_AGENT"):
     )
 
 
-def test_behavior_adapter_keeps_developer_behavior_outside_protocol_inheritance():
+def test_custom_agent_adapter_keeps_developer_agent_outside_protocol_inheritance():
     context = make_context()
     client = FakeClient()
-    behavior = RecordingBehavior()
-    adapter = BehaviorAgentAdapter(
-        behavior=behavior,
+    custom_agent = RecordingCustomAgent()
+    adapter = CustomAgentRuntimeAdapter(
+        custom_agent=custom_agent,
         sim_coordination_client=client,
         agent_id="AGT_COMPOSED",
         agent_code="COMPOSED_AGENT",
@@ -79,18 +86,18 @@ def test_behavior_adapter_keeps_developer_behavior_outside_protocol_inheritance(
         SimTaskTerminateRequest(command_id="CMD_TERM", context=context)
     )
 
-    identity = behavior.events[0][1]
+    identity = custom_agent.events[0][1]
     assert isinstance(identity, AgentIdentity)
     assert identity.agent_id == "AGT_COMPOSED"
     assert not hasattr(adapter.execution_context, "agent_instance")
-    assert not hasattr(behavior, "agent_id")
+    assert not hasattr(custom_agent, "agent_id")
     assert init_response.source_agent_instance is adapter
     assert tick_response.completed_step == 3
     assert terminate_response.source_agent_instance is adapter
-    assert [event[0] for event in behavior.events] == ["init", "tick", "terminate"]
+    assert [event[0] for event in custom_agent.events] == ["init", "tick", "terminate"]
 
 
-def test_behavior_factory_and_multi_agent_own_task_lifecycle(tmp_path):
+def test_custom_agent_factory_and_multi_agent_own_task_lifecycle(tmp_path):
     config_file = tmp_path / "agent.properties"
     config_file.write_text(
         "agent_code=COMPOSED_AGENT\nagent_type=COMPOSED_AGENT\nagent_name=Composed Agent\n",
@@ -99,8 +106,8 @@ def test_behavior_factory_and_multi_agent_own_task_lifecycle(tmp_path):
     client = FakeClient()
     callback = MultiAgentCallback(node_id="node")
     callback.set_client(client)
-    factory = BehaviorAgentFactory(
-        behavior_class=RecordingBehavior,
+    factory = CustomAgentFactory(
+        custom_agent_class=RecordingCustomAgent,
         config_file=str(config_file),
         env_config={"hydros_cluster_id": "cluster", "hydros_node_id": "node"},
     )
@@ -118,7 +125,7 @@ def test_behavior_factory_and_multi_agent_own_task_lifecycle(tmp_path):
     )
 
     assert init_response.source_agent_instance is adapter
-    assert adapter.behavior.events[0][1].agent_type == "ROUTED_TYPE"
+    assert adapter.custom_agent.events[0][1].agent_type == "ROUTED_TYPE"
     assert tick_response[0].completed_step == 4
     assert terminate_response[0].source_agent_instance is adapter
     assert not client.state_manager.has_active_context(context)
@@ -131,10 +138,10 @@ def test_launcher_discovers_composition_based_template():
     agent_class = AgentClassResolver().find_agent_class(str(template_dir))
 
     assert agent_class is not None
-    assert issubclass(agent_class, AgentBehavior)
+    assert issubclass(agent_class, CustomAgent)
 
 
-def test_launcher_registration_selects_behavior_factory(monkeypatch):
+def test_launcher_registration_selects_custom_agent_factory(monkeypatch):
     class ModuleLoader:
         def load(self, _agent_name):
             return type(
@@ -142,7 +149,7 @@ def test_launcher_registration_selects_behavior_factory(monkeypatch):
                 (),
                 {
                     "name": "composed",
-                    "agent_class": RecordingBehavior,
+                    "agent_class": RecordingCustomAgent,
                     "script_dir": "/tmp/composed",
                     "agent_code": "COMPOSED_AGENT",
                     "agent_type": "COMPOSED_AGENT",
@@ -168,5 +175,31 @@ def test_launcher_registration_selects_behavior_factory(monkeypatch):
         ["composed"],
     )
 
-    assert isinstance(callback.factory, BehaviorAgentFactory)
-    assert callback.factory.behavior_class is RecordingBehavior
+    assert isinstance(callback.factory, CustomAgentFactory)
+    assert callback.factory.custom_agent_class is RecordingCustomAgent
+
+
+def test_legacy_composition_names_remain_available():
+    assert AgentBehavior is CustomAgent
+    assert BehaviorAgentFactory is CustomAgentFactory
+    assert BehaviorAgentAdapter is CustomAgentRuntimeAdapter
+
+
+def test_legacy_adapter_accepts_behavior_keyword():
+    context = make_context()
+    custom_agent = RecordingCustomAgent()
+
+    adapter = BehaviorAgentAdapter(
+        behavior=custom_agent,
+        sim_coordination_client=FakeClient(),
+        agent_id="AGT_COMPOSED",
+        agent_code="COMPOSED_AGENT",
+        agent_type="COMPOSED_AGENT",
+        agent_name="Composed Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+    )
+
+    assert adapter.custom_agent is custom_agent
+    assert adapter.behavior is custom_agent

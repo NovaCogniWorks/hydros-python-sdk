@@ -6,6 +6,7 @@ Hydros 智能体执行的运行时辅助工具。
 """
 
 from hydros_agent_sdk.runtime.agent_context import AgentContext
+from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
 from hydros_agent_sdk.runtime.agent_configuration_service import AgentConfigurationService
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
@@ -17,6 +18,7 @@ from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
 
 __all__ = [
     "AgentContext",
+    "CustomAgentRuntimeAdapter",
     "BehaviorAgentAdapter",
     "AgentConfigurationService",
     "AgentInstanceStatusSupport",

@@ -503,9 +503,9 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     @staticmethod
     def _is_composed_agent(agent: Any) -> bool:
-        from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
+        from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 
-        return isinstance(agent, BehaviorAgentAdapter)
+        return isinstance(agent, CustomAgentRuntimeAdapter)
 
     def _initialize_composed_agent_task(self, context, context_agents: Dict[str, Any]) -> None:
         """由协调器持有组合式 Agent 的任务状态，而不是交给业务类。"""

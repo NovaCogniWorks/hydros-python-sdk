@@ -18,7 +18,7 @@ from hydros_agent_sdk.agent_constants import (
 
 if TYPE_CHECKING:
     from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
-    from hydros_agent_sdk.developer_api import AgentBehavior
+    from hydros_agent_sdk.developer_api import CustomAgent
 
 logger = logging.getLogger(__name__)
 
@@ -162,19 +162,29 @@ class HydroAgentFactory(Generic[AgentType]):
             raise
 
 
-class BehaviorAgentFactory(HydroAgentFactory):
-    """创建组合式 ``AgentBehavior`` 的运行时适配器。"""
+class CustomAgentFactory(HydroAgentFactory):
+    """Create the internal runtime adapter for a developer ``CustomAgent``."""
 
     def __init__(
         self,
-        behavior_class: Type['AgentBehavior'],
+        custom_agent_class: Optional[Type['CustomAgent']] = None,
         config_file: str = "./agent.properties",
         env_config: Optional[Dict[str, str]] = None,
+        *,
+        behavior_class: Optional[Type['CustomAgent']] = None,
     ):
-        from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
+        if custom_agent_class is None:
+            custom_agent_class = behavior_class
+        elif behavior_class is not None and behavior_class is not custom_agent_class:
+            raise ValueError("custom_agent_class and behavior_class must reference the same class")
+        if custom_agent_class is None:
+            raise ValueError("custom_agent_class is required")
 
-        super().__init__(BehaviorAgentAdapter, config_file=config_file, env_config=env_config)
-        self.behavior_class = behavior_class
+        from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
+
+        super().__init__(CustomAgentRuntimeAdapter, config_file=config_file, env_config=env_config)
+        self.custom_agent_class = custom_agent_class
+        self.behavior_class = custom_agent_class
 
     def create_agent(self, sim_coordination_client: 'SimCoordinationClient', context: SimulationContext):
         config = self._load_config(self.config_file)
@@ -183,9 +193,9 @@ class BehaviorAgentFactory(HydroAgentFactory):
 
             self.env_config = load_env_config(os.path.join(os.path.dirname(self.config_file), "env.properties"))
 
-        behavior = self.behavior_class()
+        custom_agent = self.custom_agent_class()
         return self.agent_class(
-            behavior=behavior,
+            custom_agent=custom_agent,
             sim_coordination_client=sim_coordination_client,
             agent_id=generate_agent_instance_id(config["agent_code"]),
             agent_code=config["agent_code"],
@@ -195,6 +205,11 @@ class BehaviorAgentFactory(HydroAgentFactory):
             hydros_cluster_id=self.env_config["hydros_cluster_id"],
             hydros_node_id=self.env_config["hydros_node_id"],
         )
+
+
+# Historical public name and constructor keyword for the original API.
+BehaviorAgentFactory = CustomAgentFactory
+
 
 class SystemCentralSchedulingAgentFactory:
     """内置 CENTRAL_SCHEDULING_AGENT 的工厂。"""

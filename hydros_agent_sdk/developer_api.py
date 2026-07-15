@@ -46,8 +46,8 @@ class AgentExecutionContext:
         self._client.enqueue(response)
 
 
-class AgentBehavior(ABC):
-    """开发者只实现业务生命周期，不继承协议 DTO 或运行时实现。"""
+class CustomAgent(ABC):
+    """开发者实现的自定义 Agent 生命周期，不继承协议 DTO 或运行时实现。"""
 
     def on_init(self, runtime: AgentExecutionContext, request):
         return None
@@ -69,3 +69,7 @@ class AgentBehavior(ABC):
 
     def on_outflow_time_series(self, runtime: AgentExecutionContext, request):
         return None
+
+
+# Historical public name for the original composition API.
+AgentBehavior = CustomAgent
