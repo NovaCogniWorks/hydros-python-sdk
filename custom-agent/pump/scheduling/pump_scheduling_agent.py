@@ -20,6 +20,7 @@ from hydros_agent_sdk import (
 )
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import *
@@ -838,7 +839,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"生成了 {len(commands)} 条控制指令准备下发。")
         
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
-        from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
 
