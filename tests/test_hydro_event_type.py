@@ -1,4 +1,4 @@
-from hydros_agent_sdk import AgentEventType
+from hydros_agent_sdk.protocol import AgentEventType
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
     OutflowTimeSeriesEvent,

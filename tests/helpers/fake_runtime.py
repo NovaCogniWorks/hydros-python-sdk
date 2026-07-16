@@ -12,7 +12,7 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.protocol.commands import SimCommand, SimCommandEnvelope
 from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.transport import InMemoryTransport
+from hydros_agent_sdk.transport.in_memory import InMemoryTransport
 
 
 class FakeRuntime:

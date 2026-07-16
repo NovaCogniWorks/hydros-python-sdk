@@ -9,7 +9,8 @@ import logging
 import json
 from typing import Optional
 
-from hydros_agent_sdk import ErrorCodes, handle_agent_errors, load_runtime_env_settings
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors
+from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,

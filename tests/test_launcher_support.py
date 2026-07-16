@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import hydros_agent_sdk.launcher.support as support_module
-from hydros_agent_sdk.launcher import (
+from hydros_agent_sdk.launcher.support import (
     AgentDirectoryResolver,
     AgentFactoryRegistrationService,
     LauncherCli,

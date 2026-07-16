@@ -1,6 +1,7 @@
 import pytest
 
-from hydros_agent_sdk.transport import InMemoryTransport, PublishRecord
+from hydros_agent_sdk.transport.base import PublishRecord
+from hydros_agent_sdk.transport.in_memory import InMemoryTransport
 
 
 def test_in_memory_transport_delivers_messages_to_subscribers():

@@ -140,6 +140,7 @@
 - `hydros_agent_sdk/coordination_client.py` 只装配 transport、payload decode/filter、`TaskRuntime` 和 `CoordinationOutboxPublisher`。Paho 生命周期只属于 `MqttCoordinationTransport`；task mailbox、callback dispatch 和失败响应只属于 `TaskRuntime`；出站 mailbox、worker 和重试只属于 `CoordinationOutboxPublisher`。
 - `hydros_agent_sdk/agent_commands/transport/client.py` 只复用共享 `Transport` 做 agent command 的订阅、decode 和 publish；`AgentCommandGateway` 显式装配 `AgentCommandRuntime`，禁止重新创建 Paho client 或恢复 runtime 懒创建。
 - `AgentStateManager` 是 task lifecycle、task-agent 关联和本地 runtime Agent 的唯一事实来源。`MultiAgentCallback` 只通过它查询和路由任务 Agent；具体 Agent 的 `on_init()` / `on_terminate()` 只管理自身资源，不得自行登记或清理 task truth。
+- 根包 `hydros_agent_sdk` 只导出稳定开发者 API、协调装配入口、错误处理、日志初始化和控制算法扩展接口；protocol DTO、runtime/state/transport 实现和 testing helper 必须从明确子模块导入，不得重新扩散到根包。
 
 ### P0：职责过重的核心类
 

@@ -8,13 +8,11 @@ from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
-from hydros_agent_sdk import HydroObjectType, generate_agent_command_id, get_default_env_config_path, load_env_config
+from hydros_agent_sdk.config_loader import get_default_env_config_path, load_env_config
 from hydros_agent_sdk.agent_properties import AgentProperties
-from hydros_agent_sdk.agent_commands import (
-    AgentCommandClient,
-    AgentCommandHandler,
-    AgentCommandRuntime,
-)
+from hydros_agent_sdk.agent_commands.runtime.handlers import AgentCommandHandler
+from hydros_agent_sdk.agent_commands.runtime.runtime import AgentCommandRuntime
+from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
 from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest, HydroStationTargetValueResponse
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agent_commands.transport.codec import AgentCommandDecoder
@@ -61,7 +59,7 @@ from hydros_agent_sdk.protocol.models import (
     TopHydroObject,
     Waterway,
 )
-from hydros_agent_sdk.runtime import RuntimeEnvSettings
+from hydros_agent_sdk.runtime.env_settings import RuntimeEnvSettings
 from hydros_agent_sdk.scenario_config import (
     BizScenarioConfiguration,
     SimAgentProperties,
@@ -69,7 +67,8 @@ from hydros_agent_sdk.scenario_config import (
 )
 from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.transport import InMemoryTransport
+from hydros_agent_sdk.transport.in_memory import InMemoryTransport
+from hydros_agent_sdk.utils import HydroObjectType, generate_agent_command_id
 from hydros_agent_sdk.utils import (
     SimpleChildObject,
     TopHydroObject as TopologyTopHydroObject,

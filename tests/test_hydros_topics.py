@@ -6,8 +6,10 @@ from unittest.mock import Mock
 
 from paho.mqtt.reasoncodes import ReasonCode
 
-from hydros_agent_sdk import AgentCommandClient, HydrosTopics, SimCoordinationCallback, SimCoordinationClient
-from hydros_agent_sdk.transport import MqttCoordinationTransport
+from hydros_agent_sdk import SimCoordinationCallback, SimCoordinationClient
+from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
+from hydros_agent_sdk.topics import HydrosTopics
+from hydros_agent_sdk.transport.mqtt_coordination import MqttCoordinationTransport
 
 
 class DummyCoordinationCallback(SimCoordinationCallback):

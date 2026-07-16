@@ -22,7 +22,8 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
 from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
-from hydros_agent_sdk.transport import MqttCoordinationTransport, Transport
+from hydros_agent_sdk.transport.base import Transport
+from hydros_agent_sdk.transport.mqtt_coordination import MqttCoordinationTransport
 
 logger = logging.getLogger(__name__)
 

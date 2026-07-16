@@ -4,7 +4,7 @@ import sys
 import types
 from unittest.mock import Mock
 
-from hydros_agent_sdk import HydroObjectType, MetricsCodes
+from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, ValueItem
 from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, TickCmdRequest, TimeSeriesDataUpdateRequest

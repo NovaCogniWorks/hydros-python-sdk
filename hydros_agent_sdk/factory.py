@@ -17,7 +17,8 @@ from hydros_agent_sdk.agent_constants import (
 )
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
+    from hydros_agent_sdk.base_agent import BaseHydroAgent
+    from hydros_agent_sdk.coordination_client import SimCoordinationClient
     from hydros_agent_sdk.developer_api import CustomAgent
 
 logger = logging.getLogger(__name__)
@@ -167,24 +168,14 @@ class CustomAgentFactory(HydroAgentFactory):
 
     def __init__(
         self,
-        custom_agent_class: Optional[Type['CustomAgent']] = None,
+        custom_agent_class: Type['CustomAgent'],
         config_file: str = "./agent.properties",
         env_config: Optional[Dict[str, str]] = None,
-        *,
-        behavior_class: Optional[Type['CustomAgent']] = None,
     ):
-        if custom_agent_class is None:
-            custom_agent_class = behavior_class
-        elif behavior_class is not None and behavior_class is not custom_agent_class:
-            raise ValueError("custom_agent_class and behavior_class must reference the same class")
-        if custom_agent_class is None:
-            raise ValueError("custom_agent_class is required")
-
         from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 
         super().__init__(CustomAgentRuntimeAdapter, config_file=config_file, env_config=env_config)
         self.custom_agent_class = custom_agent_class
-        self.behavior_class = custom_agent_class
 
     def create_agent(self, sim_coordination_client: 'SimCoordinationClient', context: SimulationContext):
         config = self._load_config(self.config_file)
@@ -205,12 +196,6 @@ class CustomAgentFactory(HydroAgentFactory):
             hydros_cluster_id=self.env_config["hydros_cluster_id"],
             hydros_node_id=self.env_config["hydros_node_id"],
         )
-
-
-# Historical public name and constructor keyword for the original API.
-BehaviorAgentFactory = CustomAgentFactory
-
-
 class SystemCentralSchedulingAgentFactory:
     """内置 CENTRAL_SCHEDULING_AGENT 的工厂。"""
 
@@ -225,7 +210,7 @@ class SystemCentralSchedulingAgentFactory:
         context: SimulationContext
     ):
         from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
-        from hydros_agent_sdk.runtime import load_runtime_env_settings
+        from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 
         settings = load_runtime_env_settings(env_config=self.env_config)
         if self.env_config is None:

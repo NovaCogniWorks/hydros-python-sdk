@@ -95,7 +95,7 @@ agent_type=MY_AGENT
 agent_name=My Agent
 ```
 
-`my_agent.py` 中实现 `BaseHydroAgent` 的子类。多数时间步驱动场景可以从 `TickableAgent` 起步；最小模板可参考 `examples/agents/template`，高精度仿真、规则推理和中央调度可参考 `examples/agents/twins`、`examples/agents/ontology`、`examples/agents/centralscheduling`。
+`my_agent.py` 中实现根包公开的 `CustomAgent`，通过 `AgentExecutionContext` 读取 Agent 身份、任务上下文和配置。最小模板可参考 `examples/agents/template`；SDK 内建的高级 Agent 基类只从 `hydros_agent_sdk.agents` 显式导入。
 
 启动自定义目录：
 
@@ -103,7 +103,7 @@ agent_name=My Agent
 python -m hydros_agent_sdk.launcher --launcher-dir my-app -- myagent
 ```
 
-launcher 会自动发现 `launcher-dir/agents/<agent>/agent.properties` 和目录内的 `BaseHydroAgent` 子类。
+launcher 会自动发现 `launcher-dir/agents/<agent>/agent.properties` 和目录内的 `CustomAgent` 实现。
 
 ## 依赖分层
 

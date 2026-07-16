@@ -11,7 +11,7 @@ from hydros_agent_sdk.protocol.models import (
     HydroAgentInstance,
     SimulationContext,
 )
-from hydros_agent_sdk.runtime import AgentInstanceStatusSupport
+from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
 
 
 def make_context():

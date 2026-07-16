@@ -35,7 +35,7 @@ from hydros_agent_sdk.protocol.models import (
     TimeSeriesValue,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.transport import InMemoryTransport
+from hydros_agent_sdk.transport.in_memory import InMemoryTransport
 
 
 def make_context():

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
-from typing import Optional
 
 from hydros_agent_sdk.developer_api import CustomAgent, AgentExecutionContext, AgentIdentity
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
@@ -14,18 +13,10 @@ class CustomAgentRuntimeAdapter(BaseHydroAgent):
 
     def __init__(
         self,
-        custom_agent: Optional[CustomAgent] = None,
+        custom_agent: CustomAgent,
         *args,
-        behavior: Optional[CustomAgent] = None,
         **kwargs,
     ) -> None:
-        if custom_agent is None:
-            custom_agent = behavior
-        elif behavior is not None and behavior is not custom_agent:
-            raise ValueError("custom_agent and behavior must reference the same instance")
-        if custom_agent is None:
-            raise ValueError("custom_agent is required")
-
         super().__init__(*args, **kwargs)
         self._custom_agent = custom_agent
         self._execution_context = AgentExecutionContext(
@@ -43,11 +34,6 @@ class CustomAgentRuntimeAdapter(BaseHydroAgent):
     @property
     def custom_agent(self) -> CustomAgent:
         return self._custom_agent
-
-    @property
-    def behavior(self) -> CustomAgent:
-        """Historical alias for ``custom_agent``."""
-        return self.custom_agent
 
     @property
     def execution_context(self) -> AgentExecutionContext:

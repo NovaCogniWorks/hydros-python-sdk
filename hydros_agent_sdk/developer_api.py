@@ -69,7 +69,3 @@ class CustomAgent(ABC):
 
     def on_outflow_time_series(self, runtime: AgentExecutionContext, request):
         return None
-
-
-# Historical public name for the original composition API.
-AgentBehavior = CustomAgent

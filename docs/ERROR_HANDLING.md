@@ -70,7 +70,8 @@ error_code = ErrorCodes.AGENT_INIT_FAILURE.code
 **使用示例**:
 
 ```python
-from hydros_agent_sdk import TwinsSimulationAgent, ErrorCodes, handle_agent_errors
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, SimTaskInitResponse
 
 class MyAgent(TwinsSimulationAgent):
@@ -263,10 +264,10 @@ def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResp
 
 ```python
 from hydros_agent_sdk import (
-    TwinsSimulationAgent,
     ErrorCodes,
     handle_agent_errors,
 )
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
@@ -335,12 +336,12 @@ class MyTwinsAgent(TwinsSimulationAgent):
 
 ```python
 from hydros_agent_sdk import (
-    TwinsSimulationAgent,
     ErrorCodes,
     handle_agent_errors,
     safe_execute,
     AgentErrorContext,
 )
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 
 class AdvancedAgent(TwinsSimulationAgent):
     """混合使用多种错误处理方式的 agent"""

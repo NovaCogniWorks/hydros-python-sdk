@@ -9,7 +9,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 
 from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.topics import HydrosTopics
-from hydros_agent_sdk.transport import Transport
+from hydros_agent_sdk.transport.base import Transport
 
 from .codec import AgentCommandDecoder
 

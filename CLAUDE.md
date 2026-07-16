@@ -407,7 +407,8 @@ Located in `hydros_agent_sdk/error_codes.py`, matching Java `com.hydros.common.E
 #### Pattern 1: Decorator (Recommended for Lifecycle Methods)
 
 ```python
-from hydros_agent_sdk import TwinsSimulationAgent, ErrorCodes, handle_agent_errors
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 
 class MyAgent(TwinsSimulationAgent):
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)

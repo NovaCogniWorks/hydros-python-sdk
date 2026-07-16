@@ -3,9 +3,7 @@
 from pathlib import Path
 
 from hydros_agent_sdk import (
-    AgentBehavior,
     AgentIdentity,
-    BehaviorAgentFactory,
     CustomAgent,
     CustomAgentFactory,
 )
@@ -17,7 +15,6 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
 )
 from hydros_agent_sdk.protocol.models import HydroAgent, SimulationContext
-from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
 from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -179,29 +176,3 @@ def test_launcher_registration_selects_custom_agent_factory(monkeypatch):
 
     assert isinstance(callback.factory, CustomAgentFactory)
     assert callback.factory.custom_agent_class is RecordingCustomAgent
-
-
-def test_legacy_composition_names_remain_available():
-    assert AgentBehavior is CustomAgent
-    assert BehaviorAgentFactory is CustomAgentFactory
-    assert BehaviorAgentAdapter is CustomAgentRuntimeAdapter
-
-
-def test_legacy_adapter_accepts_behavior_keyword():
-    context = make_context()
-    custom_agent = RecordingCustomAgent()
-
-    adapter = BehaviorAgentAdapter(
-        behavior=custom_agent,
-        sim_coordination_client=FakeClient(),
-        agent_id="AGT_COMPOSED",
-        agent_code="COMPOSED_AGENT",
-        agent_type="COMPOSED_AGENT",
-        agent_name="Composed Agent",
-        context=context,
-        hydros_cluster_id="cluster",
-        hydros_node_id="node",
-    )
-
-    assert adapter.custom_agent is custom_agent
-    assert adapter.behavior is custom_agent

@@ -16,9 +16,11 @@ if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
 from hydros_agent_sdk import (
-    load_env_config, ErrorCodes, handle_agent_errors,
-    HydroObjectType
+    ErrorCodes,
+    handle_agent_errors,
 )
+from hydros_agent_sdk.config_loader import load_env_config
+from hydros_agent_sdk.utils import HydroObjectType
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.controller_agent import ControllerAgent
 from hydros_agent_sdk.protocol.commands import *

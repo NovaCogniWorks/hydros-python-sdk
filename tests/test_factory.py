@@ -2,10 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from hydros_agent_sdk import AgentBehavior, CustomAgent
-from hydros_agent_sdk.factory import BehaviorAgentFactory, CustomAgentFactory, HydroAgentFactory
-from hydros_agent_sdk.runtime.behavior_agent_adapter import BehaviorAgentAdapter
-from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
+from hydros_agent_sdk.factory import CustomAgentFactory, HydroAgentFactory
 
 
 class StubAgent:
@@ -13,7 +10,7 @@ class StubAgent:
         self.__dict__.update(kwargs)
 
 
-class StubBehavior:
+class StubCustomAgent:
     pass
 
 
@@ -58,24 +55,13 @@ class HydroAgentFactoryTest(unittest.TestCase):
                 encoding="utf-8",
             )
             factory = CustomAgentFactory(
-                StubBehavior,
+                StubCustomAgent,
                 config_file=str(config_file),
             )
 
             config = factory._load_config(str(config_file))
 
         self.assertEqual("TEST_AGENT", config["agent_code"])
-
-    def test_legacy_behavior_factory_alias_accepts_behavior_class_keyword(self):
-        factory = BehaviorAgentFactory(behavior_class=StubBehavior)
-
-        self.assertIsInstance(factory, CustomAgentFactory)
-        self.assertIs(factory.custom_agent_class, StubBehavior)
-
-    def test_legacy_custom_agent_aliases_remain_available(self):
-        self.assertIs(AgentBehavior, CustomAgent)
-        self.assertIs(BehaviorAgentAdapter, CustomAgentRuntimeAdapter)
-
 
 if __name__ == "__main__":
     unittest.main()

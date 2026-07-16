@@ -15,9 +15,10 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 from hydros_agent_sdk import (
-    ErrorCodes, handle_agent_errors,
-    HydroObjectType, MetricsCodes
+    ErrorCodes,
+    handle_agent_errors,
 )
+from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory

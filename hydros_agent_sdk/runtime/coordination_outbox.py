@@ -20,7 +20,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
-from hydros_agent_sdk.transport import Transport
+from hydros_agent_sdk.transport.base import Transport
 
 
 logger = logging.getLogger(__name__)

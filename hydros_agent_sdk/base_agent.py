@@ -283,7 +283,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         和 properties。较新的代码可以依赖这个更窄的上下文，便于逐步将
         运行时关注点和业务逻辑拆开。
         """
-        from hydros_agent_sdk.runtime import AgentContext
+        from hydros_agent_sdk.runtime.agent_context import AgentContext
 
         return AgentContext(
             client=self.sim_coordination_client,
