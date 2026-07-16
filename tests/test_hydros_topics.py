@@ -152,7 +152,7 @@ class HydrosTopicsTest(unittest.TestCase):
 
         self.assertIn("env.properties mqtt_broker_url/mqtt_broker_port", str(context.exception))
         self.assertIn("DNS resolution", str(context.exception))
-        self.assertFalse(client.task_runtime.running.is_set())
+        self.assertFalse(client._task_runtime_registry.running.is_set())
 
 
 if __name__ == "__main__":

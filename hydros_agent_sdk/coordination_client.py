@@ -21,7 +21,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimCommandEnvelope,
 )
 from hydros_agent_sdk.runtime.coordination_outbox import CoordinationOutboxPublisher
-from hydros_agent_sdk.runtime.task_runtime import TaskRuntime
+from hydros_agent_sdk.runtime.task_runtime_registry import TaskRuntimeRegistry
 from hydros_agent_sdk.transport.base import Transport
 from hydros_agent_sdk.transport.mqtt_coordination import MqttCoordinationTransport
 
@@ -38,8 +38,8 @@ class SimCoordinationClient:
     基于回调架构的高层仿真协调客户端。
 
     该类只装配协调传输、消息过滤和任务运行时：
-    - 将 transport raw payload 解码、过滤并投递给 TaskRuntime
-    - 将 TaskRuntime 产生的响应交给 CoordinationOutboxPublisher
+    - 将 transport raw payload 解码、过滤并投递给 TaskRuntimeRegistry
+    - 将各 TaskRuntime 产生的响应交给 CoordinationOutboxPublisher
     - 把 MQTT/Paho 生命周期交给 CoordinationTransport
 
     开发者只需要实现 SimCoordinationCallback 来提供业务逻辑。
@@ -83,8 +83,7 @@ class SimCoordinationClient:
         base_retry_delay_ms: int = 1000,
         mqtt_username: Optional[str] = None,
         mqtt_password: Optional[str] = None,
-        control_queue_size: int = 1000,
-        business_queue_size: int = 1000,
+        task_mailbox_size: int = 1000,
         transport: Optional[Transport] = None,
     ):
         """
@@ -102,8 +101,7 @@ class SimCoordinationClient:
             base_retry_delay_ms: 基础重试延迟，单位毫秒（默认 1000）
             mqtt_username: 可选 MQTT 认证用户名；None 表示不启用认证
             mqtt_password: 可选 MQTT 认证密码；None 表示不启用认证
-            control_queue_size: 生命周期/控制指令最大积压数量
-            business_queue_size: 业务指令最大积压数量
+            task_mailbox_size: 单个任务指令邮箱的最大积压数量
         """
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
@@ -155,15 +153,13 @@ class SimCoordinationClient:
             max_retry_count=self.max_retry_count,
             base_retry_delay_ms=self.base_retry_delay_ms,
         )
-        self.task_runtime = TaskRuntime(
+        self._task_runtime_registry = TaskRuntimeRegistry(
             callback=self.sim_coordination_callback,
             state_manager=self.state_manager,
             outbound_submitter=self.outbox_publisher.enqueue,
-            control_queue_size=control_queue_size,
-            business_queue_size=business_queue_size,
+            mailbox_size=task_mailbox_size,
             log=logger,
         )
-        logger.info("Registered %s command handlers", len(self.task_runtime.router.handlers))
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
 
@@ -176,18 +172,18 @@ class SimCoordinationClient:
         2. 订阅协调 topic
         3. 启动任务运行时和出站发布器
         """
-        if self.task_runtime.running.is_set():
+        if self._task_runtime_registry.running.is_set():
             logger.warning("Client already running")
             return
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
 
         self.outbox_publisher.start()
-        self.task_runtime.start()
+        self._task_runtime_registry.start()
         try:
             self.transport.start()
         except Exception:
-            self.task_runtime.stop()
+            self._task_runtime_registry.stop()
             self.outbox_publisher.stop()
             raise
 
@@ -202,13 +198,13 @@ class SimCoordinationClient:
         2. 断开 MQTT broker
         3. 清理资源
         """
-        if not self.task_runtime.running.is_set():
+        if not self._task_runtime_registry.running.is_set():
             logger.warning("Client not running")
             return
 
         logger.info("Stopping SimCoordinationClient...")
 
-        self.task_runtime.stop()
+        self._task_runtime_registry.stop()
         self.outbox_publisher.stop()
         self.transport.stop()
 
@@ -250,7 +246,7 @@ class SimCoordinationClient:
 
             # 将业务处理推迟给 SDK 工作线程，避免 MQTT 网络回调
             # 被较慢的 tick/event/MPC 处理阻塞。
-            self.task_runtime.enqueue(command)
+            self._task_runtime_registry.enqueue(command)
 
         except Exception as e:
             logger.error(

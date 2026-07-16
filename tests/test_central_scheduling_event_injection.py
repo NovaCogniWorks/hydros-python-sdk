@@ -61,7 +61,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         )
         event = self._build_time_series_event(auto_schedule_at_step=5)
 
-        client.task_runtime.handle(
+        client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
             HydroEventCommand(
                 command_id="event-ts-001",
                 context=context,
@@ -90,7 +90,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             "hydros_agent_sdk.agents.mpc_central_scheduling_agent",
             level="ERROR",
         ) as logs:
-            client.task_runtime.handle(
+            client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
                 HydroEventCommand(
                     command_id="event-ts-missing-config",
                     context=context,
@@ -115,7 +115,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         )
         event = self._build_time_series_event(auto_schedule_at_step=7)
 
-        client.task_runtime.handle(
+        client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
             TimeSeriesDataUpdateRequest(
                 command_id="direct-ts-001",
                 context=context,
@@ -136,7 +136,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             context, with_rolling_config=True
         )
 
-        client.task_runtime.handle(
+        client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
             HydroEventCommand(
                 command_id="event-outflow-data-001",
                 context=context,
@@ -179,7 +179,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         )
         callback.set_client(client)
         outbound = Queue()
-        client.task_runtime.outbound_submitter = outbound.put
+        client._task_runtime_registry.outbound_submitter = outbound.put
 
         if with_rolling_config:
             ContextManager.create(

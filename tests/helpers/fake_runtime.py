@@ -43,6 +43,8 @@ class FakeRuntime:
         if hasattr(callback, "set_client"):
             callback.set_client(self.client)
         self.responses: List[SimCommand] = []
+        for context_id in self.state_manager.get_active_contexts():
+            self.client._task_runtime_registry.get_or_create(context_id)
         self.client.start()
 
     def send(self, command: SimCommand) -> List[SimCommand]:

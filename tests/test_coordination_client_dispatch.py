@@ -14,6 +14,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateResponse,
     SimTaskInitRequest,
     SimTaskInitResponse,
+    SimTaskTerminateRequest,
     SimTaskTerminateResponse,
     SimCommandEnvelope,
     TickCmdRequest,
@@ -157,6 +158,16 @@ class BlockingTickAndInitCallback(BlockingTickCallback):
         )
 
 
+class FailingInitCallback(ReturningCallback):
+    def __init__(self, agent):
+        super().__init__(agent)
+        self.init_handled = Event()
+
+    def on_sim_task_init(self, request):
+        self.init_handled.set()
+        raise RuntimeError("init failed")
+
+
 class TaskIsolatedBlockingCallback(ReturningCallback):
     def __init__(self, agents_by_context, blocked_context_id):
         first_agent = next(iter(agents_by_context.values()))
@@ -186,6 +197,36 @@ class TaskIsolatedBlockingCallback(ReturningCallback):
         )
 
 
+class LifecycleCallback(SimCoordinationCallback):
+    def __init__(self, state_manager):
+        self.state_manager = state_manager
+
+    def get_component(self) -> str:
+        return "TEST_AGENT"
+
+    def on_sim_task_init(self, request):
+        agent = make_agent(request.context).model_copy(
+            update={"agent_id": f"AGT_{request.context.biz_scene_instance_id}"}
+        )
+        self.state_manager.activate_task(request.context, [agent])
+        return SimTaskInitResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=agent,
+            created_agent_instances=[agent],
+            managed_top_objects={},
+            broadcast=False,
+        )
+
+    def on_tick(self, request):
+        return None
+
+    def on_task_terminate(self, request):
+        self.state_manager.terminate_task(request.context)
+        return []
+
+
 def make_client(callback, state_manager):
     return SimCoordinationClient(
         broker_url="tcp://localhost",
@@ -197,13 +238,19 @@ def make_client(callback, state_manager):
     )
 
 
-def start_inbound_workers(client):
+def task_runtime(client, context):
+    return client._task_runtime_registry.get_or_create(context.biz_scene_instance_id)
+
+
+def start_inbound_workers(client, *contexts):
+    for context in contexts:
+        task_runtime(client, context)
+    client._task_runtime_registry.start()
     client.transport.start()
-    client.task_runtime.start()
 
 
 def stop_inbound_workers(client):
-    client.task_runtime.stop()
+    client._task_runtime_registry.stop()
     client.transport.stop()
 
 
@@ -216,7 +263,7 @@ def deliver_raw_command(client, command):
 
 def capture_outbound(client):
     responses = Queue()
-    client.task_runtime.outbound_submitter = responses.put
+    client._task_runtime_registry.outbound_submitter = responses.put
     return responses
 
 
@@ -230,13 +277,14 @@ def test_callback_returned_response_is_enqueued():
     outbound = capture_outbound(client)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
-    client.task_runtime.handle(request)
+    runtime = task_runtime(client, context)
+    runtime.handle(request)
 
     response = outbound.get_nowait()
     assert isinstance(response, TickCmdResponse)
     assert response.command_status == CommandStatus.SUCCEED
     assert response.command_id == "CMD_TICK"
-    assert client.task_runtime.router.handlers
+    assert runtime.router.handlers
 
 
 def test_client_does_not_expose_paho_or_transport_callback_internals():
@@ -252,6 +300,8 @@ def test_client_does_not_expose_paho_or_transport_callback_internals():
         "out_message_queue",
         "queue_thread",
         "send_command",
+        "task_runtime",
+        "task_runtimes",
     ):
         assert not hasattr(client, legacy_name)
 
@@ -288,7 +338,7 @@ def test_remote_init_response_is_cached_while_local_task_is_initializing():
         broadcast=True,
     )
 
-    start_inbound_workers(client)
+    start_inbound_workers(client, context)
     try:
         deliver_raw_command(client, response)
         deadline = time.monotonic() + 1
@@ -325,7 +375,7 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     outbound = capture_outbound(client)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
-    client.task_runtime.handle(request)
+    task_runtime(client, context).handle(request)
 
     response = outbound.get_nowait()
     assert isinstance(response, TickCmdResponse)
@@ -343,7 +393,7 @@ def test_transport_payload_is_enqueued_and_returns_before_slow_tick_finishes():
     callback = BlockingTickCallback(agent)
     client = make_client(callback, state_manager)
     outbound = capture_outbound(client)
-    start_inbound_workers(client)
+    start_inbound_workers(client, context)
 
     try:
         request = TickCmdRequest(command_id="CMD_SLOW_TICK", context=context, step=1)
@@ -375,7 +425,7 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
     callback = BlockingTickAndInitCallback(agent)
     client = make_client(callback, state_manager)
     outbound = capture_outbound(client)
-    start_inbound_workers(client)
+    start_inbound_workers(client, old_context)
 
     try:
         tick_request = TickCmdRequest(command_id="CMD_BLOCKING_TICK", context=old_context, step=1)
@@ -422,7 +472,7 @@ def test_business_commands_are_isolated_by_task_context():
     )
     client = make_client(callback, state_manager)
     outbound = capture_outbound(client)
-    start_inbound_workers(client)
+    start_inbound_workers(client, slow_context, fast_context)
 
     try:
         slow_tick = TickCmdRequest(command_id="CMD_SLOW_TASK_TICK", context=slow_context, step=1)
@@ -446,6 +496,126 @@ def test_business_commands_are_isolated_by_task_context():
         stop_inbound_workers(client)
 
 
+def test_registry_creates_distinct_runtimes_and_releases_terminated_task():
+    first_context = make_context()
+    second_context = SimulationContext(biz_scene_instance_id="TASK_002")
+    state_manager = AgentStateManager()
+    callback = LifecycleCallback(state_manager)
+    client = make_client(callback, state_manager)
+    capture_outbound(client)
+    start_inbound_workers(client)
+
+    try:
+        for context in (first_context, second_context):
+            deliver_raw_command(
+                client,
+                SimTaskInitRequest(
+                    command_id=f"CMD_INIT_{context.biz_scene_instance_id}",
+                    context=context,
+                    agent_list=[],
+                ),
+            )
+
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            if all(
+                state_manager.has_active_context(context)
+                for context in (first_context, second_context)
+            ):
+                break
+            time.sleep(0.01)
+
+        assert client._task_runtime_registry.context_ids() == {"TASK_001", "TASK_002"}
+        first_runtime = client._task_runtime_registry.get("TASK_001")
+        second_runtime = client._task_runtime_registry.get("TASK_002")
+        assert first_runtime is not None
+        assert second_runtime is not None
+        assert first_runtime is not second_runtime
+        assert first_runtime.context_id == "TASK_001"
+        assert second_runtime.context_id == "TASK_002"
+
+        deliver_raw_command(
+            client,
+            SimTaskTerminateRequest(
+                command_id="CMD_TERMINATE_TASK_001",
+                context=first_context,
+            ),
+        )
+        deadline = time.monotonic() + 1
+        while (
+            time.monotonic() < deadline
+            and client._task_runtime_registry.get("TASK_001") is not None
+        ):
+            time.sleep(0.01)
+
+        assert client._task_runtime_registry.get("TASK_001") is None
+        assert client._task_runtime_registry.get("TASK_002") is second_runtime
+    finally:
+        stop_inbound_workers(client)
+
+
+def test_registry_releases_runtime_when_init_creates_no_active_task():
+    context = make_context()
+    state_manager = AgentStateManager()
+    callback = BlockingTickAndInitCallback(make_agent(context))
+    client = make_client(callback, state_manager)
+    capture_outbound(client)
+    start_inbound_workers(client)
+
+    try:
+        deliver_raw_command(
+            client,
+            SimTaskInitRequest(
+                command_id="CMD_INIT_WITHOUT_ACTIVE_TASK",
+                context=context,
+                agent_list=[],
+            ),
+        )
+        assert callback.init_handled.wait(timeout=1)
+
+        deadline = time.monotonic() + 1
+        while (
+            time.monotonic() < deadline
+            and client._task_runtime_registry.get("TASK_001") is not None
+        ):
+            time.sleep(0.01)
+
+        assert client._task_runtime_registry.get("TASK_001") is None
+    finally:
+        stop_inbound_workers(client)
+
+
+def test_registry_releases_runtime_when_init_fails():
+    context = make_context()
+    state_manager = AgentStateManager()
+    callback = FailingInitCallback(make_agent(context))
+    client = make_client(callback, state_manager)
+    capture_outbound(client)
+    start_inbound_workers(client)
+
+    try:
+        deliver_raw_command(
+            client,
+            SimTaskInitRequest(
+                command_id="CMD_FAILED_INIT",
+                context=context,
+                agent_list=[],
+            ),
+        )
+        assert callback.init_handled.wait(timeout=1)
+
+        deadline = time.monotonic() + 1
+        while (
+            time.monotonic() < deadline
+            and client._task_runtime_registry.get("TASK_001") is not None
+        ):
+            time.sleep(0.01)
+
+        assert client._task_runtime_registry.get("TASK_001") is None
+    finally:
+        stop_inbound_workers(client)
+
+
 def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
     context = make_context()
     agent = make_agent(context)
@@ -453,7 +623,7 @@ def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
     state_manager.set_node_id("node")
     state_manager.activate_task(context, [agent])
     client = make_client(ReturningCallback(agent), state_manager)
-    client.task_runtime.enqueue = _fail_if_called
+    client._task_runtime_registry.enqueue = _fail_if_called
     client.transport.start()
 
     try:
@@ -536,7 +706,7 @@ def test_hydro_event_command_routes_time_series_payload_and_returns_ack():
         payload=event,
     )
 
-    client.task_runtime.handle(request)
+    task_runtime(client, context).handle(request)
 
     assert len(callback.time_series_updates) == 1
     forwarded = callback.time_series_updates[0]
@@ -572,7 +742,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
         payload=event,
     )
 
-    client.task_runtime.handle(request)
+    task_runtime(client, context).handle(request)
 
     assert len(callback.outflow_requests) == 1
     forwarded = callback.outflow_requests[0]
@@ -606,7 +776,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
         payload=event,
     )
 
-    client.task_runtime.handle(request)
+    task_runtime(client, context).handle(request)
 
     assert len(callback.outflow_requests) == 1
     forwarded = callback.outflow_requests[0]
@@ -650,7 +820,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
         payload=event,
     )
 
-    client.task_runtime.handle(request)
+    task_runtime(client, context).handle(request)
 
     assert len(callback.outflow_data_updates) == 1
     forwarded = callback.outflow_data_updates[0]
