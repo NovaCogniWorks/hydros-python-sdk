@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional, Type
@@ -12,6 +13,9 @@ from pydantic import ValidationError
 
 from .models import ControlAlgorithmInput
 from .runtime import ControlAlgorithmRuntime
+
+
+logger = logging.getLogger(__name__)
 
 
 _EDGE_CONTROL_ALGORITHM_PATH_PREFIX = (
@@ -63,6 +67,13 @@ class ControlAlgorithmHttpService:
                     return
                 try:
                     payload = self._read_json()
+                    logger.info(
+                        "Control algorithm HTTP request received: path=%s, "
+                        "pathAlgorithmType=%s, payload=%s",
+                        self.path,
+                        algorithm_type,
+                        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                    )
                     input_data = ControlAlgorithmInput.model_validate(payload)
                 except (ValueError, ValidationError, json.JSONDecodeError) as exc:
                     self._write_json(

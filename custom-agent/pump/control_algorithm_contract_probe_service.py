@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from hydros_agent_sdk import (
     ControlAlgorithmRuntime,
     create_control_algorithm_http_server,
+    setup_logging,
 )
 
 from control_algorithm_contract_probe import ControlAlgorithmContractProbe
@@ -38,6 +39,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--port", default=8080, type=int)
     args = parser.parse_args(argv)
 
+    setup_logging()
     server = create_control_algorithm_contract_probe_server(args.host, args.port)
     try:
         server.serve_forever()

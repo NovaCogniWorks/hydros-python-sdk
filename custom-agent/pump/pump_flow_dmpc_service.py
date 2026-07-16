@@ -18,6 +18,7 @@ for import_root in (PROJECT_ROOT, PUMP_AGENT_ROOT):
 from hydros_agent_sdk import (  # noqa: E402
     ControlAlgorithmRuntime,
     create_control_algorithm_http_server,
+    setup_logging,
 )
 from pump_flow_dmpc import (  # noqa: E402
     PumpFlowDmpcInputResolver,
@@ -54,6 +55,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--port", default=8080, type=int)
     args = parser.parse_args(argv)
 
+    setup_logging()
     server = create_pump_flow_dmpc_server(
         args.model_config,
         host=args.host,
