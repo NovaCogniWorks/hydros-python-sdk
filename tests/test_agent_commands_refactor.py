@@ -576,8 +576,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         source = build_agent_instance("source-010", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-010", "TARGET_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
-        state_manager.add_local_agent(target)
+        state_manager.activate_task(context, [source, target])
 
         runtime = AgentCommandRuntime(
             state_manager=state_manager,
@@ -620,8 +619,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         context = SimulationContext(biz_scene_instance_id="scene-003")
         source = build_agent_instance("source-003", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-003", "TARGET_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
-        state_manager.add_local_agent(target)
+        state_manager.activate_task(context, [source, target])
 
         sent_commands = []
         runtime = AgentCommandRuntime(
@@ -2585,7 +2583,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016")
         source = build_agent_instance("agent-016", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
@@ -2609,7 +2607,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016-log")
         source = build_agent_instance("agent-016-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
@@ -2691,7 +2689,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016-enqueue-log")
         source = build_agent_instance("agent-016-enqueue-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,

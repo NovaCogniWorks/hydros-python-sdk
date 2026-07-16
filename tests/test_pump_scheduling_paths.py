@@ -25,7 +25,6 @@ class MockContext:
 class MockClient:
     def __init__(self):
         self.state_manager = self
-        self.mqtt_client = Mock()
 
 
 class PumpSchedulingPathTest(unittest.TestCase):

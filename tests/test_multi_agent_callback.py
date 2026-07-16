@@ -21,7 +21,7 @@ from hydros_agent_sdk.protocol.models import (
     HydroAgentInstance,
     SimulationContext,
 )
-from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.state_manager import AgentStateManager, TaskStatus
 from hydros_agent_sdk.utils import TopHydroObject as TopologyTopHydroObject, WaterwayTopology
 
 
@@ -57,6 +57,7 @@ class FakeClient:
 class FakeAgent:
     def __init__(self, instance):
         self.instance = instance
+        self.agent_id = instance.agent_id
         self.agent_code = instance.agent_code
         self.tick_count = 0
 
@@ -116,6 +117,13 @@ class FakeFactory:
     def create_agent(self, sim_coordination_client, context):
         self.created += 1
         return self.agent
+
+
+def activate_callback_task(callback, context, agents):
+    client = FakeClient()
+    callback.set_client(client)
+    client.state_manager.activate_task(context, list(agents))
+    return client
 
 
 def make_init_request(context, agent_code="TEST_AGENT", agent_type=None):
@@ -201,7 +209,9 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     assert response.command_status == CommandStatus.SUCCEED
     assert response.created_agent_instances == [instance]
     assert client.enqueued == []
-    assert "TEST_AGENT" in callback.agents[context.biz_scene_instance_id]
+    assert "TEST_AGENT" in client.state_manager.get_agents_by_code(
+        context.biz_scene_instance_id
+    )
 
 
 def test_multi_agent_router_returns_init_response_with_pending_status_report():
@@ -271,8 +281,9 @@ def test_default_central_scheduling_route_uses_system_factory_without_custom_fac
     assert isinstance(response, SimTaskInitResponse)
     assert response.created_agent_instances == [system_instance]
     assert system_factory.created == 1
-    assert "CENTRAL_SCHEDULING_AGENT" in callback.agents[context.biz_scene_instance_id]
-    assert "CENTRAL_SCHEDULING_AGENT_POWER01" not in callback.agents[context.biz_scene_instance_id]
+    task_agents = client.state_manager.get_agents_by_code(context.biz_scene_instance_id)
+    assert "CENTRAL_SCHEDULING_AGENT" in task_agents
+    assert "CENTRAL_SCHEDULING_AGENT_POWER01" not in task_agents
 
 
 def test_custom_central_scheduling_route_requires_exact_agent_code_when_custom_factory_exists():
@@ -299,7 +310,9 @@ def test_custom_central_scheduling_route_requires_exact_agent_code_when_custom_f
     assert response.created_agent_instances == [custom_instance]
     assert system_factory.created == 0
     assert custom_factory.created == 1
-    assert "CENTRAL_SCHEDULING_AGENT_POWER01" in callback.agents[context.biz_scene_instance_id]
+    assert "CENTRAL_SCHEDULING_AGENT_POWER01" in client.state_manager.get_agents_by_code(
+        context.biz_scene_instance_id
+    )
 
 
 def test_system_default_central_scheduling_can_coexist_with_custom_central_factory():
@@ -357,7 +370,7 @@ def test_multi_agent_init_allows_multiple_central_agents_with_different_codes():
     ]
     assert system_factory.created == 1
     assert custom_factory.created == 1
-    assert list(callback.agents[context.biz_scene_instance_id]) == [
+    assert list(client.state_manager.get_agents_by_code(context.biz_scene_instance_id)) == [
         "CENTRAL_SCHEDULING_AGENT",
         "CENTRAL_SCHEDULING_AGENT_PUMP"
     ]
@@ -367,9 +380,7 @@ def test_multi_agent_tick_and_terminate_return_response_lists():
     context = make_context()
     instance = make_instance(context)
     callback = MultiAgentCallback(node_id="node")
-    callback.agents[context.biz_scene_instance_id] = {
-        "TEST_AGENT": FakeAgent(instance),
-    }
+    client = activate_callback_task(callback, context, [FakeAgent(instance)])
 
     tick_responses = callback.on_tick(
         TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
@@ -383,7 +394,25 @@ def test_multi_agent_tick_and_terminate_return_response_lists():
     assert tick_responses[0].command_status == CommandStatus.SUCCEED
     assert len(terminate_responses) == 1
     assert isinstance(terminate_responses[0], SimTaskTerminateResponse)
-    assert context.biz_scene_instance_id not in callback.agents
+    assert not client.state_manager.has_active_context(context)
+
+
+def test_multi_agent_terminate_cleans_initializing_task_without_agents():
+    context = make_context()
+    callback = MultiAgentCallback(node_id="node")
+    client = FakeClient()
+    callback.set_client(client)
+    client.state_manager.begin_task_initialization(context)
+
+    responses = callback.on_task_terminate(
+        SimTaskTerminateRequest(command_id="CMD_TERM", context=context)
+    )
+
+    assert responses == []
+    assert (
+        client.state_manager.get_task_state(context.biz_scene_instance_id).status
+        == TaskStatus.TERMINATED
+    )
 
 
 def test_multi_agent_tick_skips_agents_without_tick_capability():
@@ -393,10 +422,7 @@ def test_multi_agent_tick_skips_agents_without_tick_capability():
     tick_agent = FakeAgent(tick_instance)
     event_agent = EventOnlyFakeAgent(event_instance)
     callback = MultiAgentCallback(node_id="node")
-    callback.agents[context.biz_scene_instance_id] = {
-        "TICK_AGENT": tick_agent,
-        "EVENT_AGENT": event_agent,
-    }
+    activate_callback_task(callback, context, [tick_agent, event_agent])
 
     tick_responses = callback.on_tick(
         TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
@@ -412,9 +438,7 @@ def test_multi_agent_tick_sets_logging_context_for_target_agent():
     context = make_context()
     agent = FakeAgent(make_instance(context))
     callback = MultiAgentCallback(node_id="node")
-    callback.agents[context.biz_scene_instance_id] = {
-        "TEST_AGENT": agent,
-    }
+    activate_callback_task(callback, context, [agent])
 
     callback.on_tick(TickCmdRequest(command_id="CMD_TICK", context=context, step=1))
 

@@ -25,7 +25,7 @@ def create_control_algorithm_contract_probe_server(
     host: str = "127.0.0.1",
     port: int = 8080,
 ) -> ThreadingHTTPServer:
-    """创建只注册契约探针的 HTTP server，不注册任何真实控制算法。"""
+    """注册 ``pump_station_flow_dmpc`` 联调替身，不注册真实控制算法。"""
     runtime = ControlAlgorithmRuntime()
     runtime.register(ControlAlgorithmContractProbe())
     return create_control_algorithm_http_server(runtime, host=host, port=port)

@@ -199,10 +199,6 @@ class PumpOutflowPlanAgent(OutflowPlanAgent):
         self._topology = None
         self._plan_config = {}
 
-        # 在状态管理器中注销
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
         logger.info(f"Outflow plan agent terminated: {self.agent_id}")
 
         return SimTaskTerminateResponse(

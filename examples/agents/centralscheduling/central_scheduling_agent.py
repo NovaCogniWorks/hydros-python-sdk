@@ -38,8 +38,6 @@ class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
             self._load_object_agent_code_map()
             self._subscribe_configured_field_metrics()
 
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
@@ -98,8 +96,6 @@ class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
         logger.info("Terminating production central scheduling agent: %s", self.agent_id)
 
         self._agent_command_gateway.shutdown()
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
         object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
 
         return SimTaskTerminateResponse(

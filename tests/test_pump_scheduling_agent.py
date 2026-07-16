@@ -16,14 +16,11 @@ class MockContext:
 class MockClient:
     def __init__(self):
         self.state_manager = self
-        self.mqtt_client = Mock()
         self.transport = Mock()
         self.topic = "test/topic"
         self.enqueued = []
     def send_command(self, req): pass
     def subscribe(self, topic): pass
-    def init_task(self, ctx, agents): pass
-    def add_local_agent(self, agent): pass
     def enqueue(self, command): self.enqueued.append(command)
 
 class TestPumpSchedulingAgent(unittest.TestCase):

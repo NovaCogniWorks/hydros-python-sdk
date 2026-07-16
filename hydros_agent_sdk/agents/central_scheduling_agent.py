@@ -231,8 +231,7 @@ class CentralSchedulingAgent(TickableAgent):
         2. 加载水网拓扑
         3. 初始化优化模型
         4. 通过 MQTT 订阅现地指标
-        5. 在状态管理器中注册
-        6. 返回 SimTaskInitResponse
+        5. 返回 SimTaskInitResponse
 
         参数:
             request: 任务初始化请求
@@ -310,8 +309,7 @@ class CentralSchedulingAgent(TickableAgent):
         子类应该：
         1. 清理优化模型
         2. 取消订阅 MQTT 主题
-        3. 从状态管理器中注销
-        4. 返回 SimTaskTerminateResponse
+        3. 返回 SimTaskTerminateResponse
 
         参数:
             request: 任务终止请求

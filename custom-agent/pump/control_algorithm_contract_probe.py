@@ -10,9 +10,9 @@ from hydros_agent_sdk import (
 
 
 class ControlAlgorithmContractProbe:
-    """返回 ``HOLD`` 的确定性探针，不执行实际控制算法。"""
+    """为 ``pump_station_flow_dmpc`` 返回 ``HOLD`` 的确定性联调替身。"""
 
-    algorithm_type = "control_contract_probe"
+    algorithm_type = "pump_station_flow_dmpc"
     algorithm_version = "1.0.0"
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
@@ -24,6 +24,7 @@ class ControlAlgorithmContractProbe:
             reason="CONTRACT_PROBE_ONLY",
             evidence={
                 "mode": "dry_run",
+                "implementation": "control_contract_probe",
                 "algorithm_type": self.algorithm_type,
                 "algorithm_version": self.algorithm_version,
             },

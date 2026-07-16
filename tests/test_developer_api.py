@@ -115,7 +115,9 @@ def test_custom_agent_factory_and_multi_agent_own_task_lifecycle(tmp_path):
     context = make_context()
 
     init_response = callback.on_sim_task_init(make_init_request(context, agent_type="ROUTED_TYPE"))
-    adapter = callback.agents[context.biz_scene_instance_id]["COMPOSED_AGENT"]
+    adapter = client.state_manager.get_agents_by_code(context.biz_scene_instance_id)[
+        "COMPOSED_AGENT"
+    ]
     assert client.state_manager.has_active_context(context)
     assert client.state_manager.is_local_agent(adapter)
 

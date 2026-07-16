@@ -121,8 +121,6 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 class MyAgent(TickableAgent):
     def on_init(self, request):
         self.load_agent_configuration(request)
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
         return SimTaskInitResponse(
             context=self.context,
             command_id=request.command_id,
@@ -138,8 +136,6 @@ class MyAgent(TickableAgent):
         return []
 
     def on_terminate(self, request):
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
         return SimTaskTerminateResponse(
             context=self.context,
             command_id=request.command_id,

@@ -96,11 +96,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             # 3. 订阅现地指标
             self.subscribe_field_metrics()
 
-            # 4. 在状态管理器中注册
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
-
-            # 5. 启动 agent command 客户端，后面就能直接发指令
+            # 4. 启动 agent command 客户端，后面就能直接发指令
             self._agent_command_gateway.start()
 
             logger.info(f"中央调度智能体初始化成功: {self.agent_id}")
@@ -250,10 +246,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self._agent_command_gateway.shutdown()
         self._optimization_model = None
         
-        # 从状态管理器中注销
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
         return SimTaskTerminateResponse(
             context=self.context,
             command_id=request.command_id,

@@ -57,8 +57,7 @@ def test_fake_runtime_dispatches_command_and_captures_response():
     agent = make_agent(context)
     state_manager = AgentStateManager()
     state_manager.set_node_id("node")
-    state_manager.init_task(context, [agent])
-    state_manager.add_local_agent(agent)
+    state_manager.activate_task(context, [agent])
     with FakeRuntime(TickCallback(agent), state_manager=state_manager) as runtime:
         responses = runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
 
@@ -73,8 +72,7 @@ def test_fake_runtime_can_publish_queued_responses_through_transport():
     agent = make_agent(context)
     state_manager = AgentStateManager()
     state_manager.set_node_id("node")
-    state_manager.init_task(context, [agent])
-    state_manager.add_local_agent(agent)
+    state_manager.activate_task(context, [agent])
     with FakeRuntime(TickCallback(agent), state_manager=state_manager) as runtime:
         runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
 

@@ -553,10 +553,6 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
                 logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
         self._hydrosim_initialized = False
 
-        # 在状态管理器中注销
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
         logger.info(f"Outflow plan agent terminated: {self.agent_id}")
 
         return SimTaskTerminateResponse(

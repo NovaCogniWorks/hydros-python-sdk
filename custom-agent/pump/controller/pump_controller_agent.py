@@ -163,9 +163,6 @@ class PumpControllerAgent(ControllerAgent):
         for uid in self.all_device_ids():
             self.update_device_attr(uid, status=0, blade_angle=0.0, flow=0.0, power=0.0)
 
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
         return SimTaskTerminateResponse(
             context=self.context,
             command_id=request.command_id,

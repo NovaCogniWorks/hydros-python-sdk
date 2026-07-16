@@ -51,8 +51,6 @@ class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
             if not subscribed_topic:
                 logger.info("No metrics topic configured; MPC will rely on injected/provider sensor data")
 
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
@@ -66,8 +64,6 @@ class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
         logger.info("Terminating system central scheduling agent: %s", self.agent_id)
 
         self._agent_command_gateway.shutdown()
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
         object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
 
         return ResponseFactory.terminate_succeed(self, request)

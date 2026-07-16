@@ -206,11 +206,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
         )
         agent._metrics_subscriber.transport = Mock()
-        callback.agents[context.biz_scene_instance_id] = {
-            agent.agent_code: agent,
-        }
-        state_manager.init_task(context, [agent])
-        state_manager.add_local_agent(agent)
+        state_manager.activate_task(context, [agent])
         return client, agent, outbound
 
     @staticmethod

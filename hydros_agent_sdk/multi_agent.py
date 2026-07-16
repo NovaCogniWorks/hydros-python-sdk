@@ -59,7 +59,6 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.node_id = node_id
         self.agent_factories: Dict[str, Any] = {}  # {agent_code: 工厂}
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
-        self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: 智能体}}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
         self._pending_status_reports: List[Any] = []
@@ -167,6 +166,11 @@ class MultiAgentCallback(SimCoordinationCallback):
             report_sink=self._record_status_report,
         )
         logger.info("Coordination client reference set")
+
+    def _task_agents(self, context_id: str) -> Dict[str, Any]:
+        if self._client is None:
+            raise RuntimeError("Coordination client not set")
+        return self._client.state_manager.get_agents_by_code(context_id)
 
     def _record_status_report(self, report) -> None:
         self._pending_status_reports.append(report)
@@ -328,9 +332,7 @@ class MultiAgentCallback(SimCoordinationCallback):
                             "biz_scene_instance_id": context_id,
                         },
                     )
-
-                # 存储智能体
-                context_agents[created_agent_code] = agent
+                    context_agents[created_agent_code] = agent
 
                 logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
 
@@ -341,13 +343,12 @@ class MultiAgentCallback(SimCoordinationCallback):
                 logger.error(f"  ✗ Failed to create agent {routed_agent_code}: {e}", exc_info=True)
                 # 继续处理其他智能体
 
-        # 存储该上下文下的智能体
-        if context_agents:
-            self._initialize_composed_agent_task(request.context, context_agents)
-            self.agents[context_id] = context_agents
-
         # 返回包含全部已创建实例的单个响应
         if created_agents:
+            self._client.state_manager.activate_task(
+                request.context,
+                list(context_agents.values()),
+            )
             # 使用第一个已创建智能体作为 source_agent_instance
             # 协议限制：理想情况下应支持多个 source_agent_instance
             first_agent = created_agents[0]
@@ -402,7 +403,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_tick(self, request: TickCmdRequest):
         """处理上下文中全部智能体的 tick 指令。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -442,11 +443,13 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """处理上下文中全部智能体的任务终止。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return None
+            self._client.state_manager.terminate_task(request.context)
+            super().on_task_terminate(request)
+            return []
 
         # 终止该上下文中的全部智能体
         responses = []
@@ -499,52 +502,15 @@ class MultiAgentCallback(SimCoordinationCallback):
                 )
                 logger.error(f"Error terminating {agent_code}: {e}", exc_info=True)
 
-        # 从跟踪结构中移除智能体
-        del self.agents[context_id]
-        self._terminate_composed_agent_task(request.context, context_agents)
+        self._client.state_manager.terminate_task(request.context)
         super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
 
-    @staticmethod
-    def _is_composed_agent(agent: Any) -> bool:
-        from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
-
-        return isinstance(agent, CustomAgentRuntimeAdapter)
-
-    def _initialize_composed_agent_task(self, context, context_agents: Dict[str, Any]) -> None:
-        """由协调器持有组合式 Agent 的任务状态，而不是交给业务类。"""
-        composed_agents = [agent for agent in context_agents.values() if self._is_composed_agent(agent)]
-        if not composed_agents:
-            return
-
-        if len(composed_agents) == len(context_agents):
-            self._client.state_manager.init_task(context, composed_agents)
-            for agent in composed_agents:
-                self._client.state_manager.add_local_agent(agent)
-            return
-
-        self._client.state_manager.add_active_context(context)
-        for agent in composed_agents:
-            self._client.state_manager.register_agent_instance(agent)
-            self._client.state_manager.add_local_agent(agent)
-
-    def _terminate_composed_agent_task(self, context, context_agents: Dict[str, Any]) -> None:
-        """对组合式 Agent 做统一清理，避免业务代码直接操作全局状态。"""
-        composed_agents = [agent for agent in context_agents.values() if self._is_composed_agent(agent)]
-        if not composed_agents:
-            return
-
-        if len(composed_agents) == len(context_agents):
-            self._client.state_manager.terminate_task(context)
-        for agent in composed_agents:
-            self._client.state_manager.remove_local_agent(agent)
-            self._client.state_manager.unregister_agent_instance(agent.agent_id)
-
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """处理上下文中全部智能体的时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -577,7 +543,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
         """处理上下文中全部智能体的出流时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -615,7 +581,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         该方法只把请求路由给请求中指定的目标智能体。
         """
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -659,7 +625,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
     def on_station_control_execution(self, report: EdgeControlExecutionReport):
         """把 edge 控制终态交给同一任务中的中心调度 Agent。"""
-        context_agents = self.agents.get(report.context.biz_scene_instance_id, {})
+        context_agents = self._task_agents(report.context.biz_scene_instance_id)
         for agent in context_agents.values():
             handler = getattr(agent, "on_station_control_execution", None)
             if callable(handler):

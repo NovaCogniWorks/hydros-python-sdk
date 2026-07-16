@@ -90,8 +90,6 @@ class MockClient:
         self.state_manager = self
     def send_command(self, req): pass
     def subscribe(self, topic): pass
-    def init_task(self, ctx, agents): pass
-    def add_local_agent(self, agent): pass
 
 def plot_step(step, steps, results_hist, predictions, db_config):
     fig = plt.figure(figsize=(20, 16))

@@ -231,9 +231,8 @@ from hydros_agent_sdk.protocol.commands import SimTaskTerminateRequest, SimTaskT
 def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
     """终止 agent"""
     try:
-        # 清理资源
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
+        # 清理 agent 自己持有的资源
+        self._cleanup_resources()
 
         # 返回成功响应
         return SimTaskTerminateResponse(
@@ -291,10 +290,6 @@ class MyTwinsAgent(TwinsSimulationAgent):
         topology_url = self.properties.get_property('hydros_objects_modeling_url')
         self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
 
-        # 注册到状态管理器
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
-
         # 初始化模型
         self._initialize_twins_model()
 
@@ -326,8 +321,7 @@ class MyTwinsAgent(TwinsSimulationAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         """终止 agent（自动错误处理）"""
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
+        self._cleanup_resources()
 
         return SimTaskTerminateResponse(
             command_id=request.command_id,

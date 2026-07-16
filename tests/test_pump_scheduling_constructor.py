@@ -43,7 +43,7 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert issubclass(module.PumpCentralSchedulingAgent, CentralSchedulingAgent)
     assert not hasattr(module, "MpcCentralSchedulingAgent")
 
-    client = Mock(mqtt_client=Mock(), state_manager=Mock())
+    client = Mock(state_manager=Mock())
     context = SimulationContext(biz_scene_instance_id="task-001")
     agent = module.PumpCentralSchedulingAgent(
         sim_coordination_client=client,
@@ -146,7 +146,7 @@ def test_pump_scheduling_agent_subscribes_metrics_before_lazy_init(monkeypatch):
 
     module = importlib.import_module("pump_scheduling_agent")
 
-    client = Mock(mqtt_client=Mock(), state_manager=Mock())
+    client = Mock(state_manager=Mock())
     context = SimulationContext(biz_scene_instance_id="task-init")
     agent = module.PumpCentralSchedulingAgent(
         sim_coordination_client=client,
@@ -193,7 +193,7 @@ def test_pump_scheduling_time_series_update_activates_generic_task_state(monkeyp
 
     module = importlib.import_module("pump_scheduling_agent")
 
-    client = Mock(mqtt_client=Mock(), state_manager=Mock())
+    client = Mock(state_manager=Mock())
     context = SimulationContext(biz_scene_instance_id="task-002")
     agent = module.PumpCentralSchedulingAgent(
         sim_coordination_client=client,

@@ -139,6 +139,7 @@
 
 - `hydros_agent_sdk/coordination_client.py` 只装配 transport、payload decode/filter、`TaskRuntime` 和 `CoordinationOutboxPublisher`。Paho 生命周期只属于 `MqttCoordinationTransport`；task mailbox、callback dispatch 和失败响应只属于 `TaskRuntime`；出站 mailbox、worker 和重试只属于 `CoordinationOutboxPublisher`。
 - `hydros_agent_sdk/agent_commands/transport/client.py` 只复用共享 `Transport` 做 agent command 的订阅、decode 和 publish；`AgentCommandGateway` 显式装配 `AgentCommandRuntime`，禁止重新创建 Paho client 或恢复 runtime 懒创建。
+- `AgentStateManager` 是 task lifecycle、task-agent 关联和本地 runtime Agent 的唯一事实来源。`MultiAgentCallback` 只通过它查询和路由任务 Agent；具体 Agent 的 `on_init()` / `on_terminate()` 只管理自身资源，不得自行登记或清理 task truth。
 
 ### P0：职责过重的核心类
 
@@ -162,8 +163,7 @@
 
 ### 迁移要求
 
-- 重构时先补兼容测试，再做小步迁移，避免一次性移动大量文件导致导入路径失控。
-- 对外公共 API 需要保留旧入口时，可以增加薄 wrapper，但 wrapper 只能委托给新对象，不再承载新逻辑。
+- 未发布功能的重构直接迁移调用方和测试，不保留旧内部入口或兼容 wrapper。
 - 每迁移一个目录或核心类，都要同步更新 `__init__.py` 导出、测试导入路径和示例启动脚本。
 - 不确定归属的类，先按“谁拥有状态、谁承担生命周期、谁依赖谁”判断；仍不清楚时宁可先放到更具体的子包，不放入根目录或 `utils/`。
 
