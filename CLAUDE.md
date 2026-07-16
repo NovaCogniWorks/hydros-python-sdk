@@ -140,7 +140,7 @@ agent_type=TWINS_SIMULATION_AGENT
 agent_name=Twins Simulation Agent
 drive_mode=SIM_TICK_DRIVEN
 hydros_cluster_id=example-cluster
-hydros_node_id=default_node
+hydros_node_id=example-node
 ```
 
 **env.properties** (MQTT connection)
