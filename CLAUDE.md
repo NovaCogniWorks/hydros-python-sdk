@@ -139,7 +139,7 @@ agent_code=TWINS_SIMULATION_AGENT
 agent_type=TWINS_SIMULATION_AGENT
 agent_name=Twins Simulation Agent
 drive_mode=SIM_TICK_DRIVEN
-hydros_cluster_id=hydros-k3s-staging
+hydros_cluster_id=example-cluster
 hydros_node_id=default_node
 ```
 

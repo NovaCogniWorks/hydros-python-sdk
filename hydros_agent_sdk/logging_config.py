@@ -12,8 +12,8 @@ Hydros Agent SDK 日志配置。
    ${hydros_cluster_id}|${hydros_node_id}|2026-01-28 23:29:48|INFO|${biz_component}|-|coordination_client.py:123|message
 
 格式字段说明：
-- hydros_cluster_id（例如 "hydros-k3s-staging"）
-- hydros_node_id（例如 "default_central"）
+- hydros_cluster_id（例如 "cluster-a"）
+- hydros_node_id（例如 "node-a"）
 - 时间戳（yyyy-MM-dd HH:mm:ss）
 - 日志级别（5 个字符，左对齐）
 - biz_scene_instance_id（来自 SimulationContext）或 biz_component（例如 "SIM_SDK", "SIM_COORDINATOR"）
@@ -155,14 +155,14 @@ class HydrosFormatter(logging.Formatter):
        CLUSTER|NODE|TIME|LEVEL|BIZ_COMPONENT|-|SOURCE|MESSAGE
 
     示例输出：
-    - 智能体：hydros-k3s-staging|default_central|2026-01-28 23:29:48|INFO |TASK202601282328VG3IE7H3CA0F|AGENT_001|coordination_client.py:123|Processing command
-    - SDK：   hydros-k3s-staging|default_central|2026-01-28 23:29:48|INFO |SIM_SDK|-|coordination_client.py:123|Loading configuration
+    - 智能体：cluster-a|node-a|2026-01-28 23:29:48|INFO |TASK202601282328VG3IE7H3CA0F|AGENT_001|coordination_client.py:123|Processing command
+    - SDK：   cluster-a|node-a|2026-01-28 23:29:48|INFO |SIM_SDK|-|coordination_client.py:123|Loading configuration
     """
 
     def __init__(
         self,
-        default_hydros_cluster_id: str = "hydros-k3s-staging",
-        default_hydros_node_id: str = "LOCAL"
+        default_hydros_cluster_id: Optional[str] = None,
+        default_hydros_node_id: Optional[str] = None,
     ):
         """
         初始化格式化器。
@@ -178,8 +178,8 @@ class HydrosFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """使用 Python 风格源码位置格式化日志记录。"""
         # 获取带默认值的上下文值
-        hydros_cluster_id = get_hydros_cluster_id() or self.default_hydros_cluster_id
-        hydros_node_id = get_hydros_node_id() or self.default_hydros_node_id
+        hydros_cluster_id = get_hydros_cluster_id() or self.default_hydros_cluster_id or "-"
+        hydros_node_id = get_hydros_node_id() or self.default_hydros_node_id or "-"
         biz_scene_instance_id = get_biz_scene_instance_id()
         biz_component = get_biz_component() or "Common"
 
@@ -232,8 +232,8 @@ class HydrosFormatter(logging.Formatter):
 
 def setup_logging(
     level: int = logging.INFO,
-    hydros_cluster_id: str = "hydros-k3s-staging",
-    hydros_node_id: str = "LOCAL",
+    hydros_cluster_id: Optional[str] = None,
+    hydros_node_id: Optional[str] = None,
     log_file: Optional[str] = None,
     console: bool = True,
     simple: bool = True,
@@ -244,8 +244,8 @@ def setup_logging(
 
     Args:
         level: 日志级别（默认 logging.INFO）
-        hydros_cluster_id: 日志默认集群 ID（默认 "hydros-k3s-staging"）
-        hydros_node_id: 日志默认节点 ID（默认 "LOCAL"）
+        hydros_cluster_id: 可选日志集群 ID；完整日志缺少该值时输出 "-"
+        hydros_node_id: 可选日志节点 ID；完整日志缺少该值时输出 "-"
         log_file: 可选日志文件路径
         console: 是否输出到控制台（默认 True）
         simple: 是否使用本地开发的简化日志格式（默认 True）。

@@ -54,14 +54,10 @@ if __name__ == "__main__":
     LOG_DIR = os.path.join(EXAMPLES_DIR, "logs")
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # 加载 env 配置，用于获取日志中的 cluster_id 和 node_id
-    try:
-        env_config = load_env_config()
-        hydros_cluster_id = env_config.get('hydros_cluster_id', 'hydros-k3s-staging')
-        hydros_node_id = env_config.get('hydros_node_id', 'LOCAL')
-    except Exception:
-        hydros_cluster_id = 'hydros-k3s-staging'
-        hydros_node_id = os.getenv("HYDROS_NODE_ID", "LOCAL")
+    # 部署身份必须来自 env.properties。
+    env_config = load_env_config()
+    hydros_cluster_id = env_config['hydros_cluster_id']
+    hydros_node_id = env_config['hydros_node_id']
 
     setup_logging(
         level=logging.INFO,
@@ -336,7 +332,7 @@ def main():
     )
 
     # 创建统一回调
-    callback = MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
+    callback = MultiAgentCallback()
     callback.register_agent_factory("ONTOLOGY_SIMULATION_AGENT", agent_factory)
 
     # 创建协调客户端

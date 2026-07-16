@@ -1428,7 +1428,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
         self.assertEqual(client.timeout_seconds, 210.0)
 
-    def test_system_central_factory_can_create_agent_without_env_properties_file(self):
+    def test_system_central_factory_requires_deployment_identity_configuration(self):
         from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
 
         state_manager = AgentStateManager()
@@ -1443,13 +1443,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             transport=InMemoryTransport(),
         )
         context = SimulationContext(biz_scene_instance_id="scene-012-no-env")
-        factory = SystemCentralSchedulingAgentFactory()
-
-        agent = factory.create_agent(sim_client, context)
-
-        self.assertEqual(agent.cluster_id, "demo-cluster")
-        self.assertEqual(agent.node_id, "node-a")
-        self.assertEqual(agent.agent_code, "CENTRAL_SCHEDULING_AGENT")
+        for missing_key, env_config in (
+            ("hydros_cluster_id", {"hydros_node_id": "node-a"}),
+            ("hydros_node_id", {"hydros_cluster_id": "demo-cluster"}),
+        ):
+            with self.subTest(missing_key=missing_key), patch.dict(os.environ, {}, clear=True):
+                factory = SystemCentralSchedulingAgentFactory(env_config=env_config)
+                with self.assertRaisesRegex(ValueError, missing_key):
+                    factory.create_agent(sim_client, context)
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")

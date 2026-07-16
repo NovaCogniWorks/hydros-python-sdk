@@ -169,7 +169,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         state_manager = AgentStateManager()
         state_manager.set_cluster_id("demo-cluster")
         state_manager.set_node_id("node-a")
-        callback = MultiAgentCallback(node_id="node-a")
+        callback = MultiAgentCallback()
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,

@@ -260,7 +260,7 @@ def test_remote_init_response_is_cached_while_local_task_is_initializing():
     context = make_context()
     state_manager = AgentStateManager()
     state_manager.set_node_id("central-node")
-    callback = MultiAgentCallback(node_id="central-node")
+    callback = MultiAgentCallback()
     client = make_client(callback, state_manager)
     callback.set_client(client)
     state_manager.begin_task_initialization(context)

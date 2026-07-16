@@ -44,19 +44,13 @@ class MultiAgentCallback(SimCoordinationCallback):
     多个智能体实例化，但只应返回一个 SimTaskInitResponse。
 
     示例：
-        callback = MultiAgentCallback(node_id="LOCAL")
+        callback = MultiAgentCallback()
         callback.register_agent_factory("TWINS_SIMULATION_AGENT", twins_factory)
         callback.register_agent_factory("ONTOLOGY_SIMULATION_AGENT", ontology_factory)
     """
 
-    def __init__(self, node_id: str = "LOCAL"):
-        """
-        初始化多智能体回调。
-
-        Args:
-            node_id: 当前智能体宿主节点标识
-        """
-        self.node_id = node_id
+    def __init__(self):
+        """初始化多智能体回调。"""
         self.agent_factories: Dict[str, Any] = {}  # {agent_code: 工厂}
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
         self._client: Optional[Any] = None
@@ -64,7 +58,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         self._pending_status_reports: List[Any] = []
         self._logging_context_setter = AgentLoggingContextSetter()
 
-        logger.info(f"MultiAgentCallback created for node: {node_id}")
+        logger.info("MultiAgentCallback created")
 
     def register_agent_factory(self, agent_code: str, factory: Any, agent_type: Optional[str] = None):
         """

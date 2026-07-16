@@ -146,7 +146,7 @@ def test_multi_agent_init_creates_context_from_scenario_config_before_agent_init
     context = make_context()
     instance = make_instance(context)
     agent = ContextAwareFakeAgent(instance)
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("TEST_AGENT", FakeFactory(agent))
     client = FakeClient()
     callback.set_client(client)
@@ -197,7 +197,7 @@ def test_multi_agent_init_creates_context_from_scenario_config_before_agent_init
 def test_multi_agent_init_returns_response_without_direct_enqueue():
     context = make_context()
     instance = make_instance(context)
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("TEST_AGENT", FakeFactory(FakeAgent(instance)))
     client = FakeClient()
     callback.set_client(client)
@@ -217,7 +217,7 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
 def test_multi_agent_router_returns_init_response_with_pending_status_report():
     context = make_context()
     instance = make_instance(context)
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("TEST_AGENT", FakeFactory(FakeAgent(instance)))
     client = FakeClient()
     callback.set_client(client)
@@ -236,7 +236,7 @@ def test_multi_agent_init_keeps_local_display_name_and_uses_requested_routing_co
     context = make_context()
     instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
     instance.agent_name = "梯级泵站调度智能体"
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory(
         "CENTRAL_SCHEDULING_AGENT_PUMP",
         FakeFactory(FakeAgent(instance)),
@@ -265,7 +265,7 @@ def test_default_central_scheduling_route_uses_system_factory_without_custom_fac
     context = make_context()
     system_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT")
     system_factory = FakeFactory(FakeAgent(system_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT", system_factory)
     client = FakeClient()
     callback.set_client(client)
@@ -292,7 +292,7 @@ def test_custom_central_scheduling_route_requires_exact_agent_code_when_custom_f
     custom_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_POWER01")
     system_factory = FakeFactory(FakeAgent(system_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
     custom_factory = FakeFactory(FakeAgent(custom_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT", system_factory)
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT_POWER01", custom_factory)
     client = FakeClient()
@@ -318,7 +318,7 @@ def test_custom_central_scheduling_route_requires_exact_agent_code_when_custom_f
 def test_system_default_central_scheduling_can_coexist_with_custom_central_factory():
     context = make_context()
     custom_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory(
         "CENTRAL_SCHEDULING_AGENT_PUMP",
         FakeFactory(FakeAgent(custom_instance), agent_type="CENTRAL_SCHEDULING_AGENT"),
@@ -336,7 +336,7 @@ def test_multi_agent_init_allows_multiple_central_agents_with_different_codes():
     custom_instance = make_instance(context, "CENTRAL_SCHEDULING_AGENT_PUMP")
     system_factory = FakeFactory(FakeAgent(system_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
     custom_factory = FakeFactory(FakeAgent(custom_instance), agent_type="CENTRAL_SCHEDULING_AGENT")
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT", system_factory)
     callback.register_agent_factory("CENTRAL_SCHEDULING_AGENT_PUMP", custom_factory)
     client = FakeClient()
@@ -379,7 +379,7 @@ def test_multi_agent_init_allows_multiple_central_agents_with_different_codes():
 def test_multi_agent_tick_and_terminate_return_response_lists():
     context = make_context()
     instance = make_instance(context)
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     client = activate_callback_task(callback, context, [FakeAgent(instance)])
 
     tick_responses = callback.on_tick(
@@ -399,7 +399,7 @@ def test_multi_agent_tick_and_terminate_return_response_lists():
 
 def test_multi_agent_terminate_cleans_initializing_task_without_agents():
     context = make_context()
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     client = FakeClient()
     callback.set_client(client)
     client.state_manager.begin_task_initialization(context)
@@ -421,7 +421,7 @@ def test_multi_agent_tick_skips_agents_without_tick_capability():
     event_instance = make_instance(context, "EVENT_AGENT")
     tick_agent = FakeAgent(tick_instance)
     event_agent = EventOnlyFakeAgent(event_instance)
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     activate_callback_task(callback, context, [tick_agent, event_agent])
 
     tick_responses = callback.on_tick(
@@ -437,7 +437,7 @@ def test_multi_agent_tick_skips_agents_without_tick_capability():
 def test_multi_agent_tick_sets_logging_context_for_target_agent():
     context = make_context()
     agent = FakeAgent(make_instance(context))
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     activate_callback_task(callback, context, [agent])
 
     callback.on_tick(TickCmdRequest(command_id="CMD_TICK", context=context, step=1))

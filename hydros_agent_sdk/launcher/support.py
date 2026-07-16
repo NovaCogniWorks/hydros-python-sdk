@@ -516,15 +516,12 @@ class LauncherLoggingConfigurator:
             use_rolling=True,
         )
 
-    def _resolve_logging_context(self) -> Tuple[str, str]:
+    def _resolve_logging_context(self) -> Tuple[Optional[str], Optional[str]]:
         try:
             env_config = load_env_config(self.env_file)
-            return (
-                env_config.get("hydros_cluster_id", "hydros-k3s-staging"),
-                env_config.get("hydros_node_id", "LOCAL"),
-            )
-        except Exception:
-            return "hydros-k3s-staging", os.getenv("HYDROS_NODE_ID", "LOCAL")
+        except (FileNotFoundError, ValueError):
+            return os.getenv("HYDROS_CLUSTER_ID"), os.getenv("HYDROS_NODE_ID")
+        return env_config["hydros_cluster_id"], env_config["hydros_node_id"]
 
 
 class LauncherDebugSupport:
@@ -969,7 +966,7 @@ class MultiAgentCoordinator:
 
     @staticmethod
     def _create_callback() -> MultiAgentCallback:
-        return MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
+        return MultiAgentCallback()
 
 
 class LauncherRuntime:

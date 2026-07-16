@@ -215,12 +215,16 @@ class SystemCentralSchedulingAgentFactory:
         settings = load_runtime_env_settings(env_config=self.env_config)
         if self.env_config is None:
             self.env_config = settings.raw
-        hydros_cluster_id = (
-            settings.hydros_cluster_id
-            or sim_coordination_client.state_manager.get_cluster_id()
-            or "hydros-k3s-staging"
-        )
-        hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
+        hydros_cluster_id = settings.hydros_cluster_id
+        hydros_node_id = settings.hydros_node_id
+        if not hydros_cluster_id:
+            raise ValueError(
+                "hydros_cluster_id is required to create the system central scheduling agent"
+            )
+        if not hydros_node_id:
+            raise ValueError(
+                "hydros_node_id is required to create the system central scheduling agent"
+            )
 
         agent_code = SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
         agent_id = generate_agent_instance_id(agent_code)

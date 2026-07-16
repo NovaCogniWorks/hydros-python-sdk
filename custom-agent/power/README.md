@@ -39,7 +39,7 @@ custom-agent/
 ```properties
 mqtt_broker_url=tcp://192.168.1.24
 mqtt_broker_port=1883
-hydros_cluster_id=hydros-k3s-staging
+hydros_cluster_id=example-cluster
 hydros_node_id=default_node
 ```
 

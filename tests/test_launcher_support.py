@@ -5,6 +5,7 @@ from hydros_agent_sdk.launcher.support import (
     AgentDirectoryResolver,
     AgentFactoryRegistrationService,
     LauncherCli,
+    LauncherLoggingConfigurator,
     MultiAgentCoordinator,
 )
 
@@ -60,6 +61,31 @@ def test_launcher_cli_parses_check_and_doctor_aliases():
     assert doctor_options.check_only
     assert not check_options.agent_names
     assert not doctor_options.agent_names
+
+
+def test_launcher_logging_does_not_invent_deployment_identity(monkeypatch, tmp_path):
+    captured = {}
+
+    def missing_env_config(_env_file):
+        raise FileNotFoundError("missing env.properties")
+
+    monkeypatch.delenv("HYDROS_CLUSTER_ID", raising=False)
+    monkeypatch.delenv("HYDROS_NODE_ID", raising=False)
+    monkeypatch.setattr(support_module, "load_env_config", missing_env_config)
+    monkeypatch.setattr(
+        support_module,
+        "setup_logging",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    LauncherLoggingConfigurator(
+        env_file=str(tmp_path / "env.properties"),
+        log_file=str(tmp_path / "hydros.log"),
+        log_dir=str(tmp_path),
+    ).configure(["multi_agent_launcher.py", "--full-log"])
+
+    assert captured["hydros_cluster_id"] is None
+    assert captured["hydros_node_id"] is None
 
 
 def test_launcher_doctor_returns_zero_when_env_and_agents_are_valid(monkeypatch, capsys):

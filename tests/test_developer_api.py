@@ -101,7 +101,7 @@ def test_custom_agent_factory_and_multi_agent_own_task_lifecycle(tmp_path):
         encoding="utf-8",
     )
     client = FakeClient()
-    callback = MultiAgentCallback(node_id="node")
+    callback = MultiAgentCallback()
     callback.set_client(client)
     factory = CustomAgentFactory(
         custom_agent_class=RecordingCustomAgent,
