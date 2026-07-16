@@ -23,38 +23,6 @@ if [ ! -x "$PYTHON_EXEC" ]; then
     PYTHON_EXEC="python3"
 fi
 
-PUMP_FLOW_DMPC_SERVICE_PID=""
-AGENT_LAUNCHER_PID=""
-
-stop_child_processes() {
-    local pid
-    for pid in "$AGENT_LAUNCHER_PID" "$PUMP_FLOW_DMPC_SERVICE_PID"; do
-        if [ -n "$pid" ]; then
-            kill "$pid" >/dev/null 2>&1 || true
-        fi
-    done
-    for pid in "$AGENT_LAUNCHER_PID" "$PUMP_FLOW_DMPC_SERVICE_PID"; do
-        if [ -n "$pid" ]; then
-            wait "$pid" >/dev/null 2>&1 || true
-        fi
-    done
-}
-
-start_pump_flow_dmpc_service() {
-    if [ -z "${PUMP_FLOW_DMPC_MODEL_CONFIG:-}" ]; then
-        echo -e "${YELLOW}未配置 PUMP_FLOW_DMPC_MODEL_CONFIG，不启动泵站流量 DMPC HTTP 服务${NC}"
-        return
-    fi
-
-    local service_port="${PUMP_FLOW_DMPC_PORT:-8015}"
-    echo -e "${GREEN}启动泵站流量 DMPC HTTP 服务: 0.0.0.0:${service_port}${NC}"
-    "$PYTHON_EXEC" "${SCRIPT_DIR}/pump_flow_dmpc_service.py" \
-        --model-config "${PUMP_FLOW_DMPC_MODEL_CONFIG}" \
-        --host 0.0.0.0 \
-        --port "${service_port}" &
-    PUMP_FLOW_DMPC_SERVICE_PID=$!
-}
-
 # 显示帮助信息
 show_help() {
     echo -e "${GREEN}Hydros Agent 启动脚本${NC}"
@@ -97,8 +65,6 @@ show_help() {
     echo ""
     echo "特性:"
     echo "  • 所有 agents 在同一个进程中运行"
-    echo "  • 配置 PUMP_FLOW_DMPC_MODEL_CONFIG 后，同时启动 8015 端口的边缘分配 HTTP 服务"
-    echo "  • 边缘分配接口: POST /engine/v1/api/control-algorithms/{algorithm_type}/solve"
     echo "  • 前台运行，可以在控制台看到日志"
     echo "  • 所有日志保存到 custom-agent/logs/hydros.log"
     echo "  • 使用 Ctrl+C 优雅停止所有 agents"
@@ -221,22 +187,10 @@ main() {
         echo ""
     fi
 
-    start_pump_flow_dmpc_service
-
     "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
         --launcher-dir "${SCRIPT_DIR}" \
         --project-root "${PROJECT_ROOT}" \
-        -- "${PYTHON_ARGS[@]}" &
-    AGENT_LAUNCHER_PID=$!
-
-    trap 'stop_child_processes; exit 0' INT TERM
-    trap stop_child_processes EXIT
-
-    if [ -n "$PUMP_FLOW_DMPC_SERVICE_PID" ]; then
-        wait -n "$AGENT_LAUNCHER_PID" "$PUMP_FLOW_DMPC_SERVICE_PID"
-    else
-        wait "$AGENT_LAUNCHER_PID"
-    fi
+        -- "${PYTHON_ARGS[@]}"
 }
 
 # 运行主函数
