@@ -53,3 +53,13 @@ class InMemoryTransport:
 
         for handler, _handler_qos in handlers:
             handler(topic, payload)
+
+    def deliver(self, topic: str, payload: str) -> None:
+        """Deliver an inbound payload without recording an outbound publish."""
+        with self._lock:
+            if not self._running:
+                raise RuntimeError("Transport is not running")
+            handlers = list(self._handlers.get(topic, []))
+
+        for handler, _handler_qos in handlers:
+            handler(topic, payload)

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+import uuid
+from typing import List, Tuple
 
 from hydros_agent_sdk.protocol.agent_commands import (
     HydroStationTargetValueRequest,
 )
 from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
-from hydros_agent_sdk.mpc.models import (
-    ControlObjectResult,
-    HorizonStep,
-    MpcOptimizeResponse,
-    ValueItem,
+from hydros_agent_sdk.mpc.control_execution_plan import (
+    MpcControlExecutionPlan,
+    MpcControlExecutionTarget,
 )
+from hydros_agent_sdk.protocol.models import HydroAgentInstance
 from hydros_agent_sdk.utils import generate_agent_command_id
 
 logger = logging.getLogger(__name__)
@@ -24,115 +24,56 @@ logger = logging.getLogger(__name__)
 class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
     """把 MPC 结果和内部控制意图转换成智能体指令。"""
 
-    def build_from_mpc_responses(
+    def build_from_control_plan(
         self,
-        responses: List[MpcOptimizeResponse],
-        horizon_step: Optional[int] = None,
+        plan: MpcControlExecutionPlan,
+        horizon_step: int,
+        current_step: int,
     ) -> List[AgentCommand]:
         control_commands: List[AgentCommand] = []
-        for response in responses:
-            if (response.plan_type or "").upper() != "OPTIMAL":
-                logger.debug(
-                    "Skip MPC response for control command build: plan_type=%s",
-                    response.plan_type,
+        control_targets = plan.get_control_targets(horizon_step)
+        resolved_targets: List[Tuple[MpcControlExecutionTarget, HydroAgentInstance]] = []
+        for control_target in control_targets:
+            target_agent = self.resolve_target_agent_for_object(
+                control_target.object_id,
+                control_target.object_type,
+            )
+            if target_agent is None:
+                logger.warning(
+                    "Cannot resolve target agent for MPC control: objectId=%s, objectType=%s",
+                    control_target.object_id,
+                    control_target.object_type,
                 )
                 continue
-            if not response.horizon_controls:
-                logger.debug(
-                    "Skip MPC response for control command build: empty horizon_controls, plan_type=%s",
-                    response.plan_type,
-                )
-                continue
+            resolved_targets.append((control_target, target_agent))
 
-            selected_horizon = self._select_horizon(response, horizon_step)
-            if selected_horizon is None:
-                logger.debug(
-                    "Skip MPC response because requested horizon is missing: horizon_step=%s",
-                    horizon_step,
+        group_id = (
+            "MPC_CTRL_GROUP:"
+            f"{self.source_agent.context.biz_scene_instance_id}:"
+            f"{current_step}:{plan.optimize_step}:{horizon_step}:{uuid.uuid4()}"
+        )
+        group_size = len(resolved_targets)
+        for control_target, target_agent in resolved_targets:
+            control_commands.append(
+                HydroStationTargetValueRequest(
+                    command_id=generate_agent_command_id(),
+                    context=self.source_agent.context,
+                    source=self.source_agent,
+                    target=target_agent,
+                    object_id=control_target.object_id,
+                    object_type=control_target.object_type,
+                    target_value=control_target.target_value,
+                    target_value_type=control_target.target_value_type,
+                    group_id=group_id,
+                    group_size=group_size,
+                    main_step_index=current_step,
+                    need_ack_reply=True,
                 )
-                continue
-            for control_object_result in selected_horizon.control_object_list or []:
-                if (
-                    self._is_incomplete_control_object(control_object_result)
-                    or not any(
-                        not self._is_incomplete_control_target(target_value)
-                        for target_value in control_object_result.target_value_list or []
-                    )
-                ):
-                    logger.debug(
-                        "Skip incomplete MPC control object: objectId=%s, objectType=%s",
-                        control_object_result.object_id,
-                        control_object_result.object_type,
-                    )
-                    continue
-                target_agent = self.resolve_target_agent_for_object(
-                    control_object_result.object_id,
-                    control_object_result.object_type,
-                )
-                if target_agent is None:
-                    logger.warning(
-                        "Cannot resolve target agent for MPC control: objectId=%s, objectType=%s",
-                        control_object_result.object_id,
-                        control_object_result.object_type,
-                    )
-                    continue
-
-                for target_value in control_object_result.target_value_list or []:
-                    if self._is_incomplete_control_target(target_value):
-                        logger.debug(
-                            "Skip incomplete MPC object control: objectId=%s, objectType=%s, targetValueType=%s",
-                            control_object_result.object_id,
-                            control_object_result.object_type,
-                            target_value.value_type,
-                        )
-                        continue
-                    control_commands.append(
-                        HydroStationTargetValueRequest(
-                            command_id=generate_agent_command_id(),
-                            context=self.source_agent.context,
-                            source=self.source_agent,
-                            target=target_agent,
-                            object_id=control_object_result.object_id,
-                            object_type=control_object_result.object_type,
-                            target_value=target_value.numeric_value(),
-                            target_value_type=target_value.value_type,
-                            need_ack_reply=True,
-                        )
-                    )
+            )
 
         logger.info(
-            "Built %s control commands from %s MPC responses",
+            "Built %s control commands from MPC execution plan at horizon %s",
             len(control_commands),
-            len(responses or []),
+            horizon_step,
         )
         return control_commands
-
-    @staticmethod
-    def _select_horizon(
-        response: MpcOptimizeResponse,
-        horizon_step: Optional[int],
-    ) -> Optional[HorizonStep]:
-        if horizon_step is None:
-            return response.horizon_controls[0] if response.horizon_controls else None
-        for horizon in response.horizon_controls:
-            if horizon.horizon_step == horizon_step:
-                return horizon
-        return None
-
-    @staticmethod
-    def _is_incomplete_control_object(control_object_result: ControlObjectResult) -> bool:
-        return (
-            control_object_result.object_id is None
-            or not MpcControlCommandBuilder._has_text(control_object_result.object_type)
-        )
-
-    @staticmethod
-    def _is_incomplete_control_target(target_value: ValueItem) -> bool:
-        return (
-            target_value.numeric_value() is None
-            or not MpcControlCommandBuilder._has_text(target_value.value_type)
-        )
-
-    @staticmethod
-    def _has_text(value: Optional[str]) -> bool:
-        return value is not None and bool(value.strip())

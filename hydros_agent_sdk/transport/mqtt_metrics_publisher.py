@@ -72,7 +72,7 @@ class MqttMetricsPublisher:
     def publish_batch(self, metrics_list: List[MqttMetrics]) -> int:
         normalized_metrics = [self._with_context(metrics) for metrics in metrics_list]
         return send_metrics_batch(
-            mqtt_client=self.transport,
+            transport=self.transport,
             topic=self.topic,
             metrics_list=normalized_metrics,
             qos=self.qos,

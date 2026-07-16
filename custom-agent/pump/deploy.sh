@@ -20,6 +20,8 @@ SKIP_BUILD=false
 DEBUG_PORT=""
 LOG_VOLUME="${CONTAINER_NAME}-logs"
 HYDROS_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-${DEFAULT_AGENT_START_ARGS}}}"
+PUMP_FLOW_DMPC_MODEL_CONFIG=""
+PUMP_FLOW_DMPC_CONTAINER_MODEL_CONFIG="/opt/hydros/custom-agent/pump/config/pump-flow-dmpc-performance.yaml"
 RUNTIME_ENV_OVERRIDES=()
 
 RED='\033[0;31m'
@@ -70,12 +72,15 @@ ${APP_NAME} Python 部署脚本
   --debug-port <port>  额外暴露调试端口
   --log-volume <name>  覆盖日志 volume，默认: ${LOG_VOLUME}
   --start-args <args>  覆盖容器启动 agent 参数，默认: ${DEFAULT_AGENT_START_ARGS}
+  --pump-flow-dmpc-model-config <host-path>
+                     挂载泵性能曲线 YAML，并启动边缘分配 HTTP 服务
   KEY=VALUE            追加传入容器的环境变量
 
 示例:
   $0 deploy --target-host 192.168.20.51 --target-port 2375
   $0 deploy --target-host 192.168.20.51 --target-port 2375 --tag v1.0.1 outflowplan scheduling
   $0 deploy --target-host 192.168.20.51 --target-port 2375 MQTT_BROKER_URL=192.168.20.10
+  $0 deploy --target-host 192.168.20.52 --pump-flow-dmpc-model-config /opt/hydros/config/pump-performance.yaml
   $0 build-image --tag v1.0.1
 USAGE
     exit "${exit_code}"
@@ -172,6 +177,11 @@ parse_arguments() {
             --start-args)
                 [ $# -ge 2 ] || { log_error "--start-args 需要一个参数"; exit 1; }
                 HYDROS_AGENT_START_ARGS="$2"
+                shift 2
+                ;;
+            --pump-flow-dmpc-model-config)
+                [ $# -ge 2 ] || { log_error "--pump-flow-dmpc-model-config 需要一个参数"; exit 1; }
+                PUMP_FLOW_DMPC_MODEL_CONFIG="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -289,6 +299,14 @@ build_run_args() {
         RUN_ARGS+=(-e "${item}")
     done
 
+    if [ -n "${PUMP_FLOW_DMPC_MODEL_CONFIG}" ]; then
+        RUN_ARGS+=(
+            -v "${PUMP_FLOW_DMPC_MODEL_CONFIG}:${PUMP_FLOW_DMPC_CONTAINER_MODEL_CONFIG}:ro"
+            -e "PUMP_FLOW_DMPC_MODEL_CONFIG=${PUMP_FLOW_DMPC_CONTAINER_MODEL_CONFIG}"
+            -e "PUMP_FLOW_DMPC_PORT=${CONTAINER_PORT}"
+        )
+    fi
+
     RUN_ARGS+=(
         -v "${LOG_VOLUME}:/opt/hydros/custom-agent/pump/logs"
         "${LOCAL_IMAGE_NAME}"
@@ -307,6 +325,12 @@ start_container() {
 
     log_info "容器启动参数: ${HYDROS_AGENT_START_ARGS}"
     log_info "端口映射: ${APP_PORT}:${CONTAINER_PORT}"
+    if [ -n "${PUMP_FLOW_DMPC_MODEL_CONFIG}" ]; then
+        log_info "泵站流量 DMPC HTTP 服务: /engine/v1/api/control-algorithms/{algorithm_type}/solve"
+        log_info "泵性能曲线文件: ${PUMP_FLOW_DMPC_MODEL_CONFIG}"
+    else
+        log_warning "未提供泵性能曲线文件，不启动泵站流量 DMPC HTTP 服务"
+    fi
     if [ -n "${DEBUG_PORT}" ]; then
         log_info "调试端口: ${DEBUG_PORT}:${DEBUG_PORT}"
     fi

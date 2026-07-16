@@ -1,5 +1,5 @@
 import unittest
-from queue import Empty
+from queue import Empty, Queue
 from unittest.mock import Mock
 
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
@@ -56,7 +56,9 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
 
     def test_hydro_event_time_series_injection_activates_central_mpc_and_returns_ack(self):
         context = SimulationContext(biz_scene_instance_id="scene-event-inject-success")
-        client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=True
+        )
         event = self._build_time_series_event(auto_schedule_at_step=5)
 
         client.task_runtime.handle(
@@ -68,7 +70,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             )
         )
 
-        ack = self._single_response_of_type(client, HydroEventAckResponse)
+        ack = self._single_response_of_type(outbound, HydroEventAckResponse)
         self.assertEqual(ack.command_id, "event-ts-001")
         self.assertEqual(ack.command_status, CommandStatus.SUCCEED)
         self.assertEqual(ack.source_agent_instance.agent_code, "CENTRAL_SCHEDULING_AGENT")
@@ -80,7 +82,9 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
 
     def test_hydro_event_time_series_injection_returns_failed_ack_when_rolling_config_missing(self):
         context = SimulationContext(biz_scene_instance_id="scene-event-inject-missing-config")
-        client, agent = self._build_registered_central_agent(context, with_rolling_config=False)
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=False
+        )
 
         with self.assertLogs(
             "hydros_agent_sdk.agents.mpc_central_scheduling_agent",
@@ -95,7 +99,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
                 )
             )
 
-        ack = self._single_response_of_type(client, HydroEventAckResponse)
+        ack = self._single_response_of_type(outbound, HydroEventAckResponse)
         self.assertEqual(ack.command_id, "event-ts-missing-config")
         self.assertEqual(ack.command_status, CommandStatus.FAILED)
         self.assertTrue(
@@ -106,7 +110,9 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
 
     def test_direct_time_series_update_request_reaches_central_agent_through_multi_agent_callback(self):
         context = SimulationContext(biz_scene_instance_id="scene-direct-update")
-        client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=True
+        )
         event = self._build_time_series_event(auto_schedule_at_step=7)
 
         client.task_runtime.handle(
@@ -118,7 +124,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             )
         )
 
-        response = self._single_response_of_type(client, TimeSeriesDataUpdateResponse)
+        response = self._single_response_of_type(outbound, TimeSeriesDataUpdateResponse)
         self.assertEqual(response.command_id, "direct-ts-001")
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         self.assertEqual(agent.optimization_steps, [7])
@@ -126,7 +132,9 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
 
     def test_outflow_data_event_injection_keeps_default_central_noop_ack_without_mpc_activation(self):
         context = SimulationContext(biz_scene_instance_id="scene-outflow-noop")
-        client, agent = self._build_registered_central_agent(context, with_rolling_config=True)
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=True
+        )
 
         client.task_runtime.handle(
             HydroEventCommand(
@@ -151,7 +159,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             )
         )
 
-        ack = self._single_response_of_type(client, HydroEventAckResponse)
+        ack = self._single_response_of_type(outbound, HydroEventAckResponse)
         self.assertEqual(ack.command_id, "event-outflow-data-001")
         self.assertEqual(ack.command_status, CommandStatus.SUCCEED)
         self.assertIsNone(agent._mpc_rolling_runtime.task_state)
@@ -170,6 +178,8 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
             state_manager=state_manager,
         )
         callback.set_client(client)
+        outbound = Queue()
+        client.task_runtime.outbound_submitter = outbound.put
 
         if with_rolling_config:
             ContextManager.create(
@@ -201,7 +211,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         }
         state_manager.init_task(context, [agent])
         state_manager.add_local_agent(agent)
-        return client, agent
+        return client, agent, outbound
 
     @staticmethod
     def _build_time_series_event(auto_schedule_at_step):
@@ -221,11 +231,11 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         )
 
     @staticmethod
-    def _single_response_of_type(client, response_type):
+    def _single_response_of_type(outbound, response_type):
         matches = []
         while True:
             try:
-                item = client.out_message_queue.get_nowait()
+                item = outbound.get_nowait()
             except Empty:
                 break
             if isinstance(item, response_type):

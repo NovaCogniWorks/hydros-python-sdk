@@ -14,6 +14,21 @@ from .models import ControlAlgorithmInput
 from .runtime import ControlAlgorithmRuntime
 
 
+_EDGE_CONTROL_ALGORITHM_PATH_PREFIX = (
+    "engine",
+    "v1",
+    "api",
+    "control-algorithms",
+)
+_EDGE_DEFAULT_PATH_PREFIX = ("engine", "v1", "api", "edge-control")
+_LEGACY_PATH_PREFIX = ("control-algorithms",)
+_SUPPORTED_PATH_PREFIXES = (
+    _EDGE_CONTROL_ALGORITHM_PATH_PREFIX,
+    _EDGE_DEFAULT_PATH_PREFIX,
+    _LEGACY_PATH_PREFIX,
+)
+
+
 class ControlAlgorithmHttpService:
     """将已注册的 SDK 控制算法 runtime 暴露为标准 HTTP 服务。"""
 
@@ -39,7 +54,10 @@ class ControlAlgorithmHttpService:
                         HTTPStatus.NOT_FOUND,
                         {
                             "error_code": "UNSUPPORTED_PATH",
-                            "error_message": "expected /control-algorithms/{algorithm_type}/solve",
+                            "error_message": (
+                                "expected /engine/v1/api/control-algorithms/"
+                                "{algorithm_type}/solve"
+                            ),
                         },
                     )
                     return
@@ -77,9 +95,15 @@ class ControlAlgorithmHttpService:
             def _algorithm_type(self) -> Optional[str]:
                 path = urlparse(self.path).path
                 parts = [part for part in path.split("/") if part]
-                if len(parts) != 3 or parts[0] != "control-algorithms" or parts[2] != "solve":
-                    return None
-                return unquote(parts[1])
+                for path_prefix in _SUPPORTED_PATH_PREFIXES:
+                    algorithm_index = len(path_prefix)
+                    if (
+                        len(parts) == algorithm_index + 2
+                        and tuple(parts[:algorithm_index]) == path_prefix
+                        and parts[-1] == "solve"
+                    ):
+                        return unquote(parts[algorithm_index])
+                return None
 
             def _read_json(self) -> Any:
                 content_length = self.headers.get("Content-Length")

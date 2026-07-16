@@ -2,6 +2,7 @@ import os
 import socket
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from paho.mqtt.reasoncodes import ReasonCode
 
@@ -52,25 +53,18 @@ class HydrosTopicsTest(unittest.TestCase):
         self.assertTrue(transport.connected.is_set())
         self.assertEqual(subscriptions, [("/hydros/commands/coordination/demo_cluster", 1)])
 
-    def test_agent_command_client_on_connect_accepts_reason_code_object(self):
+    def test_agent_command_client_subscribes_through_shared_transport(self):
+        transport = Mock()
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=transport,
             hydros_cluster_id="demo_cluster",
         )
 
-        subscriptions = []
-        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
-
-        client._on_connect(
-            None,
-            None,
-            None,
-            ReasonCode(packetType=2, aName="Success"),
+        transport.subscribe.assert_called_once_with(
+            "/hydros/commands/agent/demo_cluster",
+            client._handle_transport_payload,
+            qos=1,
         )
-
-        self.assertTrue(client._connected.is_set())
-        self.assertEqual(subscriptions, [("/hydros/commands/agent/demo_cluster", 1)])
 
     def test_topic_builders_match_java_rules(self):
         self.assertEqual(
@@ -106,8 +100,7 @@ class HydrosTopicsTest(unittest.TestCase):
 
     def test_agent_command_client_can_build_topic_from_cluster_id(self):
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=Mock(),
             hydros_cluster_id="demo_cluster",
         )
         self.assertEqual(client.topic, "/hydros/commands/agent/demo_cluster")
@@ -115,8 +108,7 @@ class HydrosTopicsTest(unittest.TestCase):
     def test_agent_command_client_requires_topic_or_cluster_id(self):
         with self.assertRaises(ValueError):
             AgentCommandClient(
-                broker_url="tcp://127.0.0.1",
-                broker_port=1883,
+                transport=Mock(),
             )
 
     def test_coordination_client_can_build_topic_from_cluster_id(self):

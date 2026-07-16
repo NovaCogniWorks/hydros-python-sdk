@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
+import json
 import time
-from queue import Queue
 from typing import List, Optional
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
-from hydros_agent_sdk.protocol.commands import SimCommand
+from hydros_agent_sdk.protocol.commands import SimCommand, SimCommandEnvelope
 from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.transport import InMemoryTransport
 
@@ -19,8 +19,8 @@ class FakeRuntime:
     """
     围绕 SimCoordinationClient 分派行为的进程内测试工具。
 
-    该运行时不会启动网络循环。测试可以把指令对象传给 ``send``，
-    并检查从出站队列捕获的响应。
+    该运行时使用 ``InMemoryTransport`` 走完整的 raw payload 装配路径，
+    不连接 MQTT broker。
     """
 
     def __init__(
@@ -43,42 +43,46 @@ class FakeRuntime:
         if hasattr(callback, "set_client"):
             callback.set_client(self.client)
         self.responses: List[SimCommand] = []
+        self.client.start()
 
     def send(self, command: SimCommand) -> List[SimCommand]:
         """分派指令并返回该指令产生的响应。"""
-        before = self.client.out_message_queue.qsize()
-        self.client.task_runtime.handle(command)
-        produced = self._drain_new_responses(before)
+        published_before = len(self.transport.published)
+        self.transport.deliver(
+            self.client.topic,
+            command.model_dump_json(by_alias=True),
+        )
+        records = self._wait_for_published(published_before)
+        produced = [
+            SimCommandEnvelope(command=json.loads(record.payload)).command
+            for record in records
+        ]
         self.responses.extend(produced)
         return produced
 
-    def _drain_new_responses(self, previous_size: int) -> List[SimCommand]:
-        produced = []
-        total_size = self.client.out_message_queue.qsize()
-        new_count = max(total_size - previous_size, 0)
-        kept = []
+    def _wait_for_published(self, start_index: int, timeout: float = 1.0):
+        deadline = time.monotonic() + timeout
+        last_count = start_index
+        stable_since = None
 
-        while not self.client.out_message_queue.empty():
-            item = self.client.out_message_queue.get_nowait()
-            if len(kept) < previous_size:
-                kept.append(item)
-            else:
-                produced.append(item)
+        while time.monotonic() < deadline:
+            records = self.transport.published
+            current_count = len(records)
+            if current_count > start_index:
+                if current_count != last_count:
+                    last_count = current_count
+                    stable_since = time.monotonic()
+                elif stable_since is not None and time.monotonic() - stable_since >= 0.02:
+                    return records[start_index:]
+            time.sleep(0.005)
 
-        restored = Queue()
-        for item in kept:
-            restored.put(item)
-        for item in produced:
-            restored.put(item)
-        self.client.out_message_queue = restored
+        return self.transport.published[start_index:]
 
-        return produced[:new_count]
+    def close(self) -> None:
+        self.client.stop()
 
-    def publish_all(self) -> None:
-        """通过进程内 transport 同步发布队列中的响应。"""
-        self.transport.start()
-        while not self.client.out_message_queue.empty():
-            command = self.client.out_message_queue.get_nowait()
-            if self.client.outbox_publisher.should_send(command):
-                self.client.outbox_publisher.send_with_retry(command)
-                time.sleep(0)
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        self.close()

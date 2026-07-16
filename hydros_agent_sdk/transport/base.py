@@ -1,5 +1,5 @@
 """
-协调消息投递的传输接口。
+SDK 消息投递的传输接口。
 """
 
 from __future__ import annotations

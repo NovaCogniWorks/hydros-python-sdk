@@ -38,4 +38,6 @@ class MpcPredictionResult(HydroBaseModel):
     execution_status: Optional[str] = None
     plan_type: Optional[str] = None
     attributes: Optional[str] = None
+    station_prediction_details: List[MpcPredictionResultDetail] = Field(default_factory=list)
+    device_prediction_details: List[MpcPredictionResultDetail] = Field(default_factory=list)
     details: List[MpcPredictionResultDetail] = Field(default_factory=list)

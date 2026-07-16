@@ -1,6 +1,7 @@
 import unittest
 
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
+from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     HorizonStep,
@@ -69,12 +70,16 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
             ],
         )
 
-        commands = builder.build_from_mpc_responses([response])
+        plan = MpcControlExecutionPlan.from_responses(4, [response])
+        commands = builder.build_from_control_plan(plan, horizon_step=1, current_step=4)
 
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0].object_id, 101)
         self.assertEqual(commands[0].target_value_type, "water_level")
         self.assertEqual(commands[0].target_value, 3.5)
+        self.assertEqual(commands[0].group_size, 1)
+        self.assertEqual(commands[0].main_step_index, 4)
+        self.assertTrue(commands[0].group_id.startswith("MPC_CTRL_GROUP:scene-structured-control:4:4:1:"))
 
 
 if __name__ == "__main__":

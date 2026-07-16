@@ -40,12 +40,8 @@ class AgentCommandGateway:
     def get_or_create_agent_command_client(self) -> AgentCommandClient:
         if self._agent_command_client is None:
             client = self.client_factory(
-                broker_url=self.sim_coordination_client.broker_url,
-                broker_port=self.sim_coordination_client.broker_port,
+                transport=self.sim_coordination_client.transport,
                 hydros_cluster_id=self.hydros_cluster_id,
-                state_manager=self.state_manager,
-                mqtt_username=getattr(self.sim_coordination_client, "mqtt_username", None),
-                mqtt_password=getattr(self.sim_coordination_client, "mqtt_password", None),
             )
             runtime = AgentCommandRuntime(
                 state_manager=self.state_manager,

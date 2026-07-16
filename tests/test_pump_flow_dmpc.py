@@ -145,7 +145,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
         thread.start()
         try:
             endpoint = (
-                "http://127.0.0.1:%s/control-algorithms/"
+                "http://127.0.0.1:%s/engine/v1/api/control-algorithms/"
                 "pump_station_flow_dmpc/solve" % server.server_address[1]
             )
             request = Request(

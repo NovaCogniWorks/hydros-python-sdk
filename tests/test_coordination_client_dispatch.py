@@ -1,5 +1,6 @@
 import json
 import time
+from queue import Queue
 from threading import Event
 from types import SimpleNamespace
 
@@ -34,6 +35,7 @@ from hydros_agent_sdk.protocol.models import (
     TimeSeriesValue,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.transport import InMemoryTransport
 
 
 def make_context():
@@ -191,22 +193,31 @@ def make_client(callback, state_manager):
         topic="/hydros/commands/coordination/test",
         sim_coordination_callback=callback,
         state_manager=state_manager,
+        transport=InMemoryTransport(),
     )
 
 
 def start_inbound_workers(client):
+    client.transport.start()
     client.task_runtime.start()
 
 
 def stop_inbound_workers(client):
     client.task_runtime.stop()
+    client.transport.stop()
 
 
 def deliver_raw_command(client, command):
-    client._handle_transport_payload(
+    client.transport.deliver(
         "/hydros/commands/coordination/test",
         command.model_dump_json(by_alias=True),
     )
+
+
+def capture_outbound(client):
+    responses = Queue()
+    client.task_runtime.outbound_submitter = responses.put
+    return responses
 
 
 def test_callback_returned_response_is_enqueued():
@@ -217,15 +228,33 @@ def test_callback_returned_response_is_enqueued():
     state_manager.init_task(context, [agent])
     state_manager.add_local_agent(agent)
     client = make_client(ReturningCallback(agent), state_manager)
+    outbound = capture_outbound(client)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
     client.task_runtime.handle(request)
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, TickCmdResponse)
     assert response.command_status == CommandStatus.SUCCEED
     assert response.command_id == "CMD_TICK"
     assert client.task_runtime.router.handlers
+
+
+def test_client_does_not_expose_paho_or_transport_callback_internals():
+    client = make_client(ReturningCallback(make_agent(make_context())), AgentStateManager())
+
+    for legacy_name in (
+        "mqtt_client",
+        "connected",
+        "publish",
+        "_on_connect",
+        "_on_disconnect",
+        "_on_message",
+        "out_message_queue",
+        "queue_thread",
+        "send_command",
+    ):
+        assert not hasattr(client, legacy_name)
 
 
 def test_remote_init_response_is_cached_while_local_task_is_initializing():
@@ -295,11 +324,12 @@ def test_handler_exception_becomes_failed_response_when_agent_context_exists():
     state_manager.init_task(context, [agent])
     state_manager.add_local_agent(agent)
     client = make_client(RaisingCallback(agent), state_manager)
+    outbound = capture_outbound(client)
 
     request = TickCmdRequest(command_id="CMD_TICK", context=context, step=1)
     client.task_runtime.handle(request)
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, TickCmdResponse)
     assert response.command_status == CommandStatus.FAILED
     assert response.error_code == "AGENT_TICK_FAILURE"
@@ -315,6 +345,7 @@ def test_transport_payload_is_enqueued_and_returns_before_slow_tick_finishes():
     state_manager.add_local_agent(agent)
     callback = BlockingTickCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
     start_inbound_workers(client)
 
     try:
@@ -325,10 +356,10 @@ def test_transport_payload_is_enqueued_and_returns_before_slow_tick_finishes():
 
         assert elapsed_ms < 200
         assert callback.tick_started.wait(timeout=1)
-        assert client.out_message_queue.empty()
+        assert outbound.empty()
 
         callback.tick_release.set()
-        response = client.out_message_queue.get(timeout=1)
+        response = outbound.get(timeout=1)
         assert callback.tick_finished.is_set()
         assert isinstance(response, TickCmdResponse)
         assert response.command_id == "CMD_SLOW_TICK"
@@ -347,6 +378,7 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
     state_manager.add_local_agent(agent)
     callback = BlockingTickAndInitCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
     start_inbound_workers(client)
 
     try:
@@ -362,12 +394,12 @@ def test_task_init_is_processed_while_business_tick_is_blocked():
         deliver_raw_command(client, init_request)
 
         assert callback.init_handled.wait(timeout=1)
-        init_response = client.out_message_queue.get(timeout=1)
+        init_response = outbound.get(timeout=1)
         assert isinstance(init_response, SimTaskInitResponse)
         assert init_response.command_id == "CMD_INIT_NEW"
 
         callback.tick_release.set()
-        tick_response = client.out_message_queue.get(timeout=1)
+        tick_response = outbound.get(timeout=1)
         assert isinstance(tick_response, TickCmdResponse)
         assert tick_response.command_id == "CMD_BLOCKING_TICK"
     finally:
@@ -394,6 +426,7 @@ def test_business_commands_are_isolated_by_task_context():
         blocked_context_id=slow_context.biz_scene_instance_id,
     )
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
     start_inbound_workers(client)
 
     try:
@@ -405,12 +438,12 @@ def test_business_commands_are_isolated_by_task_context():
         deliver_raw_command(client, fast_tick)
 
         assert callback.fast_tick_handled.wait(timeout=1)
-        fast_response = client.out_message_queue.get(timeout=1)
+        fast_response = outbound.get(timeout=1)
         assert isinstance(fast_response, TickCmdResponse)
         assert fast_response.command_id == "CMD_FAST_TASK_TICK"
 
         callback.blocked_tick_release.set()
-        slow_response = client.out_message_queue.get(timeout=1)
+        slow_response = outbound.get(timeout=1)
         assert isinstance(slow_response, TickCmdResponse)
         assert slow_response.command_id == "CMD_SLOW_TASK_TICK"
     finally:
@@ -427,32 +460,36 @@ def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
     state_manager.add_local_agent(agent)
     client = make_client(ReturningCallback(agent), state_manager)
     client.task_runtime.enqueue = _fail_if_called
+    client.transport.start()
 
-    for command_type, agent_field in (
-        ("update_monitor_rule_request", "target_agent_instance"),
-        ("update_monitor_rule_response", "source_agent_instance"),
-    ):
-        payload = {
-            "command_id": "CMD_MONITOR_RULE",
-            "command_type": command_type,
-            "context": context.model_dump(mode="json"),
-            agent_field: agent.model_dump(mode="json", by_alias=True),
-            "monitoring_rules": [
-                {
-                    "ruleId": "MRULE_001",
-                    "ruleName": "Water level warning",
-                    "bizStatus": "NORMAL",
-                    "triggerConditions": {},
-                }
-            ],
-        }
+    try:
+        for command_type, agent_field in (
+            ("update_monitor_rule_request", "target_agent_instance"),
+            ("update_monitor_rule_response", "source_agent_instance"),
+        ):
+            payload = {
+                "command_id": "CMD_MONITOR_RULE",
+                "command_type": command_type,
+                "context": context.model_dump(mode="json"),
+                agent_field: agent.model_dump(mode="json", by_alias=True),
+                "monitoring_rules": [
+                    {
+                        "ruleId": "MRULE_001",
+                        "ruleName": "Water level warning",
+                        "bizStatus": "NORMAL",
+                        "triggerConditions": {},
+                    }
+                ],
+            }
 
-        client._handle_transport_payload(
-            "/hydros/commands/coordination/test",
-            json.dumps(payload),
-        )
+            client.transport.deliver(
+                "/hydros/commands/coordination/test",
+                json.dumps(payload),
+            )
+    finally:
+        client.transport.stop()
 
-    assert client.out_message_queue.empty()
+    assert not hasattr(client, "out_message_queue")
 
 
 def _fail_if_called(command):
@@ -486,6 +523,7 @@ def test_hydro_event_command_routes_time_series_payload_and_returns_ack():
     state_manager.add_local_agent(agent)
     callback = HydroEventCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
 
     event = TimeSeriesDataChangedEvent(
         hydro_event_type="TIME_SERIES_DATA_UPDATED",
@@ -512,7 +550,7 @@ def test_hydro_event_command_routes_time_series_payload_and_returns_ack():
     assert forwarded.command_id == "CMD_EVENT"
     assert forwarded.time_series_data_changed_event.object_time_series[0].object_id == 1001
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, HydroEventAckResponse)
     assert response.command_type == "hydro_event_ack_response"
     assert response.command_id == "CMD_EVENT"
@@ -528,6 +566,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     state_manager.add_local_agent(agent)
     callback = HydroEventCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
 
     event = OutflowTimeSeriesEvent(
         hydro_event_type="OUTFLOW_TIME_SERIES",
@@ -549,7 +588,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     assert forwarded.target_agent_instance.agent_id == agent.agent_id
     assert forwarded.hydro_event.event_content_url == "https://example.test/outflow.yaml"
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, OutflowTimeSeriesResponse)
     assert response.command_type == "outflow_time_series_response"
     assert response.command_id == "CMD_OUTFLOW"
@@ -565,6 +604,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
     state_manager.add_local_agent(agent)
     callback = HydroEventCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
 
     event = OutflowTimeSeriesEvent(hydro_event_type="OUTFLOW_TIME_SERIES")
     request = HydroEventCommand(
@@ -582,7 +622,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
     assert forwarded.command_id == "CMD_OUTFLOW_NO_URL"
     assert forwarded.hydro_event.event_content_url is None
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, OutflowTimeSeriesResponse)
     assert response.command_id == "CMD_OUTFLOW_NO_URL"
     assert response.command_status == CommandStatus.SUCCEED
@@ -597,6 +637,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
     state_manager.add_local_agent(agent)
     callback = HydroEventCallback(agent)
     client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
 
     event = OutflowTimeSeriesDataChangedEvent(
         hydro_event_type="OUTFLOW_TIME_SERIES_DATA_UPDATED",
@@ -628,7 +669,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
     assert forwarded.outflow_time_series_data_changed_event.object_type == "GateStation"
     assert forwarded.outflow_time_series_data_changed_event.object_time_series[0].object_id == 20000
 
-    response = client.out_message_queue.get_nowait()
+    response = outbound.get_nowait()
     assert isinstance(response, HydroEventAckResponse)
     assert response.command_id == "CMD_OUTFLOW_UPDATED"
     assert response.command_status == CommandStatus.SUCCEED

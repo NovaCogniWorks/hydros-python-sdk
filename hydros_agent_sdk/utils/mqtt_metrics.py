@@ -70,7 +70,7 @@ class MqttMetrics(BaseModel):
 
 
 def send_metrics(
-    mqtt_client,
+    transport,
     topic: str,
     metrics: MqttMetrics,
     qos: int = 0
@@ -79,7 +79,7 @@ def send_metrics(
     通过 MQTT 发送单条指标消息。
 
     Args:
-        mqtt_client: 提供 publish(topic, payload, qos=...) 方法的 MQTT 客户端实例
+        transport: 提供 publish(topic, payload, qos=...) 方法的传输对象
         topic: 要发布到的 MQTT topic
         metrics: 要发送的 MqttMetrics 对象
         qos: 服务质量等级（0、1 或 2）
@@ -91,17 +91,10 @@ def send_metrics(
         # 序列化为 JSON
         payload = metrics.model_dump_json(exclude_none=True)
 
-        # 通过 MQTT 发布
-        result = mqtt_client.publish(topic, payload, qos=qos)
-
-        # 检查发布是否成功
-        if hasattr(result, 'rc') and result.rc == 0:
-            logger.debug(f"Sent metrics: {metrics.metrics_code}={metrics.value} "
-                        f"for object {metrics.object_name} (step {metrics.step_index})")
-            return True
-        else:
-            logger.warning(f"Failed to send metrics: {metrics.metrics_code}")
-            return False
+        transport.publish(topic, payload, qos=qos)
+        logger.debug(f"Sent metrics: {metrics.metrics_code}={metrics.value} "
+                    f"for object {metrics.object_name} (step {metrics.step_index})")
+        return True
 
     except Exception as e:
         logger.error(f"Error sending metrics: {e}", exc_info=True)
@@ -109,7 +102,7 @@ def send_metrics(
 
 
 def send_metrics_batch(
-    mqtt_client,
+    transport,
     topic: str,
     metrics_list: List[MqttMetrics],
     qos: int = 0
@@ -118,7 +111,7 @@ def send_metrics_batch(
     通过 MQTT 批量发送指标消息。
 
     Args:
-        mqtt_client: MQTT 客户端实例
+        transport: 提供 publish 的传输对象
         topic: 要发布到的 MQTT topic
         metrics_list: 要发送的 MqttMetrics 对象列表
         qos: 服务质量等级（0、1 或 2）
@@ -129,7 +122,7 @@ def send_metrics_batch(
     success_count = 0
 
     for metrics in metrics_list:
-        if send_metrics(mqtt_client, topic, metrics, qos):
+        if send_metrics(transport, topic, metrics, qos):
             success_count += 1
 
     logger.info(f"Sent {success_count}/{len(metrics_list)} metrics messages")

@@ -1,15 +1,16 @@
 # Phase 0 Java → Python AI contract review
 
-Snapshot-SHA256: `baa057cad13578ceac3f9cdf3dccbd081734f2760417712f07ca6fd752563ce8`
+Snapshot-SHA256: `204e06005e47afb19a32c45e25ae9ee21285563e58672cba401e1dcee3170d3b`
 
 The reviewer inspected the source-derived snapshot emitted by
-`scripts/contract_sync_snapshot.py` against the current Java protocol source.
+`scripts/contract_sync_snapshot.py` against the current Java protocol/common source.
 Java remains canonical. This record is invalid as soon as the snapshot hash
 changes; regenerate the snapshot and review it again rather than editing a
 verdict in isolation.
 
 | Surface | Verdict | Evidence |
 | --- | --- | --- |
+| MpcPredictionResult | PASS | Python mirrors Java `station_prediction_details`, `device_prediction_details`, and the migration-only mixed `details` field; detail identity remains in `MpcPredictionResultDetail.biz_idem_key`. |
 | SimTaskInitRequest | PASS | Java and Python use the same selected wire fields and snake-case names. |
 | TickCmdResponse | PASS | `completed_step` is required on both sides. |
 | MpcExecutionStatusReport | PASS | Field names and current execution-status enum values match. |

@@ -36,8 +36,8 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.endpoint = (
-            "http://127.0.0.1:%s/control-algorithms/hold_algorithm/solve"
-            % self.server.server_address[1]
+            "http://127.0.0.1:%s/engine/v1/api/control-algorithms/"
+            "hold_algorithm/solve" % self.server.server_address[1]
         )
 
     def tearDown(self):
@@ -71,6 +71,21 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
             json.loads(error.exception.read().decode("utf-8"))["error_code"],
             "ALGORITHM_TYPE_MISMATCH",
         )
+
+    def test_accepts_current_edge_default_and_legacy_sdk_paths(self):
+        for path_prefix in (
+            "/engine/v1/api/edge-control",
+            "/control-algorithms",
+        ):
+            endpoint = (
+                "http://127.0.0.1:%s%s/hold_algorithm/solve"
+                % (self.server.server_address[1], path_prefix)
+            )
+
+            status, payload = self._post(endpoint, self._input().model_dump(mode="json"))
+
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["status"], "HOLD")
 
     @staticmethod
     def _post(endpoint, payload):

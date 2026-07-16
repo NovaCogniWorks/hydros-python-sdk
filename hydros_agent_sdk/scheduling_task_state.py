@@ -1,10 +1,13 @@
 """滚动调度任务的通用运行时状态。"""
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import SimulationContext
+
+if TYPE_CHECKING:
+    from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 
 
 @dataclass
@@ -21,7 +24,7 @@ class SchedulingTaskState:
     algorithm_config_url: Optional[str] = None
     control_config_url: Optional[str] = None
     hydro_events: List[TimeSeriesDataChangedEvent] = field(default_factory=list)
-    latest_control_plan: List[Any] = field(default_factory=list)
+    latest_control_plan: Optional["MpcControlExecutionPlan"] = None
     latest_control_plan_start_step: Optional[int] = None
     dispatched_horizon_steps: Set[int] = field(default_factory=set)
 

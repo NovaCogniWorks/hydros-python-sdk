@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class MqttCoordinationTransport:
-    """Own Paho lifecycle, one coordination subscription and MQTT publishing."""
+    """Own the SDK's Paho lifecycle, subscriptions and MQTT publishing."""
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class MqttCoordinationTransport:
         result.wait_for_publish()
 
     def subscribe(self, topic: str, handler: MessageHandler, qos: int = 1) -> None:
-        """Register one raw-payload handler owned by this Paho client."""
+        """Register a raw-payload handler on the shared Paho client."""
         self._subscriptions[topic] = (handler, qos)
         if self.connected.is_set():
             self.mqtt_client.subscribe(topic, qos=qos)

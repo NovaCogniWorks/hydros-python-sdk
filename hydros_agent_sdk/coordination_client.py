@@ -10,8 +10,6 @@
 import json
 import logging
 import time
-from queue import Empty, Queue
-from threading import Thread
 from typing import Optional
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -40,7 +38,7 @@ class SimCoordinationClient:
 
     该类只装配协调传输、消息过滤和任务运行时：
     - 将 transport raw payload 解码、过滤并投递给 TaskRuntime
-    - 创建并管理出站协调命令队列
+    - 将 TaskRuntime 产生的响应交给 CoordinationOutboxPublisher
     - 把 MQTT/Paho 生命周期交给 CoordinationTransport
 
     开发者只需要实现 SimCoordinationCallback 来提供业务逻辑。
@@ -134,16 +132,6 @@ class SimCoordinationClient:
         # 初始化消息过滤器
         self.message_filter = MessageFilter(self.state_manager)
 
-        # 出站消息队列
-        self.out_message_queue: Queue[SimCommand] = Queue()
-        self.task_runtime = TaskRuntime(
-            callback=self.sim_coordination_callback,
-            state_manager=self.state_manager,
-            outbound_submitter=self.enqueue,
-            control_queue_size=control_queue_size,
-            business_queue_size=business_queue_size,
-            log=logger,
-        )
         if transport is None:
             transport = MqttCoordinationTransport(
                 broker_url=self.broker_url,
@@ -165,10 +153,15 @@ class SimCoordinationClient:
             qos=self.qos,
             max_retry_count=self.max_retry_count,
             base_retry_delay_ms=self.base_retry_delay_ms,
+        )
+        self.task_runtime = TaskRuntime(
+            callback=self.sim_coordination_callback,
+            state_manager=self.state_manager,
+            outbound_submitter=self.outbox_publisher.enqueue,
+            control_queue_size=control_queue_size,
+            business_queue_size=business_queue_size,
             log=logger,
         )
-
-        self.queue_thread: Optional[Thread] = None
         logger.info("Registered %s command handlers", len(self.task_runtime.router.handlers))
 
         logger.info(f"SimCoordinationClient initialized: client_id={self.client_id}, topic={self.topic}")
@@ -180,7 +173,7 @@ class SimCoordinationClient:
         该方法会：
         1. 连接 MQTT broker
         2. 订阅协调 topic
-        3. 启动出站消息队列线程
+        3. 启动任务运行时和出站发布器
         """
         if self.task_runtime.running.is_set():
             logger.warning("Client already running")
@@ -188,14 +181,14 @@ class SimCoordinationClient:
 
         logger.info(f"Starting SimCoordinationClient: {self.client_id}")
 
+        self.outbox_publisher.start()
         self.task_runtime.start()
         try:
             self.transport.start()
         except Exception:
             self.task_runtime.stop()
+            self.outbox_publisher.stop()
             raise
-        self.queue_thread = Thread(target=self._queue_loop, daemon=True, name="QueueThread")
-        self.queue_thread.start()
 
         logger.info(f"SimCoordinationClient started successfully")
 
@@ -204,7 +197,7 @@ class SimCoordinationClient:
         停止协调客户端。
 
         该方法会：
-        1. 停止队列处理线程
+        1. 停止任务运行时和出站发布器
         2. 断开 MQTT broker
         3. 清理资源
         """
@@ -214,39 +207,15 @@ class SimCoordinationClient:
 
         logger.info("Stopping SimCoordinationClient...")
 
-        # 停止队列线程
         self.task_runtime.stop()
-        if self.queue_thread and self.queue_thread.is_alive():
-            self.queue_thread.join(timeout=5)
-
+        self.outbox_publisher.stop()
         self.transport.stop()
 
         logger.info("SimCoordinationClient stopped")
 
     def enqueue(self, command: SimCommand):
-        """
-        将指令加入待发送队列。
-
-        队列线程会异步发送该指令。
-
-        Args:
-            command: 要发送的指令
-        """
-        self.out_message_queue.put(command)
-        # 使用 Pydantic 的 model_dump() 正确序列化嵌套模型
-        logger.info(
-            "Enqueued command: %s",
-            CoordinationOutboxPublisher.format_command_for_log(command),
-        )
-
-    def send_command(self, command: SimCommand):
-        """
-        立即同步发送指令。
-
-        Args:
-            command: 要发送的指令
-        """
-        self.outbox_publisher.send_with_retry(command)
+        """Submit a locally produced coordination command to the outbox."""
+        self.outbox_publisher.enqueue(command)
 
     def _handle_transport_payload(self, topic: str, payload_str: str) -> None:
         """Decode, filter and enqueue one raw payload delivered by the transport."""
@@ -307,31 +276,3 @@ class SimCoordinationClient:
         if not isinstance(data, dict):
             return False
         return data.get("command_type") in IGNORED_COORDINATION_COMMAND_TYPES
-
-    # ========================================================================
-    # 出站消息队列
-    # ========================================================================
-
-    def _queue_loop(self):
-        """
-        处理出站消息队列的主循环。
-
-        该循环运行在独立线程中，并使用重试逻辑发送消息。
-        """
-        logger.info("Queue processing thread started")
-        while self.task_runtime.running.is_set():
-            try:
-                # 从队列获取下一条指令（带超时，以便检查运行标记）
-                command = self.out_message_queue.get(timeout=1)
-
-                # 检查消息是否应发送
-                if self.outbox_publisher.should_send(command):
-                    self.outbox_publisher.send_with_retry(command)
-
-            except Empty:
-                # 超时，继续循环
-                continue
-            except Exception as e:
-                logger.error(f"Error in queue loop: {e}", exc_info=True)
-
-        logger.info("Queue processing thread stopped")

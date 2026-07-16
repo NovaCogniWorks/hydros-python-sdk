@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+from queue import Empty, Queue
+from threading import Event, Thread
 from typing import Optional
 
 from hydros_agent_sdk.protocol.commands import (
@@ -18,6 +20,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.transport import Transport
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +31,7 @@ class CoordinationOutboxPublisher:
 
     def __init__(
         self,
-        transport,
+        transport: Transport,
         state_manager: AgentStateManager,
         topic: str,
         qos: int = 1,
@@ -43,6 +46,56 @@ class CoordinationOutboxPublisher:
         self.max_retry_count = max_retry_count
         self.base_retry_delay_ms = base_retry_delay_ms
         self.logger = log or logger
+        self._queue: Queue[SimCommand] = Queue()
+        self._running = Event()
+        self._worker: Optional[Thread] = None
+
+    def start(self) -> None:
+        """Start the outbound publisher worker."""
+        if self._running.is_set():
+            return
+        self._running.set()
+        self._worker = Thread(
+            target=self._run,
+            daemon=True,
+            name="CoordinationOutbox",
+        )
+        self._worker.start()
+
+    def stop(self) -> None:
+        """Stop the publisher after sending commands already in the outbox."""
+        if not self._running.is_set():
+            return
+        self._running.clear()
+        if self._worker and self._worker.is_alive():
+            self._worker.join(timeout=5)
+        self._worker = None
+
+    def enqueue(self, command: SimCommand) -> None:
+        """Queue one command for outbound filtering and publication."""
+        self._queue.put(command)
+        self.logger.info("Enqueued command: %s", self.format_command_for_log(command))
+
+    def _run(self) -> None:
+        self.logger.info("Coordination outbox publisher started")
+        while self._running.is_set() or not self._queue.empty():
+            try:
+                command = self._queue.get(timeout=0.1)
+            except Empty:
+                continue
+
+            try:
+                if self.should_send(command):
+                    self.send_with_retry(command)
+            except Exception:
+                self.logger.error(
+                    "Error publishing outbound command: id=%s",
+                    command.command_id,
+                    exc_info=True,
+                )
+            finally:
+                self._queue.task_done()
+        self.logger.info("Coordination outbox publisher stopped")
 
     def should_send(self, command: SimCommand) -> bool:
         """Return whether an outbound coordination command should be published."""

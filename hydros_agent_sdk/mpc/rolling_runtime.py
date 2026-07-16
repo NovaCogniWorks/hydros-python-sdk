@@ -8,6 +8,8 @@ from typing import Any, Callable, List, Optional
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
+from hydros_agent_sdk.mpc.control_dispatch_tracker import MpcControlExecutionError
+from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
@@ -25,12 +27,11 @@ class MpcRollingRuntime:
         context: SimulationContext,
         properties: AgentProperties,
         optimize_step: Callable[[int], Optional[List[Any]]],
-        dispatch_control_commands: Callable[[List[Any]], None],
-        build_control_commands: Callable[[List[Any], int], List[Any]],
+        dispatch_control_commands: Callable[[List[Any], int], None],
+        build_control_commands: Callable[[MpcControlExecutionPlan, int, int], List[Any]],
         set_current_step: Callable[[int], None],
         get_current_step: Callable[[], int],
         set_agent_status: Callable[[AgentStatus], None],
-        record_dispatched_control_commands: Optional[Callable[[List[Any], int], None]] = None,
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
@@ -41,7 +42,6 @@ class MpcRollingRuntime:
         self.optimize_step = optimize_step
         self.dispatch_control_commands = dispatch_control_commands
         self.build_control_commands = build_control_commands
-        self.record_dispatched_control_commands = record_dispatched_control_commands
         self.set_current_step = set_current_step
         self.get_current_step = get_current_step
         self.set_agent_status = set_agent_status
@@ -288,7 +288,12 @@ class MpcRollingRuntime:
         )
         control_plan = self.optimize_step(task_state.current_step)
         task_state.current_loop += 1
-        task_state.latest_control_plan = list(control_plan or [])
+        responses = list(control_plan or [])
+        task_state.latest_control_plan = (
+            MpcControlExecutionPlan.from_responses(task_state.current_step, responses)
+            if responses
+            else None
+        )
         task_state.latest_control_plan_start_step = task_state.current_step
         task_state.dispatched_horizon_steps.clear()
         logger.info("MPC optimization completed at step %s", task_state.current_step)
@@ -296,16 +301,23 @@ class MpcRollingRuntime:
         return control_plan
 
     def dispatch_control_for_current_step(self, task_state: SchedulingTaskState) -> None:
-        if not task_state.latest_control_plan or task_state.latest_control_plan_start_step is None:
+        if task_state.latest_control_plan is None or task_state.latest_control_plan_start_step is None:
             return
         horizon_step = task_state.current_step - task_state.latest_control_plan_start_step + 1
         if horizon_step <= 0 or horizon_step in task_state.dispatched_horizon_steps:
             return
-        control_commands = self.build_control_commands(task_state.latest_control_plan, horizon_step)
-        if control_commands:
-            if self.record_dispatched_control_commands is not None:
-                self.record_dispatched_control_commands(control_commands, horizon_step)
-            self.dispatch_control_commands(control_commands)
+        control_commands = self.build_control_commands(
+            task_state.latest_control_plan,
+            horizon_step,
+            task_state.current_step,
+        )
+        if not control_commands:
+            raise MpcControlExecutionError(
+                "MPC execution plan has no dispatchable controls: "
+                f"optimize_step={task_state.latest_control_plan.optimize_step}, "
+                f"horizon_step={horizon_step}"
+            )
+        self.dispatch_control_commands(control_commands, horizon_step)
         task_state.dispatched_horizon_steps.add(horizon_step)
 
     def _create_task_state(

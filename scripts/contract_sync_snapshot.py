@@ -55,6 +55,15 @@ class ContractSurface:
 
 PHASE_ZERO_SURFACES = (
     ContractSurface(
+        name="MpcPredictionResult",
+        java_relative_path=(
+            "../hydros-agent-common/src/main/java/com/hydros/agent/common/model/"
+            "MpcPredictionResult.java"
+        ),
+        python_relative_path="hydros_agent_sdk/protocol/mpc_prediction_results.py",
+        python_class_name="MpcPredictionResult",
+    ),
+    ContractSurface(
         name="SimTaskInitRequest",
         java_relative_path=(
             "src/main/java/com/hydros/protocol/coordination/commands/SimTaskInitRequest.java"
@@ -458,7 +467,7 @@ def render_snapshot(java_protocol_root: Path, surfaces: Iterable[ContractSurface
     sections = [
         "# Java → Python contract AI review input",
         "",
-        "- Canonical source: Java `hydros-agent-protocol` source and its focused tests.",
+        "- Canonical source: Java protocol/common DTO source and focused protocol tests.",
         "- Python role: mirror the Java wire contract; do not add alternate V2 wire names.",
         "- This is source-derived review input, not a JSON Schema and not a second contract source.",
         "- Required AI review: compare JSON keys, requiredness, enum/value semantics, "

@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 from hydros_agent_sdk.mpc.models import (
+    ControlObjectResult,
     DeviceResult,
     HorizonStep,
     PredictedResult,
@@ -24,6 +25,15 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         )
         horizon = HorizonStep(
             horizon_step=1,
+            control_object_list=[
+                ControlObjectResult(
+                    object_type="GateStation",
+                    object_id=101,
+                    target_value_list=[
+                        ValueItem(value_type="water_level", value=3.5),
+                    ],
+                )
+            ],
             predicted_result_list=[
                 PredictedResult(
                     object_type="GateStation",
@@ -58,16 +68,26 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         )
 
         self.assertEqual(len(result.details), 2)
+        self.assertEqual(len(result.station_prediction_details), 1)
+        self.assertEqual(len(result.device_prediction_details), 1)
         station_detail, device_detail = result.details
         self.assertEqual(station_detail.object_id, 101)
         self.assertEqual(station_detail.target_value, 3.5)
         self.assertEqual(station_detail.front_water_level, 3.4)
         self.assertEqual(station_detail.back_water_level, 3.1)
         self.assertEqual(station_detail.out_flow, 18.5)
+        self.assertEqual(
+            station_detail.biz_idem_key,
+            "MPC_DETAIL:4:1:101:101:water_level",
+        )
         self.assertEqual(device_detail.node_id, 101)
         self.assertEqual(device_detail.object_id, 501)
         self.assertEqual(device_detail.command_type, "gate_opening")
         self.assertEqual(device_detail.value, 0.45)
+        self.assertEqual(
+            device_detail.biz_idem_key,
+            "MPC_DETAIL:4:1:101:501:gate_opening",
+        )
         self.assertEqual(json.loads(device_detail.attributes)["value_role"], "forecast")
 
 
