@@ -8,6 +8,7 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     HydroEventAckResponse,
     HydroEventCommand,
     OutflowTimeSeriesResponse,
@@ -137,6 +138,30 @@ class BlockingTickCallback(ReturningCallback):
         self.tick_release.wait(timeout=5)
         self.tick_finished.set()
         return super().on_tick(request)
+
+
+class CompletionWaitingCallback(ReturningCallback):
+    def __init__(self, agent, state_manager):
+        super().__init__(agent)
+        self.state_manager = state_manager
+        self.first_tick_started = Event()
+        self.second_tick_started = Event()
+        self.completion_received = Event()
+
+    def is_remote_agent(self, agent_instance) -> bool:
+        return self.state_manager.is_remote_agent(agent_instance)
+
+    def on_tick(self, request):
+        if request.step == 1:
+            self.first_tick_started.set()
+            if not self.completion_received.wait(timeout=5):
+                raise RuntimeError("completion signal was blocked by the task command mailbox")
+        else:
+            self.second_tick_started.set()
+        return super().on_tick(request)
+
+    def on_station_control_execution(self, report):
+        self.completion_received.set()
 
 
 class BlockingTickAndInitCallback(BlockingTickCallback):
@@ -412,6 +437,67 @@ def test_transport_payload_is_enqueued_and_returns_before_slow_tick_finishes():
         assert response.command_id == "CMD_SLOW_TICK"
     finally:
         callback.tick_release.set()
+        stop_inbound_workers(client)
+
+
+def test_edge_completion_bypasses_blocked_task_command_mailbox():
+    context = make_context()
+    local_agent = make_agent(context)
+    remote_agent = make_agent(context).model_copy(
+        update={
+            "agent_id": "AGT_EDGE",
+            "agent_code": "EDGE_AGENT",
+            "hydros_node_id": "edge-node",
+        }
+    )
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.activate_task(context, [local_agent])
+    callback = CompletionWaitingCallback(local_agent, state_manager)
+    client = make_client(callback, state_manager)
+    outbound = capture_outbound(client)
+    start_inbound_workers(client, context)
+
+    try:
+        deliver_raw_command(
+            client,
+            TickCmdRequest(command_id="CMD_WAITING_TICK", context=context, step=1),
+        )
+        assert callback.first_tick_started.wait(timeout=1)
+
+        deliver_raw_command(
+            client,
+            TickCmdRequest(command_id="CMD_QUEUED_TICK", context=context, step=2),
+        )
+        assert not callback.second_tick_started.wait(timeout=0.1)
+
+        deliver_raw_command(
+            client,
+            EdgeControlExecutionReport(
+                command_id="CMD_EDGE_COMPLETION",
+                context=context,
+                broadcast=True,
+                source_agent_instance=remote_agent,
+                target_agent_instance=local_agent,
+                exec_command_id="AGTCMD_WAITING_CONTROL",
+                object_type="GateStation",
+                object_id=101,
+                target_value_type="water_level",
+                target_value=3.5,
+                exec_status="COMPLETED",
+            ),
+        )
+
+        assert callback.completion_received.wait(timeout=1)
+        first_response = outbound.get(timeout=1)
+        second_response = outbound.get(timeout=1)
+        assert first_response.command_id == "CMD_WAITING_TICK"
+        assert first_response.command_status == CommandStatus.SUCCEED
+        assert second_response.command_id == "CMD_QUEUED_TICK"
+        assert second_response.command_status == CommandStatus.SUCCEED
+        assert callback.second_tick_started.is_set()
+    finally:
+        callback.completion_received.set()
         stop_inbound_workers(client)
 
 

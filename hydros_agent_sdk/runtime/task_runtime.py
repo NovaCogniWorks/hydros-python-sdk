@@ -17,6 +17,7 @@ from hydros_agent_sdk.logging_config import (
     set_hydros_node_id,
 )
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     HydroEventCommand,
     SimCommand,
     SimTaskInitRequest,
@@ -38,7 +39,7 @@ class InboundCommand:
 
 
 class TaskRuntime:
-    """Own the ordered command mailbox and callback dispatch for one task."""
+    """Own one task's ordered commands, terminal completions and callback dispatch."""
 
     def __init__(
         self,
@@ -61,8 +62,10 @@ class TaskRuntime:
         self.logger = log or logger
         self.running = Event()
         self.closed = Event()
-        self.mailbox: Queue[InboundCommand] = Queue(maxsize=mailbox_size)
-        self.worker_thread: Optional[Thread] = None
+        self.command_mailbox: Queue[InboundCommand] = Queue(maxsize=mailbox_size)
+        self.completion_mailbox: Queue[InboundCommand] = Queue(maxsize=mailbox_size)
+        self.command_worker_thread: Optional[Thread] = None
+        self.completion_worker_thread: Optional[Thread] = None
         self.router = CoordinationCommandRouter(
             callback=self.callback,
             context_id_getter=self.command_context_id,
@@ -81,55 +84,58 @@ class TaskRuntime:
         if self.running.is_set():
             return
         self.running.set()
-        self.worker_thread = Thread(
+        self.command_worker_thread = Thread(
             target=self._worker_loop,
+            args=(self.command_mailbox, self.handle, "command"),
             daemon=True,
             name=f"TaskWorker:{self.context_id}",
         )
-        self.worker_thread.start()
+        self.completion_worker_thread = Thread(
+            target=self._worker_loop,
+            args=(self.completion_mailbox, self.handle_completion, "completion"),
+            daemon=True,
+            name=f"TaskCompletionWorker:{self.context_id}",
+        )
+        self.command_worker_thread.start()
+        self.completion_worker_thread.start()
 
     def stop(self) -> None:
         self._close()
-        worker = self.worker_thread
-        if worker is not None and worker is not current_thread() and worker.is_alive():
-            worker.join(timeout=5)
+        for worker in (self.command_worker_thread, self.completion_worker_thread):
+            if worker is not None and worker is not current_thread() and worker.is_alive():
+                worker.join(timeout=5)
 
     def enqueue(self, command: SimCommand) -> None:
-        """Add a parsed command to this task's ordered mailbox."""
+        """Route a parsed command to this task's command or completion lane."""
         self._require_own_context(command)
         if not self.running.is_set():
             raise RuntimeError(f"TaskRuntime {self.context_id!r} is not running")
 
+        is_completion = isinstance(command, EdgeControlExecutionReport)
+        mailbox = self.completion_mailbox if is_completion else self.command_mailbox
+        lane = "completion" if is_completion else "command"
         item = InboundCommand(command=command, received_at=time.monotonic())
         try:
-            self.mailbox.put_nowait(item)
+            mailbox.put_nowait(item)
         except Full as error:
             raise RuntimeError(
-                f"TaskRuntime mailbox is full: context={self.context_id}, "
-                f"capacity={self.mailbox.maxsize}"
+                f"TaskRuntime {lane} mailbox is full: context={self.context_id}, "
+                f"capacity={mailbox.maxsize}"
             ) from error
 
         self.logger.debug(
-            "Task command enqueued: type=%s, id=%s, context=%s, queueSize=%s",
+            "Task command enqueued: type=%s, id=%s, context=%s, lane=%s, queueSize=%s",
             command.command_type,
             command.command_id,
             self.context_id,
-            self.mailbox.qsize(),
+            lane,
+            mailbox.qsize(),
         )
 
     def handle(self, command: SimCommand) -> None:
         """Dispatch one command and convert callback failures into responses."""
-        self._require_own_context(command)
-        self._set_logging_context()
         try:
-            self._submit_result(self.router.dispatch(command))
-        except Exception as error:
-            self.logger.error(
-                "Error handling command %s: %s", command.command_type, error, exc_info=True
-            )
-            error_response = self.error_response_factory.create(command, error)
-            if error_response is not None:
-                self.outbound_submitter(error_response)
+            self._dispatch(command, self.router.dispatch)
         finally:
             if isinstance(command, SimTaskTerminateRequest):
                 self._close()
@@ -137,12 +143,42 @@ class TaskRuntime:
                 if not self.state_manager.has_active_context(command.context):
                     self._close()
 
-    def _worker_loop(self) -> None:
+    def handle_completion(self, command: SimCommand) -> None:
+        """Dispatch a terminal control report without waiting for the command worker."""
+        if not isinstance(command, EdgeControlExecutionReport):
+            raise TypeError(f"Unsupported completion signal: {command.command_type}")
+        # The command worker owns generic pending-report draining. The completion
+        # lane calls only its typed router handler to avoid consuming that batch.
+        self._dispatch(command, self.router.handle_station_control_execution_report)
+
+    def _dispatch(
+        self,
+        command: SimCommand,
+        dispatcher: Callable[[SimCommand], object],
+    ) -> None:
+        self._require_own_context(command)
+        self._set_logging_context()
+        try:
+            self._submit_result(dispatcher(command))
+        except Exception as error:
+            self.logger.error(
+                "Error handling command %s: %s", command.command_type, error, exc_info=True
+            )
+            error_response = self.error_response_factory.create(command, error)
+            if error_response is not None:
+                self.outbound_submitter(error_response)
+
+    def _worker_loop(
+        self,
+        source_mailbox: Queue[InboundCommand],
+        handler: Callable[[SimCommand], None],
+        lane: str,
+    ) -> None:
         worker_name = current_thread().name
-        self.logger.info("Task command worker started: %s", worker_name)
+        self.logger.info("Task %s worker started: %s", lane, worker_name)
         while self.running.is_set():
             try:
-                item = self.mailbox.get(timeout=0.2)
+                item = source_mailbox.get(timeout=0.2)
             except Empty:
                 continue
 
@@ -151,20 +187,22 @@ class TaskRuntime:
             try:
                 self.logger.debug(
                     "Task command handling started: type=%s, id=%s, context=%s, "
-                    "queueWaitMs=%.2f, worker=%s",
+                    "lane=%s, queueWaitMs=%.2f, worker=%s",
                     command.command_type,
                     command.command_id,
                     self.context_id,
+                    lane,
                     (started_at - item.received_at) * 1000,
                     worker_name,
                 )
-                self.handle(command)
+                handler(command)
                 self.logger.debug(
                     "Task command handled: type=%s, id=%s, context=%s, "
-                    "handlerDurationMs=%.2f, worker=%s",
+                    "lane=%s, handlerDurationMs=%.2f, worker=%s",
                     command.command_type,
                     command.command_id,
                     self.context_id,
+                    lane,
                     (time.monotonic() - started_at) * 1000,
                     worker_name,
                 )
@@ -179,9 +217,9 @@ class TaskRuntime:
                     exc_info=True,
                 )
             finally:
-                self.mailbox.task_done()
+                source_mailbox.task_done()
 
-        self.logger.info("Task command worker stopped: %s", worker_name)
+        self.logger.info("Task %s worker stopped: %s", lane, worker_name)
 
     def _close(self) -> None:
         if self.closed.is_set():
