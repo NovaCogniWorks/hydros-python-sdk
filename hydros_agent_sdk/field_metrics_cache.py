@@ -47,6 +47,7 @@ class FieldMetricsCache:
         object_type = payload.get("object_type")
         position_code = self._normalize_position_code(payload.get("position_code"))
         attributes = payload.get("attributes")
+        status = payload.get("status")
         if not biz_scene_instance_id or object_id is None or not metrics_code:
             return None
         metrics_code = str(metrics_code).lower()
@@ -59,6 +60,7 @@ class FieldMetricsCache:
             "metrics_code": metrics_code,
             "position_code": position_code,
             "value": value,
+            "status": status,
             "step_index": step_index,
             "attributes": attributes,
         }

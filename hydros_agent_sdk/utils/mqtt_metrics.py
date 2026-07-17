@@ -36,6 +36,7 @@ class MqttMetrics(BaseModel):
                 "metrics_code": "gate_opening",
                 "position_code": "none",
                 "value": 0.75,
+                "status": "ON",
             }
         },
     )
@@ -53,6 +54,7 @@ class MqttMetrics(BaseModel):
     metrics_code: Optional[str] = Field(default=None, description="Metrics code (e.g., water_level, water_flow)")
     position_code: str = Field(default="none", description="Metrics position code")
     value: Optional[float] = Field(default=None, description="Metrics value")
+    status: Optional[str] = Field(default=None, description="Device power status: ON or OFF")
     attributes: Optional[str] = Field(default=None, description="Extended metrics attributes JSON")
     front_water_flow: Optional[float] = Field(default=None, description="Upstream/front water flow")
     back_water_flow: Optional[float] = Field(default=None, description="Downstream/back water flow")
@@ -142,6 +144,7 @@ def create_mock_metrics(
     object_type: Optional[str] = None,
     edge_node_code: Optional[str] = None,
     position_code: str = "none",
+    status: Optional[str] = None,
     attributes: Optional[str] = None,
 ) -> MqttMetrics:
     """
@@ -176,5 +179,6 @@ def create_mock_metrics(
         metrics_code=metrics_code,
         position_code=position_code,
         value=value,
+        status=status,
         attributes=attributes,
     )

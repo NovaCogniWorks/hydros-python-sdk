@@ -58,6 +58,7 @@ class MqttMetricsPublisherTest(unittest.TestCase):
             source_timestamp_ms=123,
             metrics_code="water_level",
             value=73.2,
+            status="ON",
         )
 
         published_count = publisher.publish_batch([metrics])
@@ -71,6 +72,7 @@ class MqttMetricsPublisherTest(unittest.TestCase):
         self.assertIn('"job_instance_id":"task-a"', payload)
         self.assertIn('"edge_node_code":"node-a"', payload)
         self.assertIn('"metrics_code":"water_level"', payload)
+        self.assertIn('"status":"ON"', payload)
         self.assertNotIn('"attributes":null', payload)
 
     def test_publish_batch_rejects_mismatched_context_ids(self):
