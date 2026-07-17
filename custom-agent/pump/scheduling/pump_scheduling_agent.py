@@ -94,7 +94,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self._ensure_scheduling_task_state(request.step).current_step = request.step
         commands = self.on_optimization(request.step)
         if commands:
-            self._control_command_dispatcher.dispatch(commands)
+            self.dispatch_control_commands_and_await_execution(commands)
         return None
 
     def _resolve_config_path(self) -> str:
@@ -1303,6 +1303,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
         # 清理资源
+        self.discard_control_execution_waiters()
         self._agent_command_gateway.shutdown()
         self._optimization_model = None
         

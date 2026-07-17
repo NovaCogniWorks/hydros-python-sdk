@@ -22,9 +22,19 @@ class ControlCommandDispatcher:
         self.build_station_target_value_request = build_station_target_value_request
 
     def dispatch(self, control_commands: List[Any]) -> None:
+        self.dispatch_prepared(self.prepare(control_commands))
+
+    def prepare(self, control_commands: List[Any]) -> List[AgentCommand]:
+        """Build concrete commands before dispatch so callers can register barriers.
+
+        The legacy dict form is retained for custom agents, but its generated
+        request must be visible before sending when tick completion depends on
+        an edge terminal execution report.
+        """
+        prepared: List[AgentCommand] = []
         for command in control_commands:
             if isinstance(command, AgentCommand):
-                self.send_command(command)
+                prepared.append(command)
                 continue
 
             target_agent_code = command.get("target_agent_code")
@@ -56,4 +66,10 @@ class ControlCommandDispatcher:
                 main_step_index=command.get("main_step_index"),
             )
             if command_request is not None:
-                self.send_command(command_request)
+                prepared.append(command_request)
+        return prepared
+
+    def dispatch_prepared(self, control_commands: List[AgentCommand]) -> None:
+        """Send commands previously returned by :meth:`prepare`."""
+        for command in control_commands:
+            self.send_command(command)

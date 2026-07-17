@@ -5,10 +5,11 @@ CentralSchedulingAgent 提供不默认装配 MPC 的中央调度通用能力。
 """
 
 import logging
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 from abc import abstractmethod
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
+from hydros_agent_sdk.agent_commands.runtime import ControlExecutionBarrier
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
@@ -21,6 +22,7 @@ from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     SimTaskInitRequest,
     SimTaskInitResponse,
     TickCmdRequest,
@@ -28,6 +30,10 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
+)
+from hydros_agent_sdk.protocol.agent_commands import (
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -40,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_METRICS_HISTORY_STEPS = 10
+DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS = 120.0
 
 
 class CentralSchedulingAgent(TickableAgent):
@@ -111,6 +118,13 @@ class CentralSchedulingAgent(TickableAgent):
             **kwargs: 其他关键字参数
         """
         configured_object_agent_code_map = kwargs.pop("object_agent_code_map", None)
+        control_execution_timeout_seconds = kwargs.pop(
+            "control_execution_timeout_seconds",
+            DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS,
+        )
+        control_execution_timeout_seconds = float(control_execution_timeout_seconds)
+        if control_execution_timeout_seconds <= 0:
+            raise ValueError("control_execution_timeout_seconds must be positive")
 
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -125,6 +139,11 @@ class CentralSchedulingAgent(TickableAgent):
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
+        )
+        object.__setattr__(
+            self,
+            "_control_execution_timeout_seconds",
+            control_execution_timeout_seconds,
         )
 
         self._init_command_dispatching(
@@ -165,6 +184,65 @@ class CentralSchedulingAgent(TickableAgent):
         self._control_command_dispatcher = ControlCommandDispatcher(
             send_command=lambda command: self._agent_command_gateway.send_command(command),
             build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
+        )
+        self._control_execution_barrier = ControlExecutionBarrier()
+        self._agent_command_gateway.add_response_listener(
+            self._handle_control_command_response
+        )
+
+    def dispatch_control_commands_and_await_execution(
+        self,
+        control_commands: List[Any],
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> None:
+        """Dispatch controls and hold this central tick until edge reaches terminal state.
+
+        Only station target-value requests participate in the terminal barrier.
+        Other command kinds retain their existing dispatch-only semantics.
+        """
+        prepared_commands = self._control_command_dispatcher.prepare(control_commands)
+        records = [
+            self._control_execution_barrier.register(
+                command=command,
+                biz_scene_instance_id=self.context.biz_scene_instance_id,
+                step=(
+                    command.main_step_index
+                    if command.main_step_index is not None
+                    else self._current_step
+                ),
+            )
+            for command in prepared_commands
+            if isinstance(command, HydroStationTargetValueRequest)
+        ]
+        try:
+            self._control_command_dispatcher.dispatch_prepared(prepared_commands)
+        except Exception as error:
+            if not records:
+                raise
+            self._control_execution_barrier.mark_dispatch_failed(records, error)
+
+        effective_timeout_seconds = (
+            self._control_execution_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if effective_timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._control_execution_barrier.await_all(records, effective_timeout_seconds)
+
+    def _handle_control_command_response(self, response: Any) -> None:
+        if isinstance(response, HydroStationTargetValueResponse):
+            self._control_execution_barrier.handle_response(response)
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport) -> None:
+        """Consume edge terminal reports for generic central control barriers."""
+        self._control_execution_barrier.handle_execution_report(report)
+
+    def discard_control_execution_waiters(self) -> None:
+        """Release task-scoped barrier bookkeeping after termination completes."""
+        self._control_execution_barrier.discard_by_biz_scene_instance_id(
+            self.context.biz_scene_instance_id
         )
 
     def _create_control_command_builder(self) -> StationTargetValueCommandBuilder:

@@ -2,14 +2,31 @@ import importlib
 import os
 import sys
 import types
+from threading import Event, Thread
 from unittest.mock import Mock
 
 from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, ValueItem
-from hydros_agent_sdk.protocol.commands import SimTaskInitRequest, TickCmdRequest, TimeSeriesDataUpdateRequest
+from hydros_agent_sdk.protocol.agent_commands import (
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
+)
+from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
+    SimTaskInitRequest,
+    TickCmdRequest,
+    TimeSeriesDataUpdateRequest,
+)
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
-from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgent, ObjectTimeSeries, SimulationContext
+from hydros_agent_sdk.protocol.models import (
+    AgentDriveMode,
+    CommandStatus,
+    HydroAgent,
+    HydroAgentInstance,
+    ObjectTimeSeries,
+    SimulationContext,
+)
 
 
 def _install_optional_dependency_stubs(monkeypatch):
@@ -63,7 +80,7 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
 
     commands = [{"target_agent_code": "agent", "target_command_type": "BLADE_ANGLE"}]
     object.__setattr__(agent, "on_optimization", Mock(return_value=commands))
-    agent._control_command_dispatcher.dispatch = Mock()
+    agent.dispatch_control_commands_and_await_execution = Mock()
 
     result = agent.on_tick_simulation(
         TickCmdRequest(
@@ -75,7 +92,102 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
 
     assert result is None
     agent.on_optimization.assert_called_once_with(7)
-    agent._control_command_dispatcher.dispatch.assert_called_once_with(commands)
+    agent.dispatch_control_commands_and_await_execution.assert_called_once_with(commands)
+
+
+def test_pump_tick_waits_for_edge_terminal_report_before_returning(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    client = Mock(state_manager=Mock(), transport=Mock())
+    context = SimulationContext(biz_scene_instance_id="pump-terminal-barrier")
+    agent = module.PumpCentralSchedulingAgent(
+        sim_coordination_client=client,
+        agent_id="pump-central",
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="Pump Scheduling Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+        control_execution_timeout_seconds=1,
+    )
+    target = HydroAgentInstance(
+        agent_id="station",
+        agent_code="GATE_STATION_AGENT",
+        agent_type="GATE_STATION_AGENT",
+        agent_name="Station",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node-edge",
+        context=context,
+        drive_mode=AgentDriveMode.PROACTIVE,
+    )
+    command = HydroStationTargetValueRequest(
+        command_id="AGTCMD_PUMP_TERMINAL",
+        context=context,
+        source=agent,
+        target=target,
+        object_id=20000,
+        object_type="PumpStation",
+        target_value=32.0,
+        target_value_type="water_flow",
+        group_id="pump-station-flow:12",
+        group_size=1,
+        main_step_index=12,
+    )
+    agent._ensure_scheduling_task_state = Mock(return_value=Mock())
+    agent.on_optimization = Mock(return_value=[{"unused": "dict-intent"}])
+    agent._control_command_dispatcher.prepare = Mock(return_value=[command])
+    dispatched = Event()
+    returned = Event()
+
+    def send_command(dispatched_command):
+        assert dispatched_command is command
+        agent._handle_control_command_response(
+            HydroStationTargetValueResponse.from_request(
+                command,
+                command_status=CommandStatus.SUCCEED,
+                success=True,
+            )
+        )
+        dispatched.set()
+
+    agent._control_command_dispatcher.send_command = send_command
+
+    worker = Thread(
+        target=lambda: (
+            agent.on_tick_simulation(
+                TickCmdRequest(command_id="tick-pump-terminal", context=context, step=12)
+            ),
+            returned.set(),
+        )
+    )
+    worker.start()
+    assert dispatched.wait(0.2)
+    assert not returned.is_set(), "command acceptance must not release the pump tick"
+
+    agent.on_station_control_execution(
+        EdgeControlExecutionReport(
+            command_id="SIMCMD_PUMP_TERMINAL",
+            context=context,
+            broadcast=True,
+            source_agent_instance=target,
+            target_agent_instance=agent,
+            exec_command_id=command.command_id,
+            object_type=command.object_type,
+            object_id=command.object_id,
+            target_value_type=command.target_value_type,
+            target_value=command.target_value,
+            exec_status="COMPLETED",
+        )
+    )
+    worker.join(timeout=0.2)
+    assert not worker.is_alive()
+    assert returned.is_set()
 
 
 def test_pump_scheduling_builds_grouped_station_flow_commands_from_current_horizon(monkeypatch):
