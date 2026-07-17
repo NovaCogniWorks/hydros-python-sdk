@@ -6,6 +6,7 @@ import io
 import tempfile
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
@@ -120,9 +121,12 @@ class HydroSimulationApi:
 
     def _normalize_event_payload(
         self,
-        payload: HydroSimulationEventData | dict[str, Any],
+        payload: HydroSimulationEventData | dict[str, Any] | str | Path,
     ) -> Dict[str, Any]:
-        model = payload if isinstance(payload, HydroSimulationEventData) else HydroSimulationEventData.model_validate(payload)
+        if isinstance(payload, (str, Path)):
+            model = self.input_resolver.load_event_data_from_file(str(payload))
+        else:
+            model = payload if isinstance(payload, HydroSimulationEventData) else HydroSimulationEventData.model_validate(payload)
         return model.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     def describe_capabilities(self) -> Dict[str, object]:
@@ -151,9 +155,20 @@ class HydroSimulationApi:
 
     def initialize(
         self,
-        input_bundle: HydroSimulationInputBundle | dict[str, Any],
+        input_bundle: HydroSimulationInputBundle | dict[str, Any] | None = None,
+        *,
+        time_series_file: str | None = None,
+        mpc_config_file: str | None = None,
+        initial_states_file: str | None = None,
+        constraints_file: str | None = None,
     ) -> Dict[str, Any]:
-        bundle = self.input_resolver.resolve_bundle(input_bundle=input_bundle)
+        bundle = self.input_resolver.resolve_bundle(
+            input_bundle=input_bundle,
+            time_series_file=time_series_file,
+            mpc_config_file=mpc_config_file,
+            initial_states_file=initial_states_file,
+            constraints_file=constraints_file,
+        )
         event = bundle.event.model_dump(mode="json", by_alias=True, exclude_none=True)
         steps = self.service.core.runtime._time_axis_from_event(event)
         self._session = HydroSimulationSession(
@@ -190,7 +205,7 @@ class HydroSimulationApi:
 
     def get_station_power_planning_series(
         self,
-        planning_event: HydroSimulationEventData | dict[str, Any],
+        planning_event: HydroSimulationEventData | dict[str, Any] | str | Path,
     ) -> Dict[str, Any]:
         session = self._require_session()
         if session.inputs is None:
@@ -219,7 +234,7 @@ class HydroSimulationApi:
 
     def get_station_power_planning_series_from_inflow(
         self,
-        inflow_event: HydroSimulationEventData | dict[str, Any],
+        inflow_event: HydroSimulationEventData | dict[str, Any] | str | Path,
     ) -> Dict[str, Any]:
         session = self._require_session()
         if session.inputs is None:

@@ -1518,23 +1518,24 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         payload = report.model_dump(by_alias=True)
 
         self.assertIsInstance(report, MpcResultReport)
-        self.assertEqual(report.command_type, "mpc_result_report")
+        self.assertEqual(report.command_type, "mpc_prediction_result_report")
         self.assertTrue(report.broadcast)
         self.assertEqual(payload["source_agent_instance"]["agent_id"], "agent-014")
-        self.assertEqual(payload["mpc_results"][0]["biz_scene_instance_id"], "scene-014")
-        self.assertEqual(payload["mpc_results"][0]["waterway_id"], "waterway-014")
-        self.assertEqual(payload["mpc_results"][0]["tenant_id"], "tenant-014")
-        self.assertEqual(payload["mpc_results"][0]["biz_scenario_id"], "scenario-014")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["command_type"], "OPENING")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["object_type"], "Gate")
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["node_id"], 101)
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["object_id"], 501)
-        self.assertEqual(payload["mpc_results"][0]["details"][0]["target_value"], 0.45)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["command_type"], "water_level")
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["node_id"], 102)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["object_id"], 102)
-        self.assertEqual(payload["mpc_results"][0]["details"][1]["target_value"], 2.3)
-        attributes = json.loads(payload["mpc_results"][0]["details"][1]["attributes"])
+        self.assertNotIn("mpc_results", payload)
+        self.assertEqual(payload["mpc_prediction_results"][0]["biz_scene_instance_id"], "scene-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["waterway_id"], "waterway-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["tenant_id"], "tenant-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["biz_scenario_id"], "scenario-014")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["command_type"], "OPENING")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_type"], "Gate")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["node_id"], 101)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_id"], 501)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["target_value"], 0.45)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["command_type"], "water_level")
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["node_id"], 102)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["object_id"], 102)
+        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["target_value"], 2.3)
+        attributes = json.loads(payload["mpc_prediction_results"][0]["details"][1]["attributes"])
         self.assertEqual(attributes["front_water_level"], 2.1)
         self.assertEqual(attributes["back_water_level"], 1.9)
         self.assertEqual(attributes["final_target_water_level"], 2.3)
@@ -1727,7 +1728,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         report = MpcResultReporter().build_report(source, state, [response])
         payload = report.model_dump(by_alias=True)
-        detail = payload["mpc_results"][0]["details"][0]
+        detail = payload["mpc_prediction_results"][0]["details"][0]
 
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_water_level, 63.12)
         self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
@@ -1811,10 +1812,36 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(len(report.mpc_results[0].details), 3)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
-        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertNotIn('"object_id":501', log_output)
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
+
+    def test_mpc_result_report_accepts_legacy_mpc_results_field(self):
+        context = SimulationContext(biz_scene_instance_id="scene-014-legacy")
+        source = build_agent_instance("agent-014-legacy", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
+
+        report = MpcResultReport.model_validate(
+            {
+                "command_id": "report-legacy-014",
+                "command_type": "mpc_prediction_result_report",
+                "context": context.model_dump(mode="json"),
+                "source_agent_instance": source.model_dump(mode="json"),
+                "mpc_results": [
+                    {
+                        "biz_scene_instance_id": "scene-014-legacy",
+                        "step": 4,
+                        "details": [],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(len(report.mpc_results), 1)
+        self.assertEqual(report.mpc_results[0].biz_scene_instance_id, "scene-014-legacy")
+        payload = report.model_dump(by_alias=True)
+        self.assertIn("mpc_prediction_results", payload)
+        self.assertNotIn("mpc_results", payload)
 
     def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
         state_manager = AgentStateManager()
@@ -2222,7 +2249,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn(report.command_id, log_output)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
-        self.assertNotIn('"command_type":"mpc_result_report"', log_output)
+        self.assertNotIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertNotIn('"object_id":501', log_output)
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
@@ -2299,7 +2326,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         log_output = "\n".join(logs.output)
         self.assertIn("Enqueued command", log_output)
-        self.assertIn('"command_type":"mpc_result_report"', log_output)
+        self.assertIn('"command_type":"mpc_prediction_result_report"', log_output)
         self.assertIn('"result_count":1', log_output)
         self.assertIn('"detail_count":3', log_output)
         self.assertNotIn('"object_id":501', log_output)

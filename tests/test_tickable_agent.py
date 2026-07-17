@@ -1,4 +1,6 @@
 from hydros_agent_sdk.agents.tickable_agent import TickableAgent
+from hydros_agent_sdk.error_codes import ErrorCodes
+from hydros_agent_sdk.error_handling import handle_agent_errors
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateResponse,
@@ -89,3 +91,29 @@ def test_tickable_agent_exposes_runtime_context():
     assert runtime_context.client is client
     assert runtime_context.state_manager is client.state_manager
     assert runtime_context.config is agent.properties
+
+
+def test_tickable_agent_returns_decorated_tick_failure_response():
+    class FailingTickableAgent(MinimalTickableAgent):
+        @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
+        def on_tick_simulation(self, request: TickCmdRequest):
+            raise RuntimeError("sim failure")
+
+    context = SimulationContext(biz_scene_instance_id="TASK_002")
+    agent = FailingTickableAgent(
+        sim_coordination_client=FakeClient(),
+        agent_id="AGT_FAIL",
+        agent_code="FAIL_AGENT",
+        agent_type="TEST_AGENT",
+        agent_name="Fail Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+        agent_status=AgentStatus.INIT,
+        drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
+    )
+
+    response = agent.on_tick(TickCmdRequest(command_id="tick-fail", context=context, step=1, broadcast=False))
+
+    assert response.command_status == CommandStatus.FAILED
+    assert response.error_code == ErrorCodes.SIMULATION_EXECUTION_FAILURE.code

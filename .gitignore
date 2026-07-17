@@ -60,3 +60,5 @@ Thumbs.db
 **/output/
 custom-agent/power/mpc/output_smoke/
 custom-agent/power/.runtime/
+custom-agent/power/mpc/output_configured/
+.codex/

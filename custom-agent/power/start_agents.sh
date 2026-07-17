@@ -3,27 +3,26 @@
 
 set -e
 
-# 颜色定义
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# 获取脚本所在目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
-# 设置 PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-# 优先使用项目虚拟环境，避免系统 Python 缺少 SDK 依赖
 PYTHON_EXEC="${PROJECT_ROOT}/.venv/bin/python"
 if [ ! -x "$PYTHON_EXEC" ]; then
     PYTHON_EXEC="python3"
 fi
 
-# 显示帮助信息
+CONTROL_SERVICE_PID=""
+CONTROL_SERVICE_LOG="${SCRIPT_DIR}/logs/power-control-algorithm-service.log"
+CONTROL_SERVICE_SCRIPT="${SCRIPT_DIR}/control_algorithm_service.py"
+
 show_help() {
     echo -e "${GREEN}Hydros Agent 启动脚本${NC}"
     echo ""
@@ -47,28 +46,20 @@ show_help() {
     echo "示例:"
     echo "  $0 outflowplan               # 启动 power outflow plan agent"
     echo "  $0 outflowplan pump          # 在同一进程中启动 power outflow plan 和 pump agents"
-    echo "  $0 --all                    # 启动所有 agents"
-    echo "  $0 --logs                   # 查看日志"
-    echo "  $0 --debug outflowplan       # 启用调试模式启动 power outflow plan agent"
-    echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
-    echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
-    echo ""
-    echo "调试模式:"
-    echo "  • 使用 debugpy 进行远程调试"
-    echo "  • 默认监听端口: 5678"
-    echo "  • 支持 VS Code、PyCharm 等 IDE"
-    echo "  • 可以设置断点、单步调试、查看变量等"
-    echo "  • 需要先安装: pip install debugpy"
+    echo "  $0 --all                     # 启动所有 agents"
+    echo "  $0 --logs                    # 查看日志"
+    echo "  $0 --debug outflowplan       # 调试模式启动 power outflow plan agent"
+    echo "  $0 -d outflowplan pump       # 调试模式启动多个 agents"
     echo ""
     echo "特性:"
     echo "  • 所有 agents 在同一个进程中运行"
+    echo "  • 默认同时启动电站边缘控制 API 服务"
     echo "  • 前台运行，可以在控制台看到日志"
-    echo "  • 所有日志保存到 custom-agent/logs/hydros.log"
-    echo "  • 使用 Ctrl+C 优雅停止所有 agents"
+    echo "  • 所有日志保存到 custom-agent/power/logs/"
+    echo "  • 使用 Ctrl+C 优雅停止所有 agents 和控制 API 服务"
     echo ""
 }
 
-# 列出所有可用的 agent
 list_agents() {
     echo -e "${GREEN}可用的 Agents:${NC}"
     echo ""
@@ -83,15 +74,14 @@ list_agents() {
         echo "                 路径: ${SCRIPT_DIR}/pump/outflow_plan_agent.py"
     fi
 
-    if [ -f "${SCRIPT_DIR}/scheduling/scheduling_agent.py" ]; then
+    if [ -f "${SCRIPT_DIR}/scheduling/power_scheduling_agent.py" ]; then
         echo -e "  ${BLUE}scheduling${NC} - Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/scheduling/scheduling_agent.py"
+        echo "                 路径: ${SCRIPT_DIR}/scheduling/power_scheduling_agent.py"
     fi
 
     echo ""
 }
 
-# 检查配置文件
 check_config() {
     if [ ! -f "${SCRIPT_DIR}/env.properties" ]; then
         echo -e "${YELLOW}警告: 共享配置文件不存在${NC}"
@@ -111,36 +101,60 @@ check_config() {
     return 0
 }
 
-# 查看日志
 view_logs() {
     echo -e "${GREEN}日志文件:${NC}"
     echo ""
 
     if [ -f "${SCRIPT_DIR}/logs/hydros.log" ]; then
         echo "  ${SCRIPT_DIR}/logs/hydros.log"
-        echo ""
-        echo "查看日志命令:"
-        echo "  tail -f ${SCRIPT_DIR}/logs/hydros.log"
-        echo "  tail -100 ${SCRIPT_DIR}/logs/hydros.log"
-        echo ""
-        echo "过滤特定 agent 的日志:"
-        echo "  grep 'TWINS_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/hydros.log"
-        echo "  grep 'ONTOLOGY_SIMULATION_AGENT' ${SCRIPT_DIR}/logs/hydros.log"
-        echo ""
-
-        # 显示最后几行日志
-        if [ -s "${SCRIPT_DIR}/logs/hydros.log" ]; then
-            echo "最近的日志:"
-            tail -10 "${SCRIPT_DIR}/logs/hydros.log" | sed 's/^/  /'
-        fi
     else
-        echo "  (日志文件不存在)"
+        echo "  (hydros.log 不存在)"
+    fi
+
+    if [ -f "${CONTROL_SERVICE_LOG}" ]; then
+        echo "  ${CONTROL_SERVICE_LOG}"
+    else
+        echo "  (power-control-algorithm-service.log 不存在)"
     fi
 
     echo ""
 }
 
-# 主函数
+cleanup_control_service() {
+    if [ -n "${CONTROL_SERVICE_PID}" ] && kill -0 "${CONTROL_SERVICE_PID}" 2>/dev/null; then
+        echo -e "${BLUE}Stopping power control algorithm service (PID: ${CONTROL_SERVICE_PID})...${NC}"
+        kill "${CONTROL_SERVICE_PID}" 2>/dev/null || true
+        wait "${CONTROL_SERVICE_PID}" 2>/dev/null || true
+    fi
+}
+
+start_control_algorithm_service() {
+    mkdir -p "${SCRIPT_DIR}/logs"
+
+    if [ ! -f "${CONTROL_SERVICE_SCRIPT}" ]; then
+        echo -e "${RED}错误: 找不到电站边缘控制服务脚本${NC}"
+        echo -e "${RED}路径: ${CONTROL_SERVICE_SCRIPT}${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}启动电站边缘控制 API 服务...${NC}"
+    echo -e "${BLUE}  Log file: ${CONTROL_SERVICE_LOG}${NC}"
+
+    "${PYTHON_EXEC}" "${CONTROL_SERVICE_SCRIPT}" >> "${CONTROL_SERVICE_LOG}" 2>&1 &
+    CONTROL_SERVICE_PID=$!
+
+    sleep 1
+    if ! kill -0 "${CONTROL_SERVICE_PID}" 2>/dev/null; then
+        echo -e "${RED}错误: 电站边缘控制 API 服务启动失败${NC}"
+        echo -e "${YELLOW}请检查日志: ${CONTROL_SERVICE_LOG}${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}✓ 电站边缘控制 API 服务已启动 (PID: ${CONTROL_SERVICE_PID})${NC}"
+    echo ""
+    return 0
+}
+
 main() {
     if [ $# -eq 0 ] && [ -n "${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}" ]; then
         DEFAULT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}"
@@ -148,13 +162,11 @@ main() {
         set -- "${DEFAULT_ARGS[@]}"
     fi
 
-    # 解析参数
     if [ $# -eq 0 ]; then
         show_help
         exit 0
     fi
 
-    # 收集 Python 参数
     PYTHON_ARGS=()
 
     while [ $# -gt 0 ]; do
@@ -191,6 +203,10 @@ main() {
                 PYTHON_ARGS+=("--full-log")
                 shift
                 ;;
+            edge_control)
+                echo -e "${YELLOW}警告: edge_control 不再作为 Agent 参数使用，已自动忽略；控制 API 服务会默认启动${NC}"
+                shift
+                ;;
             *)
                 PYTHON_ARGS+=("$1")
                 shift
@@ -198,20 +214,23 @@ main() {
         esac
     done
 
-    # 检查配置
     if ! check_config; then
         exit 1
     fi
 
-    # 使用 SDK 统一启动器启动 agents
     echo -e "${GREEN}启动 Hydros Agents...${NC}"
     echo ""
 
-    "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
+    trap cleanup_control_service EXIT INT TERM
+
+    if ! start_control_algorithm_service; then
+        exit 1
+    fi
+
+    "${PYTHON_EXEC}" -m hydros_agent_sdk.launcher \
         --launcher-dir "${SCRIPT_DIR}" \
         --project-root "${PROJECT_ROOT}" \
         -- "${PYTHON_ARGS[@]}"
 }
 
-# 运行主函数
 main "$@"

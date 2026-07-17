@@ -429,6 +429,37 @@ def test_station_control_execution_report_is_ignored_before_envelope_parsing():
     assert client.out_message_queue.empty()
 
 
+def test_edge_control_execution_report_is_ignored_before_envelope_parsing():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.init_task(context, [agent])
+    state_manager.add_local_agent(agent)
+    client = make_client(ReturningCallback(agent), state_manager)
+    client._handle_incoming_message = _fail_if_called
+
+    payload = {
+        "command_id": "CMD_EDGE_CONTROL_REPORT",
+        "command_type": "edge_control_execution_report",
+        "context": context.model_dump(mode="json"),
+        "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+        "command_status": CommandStatus.SUCCEED.value,
+        "execution_results": [],
+    }
+
+    client._on_message(
+        None,
+        None,
+        SimpleNamespace(
+            topic="/hydros/commands/coordination/test",
+            payload=json.dumps(payload).encode("utf-8"),
+        ),
+    )
+
+    assert client.out_message_queue.empty()
+
+
 def _fail_if_called(command):
     raise AssertionError(f"ignored command reached handler: {command.command_type}")
 

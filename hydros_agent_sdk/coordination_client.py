@@ -76,6 +76,7 @@ logger = logging.getLogger(__name__)
 IGNORED_COORDINATION_COMMAND_TYPES = {
     "update_monitor_rule_request",
     "update_monitor_rule_response",
+    "edge_control_execution_report",
     "station_control_execution_report",
 }
 
@@ -682,6 +683,12 @@ class SimCoordinationClient:
             return
 
         if isinstance(result, SimCommand):
+            logger.info(
+                "Callback produced outbound command: type=%s, id=%s, context=%s",
+                result.command_type,
+                result.command_id,
+                self._command_context_id(result),
+            )
             self.enqueue(result)
             return
 
@@ -1015,9 +1022,40 @@ class SimCoordinationClient:
                 # 序列化指令
                 payload = command.model_dump_json(by_alias=True)
 
+                if isinstance(command, SimTaskInitResponse):
+                    created_agents = command.created_agent_instances or []
+                    logger.info(
+                        "Sending task_init_response to coordinator: topic=%s, command_id=%s, biz_scene_instance_id=%s, source_agent_id=%s, created_agent_count=%s, created_agent_ids=%s, created_agent_statuses=%s",
+                        self.topic,
+                        command_id,
+                        self._command_context_id(command),
+                        getattr(command.source_agent_instance, "agent_id", None),
+                        len(created_agents),
+                        [getattr(agent, "agent_id", None) for agent in created_agents],
+                        [
+                            {
+                                "agentId": getattr(agent, "agent_id", None),
+                                "agentCode": getattr(agent, "agent_code", None),
+                                "agentStatus": getattr(agent, "agent_status", None),
+                                "agentInstanceStatus": getattr(agent, "agent_instance_status", None),
+                            }
+                            for agent in created_agents
+                        ],
+                    )
+
                 # 发布到 MQTT
                 result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
                 result.wait_for_publish()
+
+                if isinstance(command, SimTaskInitResponse):
+                    logger.info(
+                        "task_init_response sent to coordinator: topic=%s, command_id=%s, biz_scene_instance_id=%s, source_agent_id=%s, created_agent_count=%s",
+                        self.topic,
+                        command_id,
+                        self._command_context_id(command),
+                        getattr(command.source_agent_instance, "agent_id", None),
+                        len(command.created_agent_instances or []),
+                    )
 
                 if isinstance(command, MpcResultReport):
                     logger.info(

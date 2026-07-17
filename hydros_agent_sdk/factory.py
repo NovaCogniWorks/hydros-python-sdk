@@ -184,7 +184,7 @@ class SystemCentralSchedulingAgentFactory:
         hydros_cluster_id = (
             settings.hydros_cluster_id
             or sim_coordination_client.state_manager.get_cluster_id()
-            or "hydros-k3s-staging"
+            or "hydros-cluster-staging"
         )
         hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
 

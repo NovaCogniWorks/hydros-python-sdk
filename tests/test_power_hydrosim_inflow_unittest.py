@@ -67,6 +67,39 @@ class TestPowerHydroSimInflowPlanning(unittest.TestCase):
         self.assertIn(("Gate", "water_flow"), device_metrics)
         self.assertIn(("Gate", "gate_opening"), device_metrics)
 
+    def test_inflow_planning_accepts_file_path_argument(self):
+        api = HydroSimulationApi()
+        resolver = HydroSimulationInputResolver()
+        api.initialize(
+            resolver.resolve_bundle(
+                time_series_file="custom-agent/power/data/time_series_power_planning.json",
+                mpc_config_file="custom-agent/power/data/mpc_config.yaml",
+                initial_states_file="custom-agent/power/data/initial_states.yaml",
+                constraints_file="custom-agent/power/data/constrains_targets.yaml",
+            )
+        )
+
+        payload = {
+            "object_time_series": [
+                {
+                    "object_id": 20100,
+                    "object_type": "Station",
+                    "object_name": "Station-20100",
+                    "metrics_code": "water_flow",
+                    "time_series": [
+                        {"step": 0, "value": 334.0},
+                        {"step": 1, "value": 340.0},
+                    ],
+                }
+            ]
+        }
+        inflow_file = Path(tempfile.gettempdir()) / "hydrosim_inflow_path_unittest.json"
+        inflow_file.write_text(json.dumps(payload), encoding="utf-8")
+
+        planning_result = api.get_station_power_planning_series_from_inflow(str(inflow_file))
+
+        self.assertTrue(planning_result["station_power_series"])
+
 
 if __name__ == "__main__":
     unittest.main()

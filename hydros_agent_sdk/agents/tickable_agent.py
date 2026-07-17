@@ -145,6 +145,8 @@ class TickableAgent(BaseHydroAgent):
         try:
             # 执行仿真步（子类专属逻辑）
             metrics_list = self.on_tick_simulation(request)
+            if isinstance(metrics_list, TickCmdResponse):
+                return metrics_list
 
             # 通过 MQTT 发送指标数据
             if metrics_list:

@@ -26,7 +26,7 @@ SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
 SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
-SIMCMD_MPC_RESULT_REPORT = "mpc_result_report"
+SIMCMD_MPC_RESULT_REPORT = "mpc_prediction_result_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
@@ -156,9 +156,12 @@ class MpcResultReport(SimCommand):
     MPC 优化结果报告。
     由中央调度智能体发送，并由协调器或数据侧消费。
     """
-    command_type: Literal["mpc_result_report"] = SIMCMD_MPC_RESULT_REPORT
+    command_type: Literal["mpc_prediction_result_report"] = SIMCMD_MPC_RESULT_REPORT
     source_agent_instance: HydroAgentInstance
-    mpc_results: List[MpcResult]
+    mpc_results: List[MpcResult] = Field(
+        validation_alias=AliasChoices("mpc_prediction_results", "mpc_results"),
+        serialization_alias="mpc_prediction_results",
+    )
 
 class ParameterIdentifiedReport(SimCommand):
     """

@@ -157,7 +157,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             env_config = load_env_config()
             base_metrics_topic = env_config.get("metrics_topic")
             if base_metrics_topic:
-                cluster_id = env_config.get("hydros_cluster_id", "hydros-k3s-testing")
+                cluster_id = env_config.get("hydros_cluster_id", "hydros-cluster-testing")
                 base_metrics_topic = base_metrics_topic.replace("{hydros_cluster_id}", cluster_id)
                 task_id = self.context.biz_scene_instance_id
                 full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
