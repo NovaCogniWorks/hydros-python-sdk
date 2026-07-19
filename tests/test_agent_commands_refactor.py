@@ -1513,8 +1513,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["step_index"], 15)
         self.assertEqual(payload["mpc_config_url"], "http://config/mpc.yaml")
         self.assertEqual(payload["control_config_url"], "http://config/control.yaml")
+        self.assertEqual(payload["predictionHorizon"], 12)
         self.assertEqual(payload["horizon_interval_seconds"], 7200)
         self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
+        self.assertEqual(payload["diversionBoundaries"]["3001"], [3.0, 4.0])
+        self.assertNotIn("3001", payload["upstream_boundaries"])
         self.assertEqual(payload["sensor_data"][0]["object_id"], 9001)
         self.assertEqual(payload["sensor_data"][0]["metrics_code"], "water_level")
         self.assertEqual(payload["fixed_controls"], {"2001": 0.0})
@@ -1522,8 +1525,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("bizSceneInstanceId", payload)
         self.assertNotIn("upstreamBoundaries", payload)
         self.assertNotIn("sensorData", payload)
+        self.assertNotIn("downstreamBoundaries", payload)
         self.assertNotIn("targets", payload)
-        self.assert_snake_case_keys(payload)
 
     def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
@@ -1590,6 +1593,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         def fake_opener(request, timeout_seconds):
             self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
             self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
+            self.assertIn(b'"predictionHorizon": 12', request.data)
+            self.assertIn(b'"diversionBoundaries": {}', request.data)
             self.assertIn(b'"sensor_data"', request.data)
             self.assertIn(b'"object_id": 9001', request.data)
             self.assertNotIn(b'"bizSceneInstanceId"', request.data)
