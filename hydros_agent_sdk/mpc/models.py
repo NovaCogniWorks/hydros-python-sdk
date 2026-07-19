@@ -20,19 +20,19 @@ ScalarValue = Union[float, int, bool, str]
 
 
 class MpcResultContractModel(HydroBaseModel):
-    """Strict base model that exposes planning contract drift immediately."""
+    """严格校验规划契约，并立即暴露字段漂移的基础模型。"""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class ValueItem(MpcResultContractModel):
-    """A typed scalar value returned by the planning service."""
+    """规划服务返回的带类型标量值。"""
 
     value_type: str
     value: ScalarValue
 
     def numeric_value(self) -> Optional[float]:
-        """Return a numeric value without treating booleans as numbers."""
+        """返回数值结果，但不把布尔值视为数字。"""
 
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
             return None
@@ -40,7 +40,7 @@ class ValueItem(MpcResultContractModel):
 
 
 class DeviceResult(MpcResultContractModel):
-    """Prediction values for one device nested under a station result."""
+    """站点结果中某个设备的预测值。"""
 
     object_type: Optional[str] = None
     object_id: Optional[int] = None
@@ -49,7 +49,7 @@ class DeviceResult(MpcResultContractModel):
 
 
 class ControlObjectResult(MpcResultContractModel):
-    """Executable control intents for one station in a horizon step."""
+    """一个 horizon step 内某个站点的可执行控制意图。"""
 
     object_type: Optional[str] = None
     object_id: Optional[int] = None
@@ -58,7 +58,7 @@ class ControlObjectResult(MpcResultContractModel):
 
 
 class PredictedResult(MpcResultContractModel):
-    """Station and device predictions for reporting, replay, and analysis only."""
+    """仅用于报告、回放和分析的站点及设备预测结果。"""
 
     object_type: Optional[str] = None
     object_id: Optional[int] = None
@@ -70,10 +70,10 @@ class PredictedResult(MpcResultContractModel):
 
 class HorizonStep(MpcResultContractModel):
     horizon_step: Optional[int] = None
-    # Executable control intents returned by planning. Consumers should build
-    # control commands from this list, not from predicted_result_list.
+    # 规划服务返回的可执行控制意图。消费方必须从该列表构造控制指令，
+    # 不能从 predicted_result_list 派生控制指令。
     control_object_list: List[ControlObjectResult] = Field(default_factory=list)
-    # Prediction-only data for display, replay, reporting, and analysis.
+    # 仅用于展示、回放、报告和分析的预测数据。
     predicted_result_list: List[PredictedResult] = Field(default_factory=list)
 
 

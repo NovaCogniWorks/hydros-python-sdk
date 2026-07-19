@@ -1,4 +1,4 @@
-"""Track MPC command acceptance and real edge execution terminal state."""
+"""跟踪 MPC 指令接受状态和真实的边缘执行终态。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from hydros_agent_sdk.mpc.detail_identity import build_mpc_detail_identity
 
 
 class MpcControlExecutionError(ControlExecutionError):
-    """A dispatched MPC control did not reach a successful edge terminal state."""
+    """已下发的 MPC 控制指令未到达成功的边缘执行终态。"""
 
 
 @dataclass
@@ -29,7 +29,7 @@ class MpcControlDispatchRecord(ControlDispatchRecord):
 
 
 class MpcControlDispatchTracker(ControlExecutionBarrier):
-    """Owns in-flight dispatch records and the terminal completion barrier."""
+    """负责执行中的下发记录和终态完成屏障。"""
 
     def __init__(self) -> None:
         super().__init__(

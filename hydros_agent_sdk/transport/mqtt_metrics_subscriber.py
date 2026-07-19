@@ -29,7 +29,7 @@ class MqttMetricsSubscriber:
             logger.error("Error parsing field metrics payload on %s: %s", topic, exc)
 
     def handle_message(self, msg) -> Optional[str]:
-        """Process a Paho-style message for direct unit-test use."""
+        """处理 Paho 风格的消息，供单元测试直接调用。"""
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
             return self.handle_payload(msg.topic, payload)

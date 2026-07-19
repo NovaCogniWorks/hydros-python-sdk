@@ -6,8 +6,8 @@ from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAg
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
-from hydros_agent_sdk.protocol.commands import TickCmdRequest
-from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.protocol.commands import SimTaskTerminateRequest, TickCmdRequest
+from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus, SimulationContext
 
 
 class GenericCentralSchedulingAgentForTest(CentralSchedulingAgent):
@@ -20,9 +20,6 @@ class GenericCentralSchedulingAgentForTest(CentralSchedulingAgent):
 
 class MpcCentralSchedulingAgentForTest(MpcCentralSchedulingAgent):
     def on_init(self, request):
-        return None
-
-    def on_terminate(self, request):
         return None
 
 
@@ -124,6 +121,37 @@ class CentralSchedulingInheritanceTest(unittest.TestCase):
             agent._control_command_dispatcher.build_station_target_value_request.__self__,
             agent._control_command_builder,
         )
+
+    def test_mpc_base_termination_releases_task_scoped_runtime(self):
+        context = SimulationContext(biz_scene_instance_id="scene-mpc-terminate")
+        agent = MpcCentralSchedulingAgentForTest(
+            sim_coordination_client=Mock(transport=Mock()),
+            agent_id="agent-mpc-terminate",
+            agent_code="MPC_CENTRAL",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="MPC Central",
+            context=context,
+            hydros_cluster_id="cluster",
+            hydros_node_id="node",
+        )
+        agent._agent_command_gateway.shutdown = Mock()
+        agent.discard_control_execution_waiters = Mock()
+        agent._mpc_dispatch_tracker.discard_by_biz_scene_instance_id = Mock()
+        agent._mpc_rolling_runtime.close = Mock()
+
+        response = agent.on_terminate(
+            SimTaskTerminateRequest(command_id="terminate-mpc", context=context)
+        )
+
+        agent._agent_command_gateway.shutdown.assert_called_once_with()
+        agent.discard_control_execution_waiters.assert_called_once_with()
+        discard_mpc_records = (
+            agent._mpc_dispatch_tracker.discard_by_biz_scene_instance_id
+        )
+        discard_mpc_records.assert_called_once_with(context.biz_scene_instance_id)
+        agent._mpc_rolling_runtime.close.assert_called_once_with()
+        self.assertEqual(agent.agent_status, AgentStatus.TERMINATED)
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
 
 
 if __name__ == "__main__":

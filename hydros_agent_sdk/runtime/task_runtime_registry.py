@@ -1,4 +1,4 @@
-"""Registry of task-scoped coordination runtimes."""
+"""任务范围协调运行时注册表。"""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class TaskRuntimeRegistry:
-    """Create and route one :class:`TaskRuntime` per task context."""
+    """为每个任务上下文创建并路由一个 :class:`TaskRuntime`。"""
 
     def __init__(
         self,
@@ -72,7 +72,7 @@ class TaskRuntimeRegistry:
             return self._runtimes.get(context_id)
 
     def get_or_create(self, context_id: str) -> TaskRuntime:
-        """Return the task runtime, creating it for an init command when absent."""
+        """返回任务运行时；处理初始化指令且运行时不存在时负责创建。"""
         if not context_id:
             raise ValueError("context_id is required")
 

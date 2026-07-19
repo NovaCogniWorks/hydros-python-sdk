@@ -42,7 +42,7 @@ SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
 
 
 class MpcExecutionStatus(str, Enum):
-    """Wire values of Java ``MpcExecutionStatus``."""
+    """与 Java ``MpcExecutionStatus`` 对齐的 wire value。"""
 
     PENDING = "PENDING"
     DISPATCHED = "DISPATCHED"
@@ -52,7 +52,7 @@ class MpcExecutionStatus(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
-    """Wire values of Java edge ``ExecutionStatus``."""
+    """与 Java edge ``ExecutionStatus`` 对齐的 wire value。"""
 
     COMPLETED = "COMPLETED"
     SKIPPED = "SKIPPED"
@@ -259,8 +259,8 @@ class EdgeControlExecutionReport(SimCommand):
     Edge 站点控制执行终态报告。
     严格对齐当前 Java protocol；不要在 SDK 中预埋未发布的扩展字段。
     """
-    # Java's protocol parser ignores an unknown old wire field. Keep that
-    # boundary behavior without mapping the old name to this V2 DTO field.
+    # Java 协议解析器会忽略无法识别的旧 wire field。这里保持同样的边界行为，
+    # 不把旧名称映射到这个 V2 DTO 字段。
     model_config = ConfigDict(extra="ignore")
     command_type: Literal["edge_control_execution_report"] = SIMCMD_EDGE_CONTROL_EXECUTION_REPORT
     source_agent_instance: HydroAgentInstance

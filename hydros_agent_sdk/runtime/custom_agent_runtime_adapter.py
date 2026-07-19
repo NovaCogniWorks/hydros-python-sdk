@@ -1,4 +1,4 @@
-"""Adapt a developer-defined CustomAgent to the coordination runtime."""
+"""将开发者定义的 CustomAgent 接入协调运行时。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 
 
 class CustomAgentRuntimeAdapter(BaseHydroAgent):
-    """Internal runtime adapter; developers implement ``CustomAgent`` instead."""
+    """SDK 内部运行时适配器；开发者只需要实现 ``CustomAgent``。"""
 
     def __init__(
         self,

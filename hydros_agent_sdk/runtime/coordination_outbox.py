@@ -1,4 +1,4 @@
-"""Coordination command outbound publishing service."""
+"""协调指令出站发布服务。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class CoordinationOutboxPublisher:
-    """Decides which coordination commands leave this node and publishes them."""
+    """判断哪些协调指令需要离开当前节点，并负责发布。"""
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class CoordinationOutboxPublisher:
         self._worker: Optional[Thread] = None
 
     def start(self) -> None:
-        """Start the outbound publisher worker."""
+        """启动出站发布 worker。"""
         if self._running.is_set():
             return
         self._running.set()
@@ -63,7 +63,7 @@ class CoordinationOutboxPublisher:
         self._worker.start()
 
     def stop(self) -> None:
-        """Stop the publisher after sending commands already in the outbox."""
+        """发送完 outbox 中已有的指令后停止发布服务。"""
         if not self._running.is_set():
             return
         self._running.clear()
@@ -72,7 +72,7 @@ class CoordinationOutboxPublisher:
         self._worker = None
 
     def enqueue(self, command: SimCommand) -> None:
-        """Queue one command for outbound filtering and publication."""
+        """将一条指令加入出站过滤和发布队列。"""
         self._queue.put(command)
         self.logger.info("Enqueued command: %s", self.format_command_for_log(command))
 
@@ -98,7 +98,7 @@ class CoordinationOutboxPublisher:
         self.logger.info("Coordination outbox publisher stopped")
 
     def should_send(self, command: SimCommand) -> bool:
-        """Return whether an outbound coordination command should be published."""
+        """判断一条出站协调指令是否应当发布。"""
         if isinstance(command, SimCoordinationRequest):
             return False
 
@@ -130,7 +130,7 @@ class CoordinationOutboxPublisher:
         return bool(node_id and source_agent_instance.hydros_node_id == node_id)
 
     def send_with_retry(self, command: SimCommand) -> None:
-        """Publish a coordination command to MQTT with retry/backoff."""
+        """通过带重试和退避的方式向 MQTT 发布协调指令。"""
         attempt = 0
         command_id = command.command_id
 

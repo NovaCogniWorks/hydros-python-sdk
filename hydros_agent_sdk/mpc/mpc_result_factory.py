@@ -6,7 +6,7 @@ from .models import ControlObjectResult, DeviceResult, PredictedResult, ValueIte
 
 
 class MpcResultFactory:
-    """Factory for MPC optimizer result models."""
+    """MPC 优化结果模型工厂。"""
 
     @staticmethod
     def build_control_object_result(

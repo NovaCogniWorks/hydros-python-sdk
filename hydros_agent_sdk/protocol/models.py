@@ -155,7 +155,7 @@ class TopHydroObject(HydroBaseModel):
     object_type: Optional[str] = None
     properties: Dict[str, Any] = Field(default_factory=dict)
 
-# --- Time Series Models ---
+# --- 时序数据模型 ---
 
 class TimeSeriesValue(HydroBaseModel):
     step: Optional[int] = None

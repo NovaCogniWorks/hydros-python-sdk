@@ -1,4 +1,4 @@
-"""Coordination command routing to callback methods."""
+"""将协调指令路由到对应的回调方法。"""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class CoordinationCommandRouter:
-    """Routes parsed coordination commands to the configured callback."""
+    """将解析后的协调指令路由到已配置的回调对象。"""
 
     def __init__(
         self,

@@ -63,7 +63,7 @@ class MqttMetrics(BaseModel):
 
     @model_validator(mode="after")
     def sync_instance_ids(self) -> "MqttMetrics":
-        """Keep canonical and legacy scene instance IDs aligned for Java edge/central consumers."""
+        """保持场景实例 ID 一致，供 Java edge 和 central 消费。"""
         if not self.biz_scene_instance_id and self.job_instance_id:
             self.biz_scene_instance_id = self.job_instance_id
         if not self.job_instance_id and self.biz_scene_instance_id:

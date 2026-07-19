@@ -24,6 +24,8 @@ from hydros_agent_sdk.protocol.agent_commands import (
 from hydros_agent_sdk.protocol.commands import (
     MpcExecutionStatusReport,
     EdgeControlExecutionReport,
+    SimTaskTerminateRequest,
+    SimTaskTerminateResponse,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
@@ -301,9 +303,26 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         self._mpc_rolling_runtime.on_tick(request.step)
         return None
 
+    def _close_mpc_runtime(self) -> None:
+        """释放当前 task 的 MPC 状态和控制执行关联。"""
+        context_id = self.context.biz_scene_instance_id
+        self.discard_control_execution_waiters()
+        self._mpc_dispatch_tracker.discard_by_biz_scene_instance_id(context_id)
+        self._mpc_rolling_runtime.close()
+
+    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
+        """停止指令资源并释放当前 task 的 MPC runtime。"""
+        logger.info("Terminating MPC central scheduling agent: %s", self.agent_id)
+        try:
+            self._agent_command_gateway.shutdown()
+        finally:
+            self._close_mpc_runtime()
+        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
+        return ResponseFactory.terminate_succeed(self, request)
+
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         """
-        处理时序更新，并激活兼容 Java 侧的滚动 MPC。
+        处理时序更新，并激活滚动 MPC。
 
         在 Java 中央智能体中，TimeSeriesDataChangedEvent 是创建调度任务状态
         的第一个触发点。后续 tick 只会在该激活点之后继续滚动。

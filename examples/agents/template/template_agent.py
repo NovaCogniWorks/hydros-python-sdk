@@ -1,4 +1,4 @@
-"""Minimal composition-based Hydros Agent template for SDK developers."""
+"""面向 SDK 开发者的最小组合式 Hydros Agent 模板。"""
 
 import logging
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class TemplateAgent(CustomAgent):
-    """Smallest useful time-step driven Agent implementation."""
+    """可实际运行的最小时间步驱动 Agent 实现。"""
 
     def on_init(self, runtime: AgentExecutionContext, request: SimTaskInitRequest) -> None:
         logger.info("Initializing template agent: %s", runtime.agent.agent_id)

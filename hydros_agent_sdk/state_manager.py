@@ -91,7 +91,7 @@ class AgentStateManager:
             return self._hydros_node_id
 
     def has_active_context(self, context: SimulationContext) -> bool:
-        """Return whether the task for ``context`` is active."""
+        """判断 ``context`` 对应的任务是否处于活动状态。"""
         if not context or not context.biz_scene_instance_id:
             return False
 
@@ -136,7 +136,7 @@ class AgentStateManager:
                 logger.info("Task initialization cancelled: %s", context_id)
 
     def get_active_contexts(self) -> set[str]:
-        """Return context IDs derived from active task states."""
+        """返回从活动任务状态推导出的 context ID 集合。"""
         with self._lock:
             return {
                 context_id
@@ -241,7 +241,7 @@ class AgentStateManager:
         context: SimulationContext,
         agents: List[HydroAgentInstance],
     ) -> None:
-        """Activate one task and atomically register all of its local agents."""
+        """激活一个任务，并以原子方式登记该任务的全部本地 Agent。"""
         if not context or not context.biz_scene_instance_id:
             raise ValueError("context with biz_scene_instance_id is required")
 
@@ -346,7 +346,7 @@ class AgentStateManager:
             return agents
 
     def get_agents_by_code(self, context_id: str) -> Dict[str, HydroAgentInstance]:
-        """Return the task's local runtime agents keyed by ``agent_code``."""
+        """返回当前任务按 ``agent_code`` 索引的本地运行时 Agent。"""
         return {
             agent.agent_code: agent
             for agent in self.get_agents_for_context(context_id)

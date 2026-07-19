@@ -1,4 +1,4 @@
-"""Public transport extension points and metrics publishers."""
+"""公共传输扩展点和指标发布器。"""
 
 from hydros_agent_sdk.transport.base import Transport
 from hydros_agent_sdk.transport.mqtt_metrics_publisher import MqttMetricsPublisher

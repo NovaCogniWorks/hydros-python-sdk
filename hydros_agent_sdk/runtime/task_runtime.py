@@ -1,4 +1,4 @@
-"""Runtime for one coordination task."""
+"""单个协调任务的运行时。"""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class InboundCommand:
 
 
 class TaskRuntime:
-    """Own one task's ordered commands, terminal completions and callback dispatch."""
+    """负责单个任务的有序指令、终态完成消息和回调分发。"""
 
     def __init__(
         self,
@@ -106,7 +106,7 @@ class TaskRuntime:
                 worker.join(timeout=5)
 
     def enqueue(self, command: SimCommand) -> None:
-        """Route a parsed command to this task's command or completion lane."""
+        """将解析后的指令路由到当前任务的指令通道或完成通道。"""
         self._require_own_context(command)
         if not self.running.is_set():
             raise RuntimeError(f"TaskRuntime {self.context_id!r} is not running")
@@ -133,7 +133,7 @@ class TaskRuntime:
         )
 
     def handle(self, command: SimCommand) -> None:
-        """Dispatch one command and convert callback failures into responses."""
+        """分发一条指令，并将回调异常转换为失败响应。"""
         try:
             self._dispatch(command, self.router.dispatch)
         finally:
@@ -144,11 +144,11 @@ class TaskRuntime:
                     self._close()
 
     def handle_completion(self, command: SimCommand) -> None:
-        """Dispatch a terminal control report without waiting for the command worker."""
+        """不等待指令 worker，直接分发控制执行终态报告。"""
         if not isinstance(command, EdgeControlExecutionReport):
             raise TypeError(f"Unsupported completion signal: {command.command_type}")
-        # The command worker owns generic pending-report draining. The completion
-        # lane calls only its typed router handler to avoid consuming that batch.
+        # 通用待处理报告由指令 worker 统一提取。完成通道只调用自身的类型化
+        # router handler，避免提前消费该批报告。
         self._dispatch(command, self.router.handle_station_control_execution_report)
 
     def _dispatch(

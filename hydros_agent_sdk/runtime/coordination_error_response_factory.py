@@ -1,4 +1,4 @@
-"""Factory for coordination failure responses."""
+"""协调失败响应工厂。"""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class CoordinationErrorResponseFactory:
-    """Creates protocol-compatible failure responses for handler exceptions."""
+    """将 handler 异常转换为符合协议的失败响应。"""
 
     def __init__(
         self,

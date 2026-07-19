@@ -22,8 +22,8 @@ from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
-from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
 
@@ -77,7 +77,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             "_configured_target_and_constrain_config_url",
             configured_target_and_constrain_config_url,
         )
-        self._task_state_lifecycle = SchedulingTaskStateLifecycle(
+        self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_current_step=self._get_current_scheduling_step,
             get_rolling_interval_steps=lambda: 1,
@@ -91,7 +91,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Any]]:
         """执行泵站自定义滚动调度，并下发生成的控制指令。"""
-        self._ensure_scheduling_task_state(request.step).current_step = request.step
+        self._ensure_mpc_task_state(request.step).current_step = request.step
         commands = self.on_optimization(request.step)
         if commands:
             self.dispatch_control_commands_and_await_execution(commands)
@@ -772,7 +772,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             
         self.mpc_output = {"upper": upper_res, "lower": lower_res}
         
-        # Plotting Support
+        # 绘图支持
         if not hasattr(self, "plot_tracker"):
             from plot_tracker import PlotHistoryTracker
             self.plot_tracker = PlotHistoryTracker(
@@ -882,7 +882,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             reporter = MpcPredictionResultReporter(sim_coordination_client=self.sim_coordination_client)
             reporter.publish_customize_report(
                 source_agent_instance=self,
-                mpc_task_state=self._ensure_scheduling_task_state(step),
+                mpc_task_state=self._ensure_mpc_task_state(step),
                 horizon_step=horizon_step_list,
                 plan_type="optimal"
             )
@@ -983,11 +983,15 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             return self.system_config.horizon_hours
         return 0
 
-    def _ensure_scheduling_task_state(self, step: int) -> SchedulingTaskState:
-        return self._task_state_lifecycle.ensure_task_state(step)
+    def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
+        return self._mpc_task_state_lifecycle.ensure_task_state(step)
 
-    def _activate_scheduling_task_state_from_event(self, event, step: Optional[int] = None) -> Optional[SchedulingTaskState]:
-        task_state = self._task_state_lifecycle.activate_from_event(event, step=step)
+    def _activate_mpc_task_state_from_event(
+        self,
+        event,
+        step: Optional[int] = None,
+    ) -> Optional[MpcTaskState]:
+        task_state = self._mpc_task_state_lifecycle.activate_from_event(event, step=step)
         if task_state is None:
             return None
 
@@ -1011,16 +1015,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         st_action,
         horizon_idx: int,
     ):
-        """Build PredictedResult contract-correct for one station at one horizon step.
+        """为单个站点的一个 horizon step 构造符合契约的 PredictedResult。
 
-        Matches the MpcResultContractModel shape:
-        - predicted_value_list: front_water_level, back_water_level, out_flow, efficiency
-        - target_value: water_flow = station target flow
-        - device_result_list: per-pump-unit blade_angle, flow, efficiency
+        输出符合 MpcResultContractModel 结构：
+        - predicted_value_list：front_water_level、back_water_level、out_flow、efficiency
+        - target_value：water_flow 表示站点目标流量
+        - device_result_list：各泵组的 blade_angle、flow、efficiency
         """
         from hydros_agent_sdk.mpc.models import ValueItem, DeviceResult
 
-        # --- station name lookup ---
+        # --- 查询站点名称 ---
         station_name = None
         unit_name_map = {}
         if hasattr(self, "system_config") and hasattr(self.system_config, "stations"):
@@ -1031,7 +1035,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         unit_name_map[unit.id] = getattr(unit, "name", None)
                     break
 
-        # --- predicted_value_list ---
+        # --- 站点预测值列表 ---
         predicted_value_list = []
         if st_front is not None:
             predicted_value_list.append(
@@ -1050,33 +1054,33 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 ValueItem(value_type="efficiency", value=float(st_eff_val))
             )
 
-        # --- target_value (station-level flow target) ---
+        # --- 站点级流量目标 ---
         target_value = None
         if st_flow is not None:
             target_value = ValueItem(
                 value_type="water_flow", value=float(st_flow)
             )
 
-        # --- device_result_list: per-unit predictions ---
+        # --- 设备结果列表：各泵组预测值 ---
         device_result_list = []
         for uid in self._device_ids_for_station(sid, st_action):
             uv_list = []
 
-            # blade_angle from predicted openings
+            # 根据预测开度生成叶片角
             blade_angle = self._get_predicted_value(
                 st_action, "predicted_unit_openings", uid, horizon_idx
             )
             if blade_angle is not None:
                 uv_list.append(ValueItem(value_type="blade_angle", value=float(blade_angle)))
 
-            # unit flow
+            # 泵组流量
             # u_flow = self._get_predicted_value(
             #     st_action, "predicted_unit_flows", uid, horizon_idx
             # )
             # if u_flow is not None:
             #     uv_list.append(ValueItem(value_type="flow", value=float(u_flow)))
 
-            # unit efficiency
+            # 泵组效率
             # u_eff = self._get_predicted_value(
             #     st_action, "predicted_unit_efficiencies", uid, horizon_idx
             # )
@@ -1104,17 +1108,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     @staticmethod
     def _device_ids_for_station(sid: int, st_action) -> list:
-        """Collect unit IDs from station action."""
+        """从站点动作中收集泵组 ID。"""
         ids = []
         for attr in ("unit_openings", "predicted_unit_openings", "unit_status"):
             mapping = getattr(st_action, attr, None)
             if isinstance(mapping, dict):
                 ids.extend(mapping.keys())
-        return list(dict.fromkeys(ids))  # deduplicate, preserve order
+        return list(dict.fromkeys(ids))  # 去重并保持原有顺序
 
     @staticmethod
     def _get_predicted_value(st_action, attr_name: str, uid: int, horizon_idx: int):
-        """Safely get predicted value for a unit at a horizon index."""
+        """安全读取某个泵组在指定 horizon index 的预测值。"""
         mapping = getattr(st_action, attr_name, None)
         if not isinstance(mapping, dict):
             return None
@@ -1136,7 +1140,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 1. 获取变更的数据事件
         event = request.time_series_data_changed_event
-        self._activate_scheduling_task_state_from_event(event)
+        self._activate_mpc_task_state_from_event(event)
         
         from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
         
@@ -1272,7 +1276,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 1. 获取变更的数据事件
         event = request.outflow_time_series_data_changed_event
-        self._activate_scheduling_task_state_from_event(event)
+        self._activate_mpc_task_state_from_event(event)
 
         if event and event.object_time_series:
             # 2. 遍历并处理数据
@@ -1304,6 +1308,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         # 清理资源
         self.discard_control_execution_waiters()
+        self._mpc_task_state_lifecycle.clear()
         self._agent_command_gateway.shutdown()
         self._optimization_model = None
         

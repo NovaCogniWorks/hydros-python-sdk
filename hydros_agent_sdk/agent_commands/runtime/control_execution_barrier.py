@@ -1,4 +1,4 @@
-"""Generic central-side barrier for asynchronous edge control execution."""
+"""中央调度侧等待异步边缘控制执行完成的通用屏障。"""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from hydros_agent_sdk.protocol.commands import EdgeControlExecutionReport
 
 
 class ControlExecutionError(RuntimeError):
-    """A control dispatched by central did not reach a successful edge terminal state."""
+    """中央调度下发的控制指令未到达成功的边缘执行终态。"""
 
 
 @dataclass
 class ControlDispatchRecord:
-    """One terminal-report-producing station control command registered before dispatch."""
+    """下发前登记的一条需要等待终态报告的站点控制指令。"""
 
     command: HydroStationTargetValueRequest
     biz_scene_instance_id: str
@@ -35,11 +35,10 @@ class ControlDispatchRecord:
 
 
 class ControlExecutionBarrier:
-    """Track station controls until edge reports their terminal execution state.
+    """跟踪站点控制指令，直到边缘侧报告执行终态。
 
-    A station-target response only proves that the target accepted or started a
-    command.  The barrier is released exclusively by the corresponding
-    :class:`EdgeControlExecutionReport`, correlated with ``exec_command_id``.
+    站点目标值响应只能证明目标 Agent 已接受或启动指令。屏障只由通过
+    ``exec_command_id`` 关联的 :class:`EdgeControlExecutionReport` 释放。
     """
 
     def __init__(
@@ -81,7 +80,7 @@ class ControlExecutionBarrier:
         self,
         response: HydroStationTargetValueResponse,
     ) -> Optional[Tuple[ControlDispatchRecord, str]]:
-        """Record acceptance/rejection without treating acceptance as completion."""
+        """记录接受或拒绝结果，但不把接受指令视为执行完成。"""
         with self._lock:
             record = self._records.get(response.command_id)
             if record is None or record.terminal_status is not None:
@@ -98,7 +97,7 @@ class ControlExecutionBarrier:
         self,
         report: EdgeControlExecutionReport,
     ) -> Optional[Tuple[ControlDispatchRecord, str]]:
-        """Complete a registered command only when edge reports a terminal state."""
+        """仅在边缘侧报告终态时完成对应的已登记指令。"""
         with self._lock:
             record = self._records.get(report.exec_command_id)
             if record is None or record.terminal_status is not None:
@@ -135,7 +134,7 @@ class ControlExecutionBarrier:
         records: List[ControlDispatchRecord],
         timeout_seconds: float,
     ) -> None:
-        """Wait for every record, preserving unfinished records for late reports."""
+        """等待全部记录完成，并为迟到报告保留尚未完成的记录。"""
         if not records:
             return
 
@@ -165,7 +164,7 @@ class ControlExecutionBarrier:
             )
 
     def discard_by_biz_scene_instance_id(self, biz_scene_instance_id: str) -> None:
-        """Discard task-scoped records during a completed task termination."""
+        """任务终止完成后清除该任务范围内的记录。"""
         with self._lock:
             self._cleanup(
                 record

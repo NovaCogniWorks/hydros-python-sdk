@@ -32,7 +32,7 @@ from hydros_agent_sdk.mpc.models import (
     ValueItem,
 )
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
     MpcPredictionResultReport,
@@ -1454,7 +1454,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=10,
@@ -1527,7 +1527,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1648,7 +1648,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_logs_empty_sensor_data_before_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-empty-sensor")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1685,7 +1685,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1765,7 +1765,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_prediction_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1824,7 +1824,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_prediction_result_reporter_builds_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-report")
         source = build_agent_instance("agent-014-customize-report", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1863,7 +1863,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_prediction_result_reporter_publishes_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-publish")
         source = build_agent_instance("agent-014-customize-publish", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1913,7 +1913,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014-renamed-fields", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1969,7 +1969,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("out_flow", attributes)
 
     def test_mpc_prediction_result_reporter_converts_water_flow_target_attribute(self):
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=SimulationContext(biz_scene_instance_id="scene-014-flow-target"),
             rolling_interval_steps=3,
             start_step=1,
@@ -2015,7 +2015,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
     def test_mpc_prediction_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
         source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -2618,7 +2618,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         client.outbox_publisher.transport = Mock()
         report = MpcPredictionResultReporter().build_report(
             source,
-            SchedulingTaskState(
+            MpcTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,
@@ -2699,7 +2699,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         report = MpcPredictionResultReporter().build_report(
             source,
-            SchedulingTaskState(
+            MpcTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,

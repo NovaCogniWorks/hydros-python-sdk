@@ -1,4 +1,4 @@
-"""MPC planning output projected into explicit executable control intent."""
+"""将 MPC 规划输出投影为明确且可执行的控制意图。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ SUPPORTED_TARGET_VALUE_TYPE = "water_level"
 
 @dataclass(frozen=True)
 class MpcControlExecutionTarget:
-    """One commandable station target from ``control_object_list``."""
+    """从 ``control_object_list`` 提取的一条可下发站点控制目标。"""
 
     horizon_step: int
     object_id: int
@@ -25,7 +25,7 @@ class MpcControlExecutionTarget:
 
 @dataclass
 class MpcControlExecutionPlan:
-    """Separates executable intent from observational MPC predictions."""
+    """将可执行控制意图与仅用于观测的 MPC 预测结果分离。"""
 
     optimize_step: int
     control_targets_by_horizon: Dict[int, List[MpcControlExecutionTarget]] = field(

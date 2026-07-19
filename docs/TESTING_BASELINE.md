@@ -58,7 +58,7 @@ python scripts/run_test_baseline.py central
 - `hydros_agent_sdk/agents/central_scheduling_agent.py`
 - `hydros_agent_sdk/agents/mpc_central_scheduling_agent.py`
 - `hydros_agent_sdk/mpc/rolling_runtime.py`
-- `hydros_agent_sdk/scheduling_task_state*.py`
+- `hydros_agent_sdk/mpc/task_state*.py`
 
 ### `central-router`
 

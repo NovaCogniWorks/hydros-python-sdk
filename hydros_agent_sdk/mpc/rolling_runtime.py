@@ -10,8 +10,8 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.control_dispatch_tracker import MpcControlExecutionError
 from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
-from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import AgentStatus, SimulationContext
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
@@ -35,7 +35,7 @@ class MpcRollingRuntime:
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
-        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]] = None,
+        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]] = None,
     ):
         self.context = context
         self.properties = properties
@@ -52,7 +52,7 @@ class MpcRollingRuntime:
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
         self.rolling_cycle_runner = rolling_cycle_runner
         self._last_optimization_step = 0
-        self._task_state_lifecycle = SchedulingTaskStateLifecycle(
+        self._task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_current_step=get_current_step,
             get_rolling_interval_steps=self.get_roll_steps,
@@ -66,8 +66,14 @@ class MpcRollingRuntime:
         return self._last_optimization_step
 
     @property
-    def task_state(self) -> Optional[SchedulingTaskState]:
+    def task_state(self) -> Optional[MpcTaskState]:
         return self._task_state_lifecycle.task_state
+
+    def close(self) -> None:
+        """Agent 终止时释放 task-scoped MPC 状态。"""
+        with self._lock:
+            self._task_state_lifecycle.clear()
+            self._last_optimization_step = 0
 
     def _get_model_context(self):
         from hydros_agent_sdk.context_manager import ContextManager
@@ -150,7 +156,7 @@ class MpcRollingRuntime:
 
     def set_rolling_cycle_runner(
         self,
-        rolling_cycle_runner: Optional[Callable[[SchedulingTaskState], Optional[List[Any]]]],
+        rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]],
     ) -> None:
         self.rolling_cycle_runner = rolling_cycle_runner
 
@@ -177,7 +183,7 @@ class MpcRollingRuntime:
             task_state = self.require_task_state()
             task_state.current_step = step
             task_state.total_steps = self.get_total_steps()
-            should_roll = task_state.active_new_rolling(step)
+            should_roll = task_state.should_start_new_rolling(step)
 
             logger.info(
                 "MPC rolling check: bizSceneInstanceId=%s, startStep=%s, "
@@ -272,12 +278,12 @@ class MpcRollingRuntime:
         self._last_optimization_step = current_step
         self.set_agent_status(AgentStatus.ACTIVE)
 
-    def require_task_state(self) -> SchedulingTaskState:
+    def require_task_state(self) -> MpcTaskState:
         return self._task_state_lifecycle.require_task_state(
             "task_state is not initialized"
         )
 
-    def do_rolling_optimal(self, task_state: SchedulingTaskState) -> Optional[List[Any]]:
+    def do_rolling_optimal(self, task_state: MpcTaskState) -> Optional[List[Any]]:
         if self.rolling_cycle_runner is not None:
             return self.rolling_cycle_runner(task_state)
 
@@ -300,7 +306,7 @@ class MpcRollingRuntime:
         self.dispatch_control_for_current_step(task_state)
         return control_plan
 
-    def dispatch_control_for_current_step(self, task_state: SchedulingTaskState) -> None:
+    def dispatch_control_for_current_step(self, task_state: MpcTaskState) -> None:
         if task_state.latest_control_plan is None or task_state.latest_control_plan_start_step is None:
             return
         horizon_step = task_state.current_step - task_state.latest_control_plan_start_step + 1
@@ -325,7 +331,7 @@ class MpcRollingRuntime:
         rolling_interval_steps: int,
         current_step: int,
         total_steps: int,
-    ) -> SchedulingTaskState:
+    ) -> MpcTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
             configured_mpc_config_url=self.configured_mpc_config_url,
@@ -356,7 +362,7 @@ class MpcRollingRuntime:
         rolling_interval_steps: int,
         current_step: int,
         total_steps: int,
-    ) -> SchedulingTaskState:
+    ) -> MpcTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
             configured_mpc_config_url=self.configured_mpc_config_url,

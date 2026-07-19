@@ -15,6 +15,7 @@ from hydros_agent_sdk.protocol.agent_commands import (
 from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
     SimTaskInitRequest,
+    SimTaskTerminateRequest,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
 )
@@ -139,7 +140,7 @@ def test_pump_tick_waits_for_edge_terminal_report_before_returning(monkeypatch):
         group_size=1,
         main_step_index=12,
     )
-    agent._ensure_scheduling_task_state = Mock(return_value=Mock())
+    agent._ensure_mpc_task_state = Mock(return_value=Mock())
     agent.on_optimization = Mock(return_value=[{"unused": "dict-intent"}])
     agent._control_command_dispatcher.prepare = Mock(return_value=[command])
     dispatched = Event()
@@ -297,7 +298,7 @@ def test_pump_scheduling_agent_subscribes_metrics_before_lazy_init(monkeypatch):
     agent._lazy_init_odd_mpc.assert_called_once_with()
 
 
-def test_pump_scheduling_time_series_update_activates_generic_task_state(monkeypatch):
+def test_pump_scheduling_time_series_update_activates_mpc_task_state(monkeypatch):
     _install_optional_dependency_stubs(monkeypatch)
     scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
     if scheduling_dir not in sys.path:
@@ -335,9 +336,41 @@ def test_pump_scheduling_time_series_update_activates_generic_task_state(monkeyp
     response = agent.on_time_series_data_update(request)
 
     assert response.command_status == CommandStatus.SUCCEED
-    task_state = agent._task_state_lifecycle.task_state
+    task_state = agent._mpc_task_state_lifecycle.task_state
     assert task_state is not None
     assert task_state.current_step == 12
     assert task_state.context is context
     assert task_state.algorithm_config_url == "custom-agent/pump/data/config_xhh.yaml"
     assert task_state.hydro_events == [request.time_series_data_changed_event]
+
+
+def test_pump_scheduling_termination_clears_mpc_task_state(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    context = SimulationContext(biz_scene_instance_id="task-terminate")
+    agent = module.PumpCentralSchedulingAgent(
+        sim_coordination_client=Mock(state_manager=Mock()),
+        agent_id="agent-terminate",
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="Pump Scheduling Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+    )
+    agent._mpc_task_state_lifecycle.ensure_task_state(1)
+    agent.discard_control_execution_waiters = Mock()
+    agent._agent_command_gateway.shutdown = Mock()
+
+    response = agent.on_terminate(
+        SimTaskTerminateRequest(command_id="terminate-pump", context=context)
+    )
+
+    assert response.command_status == CommandStatus.SUCCEED
+    assert agent._mpc_task_state_lifecycle.task_state is None
+    agent.discard_control_execution_waiters.assert_called_once_with()
+    agent._agent_command_gateway.shutdown.assert_called_once_with()

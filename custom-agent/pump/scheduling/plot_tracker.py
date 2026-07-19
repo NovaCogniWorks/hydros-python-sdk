@@ -36,7 +36,7 @@ class PlotHistoryTracker:
         self.hist_ref_flows = {sid: [] for sid in self.system_config.station_ids}
         self.hist_power_mw = {sid: [] for sid in self.system_config.station_ids}
         
-        # We need a mock runtime or just create a dict for odd boundaries
+        # 构造最小 runtime，用于提供 ODD 边界参数
         self.odd1_flow_tolerance = 0.5
         self.odd3_flow_tolerance = 2.0
         
@@ -45,20 +45,20 @@ class PlotHistoryTracker:
         return f"{val:.2f}"
 
     def update_and_plot(self, step_index, current_time_hours, lower_step_hours, upper_plan, actions, decisions, observation, transfer_bundles):
-        # Update histories
+        # 更新历史序列
         self.hist_times.append(current_time_hours)
         snapshot = {}
         for station_id in self.system_config.station_ids:
-            # Flow
+            # 流量
             flow = float(observation.station_flows[station_id])
             self.hist_flows[station_id].append(flow)
             
-            # Modes and Refs
+            # 运行模式和参考值
             self.hist_modes[station_id].append(actions[station_id].mode if hasattr(actions[station_id], 'mode') else "UNKNOWN")
             ref_flow = upper_plan.flow_refs[station_id][0] if station_id in upper_plan.flow_refs and len(upper_plan.flow_refs[station_id]) > 0 else 0.0
             self.hist_ref_flows[station_id].append(float(ref_flow))
             
-            # Levels
+            # 水位
             back = float(observation.station_back_levels[station_id])
             front = float(observation.station_front_levels[station_id])
             self.hist_back_levels[station_id].append(back)
@@ -69,21 +69,21 @@ class PlotHistoryTracker:
             self.hist_pred_back_levels[station_id].append(pred_back)
             self.hist_pred_front_levels[station_id].append(pred_front)
             
-            # Efficiency & Power
+            # 效率和功率
             eff = float(actions[station_id].predicted_efficiencies[0]) if hasattr(actions[station_id], 'predicted_efficiencies') and actions[station_id].predicted_efficiencies else 0.0
             self.hist_efficiencies[station_id].append(eff)
             head = float(observation.station_heads.get(station_id, 0.0))
             power = (9.81 * 1000 * flow * head) / (eff * 1e6) if eff > 0.01 else 0.0
             self.hist_power_mw[station_id].append(power)
             
-            # Errors
+            # 误差
             self.hist_odd_flow_errors[station_id].append(float(decisions[station_id].flow_error))
             self.hist_odd_level_errors[station_id].append(float(decisions[station_id].level_error))
             
-            self.hist_upper_flow_errors[station_id].append(0.0) # placeholders
+            self.hist_upper_flow_errors[station_id].append(0.0)  # 暂无真实数据的占位值
             self.hist_lower_flow_errors[station_id].append(0.0)
             
-            # Units
+            # 泵组状态
             station_snapshot = {}
             station = self.system_config.station_by_id[station_id]
             for unit in station.units:
@@ -102,7 +102,7 @@ class PlotHistoryTracker:
             self.hist_pool_levels[pool_id].append(float(observation.pool_levels.get(pool_id, 0.0)))
             self.hist_disturbances[pool_id].append(float(transfer_bundles[self.system_config.station_ids[0]].disturbance_estimate.get(pool_id, 0.0)))
             
-        # Build lower prediction plan
+        # 构造下层预测计划
         lower_prediction_plan = {}
         for station_id in self.system_config.station_ids:
             pred_unit_flows = getattr(actions[station_id], 'predicted_unit_flows', {})
@@ -117,7 +117,7 @@ class PlotHistoryTracker:
             else:
                 lower_prediction_plan[station_id] = [actions[station_id].selected_flow]
             
-        # Call plot
+        # 生成绘图
         self._plot_step(
             step_index=step_index,
             current_time_hours=current_time_hours,
@@ -158,8 +158,8 @@ class PlotHistoryTracker:
         demand_series = {}
         rain_series = {pool_id: [] for pool_id in pool_ids}
         
-        # Determine mapping from pool_id to demand column based on topology
-        # Assuming channel between station_i and station_i+1 corresponds to pool_id 
+        # 根据拓扑确定 pool_id 到需求列的映射
+        # 相邻站点之间的渠道对应一个 pool_id
         for idx, (up_id, down_id) in enumerate(zip(station_ids[:-1], station_ids[1:]), start=1):
             pool_id = pool_ids[idx - 1] if idx - 1 < len(pool_ids) else idx
             demand_column = f"station{up_id}-station{down_id}"
@@ -180,7 +180,7 @@ class PlotHistoryTracker:
             else:
                 rain_series[pool_id] = np.zeros(n_points, dtype=float)
                 
-        # Fill any unmapped pools
+        # 补齐尚未映射的池段
         for pool_id in pool_ids:
             if pool_id not in demand_series:
                 demand_series[pool_id] = np.zeros(n_points, dtype=float)
@@ -249,7 +249,7 @@ class PlotHistoryTracker:
             st_upper_len = len(upper_plan.flow_refs.get(station_id, []))
             st_times_upper = current_time_hours + np.arange(st_upper_len, dtype=float) * float(self.system_config.dt_hours)
             
-            # 1. Flow
+            # 1. 流量
             ax_flow = fig.add_subplot(gs[idx, 0])
             ax_flow.plot(times_hist, hist_flows[station_id], color=color, linestyle="-", label="Actual Q")
             ax_flow.plot(st_times_plan, lower_prediction_plan[station_id], color=color, linestyle="--", alpha=0.5, label="Lower Pred")
@@ -261,7 +261,7 @@ class PlotHistoryTracker:
             ax_flow.legend(loc="upper right", fontsize=8)
             ax_flow.grid(True)
             
-            # 2. Head
+            # 2. 水头
             ax_head = fig.add_subplot(gs[idx, 1])
             
             act_back_arr = np.array(hist_back_levels[station_id]) if hist_back_levels[station_id] else np.array([])
@@ -282,7 +282,7 @@ class PlotHistoryTracker:
             ax_head.legend(loc="upper right", fontsize=8)
             ax_head.grid(True)
             
-            # 3. Efficiency
+            # 3. 效率
             ax_eff = fig.add_subplot(gs[idx, 2])
             ax_eff.plot(times_hist, hist_efficiencies[station_id], color=color, linestyle="-", label="Efficiency %")
             ax_eff.plot(st_times_plan, self._predicted_series(action.predicted_efficiencies, hist_efficiencies[station_id], len(st_times_plan)), color=color, linestyle="--", alpha=0.5, label="Pred Eff")
@@ -293,7 +293,7 @@ class PlotHistoryTracker:
             ax_eff.legend(loc="lower right", fontsize=8)
             ax_eff.grid(True)
             
-            # 4. Blade Angles
+            # 4. 叶片角
             ax_angle = fig.add_subplot(gs[idx, 3])
             palette_st = station_palettes[station_id]
             for u_idx, unit in enumerate(station.units):
@@ -308,7 +308,7 @@ class PlotHistoryTracker:
             ax_angle.legend(loc="upper right", ncol=2, fontsize=7)
             ax_angle.grid(True)
             
-            # 5. ODD Domain
+            # 5. ODD 区域
             ax_odd = fig.add_subplot(gs[idx, 4])
             odd3_boundary = max(float(self.odd3_flow_tolerance), float(self.odd1_flow_tolerance))
             ymax = max(
@@ -331,7 +331,7 @@ class PlotHistoryTracker:
             ax_odd.legend(loc="upper right", fontsize=7)
             ax_odd.grid(True)
             
-            # 6. Detailed Text Summary
+            # 6. 详细文本摘要
             ax_text = fig.add_subplot(gs[idx, 5])
             ax_text.axis("off")
             
@@ -539,4 +539,3 @@ class PlotHistoryTracker:
             summary_df.to_csv(os.path.join(self.output_dir, "final_summary.csv"), index=False)
             if pred_records:
                 pd.DataFrame(pred_records).to_csv(os.path.join(self.output_dir, "step_predictions.csv"), index=False)
-

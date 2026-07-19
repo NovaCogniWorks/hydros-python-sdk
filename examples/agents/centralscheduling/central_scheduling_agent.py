@@ -95,14 +95,4 @@ class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating production central scheduling agent: %s", self.agent_id)
-
-        self._agent_command_gateway.shutdown()
-        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
-
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
-        )
+        return super().on_terminate(request)

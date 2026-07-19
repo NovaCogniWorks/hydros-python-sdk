@@ -25,11 +25,10 @@ class ControlCommandDispatcher:
         self.dispatch_prepared(self.prepare(control_commands))
 
     def prepare(self, control_commands: List[Any]) -> List[AgentCommand]:
-        """Build concrete commands before dispatch so callers can register barriers.
+        """在下发前构造具体指令，使调用方可以提前登记终态屏障。
 
-        The legacy dict form is retained for custom agents, but its generated
-        request must be visible before sending when tick completion depends on
-        an edge terminal execution report.
+        custom agent 仍可提交 dict 形式的控制意图；当 tick 完成依赖边缘执行终态报告时，
+        必须在发送前暴露由它生成的 request，以便登记关联关系。
         """
         prepared: List[AgentCommand] = []
         for command in control_commands:
@@ -70,6 +69,6 @@ class ControlCommandDispatcher:
         return prepared
 
     def dispatch_prepared(self, control_commands: List[AgentCommand]) -> None:
-        """Send commands previously returned by :meth:`prepare`."""
+        """发送此前由 :meth:`prepare` 返回的指令。"""
         for command in control_commands:
             self.send_command(command)

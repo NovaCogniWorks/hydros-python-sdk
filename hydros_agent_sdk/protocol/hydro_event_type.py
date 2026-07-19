@@ -1,5 +1,5 @@
 class AgentEventType:
-    """Hydros agent event_type constants aligned with Java AgentEventType code."""
+    """与 Java AgentEventType code 对齐的 Hydros Agent event_type 常量。"""
 
     WEATHER_FORECAST = "WEATHER_FORECAST"
     WATER_USE = "WATER_USE"

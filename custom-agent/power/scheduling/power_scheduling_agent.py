@@ -243,14 +243,5 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         """
         logger.info(f"正在停止中央调度智能体: {self.agent_id}")
 
-        # 清理资源
-        self._agent_command_gateway.shutdown()
         self._optimization_model = None
-        
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False
-        )
+        return super().on_terminate(request)

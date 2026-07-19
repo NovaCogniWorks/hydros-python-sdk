@@ -1,4 +1,4 @@
-"""Agent command adapter over the shared coordination transport."""
+"""基于共享协调传输的 Agent 指令适配器。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentCommandClient:
-    """Decode and publish agent commands through a shared ``Transport``."""
+    """通过共享 ``Transport`` 解码和发布 Agent 指令。"""
 
     def __init__(
         self,
@@ -77,7 +77,7 @@ class AgentCommandClient:
         self.runtime.set_pending_command_predicate(predicate)
 
     def publish_command(self, command: AgentCommand) -> None:
-        """Serialize and publish one agent command through the shared transport."""
+        """通过共享传输序列化并发布一条 Agent 指令。"""
         attempt = 0
         while attempt <= self.max_retry_count:
             try:

@@ -15,7 +15,7 @@ from hydros_agent_sdk.sensor_data import SensorData
 from .models import MpcOptimizeRequest, MpcOptimizeResponse
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+    from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class MpcPlanningClient:
 
     def execute_optimization(
         self,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> List[MpcOptimizeResponse]:
@@ -117,7 +117,7 @@ class MpcPlanningClient:
 
     def build_optimize_request(
         self,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> MpcOptimizeRequest:

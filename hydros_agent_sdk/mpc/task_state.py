@@ -1,4 +1,4 @@
-"""滚动调度任务的通用运行时状态。"""
+"""MPC 滚动任务的运行时状态。"""
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional, Set
@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class SchedulingTaskState:
-    """单个滚动调度循环的运行时状态。"""
+class MpcTaskState:
+    """单个 MPC 滚动循环的运行时状态。"""
 
     context: SimulationContext
     rolling_interval_steps: int
@@ -31,7 +31,7 @@ class SchedulingTaskState:
     def register_hydro_event(self, event: TimeSeriesDataChangedEvent) -> None:
         self.hydro_events.append(event)
 
-    def active_new_rolling(self, current_step: int) -> bool:
+    def should_start_new_rolling(self, current_step: int) -> bool:
         if self.rolling_interval_steps <= 0:
             return False
         step_delta = current_step - self.start_step

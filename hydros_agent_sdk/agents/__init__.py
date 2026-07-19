@@ -1,16 +1,16 @@
 """
-SDK builtin and specialized agent types.
+SDK 内置和专用 Agent 类型。
 
-This module provides pre-built BaseHydroAgent extensions:
-- TickableAgent: tick-driven simulation agent base
-- OntologySimulationAgent: Ontology-based simulation agent
-- TwinsSimulationAgent: Digital twins simulation agent
-- ModelCalculationAgent: Event-driven model calculation agent
-- CentralSchedulingAgent: Central scheduling agent base
-- ControllerAgent: Local pump/gate station controller agent base
-- OutflowPlanAgent: Event-driven outflow plan agent
+本模块提供预构建的 BaseHydroAgent 扩展：
+- TickableAgent：由 tick 驱动的仿真 Agent 基类
+- OntologySimulationAgent：基于本体的仿真 Agent
+- TwinsSimulationAgent：数字孪生仿真 Agent
+- ModelCalculationAgent：事件驱动的模型计算 Agent
+- CentralSchedulingAgent：中央调度 Agent 基类
+- ControllerAgent：泵站、闸站等现地控制器 Agent 基类
+- OutflowPlanAgent：事件驱动的出流计划 Agent
 
-MPC capabilities are still available through optional MPC agent modules:
+MPC 能力由以下可选 Agent 模块提供：
 hydros_agent_sdk.agents.mpc_central_scheduling_agent
 hydros_agent_sdk.agents.system_central_scheduling_agent
 """

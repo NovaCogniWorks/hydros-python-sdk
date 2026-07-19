@@ -1,9 +1,8 @@
 ﻿"""
-Pump Station Local Controller Agent.
+泵站现地控制器 Agent。
 
-Concrete implementation of ControllerAgent for pump stations.
-Receives control commands (blade angle, on/off) from the central
-scheduling agent and maintains per-unit operational state.
+面向泵站的 ControllerAgent 具体实现。接收中央调度 Agent 下发的叶片角、
+启停等控制指令，并维护各泵组的运行状态。
 """
 
 import logging
@@ -30,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 
 class PumpControllerAgent(ControllerAgent):
-    """Pump station local controller.
+    """泵站现地控制器。
 
-    Responsibilities:
-    1. Initialise per-pump-unit device states on task init
-    2. Receive and apply blade-angle / on-off commands each tick
-    3. Compute approximate flow and power from blade angle
-    4. Report unit status via MQTT metrics
+    主要职责：
+    1. 任务初始化时建立各泵组的设备状态
+    2. 每个 tick 接收并执行叶片角和启停指令
+    3. 根据叶片角估算流量和功率
+    4. 通过 MQTT metrics 上报泵组状态
     """
 
     def __init__(
@@ -62,7 +61,7 @@ class PumpControllerAgent(ControllerAgent):
             hydros_node_id=hydros_node_id,
             **kwargs
         )
-        # Per-unit rated parameters read from config during on_init
+        # 各泵组额定参数在 on_init 阶段从配置读取
         self._unit_rated_flow: Dict[str, float] = {}
         self._unit_rated_power: Dict[str, float] = {}
 
@@ -71,7 +70,7 @@ class PumpControllerAgent(ControllerAgent):
         logger.info("Initialising PumpControllerAgent: %s", self.agent_id)
         self.load_agent_configuration(request)
 
-        # Read managed pump-unit list from config
+        # 从配置读取当前 Agent 管理的泵组列表
         unit_list = self.properties.get_property("pump_units", [])
         if isinstance(unit_list, str):
             import json
@@ -111,7 +110,7 @@ class PumpControllerAgent(ControllerAgent):
         )
 
     def _apply_control_action(self, command: Dict[str, Any]) -> None:
-        """Apply control action and also update derived flow/power."""
+        """执行控制动作，并同步更新派生的流量和功率。"""
         super()._apply_control_action(command)
 
         object_id = str(command.get("object_id", ""))
@@ -138,7 +137,7 @@ class PumpControllerAgent(ControllerAgent):
                       object_id, blade, status, state["flow"])
 
     def _build_metrics_report(self, step: int) -> Optional[List]:
-        """Build metrics report including pump-specific fields."""
+        """构造包含泵组专有字段的 metrics report。"""
         from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
         metrics_list = []

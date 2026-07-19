@@ -164,7 +164,7 @@ class HydroAgentFactory(Generic[AgentType]):
 
 
 class CustomAgentFactory(HydroAgentFactory):
-    """Create the internal runtime adapter for a developer ``CustomAgent``."""
+    """为开发者实现的 ``CustomAgent`` 创建内部运行时适配器。"""
 
     def __init__(
         self,

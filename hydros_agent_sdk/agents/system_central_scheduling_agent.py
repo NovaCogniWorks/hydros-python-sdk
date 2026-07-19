@@ -9,8 +9,6 @@ from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSched
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
-    SimTaskTerminateRequest,
-    SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.protocol.models import AgentStatus
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
@@ -59,11 +57,3 @@ class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
         except Exception:
             self._agent_command_gateway.shutdown()
             raise
-
-    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        logger.info("Terminating system central scheduling agent: %s", self.agent_id)
-
-        self._agent_command_gateway.shutdown()
-        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
-
-        return ResponseFactory.terminate_succeed(self, request)

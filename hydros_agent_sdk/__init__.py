@@ -1,4 +1,4 @@
-"""Hydros Python Agent SDK public API."""
+"""Hydros Python Agent SDK 公共 API。"""
 
 from hydros_agent_sdk.version import __version__, get_sdk_version
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback

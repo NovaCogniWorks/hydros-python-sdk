@@ -1,4 +1,4 @@
-"""通用滚动调度任务状态生命周期。"""
+"""MPC 滚动任务状态生命周期。"""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from typing import Callable, Optional
 
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import SimulationContext
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 
-class SchedulingTaskStateLifecycle:
-    """创建、刷新并登记滚动调度任务状态。"""
+class MpcTaskStateLifecycle:
+    """创建、刷新并登记 MPC 滚动任务状态。"""
 
     def __init__(
         self,
@@ -29,15 +29,11 @@ class SchedulingTaskStateLifecycle:
         self.get_output_step_size = get_output_step_size
         self.get_algorithm_config_url = get_algorithm_config_url
         self.get_control_config_url = get_control_config_url
-        self._task_state: Optional[SchedulingTaskState] = None
+        self._task_state: Optional[MpcTaskState] = None
 
     @property
-    def task_state(self) -> Optional[SchedulingTaskState]:
+    def task_state(self) -> Optional[MpcTaskState]:
         return self._task_state
-
-    @task_state.setter
-    def task_state(self, value: Optional[SchedulingTaskState]) -> None:
-        self._task_state = value
 
     def has_task_state(self) -> bool:
         return self._task_state is not None
@@ -45,7 +41,7 @@ class SchedulingTaskStateLifecycle:
     def require_task_state(
         self,
         message: str = "task_state is not initialized",
-    ) -> SchedulingTaskState:
+    ) -> MpcTaskState:
         if self._task_state is None:
             raise RuntimeError(message)
         return self._task_state
@@ -58,7 +54,7 @@ class SchedulingTaskStateLifecycle:
         output_step_size: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
-    ) -> SchedulingTaskState:
+    ) -> MpcTaskState:
         resolved_rolling_interval_steps = self._resolve_int(
             rolling_interval_steps,
             self.get_rolling_interval_steps,
@@ -83,7 +79,7 @@ class SchedulingTaskStateLifecycle:
         )
 
         if self._task_state is None:
-            self._task_state = SchedulingTaskState(
+            self._task_state = MpcTaskState(
                 context=self.context,
                 rolling_interval_steps=resolved_rolling_interval_steps,
                 start_step=step,
@@ -113,7 +109,7 @@ class SchedulingTaskStateLifecycle:
         output_step_size: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
-    ) -> Optional[SchedulingTaskState]:
+    ) -> Optional[MpcTaskState]:
         if event is None:
             return self._task_state
 
@@ -125,7 +121,7 @@ class SchedulingTaskStateLifecycle:
         if current_step is None and self.get_current_step is not None:
             current_step = self.get_current_step()
         if current_step is None:
-            raise ValueError("current step is required to activate scheduling task state")
+            raise ValueError("current step is required to activate MPC task state")
 
         task_state = self.ensure_task_state(
             int(current_step),
@@ -137,6 +133,10 @@ class SchedulingTaskStateLifecycle:
         )
         task_state.register_hydro_event(event)
         return task_state
+
+    def clear(self) -> None:
+        """Agent 终止时释放 task-scoped MPC 状态。"""
+        self._task_state = None
 
     @staticmethod
     def _resolve_int(

@@ -1,4 +1,4 @@
-"""Stable identity shared by MPC prediction details and execution reports."""
+"""MPC 预测明细和执行报告共享的稳定身份标识。"""
 
 from typing import Optional
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Power custom-agent launcher thin wrapper."""
+"""电力 custom-agent 的轻量 launcher 入口。"""
 
 import logging
 import os

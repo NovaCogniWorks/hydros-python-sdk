@@ -1,4 +1,4 @@
-"""Agent-command MQTT payload decoding。"""
+"""Agent 指令 MQTT payload 解码。"""
 
 from __future__ import annotations
 

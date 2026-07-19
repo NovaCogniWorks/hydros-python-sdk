@@ -211,7 +211,7 @@ class FieldMetricsCache:
         ]
 
     def to_mpc_sensor_data(self) -> List["SensorData"]:
-        """Return Java central-compatible MPC sensor data from the broader local cache."""
+        """从本地完整缓存中生成与 Java central 口径一致的 MPC 传感数据。"""
         return self.to_sensor_data()
 
     @classmethod

@@ -211,11 +211,11 @@ class SimCoordinationClient:
         logger.info("SimCoordinationClient stopped")
 
     def enqueue(self, command: SimCommand):
-        """Submit a locally produced coordination command to the outbox."""
+        """将本地产生的协调指令提交到 outbox。"""
         self.outbox_publisher.enqueue(command)
 
     def _handle_transport_payload(self, topic: str, payload_str: str) -> None:
-        """Decode, filter and enqueue one raw payload delivered by the transport."""
+        """解码、过滤传输层送达的一条 raw payload，并将其加入任务队列。"""
         data = None
         try:
             logger.debug("Received message on topic %s: %s...", topic, payload_str[:200])

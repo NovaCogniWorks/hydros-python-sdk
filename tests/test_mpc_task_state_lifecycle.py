@@ -2,13 +2,13 @@ import unittest
 
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext
-from hydros_agent_sdk.scheduling_task_state_lifecycle import SchedulingTaskStateLifecycle
+from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 
 
-class SchedulingTaskStateLifecycleTest(unittest.TestCase):
-    def test_ensure_task_state_creates_generic_scheduling_state(self):
+class MpcTaskStateLifecycleTest(unittest.TestCase):
+    def test_ensure_task_state_creates_mpc_task_state(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle")
-        lifecycle = SchedulingTaskStateLifecycle(
+        lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_rolling_interval_steps=lambda: 2,
             get_total_steps=lambda: 12,
@@ -31,7 +31,7 @@ class SchedulingTaskStateLifecycleTest(unittest.TestCase):
 
     def test_activate_from_event_uses_event_step_and_registers_event(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-event")
-        lifecycle = SchedulingTaskStateLifecycle(
+        lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_current_step=lambda: 1,
             get_rolling_interval_steps=lambda: 5,
@@ -52,7 +52,7 @@ class SchedulingTaskStateLifecycleTest(unittest.TestCase):
 
     def test_activate_from_event_can_use_resolved_step_over_event_step(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-resolved-step")
-        lifecycle = SchedulingTaskStateLifecycle(
+        lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_current_step=lambda: 10,
             get_rolling_interval_steps=lambda: 5,
@@ -73,7 +73,7 @@ class SchedulingTaskStateLifecycleTest(unittest.TestCase):
     def test_ensure_task_state_refreshes_existing_state_without_resetting_start_step(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-refresh")
         total_steps = {"value": 20}
-        lifecycle = SchedulingTaskStateLifecycle(
+        lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_rolling_interval_steps=lambda: 3,
             get_total_steps=lambda: total_steps["value"],
@@ -87,6 +87,18 @@ class SchedulingTaskStateLifecycleTest(unittest.TestCase):
         self.assertEqual(refreshed.start_step, 4)
         self.assertEqual(refreshed.current_step, 8)
         self.assertEqual(refreshed.total_steps, 30)
+
+    def test_clear_releases_task_state(self):
+        lifecycle = MpcTaskStateLifecycle(
+            context=SimulationContext(biz_scene_instance_id="scene-lifecycle-clear"),
+            get_rolling_interval_steps=lambda: 3,
+            get_total_steps=lambda: 30,
+        )
+        lifecycle.ensure_task_state(4)
+
+        lifecycle.clear()
+
+        self.assertIsNone(lifecycle.task_state)
 
 
 if __name__ == "__main__":

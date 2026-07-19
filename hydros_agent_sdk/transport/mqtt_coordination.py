@@ -1,4 +1,4 @@
-"""MQTT transport for coordination commands."""
+"""协调指令使用的 MQTT 传输实现。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class MqttCoordinationTransport:
-    """Own the SDK's Paho lifecycle, subscriptions and MQTT publishing."""
+    """统一负责 SDK 的 Paho 生命周期、订阅和 MQTT 发布。"""
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class MqttCoordinationTransport:
         result.wait_for_publish()
 
     def subscribe(self, topic: str, handler: MessageHandler, qos: int = 1) -> None:
-        """Register a raw-payload handler on the shared Paho client."""
+        """在共享 Paho client 上登记 raw payload handler。"""
         self._subscriptions[topic] = (handler, qos)
         if self.connected.is_set():
             self.mqtt_client.subscribe(topic, qos=qos)

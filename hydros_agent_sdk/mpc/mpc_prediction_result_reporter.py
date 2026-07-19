@@ -20,7 +20,7 @@ from .models import (
 from .detail_identity import build_mpc_detail_identity
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+    from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
@@ -38,7 +38,7 @@ class MpcPredictionResultReporter:
     def build_report(
         self,
         source_agent_instance: HydroAgentInstance,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         responses: Iterable[MpcOptimizeResponse],
     ) -> Optional[MpcPredictionResultReport]:
         results = self.build_prediction_results(mpc_task_state, responses)
@@ -55,7 +55,7 @@ class MpcPredictionResultReporter:
     def build_customize_report(
         self,
         source_agent_instance: Optional[HydroAgentInstance],
-        mpc_task_state: Optional["SchedulingTaskState"],
+        mpc_task_state: Optional["MpcTaskState"],
         horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
     ) -> Optional[MpcPredictionResultReport]:
@@ -77,7 +77,7 @@ class MpcPredictionResultReporter:
     def publish(
         self,
         source_agent_instance: HydroAgentInstance,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         responses: Iterable[MpcOptimizeResponse],
     ) -> Optional[MpcPredictionResultReport]:
         report = self.build_report(source_agent_instance, mpc_task_state, responses)
@@ -114,7 +114,7 @@ class MpcPredictionResultReporter:
     def publish_customize_report(
         self,
         source_agent_instance: Optional[HydroAgentInstance],
-        mpc_task_state: Optional["SchedulingTaskState"],
+        mpc_task_state: Optional["MpcTaskState"],
         horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
     ) -> Optional[MpcPredictionResultReport]:
@@ -157,7 +157,7 @@ class MpcPredictionResultReporter:
     @classmethod
     def build_prediction_results(
         cls,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         responses: Iterable[MpcOptimizeResponse],
     ) -> List[MpcPredictionResult]:
         context = mpc_task_state.context
@@ -178,7 +178,7 @@ class MpcPredictionResultReporter:
     @classmethod
     def build_customize_prediction_result(
         cls,
-        mpc_task_state: Optional["SchedulingTaskState"],
+        mpc_task_state: Optional["MpcTaskState"],
         horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,
@@ -256,7 +256,7 @@ class MpcPredictionResultReporter:
     @classmethod
     def build_prediction_result(
         cls,
-        mpc_task_state: Optional["SchedulingTaskState"],
+        mpc_task_state: Optional["MpcTaskState"],
         horizon_step: Optional[List[HorizonStep]] = None,
         plan_type: Optional[str] = None,
         loss: Optional[float] = None,

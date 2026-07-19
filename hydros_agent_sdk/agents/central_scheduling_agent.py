@@ -196,10 +196,9 @@ class CentralSchedulingAgent(TickableAgent):
         *,
         timeout_seconds: Optional[float] = None,
     ) -> None:
-        """Dispatch controls and hold this central tick until edge reaches terminal state.
+        """下发控制指令，并保持当前 central tick，直到边缘侧到达终态。
 
-        Only station target-value requests participate in the terminal barrier.
-        Other command kinds retain their existing dispatch-only semantics.
+        只有站点目标值请求进入终态屏障；其他指令类型仍保持只下发、不等待的语义。
         """
         prepared_commands = self._control_command_dispatcher.prepare(control_commands)
         records = [
@@ -236,11 +235,11 @@ class CentralSchedulingAgent(TickableAgent):
             self._control_execution_barrier.handle_response(response)
 
     def on_station_control_execution(self, report: EdgeControlExecutionReport) -> None:
-        """Consume edge terminal reports for generic central control barriers."""
+        """消费边缘执行终态报告，并推进通用 central 控制屏障。"""
         self._control_execution_barrier.handle_execution_report(report)
 
     def discard_control_execution_waiters(self) -> None:
-        """Release task-scoped barrier bookkeeping after termination completes."""
+        """任务终止完成后释放该任务范围内的屏障记录。"""
         self._control_execution_barrier.discard_by_biz_scene_instance_id(
             self.context.biz_scene_instance_id
         )
@@ -371,12 +370,7 @@ class CentralSchedulingAgent(TickableAgent):
             # 待办：更新优化模型约束
 
     def get_metrics_topic(self) -> str:
-        """
-        Get the MQTT topic for sending metrics data.
-
-        Returns:
-            MQTT topic string for central scheduling metrics
-        """
+        """返回中央调度指标数据使用的 MQTT topic。"""
         return f"/hydros/simulation/jobs/{self.biz_scene_instance_id}/centralscheduling/objects"
 
     @abstractmethod

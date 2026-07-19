@@ -55,7 +55,7 @@ class InMemoryTransport:
             handler(topic, payload)
 
     def deliver(self, topic: str, payload: str) -> None:
-        """Deliver an inbound payload without recording an outbound publish."""
+        """投递一条入站 payload，但不记录为出站发布。"""
         with self._lock:
             if not self._running:
                 raise RuntimeError("Transport is not running")
