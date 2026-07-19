@@ -27,6 +27,7 @@ from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     HorizonStep,
+    MpcOptimizeRequest,
     MpcOptimizeResponse,
     PredictedResult,
     ValueItem,
@@ -1528,6 +1529,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("downstreamBoundaries", payload)
         self.assertNotIn("targets", payload)
 
+    def test_mpc_optimize_request_preserves_targets_contract(self):
+        request = MpcOptimizeRequest(
+            biz_scene_instance_id="scene-targets",
+            step_index=1,
+            prediction_horizon=12,
+            sensor_data=[],
+            targets={1009: [57.0, 57.5]},
+        )
+
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        self.assertEqual(payload["targets"], {1009: [57.0, 57.5]})
+        self.assertNotIn("diversionBoundaries", payload)
+
     def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
         state = MpcTaskState(
@@ -1594,7 +1609,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
             self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
             self.assertIn(b'"predictionHorizon": 12', request.data)
-            self.assertIn(b'"diversionBoundaries": {}', request.data)
+            self.assertNotIn(b'"diversionBoundaries"', request.data)
             self.assertIn(b'"sensor_data"', request.data)
             self.assertIn(b'"object_id": 9001', request.data)
             self.assertNotIn(b'"bizSceneInstanceId"', request.data)

@@ -84,10 +84,11 @@ class MpcOptimizeRequest(HydroBaseModel):
     control_config_url: Optional[str] = _payload_field("control_config_url")
     prediction_horizon: int = _payload_field("predictionHorizon", default=...)
     upstream_boundaries: Dict[str, List[float]] = _payload_field("upstream_boundaries", default_factory=dict)
-    diversion_boundaries: Dict[str, List[float]] = _payload_field("diversionBoundaries", default=...)
+    diversion_boundaries: Optional[Dict[str, List[float]]] = _payload_field("diversionBoundaries")
     sensor_data: List[_SensorData] = _payload_field("sensor_data", default_factory=list)
     fixed_controls: Dict[str, float] = _payload_field("fixed_controls", default_factory=dict)
     multi_profile: bool = _payload_field("multi_profile", default=False)
+    targets: Optional[Dict[int, List[float]]] = _payload_field("targets")
     include_diversion: bool = _payload_field("include_diversion", default=False)
     horizon_interval_seconds: Optional[int] = _payload_field("horizon_interval_seconds")
 

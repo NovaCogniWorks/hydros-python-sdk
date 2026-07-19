@@ -160,7 +160,7 @@ class MpcPlanningClient:
                 mpc_task_state.hydro_events,
                 mpc_task_state.current_step,
             ),
-            diversion_boundaries=diversion_boundaries,
+            diversion_boundaries=diversion_boundaries or None,
             sensor_data=normalized_sensor_data,
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
             include_diversion=bool(diversion_boundaries),
