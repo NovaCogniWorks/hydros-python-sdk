@@ -5,6 +5,7 @@
 """
 
 import logging
+from threading import Lock
 from typing import Dict, List, Optional, Any
 
 from hydros_agent_sdk.context_manager import ContextManager
@@ -18,6 +19,7 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
     EdgeControlExecutionReport,
+    AgentInstanceStatusReport,
 )
 from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
@@ -55,7 +57,8 @@ class MultiAgentCallback(SimCoordinationCallback):
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
-        self._pending_status_reports: List[Any] = []
+        self._pending_status_reports: Dict[str, List[AgentInstanceStatusReport]] = {}
+        self._pending_status_reports_lock = Lock()
         self._logging_context_setter = AgentLoggingContextSetter()
 
         logger.info("MultiAgentCallback created")
@@ -166,13 +169,17 @@ class MultiAgentCallback(SimCoordinationCallback):
             raise RuntimeError("Coordination client not set")
         return self._client.state_manager.get_agents_by_code(context_id)
 
-    def _record_status_report(self, report) -> None:
-        self._pending_status_reports.append(report)
+    def _record_status_report(self, report: AgentInstanceStatusReport) -> None:
+        context_id = report.context.biz_scene_instance_id
+        with self._pending_status_reports_lock:
+            self._pending_status_reports.setdefault(context_id, []).append(report)
 
-    def consume_pending_status_reports(self):
-        reports = list(self._pending_status_reports)
-        self._pending_status_reports.clear()
-        return reports
+    def consume_pending_status_reports(
+        self,
+        context_id: str,
+    ) -> List[AgentInstanceStatusReport]:
+        with self._pending_status_reports_lock:
+            return self._pending_status_reports.pop(context_id, [])
 
     def get_component(self) -> str:
         """

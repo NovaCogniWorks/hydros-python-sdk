@@ -14,6 +14,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.runtime.coordination_router import CoordinationCommandRouter
 from hydros_agent_sdk.protocol.models import (
+    AgentInstanceStatus,
     AgentStatus,
     AgentDriveMode,
     CommandStatus,
@@ -221,7 +222,10 @@ def test_multi_agent_router_returns_init_response_with_pending_status_report():
     callback.register_agent_factory("TEST_AGENT", FakeFactory(FakeAgent(instance)))
     client = FakeClient()
     callback.set_client(client)
-    router = CoordinationCommandRouter(callback)
+    router = CoordinationCommandRouter(
+        callback,
+        context_id_getter=lambda command: command.context.biz_scene_instance_id,
+    )
 
     result = router.dispatch(make_init_request(context))
 
@@ -230,6 +234,43 @@ def test_multi_agent_router_returns_init_response_with_pending_status_report():
     assert isinstance(result[1], AgentInstanceStatusReport)
     assert result[1].source_agent_instance == instance
     assert client.enqueued == []
+
+
+def test_pending_status_reports_are_consumed_by_task_context():
+    first_context = make_context()
+    second_context = SimulationContext(biz_scene_instance_id="TASK_002")
+    first_instance = make_instance(first_context, "FIRST_AGENT")
+    second_instance = make_instance(second_context, "SECOND_AGENT")
+    callback = MultiAgentCallback()
+    callback.set_client(FakeClient())
+
+    callback._transition_status(
+        first_instance,
+        AgentInstanceStatus.RUNNING,
+        phase="FIRST_TASK_STARTED",
+    )
+    callback._transition_status(
+        second_instance,
+        AgentInstanceStatus.RUNNING,
+        phase="SECOND_TASK_STARTED",
+    )
+
+    first_reports = callback.consume_pending_status_reports(
+        first_context.biz_scene_instance_id
+    )
+    assert [report.context.biz_scene_instance_id for report in first_reports] == [
+        first_context.biz_scene_instance_id
+    ]
+
+    second_reports = callback.consume_pending_status_reports(
+        second_context.biz_scene_instance_id
+    )
+    assert [report.context.biz_scene_instance_id for report in second_reports] == [
+        second_context.biz_scene_instance_id
+    ]
+    assert (
+        callback.consume_pending_status_reports(first_context.biz_scene_instance_id) == []
+    )
 
 
 def test_multi_agent_init_keeps_local_display_name_and_uses_requested_routing_config():

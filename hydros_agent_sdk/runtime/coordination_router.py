@@ -97,7 +97,9 @@ class CoordinationCommandRouter:
             getattr(handler, "__name__", str(handler)),
         )
         result = handler(command)
-        pending_reports = self._consume_callback_pending_reports()
+        pending_reports = self._consume_callback_pending_reports(
+            self.context_id_getter(command)
+        )
         if not pending_reports:
             return result
         if result is None:
@@ -108,11 +110,11 @@ class CoordinationCommandRouter:
             return [*result, *pending_reports]
         return [result, *pending_reports]
 
-    def _consume_callback_pending_reports(self):
+    def _consume_callback_pending_reports(self, context_id: Optional[str]):
         consumer = getattr(self.callback, "consume_pending_status_reports", None)
-        if not callable(consumer):
+        if not callable(consumer) or not context_id:
             return []
-        reports = consumer()
+        reports = consumer(context_id)
         return list(reports or [])
 
     def handle_task_init(self, command: SimCommand):
