@@ -35,6 +35,9 @@ from hydros_agent_sdk.version import SDK_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
+LEGACY_PUBLIC_S3_PREFIX = "https://hydroos.cn/s3/"
+PUBLIC_S3_PREFIX = "https://s3.hydroos.pub/"
+
 
 class Author(HydroBaseModel):
     """智能体配置的作者信息。"""
@@ -178,13 +181,14 @@ class AgentConfigLoader:
                 "Install it with: pip install pyyaml"
             )
 
-        logger.info(f"Loading agent configuration from URL: {url}")
+        normalized_url = AgentConfigLoader.normalize_legacy_public_s3_url(url)
+        logger.info(f"Loading agent configuration from URL: {normalized_url}")
 
         try:
             # 编码 URL 以处理非 ASCII 字符（例如中文字符）
             # 将 URL 拆分为多个部分，只编码 path 部分
             from urllib.parse import urlparse, urlunparse
-            parsed = urlparse(url)
+            parsed = urlparse(normalized_url)
 
             # 编码 path 组件，同时保留已经编码的字符
             encoded_path = quote(parsed.path, safe='/:@!$&\'()*+,;=')
@@ -209,14 +213,20 @@ class AgentConfigLoader:
                 content = response.read().decode('utf-8')
                 return AgentConfigLoader.from_yaml_string(content)
         except HTTPError as e:
-            logger.error(f"HTTP error loading configuration from {url}: {e.code} {e.reason}")
+            logger.error(f"HTTP error loading configuration from {normalized_url}: {e.code} {e.reason}")
             raise
         except URLError as e:
-            logger.error(f"URL error loading configuration from {url}: {e.reason}")
+            logger.error(f"URL error loading configuration from {normalized_url}: {e.reason}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error loading configuration from {url}: {e}")
+            logger.error(f"Unexpected error loading configuration from {normalized_url}: {e}")
             raise
+
+    @staticmethod
+    def normalize_legacy_public_s3_url(url: Optional[str]) -> Optional[str]:
+        if not url:
+            return url
+        return url.replace(LEGACY_PUBLIC_S3_PREFIX, PUBLIC_S3_PREFIX)
 
     @staticmethod
     def from_file(file_path: str) -> AgentConfiguration:

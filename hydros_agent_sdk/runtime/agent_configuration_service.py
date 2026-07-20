@@ -30,7 +30,9 @@ class AgentConfigurationService:
             logger.warning(f"No agent_configuration_url provided for agent '{agent.agent_code}'")
             return
 
-        agent_config_url = matching_agent.agent_configuration_url
+        agent_config_url = AgentConfigLoader.normalize_legacy_public_s3_url(
+            matching_agent.agent_configuration_url
+        )
         logger.info(f"Loading agent configuration from: {agent_config_url}")
 
         if self._apply_specialized_config_url(agent, matching_agent, agent_config_url):
