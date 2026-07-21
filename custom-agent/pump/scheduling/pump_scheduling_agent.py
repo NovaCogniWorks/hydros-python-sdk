@@ -802,12 +802,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
-
-        try:
-            first_sid = self.system_config.station_ids[0]
-            plan_len = len(actions[first_sid].predicted_openings)
-        except Exception:
-            plan_len = 10
+        # horizon_step_list 长度 = 72 - step；下层预测不够则 None 补全
+        total_steps = self._get_total_scheduling_steps()
+        plan_len = max(1, total_steps - step)
         
         horizon_step_list = []
         for i in range(plan_len):
@@ -832,16 +829,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     u_flow_list = st_action.predicted_unit_flows.get(uid, [])
                     u_eff_list = getattr(st_action, "predicted_unit_efficiencies", {}).get(uid, [])
                 
-                # 全站级预测
-                if i == 0:
-                    st_flow = float(st_action.selected_flow)
-                else:
-                    ref_flow_list = upper_plan.flow_refs.get(sid, [])
-                    st_flow = float(ref_flow_list[i]) if i < len(ref_flow_list) else None
+                # 全站级预测：流量和效率统一从 upper_plan 取
+                ref_flow_list = upper_plan.flow_refs.get(sid, [])
+                st_flow = float(ref_flow_list[i]) if i < len(ref_flow_list) else None
                 
-                # 全站平均效率预测
-                st_eff_list = getattr(st_action, "predicted_efficiencies", [])
-                st_eff_val = float(st_eff_list[i]) if i < len(st_eff_list) else None
+                eff_ref_list = upper_plan.efficiency_refs.get(sid, [])
+                st_eff_val = float(eff_ref_list[i]) if i < len(eff_ref_list) else None
 
                 control_object_list.append(
                     MpcResultFactory.build_control_object_result(
