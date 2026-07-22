@@ -16,22 +16,26 @@ from hydros_agent_sdk import (  # noqa: E402
 
 
 class _HoldAlgorithm:
-    algorithm_type = "hold_algorithm"
     algorithm_version = "1.0.0"
+
+    def __init__(self, algorithm_type, reason):
+        self.algorithm_type = algorithm_type
+        self.reason = reason
 
     def solve(self, input_data):
         return ControlAlgorithmOutput(
             schema_version=input_data.schema_version,
             request_id=input_data.context.request_id,
             status=ControlAlgorithmStatus.HOLD,
-            reason="NO_CHANGE_REQUIRED",
+            reason=self.reason,
         )
 
 
 class ControlAlgorithmHttpServiceTest(unittest.TestCase):
     def setUp(self):
         runtime = ControlAlgorithmRuntime()
-        runtime.register(_HoldAlgorithm())
+        runtime.register(_HoldAlgorithm("hold_algorithm", "NO_CHANGE_REQUIRED"))
+        runtime.register(_HoldAlgorithm("alternate_hold_algorithm", "ALTERNATE_HOLD"))
         self.server = create_control_algorithm_http_server(runtime, port=0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -51,6 +55,18 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "HOLD")
         self.assertEqual(payload["request_id"], "scene-001:12:2001:hold_algorithm")
+
+    def test_routes_multiple_algorithms_through_same_http_service(self):
+        endpoint = self._endpoint("alternate_hold_algorithm")
+
+        status, payload = self._post(
+            endpoint,
+            self._input(algorithm_type="alternate_hold_algorithm").model_dump(mode="json"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "HOLD")
+        self.assertEqual(payload["reason"], "ALTERNATE_HOLD")
 
     def test_logs_received_control_algorithm_request_payload(self):
         with self.assertLogs(
@@ -87,7 +103,7 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
             "ALGORITHM_TYPE_MISMATCH",
         )
 
-    def test_accepts_current_edge_default_and_legacy_sdk_paths(self):
+    def test_rejects_non_canonical_paths(self):
         for path_prefix in (
             "/engine/v1/api/edge-control",
             "/control-algorithms",
@@ -97,10 +113,16 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
                 % (self.server.server_address[1], path_prefix)
             )
 
-            status, payload = self._post(endpoint, self._input().model_dump(mode="json"))
+            with self.assertRaises(HTTPError) as error:
+                self._post(endpoint, self._input().model_dump(mode="json"))
 
-            self.assertEqual(status, 200)
-            self.assertEqual(payload["status"], "HOLD")
+            self.assertEqual(error.exception.code, 404)
+
+    def _endpoint(self, algorithm_type):
+        return (
+            "http://127.0.0.1:%s/engine/v1/api/control-algorithms/%s/solve"
+            % (self.server.server_address[1], algorithm_type)
+        )
 
     @staticmethod
     def _post(endpoint, payload):

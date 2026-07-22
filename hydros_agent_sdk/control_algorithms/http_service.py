@@ -18,18 +18,11 @@ from .runtime import ControlAlgorithmRuntime
 logger = logging.getLogger(__name__)
 
 
-_EDGE_CONTROL_ALGORITHM_PATH_PREFIX = (
+_CONTROL_ALGORITHM_PATH_PREFIX = (
     "engine",
     "v1",
     "api",
     "control-algorithms",
-)
-_EDGE_DEFAULT_PATH_PREFIX = ("engine", "v1", "api", "edge-control")
-_LEGACY_PATH_PREFIX = ("control-algorithms",)
-_SUPPORTED_PATH_PREFIXES = (
-    _EDGE_CONTROL_ALGORITHM_PATH_PREFIX,
-    _EDGE_DEFAULT_PATH_PREFIX,
-    _LEGACY_PATH_PREFIX,
 )
 
 
@@ -106,14 +99,13 @@ class ControlAlgorithmHttpService:
             def _algorithm_type(self) -> Optional[str]:
                 path = urlparse(self.path).path
                 parts = [part for part in path.split("/") if part]
-                for path_prefix in _SUPPORTED_PATH_PREFIXES:
-                    algorithm_index = len(path_prefix)
-                    if (
-                        len(parts) == algorithm_index + 2
-                        and tuple(parts[:algorithm_index]) == path_prefix
-                        and parts[-1] == "solve"
-                    ):
-                        return unquote(parts[algorithm_index])
+                algorithm_index = len(_CONTROL_ALGORITHM_PATH_PREFIX)
+                if (
+                    len(parts) == algorithm_index + 2
+                    and tuple(parts[:algorithm_index]) == _CONTROL_ALGORITHM_PATH_PREFIX
+                    and parts[-1] == "solve"
+                ):
+                    return unquote(parts[algorithm_index])
                 return None
 
             def _read_json(self) -> Any:
