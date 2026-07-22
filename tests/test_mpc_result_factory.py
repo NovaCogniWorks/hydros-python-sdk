@@ -19,7 +19,7 @@ class MpcResultFactoryTest(unittest.TestCase):
             object_type="Gate",
             object_name="Gate 501",
             target_value_list=[ValueItem(value_type="OPENING", value=0.45)],
-            planning_signals=[planning_signal],
+            algorithm_input_signals=[planning_signal],
         )
 
         self.assertIsInstance(result, ControlObjectResult)
@@ -29,7 +29,7 @@ class MpcResultFactoryTest(unittest.TestCase):
         self.assertEqual(len(result.target_value_list), 1)
         self.assertEqual(result.target_value_list[0].value, 0.45)
         self.assertEqual(result.target_value_list[0].value_type, "OPENING")
-        self.assertEqual(result.planning_signals, [planning_signal])
+        self.assertEqual(result.algorithm_input_signals, [planning_signal])
 
     def test_build_predicted_result(self):
         result = MpcResultFactory.build_predicted_result(

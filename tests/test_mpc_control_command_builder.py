@@ -55,7 +55,7 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
                                 ValueItem(value_type="enabled", value=True),
                                 ValueItem(value_type="label", value="manual"),
                             ],
-                            planning_signals=[
+                            algorithm_input_signals=[
                                 ControlSignal(
                                     type=SignalType.REFERENCE,
                                     object_type="GateStation",

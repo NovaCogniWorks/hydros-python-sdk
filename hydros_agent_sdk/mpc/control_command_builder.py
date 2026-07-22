@@ -67,7 +67,7 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                     group_id=group_id,
                     group_size=group_size,
                     main_step_index=current_step,
-                    planning_signals=control_target.planning_signals,
+                    planning_signals=control_target.algorithm_input_signals,
                     need_ack_reply=True,
                 )
             )
