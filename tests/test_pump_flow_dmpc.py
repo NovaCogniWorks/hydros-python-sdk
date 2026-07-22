@@ -28,6 +28,7 @@ from pump_flow_dmpc import (  # noqa: E402
     TabulatedPumpPerformanceRepository,
 )
 from pump_flow_dmpc_service import (  # noqa: E402
+    DeferredPumpPerformanceRepository,
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
 )
@@ -140,6 +141,30 @@ class PumpFlowDmpcTest(unittest.TestCase):
             finally:
                 server.server_close()
 
+    def test_deferred_performance_repository_loads_model_on_first_prediction(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = os.path.join(temporary_directory, "pump-performance.yaml")
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                config_file.write(
+                    "stations:\n"
+                    "  '2001':\n"
+                    "    units:\n"
+                    "      '2101':\n"
+                    "        curve:\n"
+                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
+                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
+                )
+            repository = DeferredPumpPerformanceRepository(config_path)
+
+            predicted = repository.predict_unit_flow(
+                station_id=2001,
+                unit_id=2101,
+                blade_angle=10.0,
+                water_head=5.0,
+            )
+
+            self.assertEqual(10.0, predicted)
+
     def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             config_path = os.path.join(temporary_directory, "pump-performance.yaml")
@@ -164,14 +189,29 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
             self.assertIsNone(host.server_address)
 
-    def test_managed_http_host_requires_explicit_model_config(self):
+    def test_managed_http_host_without_model_returns_dependency_failure(self):
         host = PumpFlowDmpcHttpHost("", host="127.0.0.1", port=0)
+        host.start()
+        try:
+            endpoint = (
+                "http://127.0.0.1:%s/engine/v1/api/control-algorithms/"
+                "pump_station_flow_dmpc/solve" % host.server_address[1]
+            )
+            request = Request(
+                endpoint,
+                data=json.dumps(self._input(34.0, 20.0).model_dump(mode="json")).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=2) as response:
+                payload = json.loads(response.read().decode("utf-8"))
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG is required",
-        ):
-            host.start()
+            self.assertEqual(200, response.status)
+            self.assertEqual("FAILED", payload["status"])
+            self.assertEqual("PERFORMANCE_CONFIG_UNAVAILABLE", payload["error_code"])
+            self.assertEqual([], payload["actuator_targets"])
+        finally:
+            host.stop()
 
     def test_runtime_and_http_service_return_standard_output(self):
         runtime = ControlAlgorithmRuntime()
