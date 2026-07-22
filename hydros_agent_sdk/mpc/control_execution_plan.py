@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Set, Tuple
 
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 
 
@@ -21,11 +22,12 @@ class MpcControlExecutionTarget:
     object_type: str
     target_value: float
     target_value_type: str
+    planning_signals: List[ControlSignal] = field(default_factory=list)
 
 
 @dataclass
 class MpcControlExecutionPlan:
-    """将可执行控制意图与仅用于观测的 MPC 预测结果分离。"""
+    """从 MPC ``control_object_list`` 提取可执行目标及其规划信号。"""
 
     optimize_step: int
     control_targets_by_horizon: Dict[int, List[MpcControlExecutionTarget]] = field(
@@ -78,6 +80,7 @@ class MpcControlExecutionPlan:
                                 object_type=control_object.object_type,
                                 target_value=numeric_value,
                                 target_value_type=target_value.value_type,
+                                planning_signals=list(control_object.planning_signals),
                             )
                         )
                 if targets:

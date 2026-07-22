@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import Field, field_validator
+
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
 
 from .base import (
     AgentCommand,
@@ -58,6 +60,7 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
     group_id: Optional[str] = None
     group_size: Optional[int] = None
     main_step_index: Optional[int] = None
+    planning_signals: List[ControlSignal] = Field(default_factory=list)
 
     @field_validator("object_type", "target_value_type")
     @classmethod

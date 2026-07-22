@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
+
 from .models import ControlObjectResult, DeviceResult, PredictedResult, ValueItem
 
 
@@ -14,12 +16,14 @@ class MpcResultFactory:
         object_type: str,
         target_value_list: List[ValueItem],
         object_name: Optional[str] = None,
+        planning_signals: Optional[List[ControlSignal]] = None,
     ) -> ControlObjectResult:
         return ControlObjectResult(
             object_type=object_type,
             object_id=object_id,
             object_name=object_name,
             target_value_list=target_value_list,
+            planning_signals=planning_signals or [],
         )
 
     @staticmethod

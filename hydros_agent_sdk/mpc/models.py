@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import ConfigDict, Field
 
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.protocol.base import HydroBaseModel
 from hydros_agent_sdk.sensor_data import SensorData as _SensorData
 
@@ -55,6 +56,7 @@ class ControlObjectResult(MpcResultContractModel):
     object_id: Optional[int] = None
     object_name: Optional[str] = None
     target_value_list: List[ValueItem] = Field(default_factory=list)
+    planning_signals: List[ControlSignal] = Field(default_factory=list)
 
 
 class PredictedResult(MpcResultContractModel):

@@ -1,3 +1,4 @@
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.protocol.agent_commands import (
     AgentCommandCatalog,
     HydroStationTargetValueRequest,
@@ -18,11 +19,23 @@ def test_agent_command_dtos_are_owned_by_protocol() -> None:
         object_type="PumpStation",
         target_value_type=DeviceValueTypeEnum.WATER_LEVEL.code,
         target_value=12.3,
+        planning_signals=[
+            ControlSignal(
+                type=SignalType.REFERENCE,
+                object_type="PumpStation",
+                object_id=101,
+                value_type="water_head",
+                value=4.2,
+                series=[4.2, 4.3],
+                attributes={"source": "mpc"},
+            )
+        ],
     )
 
     decoded = AgentCommandDecoder().decode(command.model_dump())
 
     assert isinstance(decoded, HydroStationTargetValueRequest)
+    assert decoded.planning_signals == command.planning_signals
     assert AgentCommandCatalog.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST in AgentCommandCatalog.values()
     assert HydroStationTargetValueRequest.__module__ == "hydros_agent_sdk.protocol.agent_commands.commands"
 
@@ -51,6 +64,7 @@ def test_station_target_value_dtos_include_java_direct_fields() -> None:
         "group_id",
         "group_size",
         "main_step_index",
+        "planning_signals",
     } <= HydroStationTargetValueRequest.model_fields.keys()
     assert {"object_id", "target_value_type", "target_value", "target_value_map"} <= (
         HydroStationTargetValueResponse.model_fields.keys()

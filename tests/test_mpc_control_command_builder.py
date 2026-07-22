@@ -1,5 +1,6 @@
 import unittest
 
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
 from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.models import (
@@ -54,6 +55,17 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
                                 ValueItem(value_type="enabled", value=True),
                                 ValueItem(value_type="label", value="manual"),
                             ],
+                            planning_signals=[
+                                ControlSignal(
+                                    type=SignalType.REFERENCE,
+                                    object_type="GateStation",
+                                    object_id=101,
+                                    value_type="front_water_level",
+                                    value=3.3,
+                                    series=[3.3, 3.7],
+                                    attributes={"source": "mpc"},
+                                )
+                            ],
                         )
                     ],
                     predicted_result_list=[
@@ -64,9 +76,24 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
                                 value_type="water_level",
                                 value=3.6,
                             ),
+                            predicted_value_list=[
+                                ValueItem(value_type="front_water_level", value=3.4)
+                            ],
                         )
                     ],
-                )
+                ),
+                HorizonStep(
+                    horizon_step=2,
+                    predicted_result_list=[
+                        PredictedResult(
+                            object_type="GateStation",
+                            object_id=101,
+                            predicted_value_list=[
+                                ValueItem(value_type="front_water_level", value=3.6)
+                            ],
+                        )
+                    ],
+                ),
             ],
         )
 
@@ -80,6 +107,11 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
         self.assertEqual(commands[0].group_size, 1)
         self.assertEqual(commands[0].main_step_index, 4)
         self.assertTrue(commands[0].group_id.startswith("MPC_CTRL_GROUP:scene-structured-control:4:4:1:"))
+        self.assertEqual(len(commands[0].planning_signals), 1)
+        planning_signal = commands[0].planning_signals[0]
+        self.assertEqual(planning_signal.value_type, "front_water_level")
+        self.assertEqual(planning_signal.series, [3.3, 3.7])
+        self.assertEqual(planning_signal.attributes, {"source": "mpc"})
 
 
 if __name__ == "__main__":

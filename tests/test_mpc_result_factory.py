@@ -1,16 +1,25 @@
 import unittest
 
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.mpc.models import ControlObjectResult, PredictedResult, ValueItem
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 
 
 class MpcResultFactoryTest(unittest.TestCase):
     def test_build_control_object_result(self):
+        planning_signal = ControlSignal(
+            type=SignalType.REFERENCE,
+            object_type="GateStation",
+            object_id=501,
+            value_type="front_water_level",
+            series=[3.4, 3.6],
+        )
         result = MpcResultFactory.build_control_object_result(
             object_id=501,
             object_type="Gate",
             object_name="Gate 501",
             target_value_list=[ValueItem(value_type="OPENING", value=0.45)],
+            planning_signals=[planning_signal],
         )
 
         self.assertIsInstance(result, ControlObjectResult)
@@ -20,6 +29,7 @@ class MpcResultFactoryTest(unittest.TestCase):
         self.assertEqual(len(result.target_value_list), 1)
         self.assertEqual(result.target_value_list[0].value, 0.45)
         self.assertEqual(result.target_value_list[0].value_type, "OPENING")
+        self.assertEqual(result.planning_signals, [planning_signal])
 
     def test_build_predicted_result(self):
         result = MpcResultFactory.build_predicted_result(
