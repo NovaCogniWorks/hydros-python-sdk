@@ -22,7 +22,7 @@ class MpcControlExecutionTarget:
     object_type: str
     target_value: float
     target_value_type: str
-    algorithm_input_signals: List[ControlSignal] = field(default_factory=list)
+    algo_required_input: List[ControlSignal] = field(default_factory=list)
 
 
 @dataclass
@@ -80,7 +80,7 @@ class MpcControlExecutionPlan:
                                 object_type=control_object.object_type,
                                 target_value=numeric_value,
                                 target_value_type=target_value.value_type,
-                                algorithm_input_signals=list(control_object.algorithm_input_signals),
+                                algo_required_input=list(control_object.algo_required_input),
                             )
                         )
                 if targets:

@@ -56,7 +56,7 @@ class ControlObjectResult(MpcResultContractModel):
     object_id: Optional[int] = None
     object_name: Optional[str] = None
     target_value_list: List[ValueItem] = Field(default_factory=list)
-    algorithm_input_signals: List[ControlSignal] = Field(default_factory=list)
+    algo_required_input: List[ControlSignal] = Field(default_factory=list)
 
 
 class PredictedResult(MpcResultContractModel):

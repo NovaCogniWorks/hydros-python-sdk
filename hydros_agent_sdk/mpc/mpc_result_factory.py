@@ -16,14 +16,14 @@ class MpcResultFactory:
         object_type: str,
         target_value_list: List[ValueItem],
         object_name: Optional[str] = None,
-        algorithm_input_signals: Optional[List[ControlSignal]] = None,
+        algo_required_input: Optional[List[ControlSignal]] = None,
     ) -> ControlObjectResult:
         return ControlObjectResult(
             object_type=object_type,
             object_id=object_id,
             object_name=object_name,
             target_value_list=target_value_list,
-            algorithm_input_signals=algorithm_input_signals or [],
+            algo_required_input=algo_required_input or [],
         )
 
     @staticmethod
