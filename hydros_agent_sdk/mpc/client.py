@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger(__name__)
-PREDICTION_HORIZON = 12
+DEFAULT_PREDICTION_HORIZON = 12
 
 
 class MpcPlanningError(RuntimeError):
@@ -155,7 +155,11 @@ class MpcPlanningClient:
             step_index=mpc_task_state.current_step,
             mpc_config_url=mpc_task_state.algorithm_config_url,
             control_config_url=mpc_task_state.control_config_url,
-            prediction_horizon=PREDICTION_HORIZON,
+            prediction_horizon=(
+                mpc_task_state.prediction_horizon
+                if mpc_task_state.prediction_horizon is not None
+                else DEFAULT_PREDICTION_HORIZON
+            ),
             upstream_boundaries=self.build_lateral_inflow_boundaries(
                 mpc_task_state.hydro_events,
                 mpc_task_state.current_step,

@@ -58,6 +58,7 @@ class MpcRollingRuntime:
             get_rolling_interval_steps=self.get_roll_steps,
             get_total_steps=self.get_total_steps,
             get_output_step_size=self.get_output_step_size,
+            get_prediction_horizon=self.get_output_future_steps,
         )
         self._lock = RLock()
 
@@ -145,6 +146,10 @@ class MpcRollingRuntime:
         if value is None:
             return None
         return int(value)
+
+    def get_output_future_steps(self) -> Optional[int]:
+        """返回任务级预测步数，缺省值由 MPC 请求装配边界处理。"""
+        return self._get_scenario_int("output_future_steps", "output_future_steps")
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """判断 tick 是否可以在时间序列更新到达前激活 MPC。"""
@@ -352,6 +357,7 @@ class MpcRollingRuntime:
             rolling_interval_steps=rolling_interval_steps,
             total_steps=total_steps,
             output_step_size=self.get_output_step_size(),
+            prediction_horizon=self.get_output_future_steps(),
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,
         )
@@ -378,6 +384,7 @@ class MpcRollingRuntime:
             rolling_interval_steps=rolling_interval_steps,
             total_steps=total_steps,
             output_step_size=self.get_output_step_size(),
+            prediction_horizon=self.get_output_future_steps(),
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,
         )

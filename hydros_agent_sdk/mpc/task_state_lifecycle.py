@@ -19,6 +19,7 @@ class MpcTaskStateLifecycle:
         get_rolling_interval_steps: Optional[Callable[[], int]] = None,
         get_total_steps: Optional[Callable[[], int]] = None,
         get_output_step_size: Optional[Callable[[], Optional[int]]] = None,
+        get_prediction_horizon: Optional[Callable[[], Optional[int]]] = None,
         get_algorithm_config_url: Optional[Callable[[], Optional[str]]] = None,
         get_control_config_url: Optional[Callable[[], Optional[str]]] = None,
     ):
@@ -27,6 +28,7 @@ class MpcTaskStateLifecycle:
         self.get_rolling_interval_steps = get_rolling_interval_steps
         self.get_total_steps = get_total_steps
         self.get_output_step_size = get_output_step_size
+        self.get_prediction_horizon = get_prediction_horizon
         self.get_algorithm_config_url = get_algorithm_config_url
         self.get_control_config_url = get_control_config_url
         self._task_state: Optional[MpcTaskState] = None
@@ -52,6 +54,7 @@ class MpcTaskStateLifecycle:
         rolling_interval_steps: Optional[int] = None,
         total_steps: Optional[int] = None,
         output_step_size: Optional[int] = None,
+        prediction_horizon: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
     ) -> MpcTaskState:
@@ -68,6 +71,10 @@ class MpcTaskStateLifecycle:
         resolved_output_step_size = self._resolve_optional(
             output_step_size,
             self.get_output_step_size,
+        )
+        resolved_prediction_horizon = self._resolve_optional(
+            prediction_horizon,
+            self.get_prediction_horizon,
         )
         resolved_algorithm_config_url = self._resolve_optional(
             algorithm_config_url,
@@ -86,6 +93,7 @@ class MpcTaskStateLifecycle:
                 current_step=step,
                 total_steps=resolved_total_steps,
                 output_step_size=resolved_output_step_size,
+                prediction_horizon=resolved_prediction_horizon,
                 algorithm_config_url=resolved_algorithm_config_url,
                 control_config_url=resolved_control_config_url,
             )
@@ -95,6 +103,7 @@ class MpcTaskStateLifecycle:
         self._task_state.current_step = step
         self._task_state.total_steps = resolved_total_steps
         self._task_state.output_step_size = resolved_output_step_size
+        self._task_state.prediction_horizon = resolved_prediction_horizon
         self._task_state.algorithm_config_url = resolved_algorithm_config_url
         self._task_state.control_config_url = resolved_control_config_url
         return self._task_state
@@ -107,6 +116,7 @@ class MpcTaskStateLifecycle:
         rolling_interval_steps: Optional[int] = None,
         total_steps: Optional[int] = None,
         output_step_size: Optional[int] = None,
+        prediction_horizon: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
     ) -> Optional[MpcTaskState]:
@@ -128,6 +138,7 @@ class MpcTaskStateLifecycle:
             rolling_interval_steps=rolling_interval_steps,
             total_steps=total_steps,
             output_step_size=output_step_size,
+            prediction_horizon=prediction_horizon,
             algorithm_config_url=algorithm_config_url,
             control_config_url=control_config_url,
         )

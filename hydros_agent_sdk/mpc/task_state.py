@@ -21,6 +21,7 @@ class MpcTaskState:
     total_steps: int = 36
     current_loop: int = 1
     output_step_size: Optional[int] = None
+    prediction_horizon: Optional[int] = None
     algorithm_config_url: Optional[str] = None
     control_config_url: Optional[str] = None
     hydro_events: List[TimeSeriesDataChangedEvent] = field(default_factory=list)

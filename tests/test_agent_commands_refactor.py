@@ -1150,11 +1150,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     roll_steps=8,
                     max_steps=32,
                     output_step_seconds=900,
+                    output_future_steps=24,
                 ),
                 sim_agent_properties=SimAgentProperties(
                     roll_steps=60,
                     total_steps=36,
                     output_step_size=1800,
+                    output_future_steps=12,
                 ),
             ),
         )
@@ -1185,6 +1187,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(runtime.task_state.rolling_interval_steps, 8)
         self.assertEqual(runtime.task_state.total_steps, 32)
         self.assertEqual(runtime.task_state.output_step_size, 900)
+        self.assertEqual(runtime.task_state.prediction_horizon, 24)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()
@@ -1528,6 +1531,25 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("sensorData", payload)
         self.assertNotIn("downstreamBoundaries", payload)
         self.assertNotIn("targets", payload)
+
+    def test_mpc_planning_client_uses_task_prediction_horizon(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-013-custom-horizon"),
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=2,
+            prediction_horizon=24,
+        )
+        client = MpcPlanningClient(
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
+            require_sensor_data=False,
+        )
+
+        request = client.build_optimize_request(state, [])
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        self.assertEqual(request.prediction_horizon, 24)
+        self.assertEqual(payload["predictionHorizon"], 24)
 
     def test_mpc_optimize_request_preserves_targets_contract(self):
         request = MpcOptimizeRequest(
