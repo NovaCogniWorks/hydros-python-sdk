@@ -19,7 +19,7 @@ def test_agent_command_dtos_are_owned_by_protocol() -> None:
         object_type="PumpStation",
         target_value_type=DeviceValueTypeEnum.WATER_LEVEL.code,
         target_value=12.3,
-        planning_signals=[
+        algo_required_inputs=[
             ControlSignal(
                 type=SignalType.REFERENCE,
                 object_type="PumpStation",
@@ -35,7 +35,7 @@ def test_agent_command_dtos_are_owned_by_protocol() -> None:
     decoded = AgentCommandDecoder().decode(command.model_dump())
 
     assert isinstance(decoded, HydroStationTargetValueRequest)
-    assert decoded.planning_signals == command.planning_signals
+    assert decoded.algo_required_inputs == command.algo_required_inputs
     assert AgentCommandCatalog.AGTCMD_UPDATE_STATION_TARGET_VALUE_REQUEST in AgentCommandCatalog.values()
     assert HydroStationTargetValueRequest.__module__ == "hydros_agent_sdk.protocol.agent_commands.commands"
 
@@ -64,7 +64,7 @@ def test_station_target_value_dtos_include_java_direct_fields() -> None:
         "group_id",
         "group_size",
         "main_step_index",
-        "planning_signals",
+        "algo_required_inputs",
     } <= HydroStationTargetValueRequest.model_fields.keys()
     assert {"object_id", "target_value_type", "target_value", "target_value_map"} <= (
         HydroStationTargetValueResponse.model_fields.keys()

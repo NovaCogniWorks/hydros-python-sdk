@@ -60,7 +60,7 @@ class HydroStationTargetValueRequest(AgentCommandRequest):
     group_id: Optional[str] = None
     group_size: Optional[int] = None
     main_step_index: Optional[int] = None
-    planning_signals: List[ControlSignal] = Field(default_factory=list)
+    algo_required_inputs: List[ControlSignal] = Field(default_factory=list)
 
     @field_validator("object_type", "target_value_type")
     @classmethod

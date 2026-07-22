@@ -21,7 +21,7 @@ class MpcModelsContractTest(unittest.TestCase):
                                 {"value_type": "water_level", "value": 3.5},
                                 {"value_type": "enabled", "value": True},
                             ],
-                            "algo_required_input": [
+                            "algo_required_inputs": [
                                 {
                                     "type": "REFERENCE",
                                     "object_type": "GateStation",
@@ -68,11 +68,11 @@ class MpcModelsContractTest(unittest.TestCase):
         horizon = response.horizon_controls[0]
 
         control_values = horizon.control_object_list[0].target_value_list
-        algo_required_input = horizon.control_object_list[0].algo_required_input
+        algo_required_inputs = horizon.control_object_list[0].algo_required_inputs
         prediction = horizon.predicted_result_list[0]
         self.assertEqual(control_values[0].numeric_value(), 3.5)
         self.assertIsNone(control_values[1].numeric_value())
-        self.assertEqual(algo_required_input[0].series, [3.4, 3.6])
+        self.assertEqual(algo_required_inputs[0].series, [3.4, 3.6])
         self.assertEqual(prediction.target_value.value_type, "water_level")
         self.assertEqual(prediction.device_result_list[0].object_id, 501)
         self.assertEqual(

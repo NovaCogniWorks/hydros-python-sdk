@@ -55,7 +55,7 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
                                 ValueItem(value_type="enabled", value=True),
                                 ValueItem(value_type="label", value="manual"),
                             ],
-                            algo_required_input=[
+                            algo_required_inputs=[
                                 ControlSignal(
                                     type=SignalType.REFERENCE,
                                     object_type="GateStation",
@@ -107,8 +107,8 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
         self.assertEqual(commands[0].group_size, 1)
         self.assertEqual(commands[0].main_step_index, 4)
         self.assertTrue(commands[0].group_id.startswith("MPC_CTRL_GROUP:scene-structured-control:4:4:1:"))
-        self.assertEqual(len(commands[0].planning_signals), 1)
-        planning_signal = commands[0].planning_signals[0]
+        self.assertEqual(len(commands[0].algo_required_inputs), 1)
+        planning_signal = commands[0].algo_required_inputs[0]
         self.assertEqual(planning_signal.value_type, "front_water_level")
         self.assertEqual(planning_signal.series, [3.3, 3.7])
         self.assertEqual(planning_signal.attributes, {"source": "mpc"})
