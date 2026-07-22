@@ -50,7 +50,6 @@ htmlcov/
 Thumbs.db
 
 # Project specific
-env.properties
 *.bak
 *.tmp
 /data/agent_data.db
