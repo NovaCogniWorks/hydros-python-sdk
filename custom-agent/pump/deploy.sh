@@ -70,12 +70,12 @@ ${APP_NAME} Python 部署脚本
   --debug-port <port>  额外暴露调试端口
   --log-volume <name>  覆盖日志 volume，默认: ${LOG_VOLUME}
   --start-args <args>  覆盖容器启动 agent 参数，默认: ${DEFAULT_AGENT_START_ARGS}
-  KEY=VALUE            追加传入容器的环境变量
+  KEY=VALUE            追加传入容器的环境变量；算法 Host 需要提供
+                       HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=<容器内模型路径>
 
 示例:
-  $0 deploy --target-host 192.168.20.51 --target-port 2375
-  $0 deploy --target-host 192.168.20.51 --target-port 2375 --tag v1.0.1 outflowplan scheduling
-  $0 deploy --target-host 192.168.20.51 --target-port 2375 MQTT_BROKER_URL=192.168.20.10
+  $0 deploy --target-host 192.168.20.51 --target-port 2375 HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=/opt/hydros/custom-agent/pump/data/pump-performance.yaml
+  $0 deploy --target-host 192.168.20.51 --tag v1.0.1 --start-args "outflowplan scheduling" HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=/opt/hydros/custom-agent/pump/data/pump-performance.yaml
   $0 build-image --tag v1.0.1
 USAGE
     exit "${exit_code}"
@@ -264,11 +264,39 @@ add_default_runtime_env() {
     RUNTIME_ENV_OVERRIDES+=("HYDROS_AGENT_START_ARGS=${HYDROS_AGENT_START_ARGS}")
 
     local name
-    for name in HYDROS_NODE_ID HYDROS_CLUSTER_ID MQTT_BROKER_URL MQTT_BROKER_PORT MQTT_TOPIC MQTT_USERNAME MQTT_PASSWORD; do
+    for name in \
+        HYDROS_NODE_ID \
+        HYDROS_CLUSTER_ID \
+        MQTT_BROKER_URL \
+        MQTT_BROKER_PORT \
+        MQTT_TOPIC \
+        MQTT_USERNAME \
+        MQTT_PASSWORD \
+        HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG; do
         if [ -n "${!name:-}" ]; then
             RUNTIME_ENV_OVERRIDES+=("${name}=${!name}")
         fi
     done
+}
+
+require_control_algorithm_model_config() {
+    local item
+    local model_config=""
+    for item in "${RUNTIME_ENV_OVERRIDES[@]}"; do
+        if [[ "${item}" == HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=* ]]; then
+            model_config="${item#*=}"
+        fi
+    done
+
+    if [ -z "${model_config}" ]; then
+        log_error "缺少 HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG"
+        log_error "请提供容器内泵性能模型绝对路径，算法 HTTP Host 才能完成启动注册"
+        exit 1
+    fi
+    if [[ "${model_config}" != /* ]]; then
+        log_error "HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG 必须是容器内绝对路径: ${model_config}"
+        exit 1
+    fi
 }
 
 build_run_args() {
@@ -300,7 +328,6 @@ build_run_args() {
 start_container() {
     log_step 3 "启动新容器"
     resolve_image_names
-    add_default_runtime_env
     build_run_args
 
     docker volume create "${LOG_VOLUME}" >/dev/null
@@ -335,6 +362,8 @@ run_deploy() {
     log_header "${APP_NAME} Python 部署系统"
     check_command docker
     setup_environment
+    add_default_runtime_env
+    require_control_algorithm_model_config
     build_image
     cleanup_container
     start_container

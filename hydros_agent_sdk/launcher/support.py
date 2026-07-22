@@ -12,7 +12,7 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, Type
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
 from hydros_agent_sdk.config_loader import load_env_config
@@ -27,6 +27,16 @@ from hydros_agent_sdk.agent_constants import (
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 
 logger = logging.getLogger(__name__)
+
+
+class ManagedRuntimeService(Protocol):
+    """与多智能体进程共享生命周期的应用服务。"""
+
+    def start(self) -> None:
+        """启动服务；失败时抛出异常并阻止 Agent runtime 启动。"""
+
+    def stop(self) -> None:
+        """停止服务并释放端口、线程等运行时资源。"""
 
 
 @dataclass(frozen=True)
@@ -867,6 +877,7 @@ class MultiAgentCoordinator:
         client_factory: Optional[CoordinationClientFactory] = None,
         startup_reporter: Optional[LauncherStartupReporter] = None,
         callback_factory: Optional[Any] = None,
+        managed_services: Optional[Sequence[ManagedRuntimeService]] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.launcher_dir = launcher_dir
@@ -890,6 +901,8 @@ class MultiAgentCoordinator:
             logger=self.logger,
         )
         self.callback_factory = callback_factory or self._create_callback
+        self.managed_services = tuple(managed_services or ())
+        self._started_managed_services: List[ManagedRuntimeService] = []
         self.running = False
 
     def load_agent_module(self, agent_name: str) -> AgentModuleInfo:
@@ -912,17 +925,22 @@ class MultiAgentCoordinator:
             self.logger.error("Failed to register agents: %s", exc, exc_info=True)
             return False
 
-        self.logger.info("")
-        self.logger.info("Creating SimCoordinationClient...")
-        self.client = self.client_factory.create(env_config, self.callback)
-        self.callback.set_client(self.client)
+        if not self._start_managed_services():
+            return False
 
         self.logger.info("")
-        self.logger.info("Starting coordination client...")
+        self.logger.info("Creating SimCoordinationClient...")
         try:
+            self.client = self.client_factory.create(env_config, self.callback)
+            self.callback.set_client(self.client)
+
+            self.logger.info("")
+            self.logger.info("Starting coordination client...")
             self.client.start()
         except Exception as exc:
             self.logger.error("Failed to start coordination client: %s", exc, exc_info=True)
+            self._stop_coordination_client()
+            self._stop_managed_services()
             return False
 
         self.startup_reporter.log_started(env_config, registered_agents)
@@ -931,27 +949,66 @@ class MultiAgentCoordinator:
 
     def stop_all(self) -> None:
         """停止所有 agents。"""
-        if not self.running:
+        if not self.running and not self._started_managed_services:
             return
 
+        self.running = False
         self.logger.info("")
         self.logger.info("=" * 70)
         self.logger.info("Stopping multi-agent system...")
         self.logger.info("=" * 70)
 
-        if self.client:
-            try:
-                self.logger.info("Stopping coordination client...")
-                self.client.stop()
-                self.logger.info("  ✓ Client stopped")
-            except Exception as exc:
-                self.logger.error("  ✗ Error stopping client: %s", exc)
-
-        self.running = False
+        self._stop_managed_services()
+        self._stop_coordination_client()
 
         self.logger.info("=" * 70)
         self.logger.info("Multi-agent system stopped")
         self.logger.info("=" * 70)
+
+    def _start_managed_services(self) -> bool:
+        for service in self.managed_services:
+            service_name = service.__class__.__name__
+            try:
+                self.logger.info("Starting managed runtime service: %s", service_name)
+                service.start()
+                self._started_managed_services.append(service)
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to start managed runtime service %s: %s",
+                    service_name,
+                    exc,
+                    exc_info=True,
+                )
+                self._stop_managed_services()
+                return False
+        return True
+
+    def _stop_managed_services(self) -> None:
+        while self._started_managed_services:
+            service = self._started_managed_services.pop()
+            service_name = service.__class__.__name__
+            try:
+                self.logger.info("Stopping managed runtime service: %s", service_name)
+                service.stop()
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to stop managed runtime service %s: %s",
+                    service_name,
+                    exc,
+                    exc_info=True,
+                )
+
+    def _stop_coordination_client(self) -> None:
+        if self.client is None:
+            return
+        try:
+            self.logger.info("Stopping coordination client...")
+            self.client.stop()
+            self.logger.info("  ✓ Client stopped")
+        except Exception as exc:
+            self.logger.error("  ✗ Error stopping client: %s", exc, exc_info=True)
+        finally:
+            self.client = None
 
     def run(self) -> None:
         """运行主循环，直到收到停止信号。"""
@@ -1008,6 +1065,7 @@ class MultiAgentLauncherApp:
         project_root: Optional[str] = None,
         default_debug_port: int = 5678,
         service_factory: Optional[LauncherServiceFactory] = None,
+        managed_services: Optional[Sequence[ManagedRuntimeService]] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.launcher_dir = launcher_dir
@@ -1017,6 +1075,7 @@ class MultiAgentLauncherApp:
         self.project_root = project_root or launcher_dir
         self.default_debug_port = default_debug_port
         self.service_factory = service_factory or LauncherServiceFactory(launcher_dir)
+        self.managed_services = tuple(managed_services or ())
         self.logger = logger or logging.getLogger(__name__)
 
     def run(self, argv: List[str]) -> int:
@@ -1075,6 +1134,7 @@ class MultiAgentLauncherApp:
             log_file=self.log_file,
             module_loader=services.module_loader,
             register_default_central_scheduling_agent=options.enable_system_central_scheduling_agent,
+            managed_services=self.managed_services,
             logger=self.logger,
         )
         runtime = LauncherRuntime(coordinator, logger=self.logger)

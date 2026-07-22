@@ -27,7 +27,10 @@ from pump_flow_dmpc import (  # noqa: E402
     PumpStationFlowDmpcAlgorithm,
     TabulatedPumpPerformanceRepository,
 )
-from pump_flow_dmpc_service import create_pump_flow_dmpc_server  # noqa: E402
+from pump_flow_dmpc_service import (  # noqa: E402
+    PumpFlowDmpcHttpHost,
+    create_pump_flow_dmpc_server,
+)
 
 
 class PumpFlowDmpcTest(unittest.TestCase):
@@ -136,6 +139,39 @@ class PumpFlowDmpcTest(unittest.TestCase):
                 self.assertGreater(server.server_address[1], 0)
             finally:
                 server.server_close()
+
+    def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_path = os.path.join(temporary_directory, "pump-performance.yaml")
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                config_file.write(
+                    "stations:\n"
+                    "  '2001':\n"
+                    "    units:\n"
+                    "      '2101':\n"
+                    "        curve:\n"
+                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
+                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
+                )
+            host = PumpFlowDmpcHttpHost(config_path, host="127.0.0.1", port=0)
+
+            host.start()
+            try:
+                self.assertIsNotNone(host.server_address)
+                self.assertGreater(host.server_address[1], 0)
+            finally:
+                host.stop()
+
+            self.assertIsNone(host.server_address)
+
+    def test_managed_http_host_requires_explicit_model_config(self):
+        host = PumpFlowDmpcHttpHost("", host="127.0.0.1", port=0)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG is required",
+        ):
+            host.start()
 
     def test_runtime_and_http_service_return_standard_output(self):
         runtime = ControlAlgorithmRuntime()

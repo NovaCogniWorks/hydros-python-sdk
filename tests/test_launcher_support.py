@@ -150,6 +150,21 @@ def test_launcher_doctor_returns_nonzero_when_no_agents(monkeypatch, capsys):
 
 
 def test_multi_agent_coordinator_runs_generic_registration_flow():
+    events = []
+
+    class ManagedService:
+        def __init__(self):
+            self.started = False
+            self.stopped = False
+
+        def start(self):
+            events.append("service.start")
+            self.started = True
+
+        def stop(self):
+            events.append("service.stop")
+            self.stopped = True
+
     class Callback:
         def __init__(self):
             self.client = None
@@ -173,9 +188,11 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
             self.stopped = False
 
         def start(self):
+            events.append("client.start")
             self.started = True
 
         def stop(self):
+            events.append("client.stop")
             self.stopped = True
 
     class ClientFactory:
@@ -205,6 +222,7 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
     registration_service = RegistrationService()
     client_factory = ClientFactory(client)
     reporter = Reporter()
+    managed_service = ManagedService()
     coordinator = MultiAgentCoordinator(
         launcher_dir="/tmp/hydros-agents",
         env_file="/tmp/hydros-agents/env.properties",
@@ -214,6 +232,7 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
         client_factory=client_factory,
         startup_reporter=reporter,
         callback_factory=lambda: callback,
+        managed_services=(managed_service,),
     )
 
     assert coordinator.start_all(["outflowplan", "scheduling"])
@@ -223,16 +242,36 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
     assert registration_service.agent_names == ["outflowplan", "scheduling"]
     assert client_factory.callback is callback
     assert callback.client is client
+    assert managed_service.started
     assert client.started
     assert reporter.started
+    assert events == ["service.start", "client.start"]
 
     coordinator.stop_all()
 
+    assert managed_service.stopped
     assert client.stopped
+    assert events == [
+        "service.start",
+        "client.start",
+        "service.stop",
+        "client.stop",
+    ]
     assert not coordinator.running
 
 
 def test_multi_agent_coordinator_returns_false_when_client_start_fails():
+    class ManagedService:
+        def __init__(self):
+            self.started = False
+            self.stopped = False
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            self.stopped = True
+
     class Callback:
         def __init__(self):
             self.client = None
@@ -268,6 +307,7 @@ def test_multi_agent_coordinator_returns_false_when_client_start_fails():
     callback = Callback()
     client = Client()
     reporter = Reporter()
+    managed_service = ManagedService()
     coordinator = MultiAgentCoordinator(
         launcher_dir="/tmp/hydros-agents",
         env_file="/tmp/hydros-agents/env.properties",
@@ -277,12 +317,62 @@ def test_multi_agent_coordinator_returns_false_when_client_start_fails():
         client_factory=ClientFactory(client),
         startup_reporter=reporter,
         callback_factory=lambda: callback,
+        managed_services=(managed_service,),
     )
 
     assert not coordinator.start_all(["scheduling"])
 
     assert callback.client is client
+    assert managed_service.started
+    assert managed_service.stopped
     assert not reporter.started
+    assert not coordinator.running
+
+
+def test_multi_agent_coordinator_does_not_start_client_when_managed_service_fails():
+    class Callback:
+        def set_client(self, _client):
+            raise AssertionError("coordination client must not be created")
+
+    class RegistrationService:
+        def register_agents(self, _callback, _agent_names):
+            return {
+                "mqtt_broker_url": "localhost",
+                "mqtt_broker_port": "1883",
+                "mqtt_topic": "topic",
+            }, []
+
+    class FailingManagedService:
+        def start(self):
+            raise ValueError("model config is required")
+
+        def stop(self):
+            raise AssertionError("service was never started")
+
+    class ClientFactory:
+        def create(self, _env_config, _callback):
+            raise AssertionError("coordination client must not be created")
+
+    class Reporter:
+        def log_starting(self, _agent_names):
+            return None
+
+        def log_started(self, _env_config, _registered_agents):
+            raise AssertionError("startup must not be reported")
+
+    coordinator = MultiAgentCoordinator(
+        launcher_dir="/tmp/hydros-agents",
+        env_file="/tmp/hydros-agents/env.properties",
+        log_file="/tmp/hydros-agents/logs/hydros.log",
+        module_loader=object(),
+        registration_service=RegistrationService(),
+        client_factory=ClientFactory(),
+        startup_reporter=Reporter(),
+        callback_factory=Callback,
+        managed_services=(FailingManagedService(),),
+    )
+
+    assert not coordinator.start_all(["scheduling"])
     assert not coordinator.running
 
 

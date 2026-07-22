@@ -187,7 +187,7 @@ main() {
         echo ""
     fi
 
-    "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
+    "$PYTHON_EXEC" "${SCRIPT_DIR}/pump_application.py" \
         --launcher-dir "${SCRIPT_DIR}" \
         --project-root "${PROJECT_ROOT}" \
         -- "${PYTHON_ARGS[@]}"
