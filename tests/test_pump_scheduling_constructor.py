@@ -240,7 +240,7 @@ def test_pump_scheduling_builds_grouped_station_flow_commands_from_current_horiz
 
     assert commands == [
         {
-            "target_agent_code": "STATION_AGENT",
+            "target_agent_code": "GATE_STATION_AGENT",
             "target_command_type": "water_flow",
             "target_value": "123.46",
             "object_id": 1001,

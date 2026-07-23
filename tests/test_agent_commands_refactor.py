@@ -901,6 +901,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             group_id=None,
             group_size=None,
             main_step_index=None,
+            algo_required_inputs=None,
         )
         send_command.assert_called_once_with(pump_request)
 
