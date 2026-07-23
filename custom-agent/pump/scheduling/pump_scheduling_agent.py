@@ -194,7 +194,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         self._init_dynamic_demand_plan(build_zero_demand_plan, payload)
         
-        self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
+        cache_dir = os.path.join(os.path.dirname(self._resolve_config_path()), ".cache")
+        self.flow_service = FlowDepartService(
+            self.system_config, config_dict=payload, cache_dir=cache_dir,
+        )
+        loaded = self.flow_service.load_flow_depart_cache()
+        logger.info("flow depart cache loaded %d tables from %s", loaded, cache_dir)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
         self.supervisor = ODDSupervisor(self.runtime)
         self.observers = DisturbanceObserverBank(self.system_config, self.runtime)
@@ -402,7 +407,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     angle_val = float(angle)
                     status = 0 if abs(angle_val - 100.0) < 1e-3 else 1
                     # 同步到 Agent 缓存。注意：这里直接覆盖 status 和 openings
-                    # 这个修改代表“从真实环境同步最新状态”，并没有修改 time_since_switch/time_since_adjust
+                    # 这个修改代表'从真实环境同步最新状态'，并没有修改 time_since_switch/time_since_adjust
                     # 所以这个同步行为不会错误地计入下层MPC决策的启停和调整次数，逻辑是正确的。
                     if self.station_memories and sid in self.station_memories:
                         self.station_memories[sid].unit_status[uid] = status
@@ -802,9 +807,119 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
+        from hydros_agent_sdk.control_algorithms.models import ControlSignal, SignalType
         # horizon_step_list 长度 = 72 - step；下层预测不够则 None 补全
         total_steps = self._get_total_scheduling_steps()
         plan_len = max(1, total_steps - step)
+        
+        # ---- 预构建每个站点的 algo_required_inputs (72步序列 + 机组记忆) ----
+        station_algo_inputs: Dict[int, List[ControlSignal]] = {}
+        for sid in self.system_config.station_ids:
+            st_action = actions[sid]
+            algo_inputs: List[ControlSignal] = []
+            
+            # --- 站级预测序列 (仅有效值) ---
+            front_series = list(upper_plan.station_front_levels.get(sid, []))
+            back_series = list(upper_plan.station_back_levels.get(sid, []))
+            eff_series = list(upper_plan.efficiency_refs.get(sid, []))
+            
+            algo_inputs.append(ControlSignal(
+                object_type=HydroObjectType.PUMP_STATION.value,
+                object_id=sid,
+                type=SignalType.REFERENCE,
+                value_type='station_front_water_level',
+                series=front_series,
+            ))
+            algo_inputs.append(ControlSignal(
+                object_type=HydroObjectType.PUMP_STATION.value,
+                object_id=sid,
+                type=SignalType.REFERENCE,
+                value_type='station_back_water_level',
+                series=back_series,
+            ))
+            algo_inputs.append(ControlSignal(
+                object_type=HydroObjectType.PUMP_STATION.value,
+                object_id=sid,
+                type=SignalType.REFERENCE,
+                value_type='station_efficiency',
+                series=eff_series,
+            ))
+            
+            # --- 站级记忆 (station_memories) ---
+            if self.station_memories and sid in self.station_memories:
+                mem = self.station_memories[sid]
+                algo_inputs.append(ControlSignal(
+                    object_type=HydroObjectType.PUMP_STATION.value,
+                    object_id=sid,
+                    type=SignalType.OBSERVATION,
+                    value_type='station_memory',
+                    attributes={
+                        'last_selected_flow': mem.last_selected_flow,
+                        'mode': mem.mode,
+                        'active_unit_ids': mem.active_unit_ids[:],
+                    },
+                ))
+            
+            # --- 下层反馈 (lower_feedback) ---
+            if hasattr(self, 'lower_feedback'):
+                lf = self.lower_feedback
+                algo_inputs.append(ControlSignal(
+                    object_type=HydroObjectType.PUMP_STATION.value,
+                    object_id=sid,
+                    type=SignalType.OBSERVATION,
+                    value_type='lower_feedback',
+                    attributes={
+                        'feasible_flow_range': list(lf.feasible_flow_ranges.get(sid, [0.0, 0.0])),
+                        'plan_execution_error': float(lf.plan_execution_errors.get(sid, 0.0)),
+                        'current_mode': lf.current_modes.get(sid, ''),
+                    },
+                ))
+            
+            # --- 流量历史 (station_flow_history) ---
+            if hasattr(self, 'station_flow_history') and sid in self.station_flow_history:
+                fh = self.station_flow_history[sid]
+                algo_inputs.append(ControlSignal(
+                    object_type=HydroObjectType.PUMP_STATION.value,
+                    object_id=sid,
+                    type=SignalType.OBSERVATION,
+                    value_type='flow_history',
+                    attributes={'history': [float(v) for v in fh]},
+                ))
+            
+            # --- 每台机组：叶片角序列 (仅下层算出的有效值) ---
+            uids = self.available_units_map.get(sid, [])
+            for uid in uids:
+                predicted_openings = getattr(st_action, 'predicted_unit_openings', None)
+                if isinstance(predicted_openings, dict) and uid in predicted_openings:
+                    blade_seq = list(predicted_openings[uid])
+                else:
+                    blade_seq = []
+
+                algo_inputs.append(ControlSignal(
+                    object_type='PUMP',
+                    object_id=uid,
+                    type=SignalType.REFERENCE,
+                    value_type='blade_angle',
+                    series=blade_seq,
+                ))
+                
+                # --- 机组记忆 ---
+                if self.station_memories and sid in self.station_memories:
+                    mem = self.station_memories[sid]
+                    algo_inputs.append(ControlSignal(
+                        object_type='PUMP',
+                        object_id=uid,
+                        type=SignalType.OBSERVATION,
+                        value_type='unit_memory',
+                        attributes={
+                            'unit_status': int(mem.unit_status.get(uid, 0)),
+                            'unit_opening': float(mem.unit_openings.get(uid, 0.0)),
+                            'time_since_adjust': int(mem.time_since_adjust.get(uid, 999)),
+                            'time_since_switch': int(mem.time_since_switch.get(uid, 999)),
+                        },
+                    ))
+            
+            station_algo_inputs[sid] = algo_inputs
         
         horizon_step_list = []
         for i in range(plan_len):
@@ -817,17 +932,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 # 全站水位预测从 upper_plan 中取
                 st_front = upper_plan.station_front_levels[sid][i] if sid in upper_plan.station_front_levels and i < len(upper_plan.station_front_levels[sid]) else None
                 st_back = upper_plan.station_back_levels[sid][i] if sid in upper_plan.station_back_levels and i < len(upper_plan.station_back_levels[sid]) else None
-                
-                # 单机组预测与控制
-                for uid, op in st_action.unit_openings.items():
-                    # 控制量（叶片角）
-                    st = st_action.unit_status.get(uid, 0)
-                    target_value = 100.0 if st == 0 else float(op)
-                    
-                    
-                    # 单机组预测流量和效率
-                    u_flow_list = st_action.predicted_unit_flows.get(uid, [])
-                    u_eff_list = getattr(st_action, "predicted_unit_efficiencies", {}).get(uid, [])
                 
                 # 全站级预测：流量和效率统一从 upper_plan 取
                 ref_flow_list = upper_plan.flow_refs.get(sid, [])
@@ -843,6 +947,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         target_value_list=[
                             ValueItem(value_type=MetricsCodes.WATER_FLOW, value=float(st_flow))
                         ] if st_flow is not None else [],
+                        algo_required_inputs=station_algo_inputs.get(sid, []),
                     )
                 )
 
@@ -939,15 +1044,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         target_value.value,
                     )
                     continue
-                commands.append(
-                    {
-                        "target_agent_code": "GATE_STATION_AGENT",
-                        "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
-                        "target_value": str(round(water_flow, 2)),
-                        "object_id": int(control_object.object_id),
-                        "object_type": control_object.object_type,
-                    }
-                )
+                command: Dict[str, Any] = {
+                    "target_agent_code": "GATE_STATION_AGENT",
+                    "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
+                    "target_value": str(round(water_flow, 2)),
+                    "object_id": int(control_object.object_id),
+                    "object_type": control_object.object_type,
+                }
+                if control_object.algo_required_inputs:
+                    command["algo_required_inputs"] = list(
+                        control_object.algo_required_inputs
+                    )
+                commands.append(command)
 
         if not commands:
             logger.warning("首个 MPC horizon 没有可下发的 PumpStation water_flow 控制目标")

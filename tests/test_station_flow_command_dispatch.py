@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.models import AgentDriveMode, HydroAgentInstance, SimulationContext
 
@@ -24,6 +25,13 @@ def test_station_flow_command_preserves_group_fields_through_builder_and_dispatc
     context = SimulationContext(biz_scene_instance_id="scene-station-flow")
     source = build_agent("source-agent", context)
     target = build_agent("STATION_AGENT", context)
+    planning_signal = ControlSignal(
+        type=SignalType.REFERENCE,
+        object_type="PumpStation",
+        object_id=1001,
+        value_type="station_front_water_level",
+        series=[12.3, 12.4],
+    )
     builder = StationTargetValueCommandBuilder(
         source_agent=source,
         get_sibling_agent_instance=lambda agent_code: target if agent_code == "STATION_AGENT" else None,
@@ -46,6 +54,7 @@ def test_station_flow_command_preserves_group_fields_through_builder_and_dispatc
                 "group_id": "pump-station-flow:8",
                 "group_size": 1,
                 "main_step_index": 8,
+                "algo_required_inputs": [planning_signal],
             }
         ]
     )
@@ -59,3 +68,4 @@ def test_station_flow_command_preserves_group_fields_through_builder_and_dispatc
     assert request.group_id == "pump-station-flow:8"
     assert request.group_size == 1
     assert request.main_step_index == 8
+    assert request.algo_required_inputs == [planning_signal]
