@@ -194,7 +194,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         self._init_dynamic_demand_plan(build_zero_demand_plan, payload)
         
-        self.flow_service = FlowDepartService(self.system_config, config_dict=payload)
+        cache_dir = os.path.join(os.path.dirname(self._resolve_config_path()), ".cache")
+        self.flow_service = FlowDepartService(
+            self.system_config, config_dict=payload, cache_dir=cache_dir,
+        )
+        loaded = self.flow_service.load_flow_depart_cache()
+        logger.info("flow depart cache loaded %d tables from %s", loaded, cache_dir)
         self.local_controller = LocalController(self.system_config, self.runtime, self.flow_service)
         self.supervisor = ODDSupervisor(self.runtime)
         self.observers = DisturbanceObserverBank(self.system_config, self.runtime)

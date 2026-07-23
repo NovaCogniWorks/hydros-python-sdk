@@ -4,6 +4,8 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
+import pickle
+import logging
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
@@ -14,6 +16,8 @@ from pump_unit import PumpUnit
 from .station_model import PumpStationModel
 from .types import StationConfig, SystemConfig
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class FlowDepartService:
@@ -23,6 +27,7 @@ class FlowDepartService:
     _cache: Dict[Tuple[int, Tuple[int, ...]], pd.DataFrame] = field(default_factory=dict)
     _model_cache: Dict[Tuple[int, Tuple[int, ...]], PumpStationModel] = field(default_factory=dict)
     _unit_model_cache: Dict[int, Dict[int, PumpUnit]] = field(default_factory=dict)
+    cache_dir: Optional[str] = None
 
     def _available_key(self, station_id: int, available_unit_ids: Iterable[int]) -> Tuple[int, Tuple[int, ...]]:
         return station_id, tuple(sorted(available_unit_ids))
@@ -63,6 +68,43 @@ class FlowDepartService:
                 return str(workbook.sheet_names[0])
             raise KeyError(f"Sheet '{target_sheet}' not found in {workbook.io}")
         return sheet_name
+
+    def _resolve_cache_path(self) -> Path:
+        if self.cache_dir:
+            cache_dir = Path(self.cache_dir)
+        else:
+            config_root = Path(self.config_path or self.system_config.source_config_path).resolve().parent
+            cache_dir = config_root / ".cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "flow_depart_cache.pkl"
+
+    def load_flow_depart_cache(self) -> int:
+        cache_path = self._resolve_cache_path()
+        if not cache_path.exists():
+            logger.info("flow depart cache not found at %s", cache_path)
+            return 0
+        try:
+            with open(cache_path, "rb") as f:
+                loaded: dict = pickle.load(f)
+            loaded_count = 0
+            for key, df in loaded.items():
+                if isinstance(key, tuple) and len(key) == 2 and isinstance(df, pd.DataFrame):
+                    self._cache[key] = df
+                    loaded_count += 1
+            logger.info("flow depart cache loaded: %d tables from %s", loaded_count, cache_path)
+            return loaded_count
+        except Exception as e:
+            logger.warning("failed to load flow depart cache from %s: %s", cache_path, e)
+            return 0
+
+    def save_flow_depart_cache(self) -> None:
+        cache_path = self._resolve_cache_path()
+        try:
+            with open(cache_path, "wb") as f:
+                pickle.dump(self._cache, f)
+            logger.info("flow depart cache saved: %d tables to %s", len(self._cache), cache_path)
+        except Exception as e:
+            logger.warning("failed to save flow depart cache: %s", e)
 
     def _load_unit_models(self, station_id: int) -> Dict[int, PumpUnit]:
         cached = self._unit_model_cache.get(station_id)
@@ -127,6 +169,7 @@ class FlowDepartService:
         if table is None or table.empty:
             raise ValueError(f"Unable to generate flow depart table for station {station_id} and units {key[1]}")
         self._cache[key] = table.copy()
+        self.save_flow_depart_cache()
         return table.copy()
 
     def get_station_model(self, station_id: int, available_unit_ids: Iterable[int]) -> PumpStationModel:
