@@ -813,20 +813,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             st_action = actions[sid]
             algo_inputs: List[ControlSignal] = []
             
-            # --- 站级预测序列 (72步，全长有效) ---
+            # --- 站级预测序列 (仅有效值) ---
             front_series = list(upper_plan.station_front_levels.get(sid, []))
             back_series = list(upper_plan.station_back_levels.get(sid, []))
             eff_series = list(upper_plan.efficiency_refs.get(sid, []))
-            # 确保序列长度为 plan_len
-            while len(front_series) < plan_len:
-                front_series.append(float('nan'))
-            while len(back_series) < plan_len:
-                back_series.append(float('nan'))
-            while len(eff_series) < plan_len:
-                eff_series.append(float('nan'))
-            front_series = front_series[:plan_len]
-            back_series = back_series[:plan_len]
-            eff_series = eff_series[:plan_len]
             
             algo_inputs.append(ControlSignal(
                 object_type=HydroObjectType.PUMP_STATION.value,
@@ -891,7 +881,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     attributes={'history': [float(v) for v in fh]},
                 ))
             
-            # --- 每台机组：叶片角序列 (72步，下层超出部分用 nan) ---
+            # --- 每台机组：叶片角序列 (仅下层算出的有效值) ---
             uids = self.available_units_map.get(sid, [])
             for uid in uids:
                 predicted_openings = getattr(st_action, 'predicted_unit_openings', None)
@@ -899,9 +889,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     blade_seq = list(predicted_openings[uid])
                 else:
                     blade_seq = []
-                while len(blade_seq) < plan_len:
-                    blade_seq.append(float('nan'))
-                blade_seq = blade_seq[:plan_len]
+
                 algo_inputs.append(ControlSignal(
                     object_type='PUMP',
                     object_id=uid,
