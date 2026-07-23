@@ -802,7 +802,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         # 按照用户要求，生成 MpcPredictionResultReport 并发送
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
-        from hydros_agent_sdk.control_algorithms.models import ControlSignal
+        from hydros_agent_sdk.control_algorithms.models import ControlSignal, SignalType
         # horizon_step_list 长度 = 72 - step；下层预测不够则 None 补全
         total_steps = self._get_total_scheduling_steps()
         plan_len = max(1, total_steps - step)
@@ -831,18 +831,21 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             algo_inputs.append(ControlSignal(
                 object_type=HydroObjectType.PUMP_STATION.value,
                 object_id=sid,
+                type=SignalType.REFERENCE,
                 value_type='station_front_water_level',
                 series=front_series,
             ))
             algo_inputs.append(ControlSignal(
                 object_type=HydroObjectType.PUMP_STATION.value,
                 object_id=sid,
+                type=SignalType.REFERENCE,
                 value_type='station_back_water_level',
                 series=back_series,
             ))
             algo_inputs.append(ControlSignal(
                 object_type=HydroObjectType.PUMP_STATION.value,
                 object_id=sid,
+                type=SignalType.REFERENCE,
                 value_type='station_efficiency',
                 series=eff_series,
             ))
@@ -853,6 +856,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 algo_inputs.append(ControlSignal(
                     object_type=HydroObjectType.PUMP_STATION.value,
                     object_id=sid,
+                    type=SignalType.OBSERVATION,
                     value_type='station_memory',
                     attributes={
                         'last_selected_flow': mem.last_selected_flow,
@@ -867,6 +871,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 algo_inputs.append(ControlSignal(
                     object_type=HydroObjectType.PUMP_STATION.value,
                     object_id=sid,
+                    type=SignalType.OBSERVATION,
                     value_type='lower_feedback',
                     attributes={
                         'feasible_flow_range': list(lf.feasible_flow_ranges.get(sid, [0.0, 0.0])),
@@ -881,6 +886,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 algo_inputs.append(ControlSignal(
                     object_type=HydroObjectType.PUMP_STATION.value,
                     object_id=sid,
+                    type=SignalType.OBSERVATION,
                     value_type='flow_history',
                     attributes={'history': [float(v) for v in fh]},
                 ))
@@ -899,6 +905,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 algo_inputs.append(ControlSignal(
                     object_type='PUMP',
                     object_id=uid,
+                    type=SignalType.REFERENCE,
                     value_type='blade_angle',
                     series=blade_seq,
                 ))
@@ -909,6 +916,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     algo_inputs.append(ControlSignal(
                         object_type='PUMP',
                         object_id=uid,
+                        type=SignalType.OBSERVATION,
                         value_type='unit_memory',
                         attributes={
                             'unit_status': int(mem.unit_status.get(uid, 0)),
