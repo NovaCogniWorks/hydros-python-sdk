@@ -9,13 +9,9 @@ from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSched
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
     SimTaskInitResponse,
-    SimTaskTerminateRequest,
-    SimTaskTerminateResponse,
 )
 from hydros_agent_sdk.protocol.models import AgentStatus
-from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
-from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 
 logger = logging.getLogger(__name__)
 
@@ -49,24 +45,10 @@ class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 }
                 logger.info("Loaded object-agent mapping entries: %s", len(self._object_agent_code_map))
 
-            settings = load_runtime_env_settings()
-            metrics_topic = PropertyParseUtils.get_string(
-                self.properties,
-                "metrics_topic",
-                settings.metrics_topic,
-            )
-            if metrics_topic:
-                cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
-                rendered_topic = settings.render_topic(str(metrics_topic), cluster_id=cluster_id)
-                task_id = self.context.biz_scene_instance_id
-                full_topic = f"{rendered_topic.rstrip('/')}/{task_id}"
-                logger.info("Subscribing system central field metrics topic: %s", full_topic)
-                self._metrics_subscriber.subscribe(full_topic)
-            else:
+            subscribed_topic = self.subscribe_field_metrics()
+            if not subscribed_topic:
                 logger.info("No metrics topic configured; MPC will rely on injected/provider sensor data")
 
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
@@ -75,13 +57,3 @@ class SystemCentralSchedulingAgent(MpcCentralSchedulingAgent):
         except Exception:
             self._agent_command_gateway.shutdown()
             raise
-
-    def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        logger.info("Terminating system central scheduling agent: %s", self.agent_id)
-
-        self._agent_command_gateway.shutdown()
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
-
-        return ResponseFactory.terminate_succeed(self, request)

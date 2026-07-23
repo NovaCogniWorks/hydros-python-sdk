@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, List, Optional
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +22,18 @@ class ControlCommandDispatcher:
         self.build_station_target_value_request = build_station_target_value_request
 
     def dispatch(self, control_commands: List[Any]) -> None:
+        self.dispatch_prepared(self.prepare(control_commands))
+
+    def prepare(self, control_commands: List[Any]) -> List[AgentCommand]:
+        """在下发前构造具体指令，使调用方可以提前登记终态屏障。
+
+        custom agent 仍可提交 dict 形式的控制意图；当 tick 完成依赖边缘执行终态报告时，
+        必须在发送前暴露由它生成的 request，以便登记关联关系。
+        """
+        prepared: List[AgentCommand] = []
         for command in control_commands:
             if isinstance(command, AgentCommand):
-                self.send_command(command)
+                prepared.append(command)
                 continue
 
             target_agent_code = command.get("target_agent_code")
@@ -52,6 +61,15 @@ class ControlCommandDispatcher:
                 target_value=target_value,
                 object_id=object_id,
                 object_type=object_type,
+                group_id=command.get("group_id"),
+                group_size=command.get("group_size"),
+                main_step_index=command.get("main_step_index"),
             )
             if command_request is not None:
-                self.send_command(command_request)
+                prepared.append(command_request)
+        return prepared
+
+    def dispatch_prepared(self, control_commands: List[AgentCommand]) -> None:
+        """发送此前由 :meth:`prepare` 返回的指令。"""
+        for command in control_commands:
+            self.send_command(command)

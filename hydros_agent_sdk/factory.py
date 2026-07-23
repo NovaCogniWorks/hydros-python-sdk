@@ -17,7 +17,9 @@ from hydros_agent_sdk.agent_constants import (
 )
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk import BaseHydroAgent, SimCoordinationClient
+    from hydros_agent_sdk.base_agent import BaseHydroAgent
+    from hydros_agent_sdk.coordination_client import SimCoordinationClient
+    from hydros_agent_sdk.developer_api import CustomAgent
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +132,16 @@ class HydroAgentFactory(Generic[AgentType]):
 
         try:
             # 读取 properties 文件
-            with open(config_file, 'r') as f:
-                config_string = '[DEFAULT]\n' + f.read()
+            with open(config_file, "r") as config_stream:
+                config_string = "[DEFAULT]\n" + config_stream.read()
             config.read_string(config_string)
 
             # 必填属性
-            required_props = ['agent_code', 'agent_type', 'agent_name']
+            required_props = ["agent_code", "agent_type", "agent_name"]
             missing_props = []
 
             for prop in required_props:
-                if not config.has_option('DEFAULT', prop):
+                if not config.has_option("DEFAULT", prop):
                     missing_props.append(prop)
 
             if missing_props:
@@ -152,16 +154,48 @@ class HydroAgentFactory(Generic[AgentType]):
             # 注意：hydros_cluster_id 和 hydros_node_id 不应放在 agent.properties 中，
             # 它们从 env.properties 加载。
             return {
-                'agent_code': config.get('DEFAULT', 'agent_code'),
-                'agent_type': config.get('DEFAULT', 'agent_type'),
-                'agent_name': config.get('DEFAULT', 'agent_name'),
+                "agent_code": config.get("DEFAULT", "agent_code"),
+                "agent_type": config.get("DEFAULT", "agent_type"),
+                "agent_name": config.get("DEFAULT", "agent_name"),
             }
-
-        except Exception as e:
-            logger.error(f"Error loading config file: {e}")
+        except Exception as error:
+            logger.error(f"Error loading config file: {error}")
             raise
 
 
+class CustomAgentFactory(HydroAgentFactory):
+    """为开发者实现的 ``CustomAgent`` 创建内部运行时适配器。"""
+
+    def __init__(
+        self,
+        custom_agent_class: Type['CustomAgent'],
+        config_file: str = "./agent.properties",
+        env_config: Optional[Dict[str, str]] = None,
+    ):
+        from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
+
+        super().__init__(CustomAgentRuntimeAdapter, config_file=config_file, env_config=env_config)
+        self.custom_agent_class = custom_agent_class
+
+    def create_agent(self, sim_coordination_client: 'SimCoordinationClient', context: SimulationContext):
+        config = self._load_config(self.config_file)
+        if self.env_config is None:
+            from hydros_agent_sdk.config_loader import load_env_config
+
+            self.env_config = load_env_config(os.path.join(os.path.dirname(self.config_file), "env.properties"))
+
+        custom_agent = self.custom_agent_class()
+        return self.agent_class(
+            custom_agent=custom_agent,
+            sim_coordination_client=sim_coordination_client,
+            agent_id=generate_agent_instance_id(config["agent_code"]),
+            agent_code=config["agent_code"],
+            agent_type=config["agent_type"],
+            agent_name=config["agent_name"],
+            context=context,
+            hydros_cluster_id=self.env_config["hydros_cluster_id"],
+            hydros_node_id=self.env_config["hydros_node_id"],
+        )
 class SystemCentralSchedulingAgentFactory:
     """内置 CENTRAL_SCHEDULING_AGENT 的工厂。"""
 
@@ -176,17 +210,21 @@ class SystemCentralSchedulingAgentFactory:
         context: SimulationContext
     ):
         from hydros_agent_sdk.agents.system_central_scheduling_agent import SystemCentralSchedulingAgent
-        from hydros_agent_sdk.runtime import load_runtime_env_settings
+        from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 
         settings = load_runtime_env_settings(env_config=self.env_config)
         if self.env_config is None:
             self.env_config = settings.raw
-        hydros_cluster_id = (
-            settings.hydros_cluster_id
-            or sim_coordination_client.state_manager.get_cluster_id()
-            or "hydros-cluster-staging"
-        )
-        hydros_node_id = settings.hydros_node_id or sim_coordination_client.state_manager.get_node_id() or "LOCAL"
+        hydros_cluster_id = settings.hydros_cluster_id
+        hydros_node_id = settings.hydros_node_id
+        if not hydros_cluster_id:
+            raise ValueError(
+                "hydros_cluster_id is required to create the system central scheduling agent"
+            )
+        if not hydros_node_id:
+            raise ValueError(
+                "hydros_node_id is required to create the system central scheduling agent"
+            )
 
         agent_code = SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE
         agent_id = generate_agent_instance_id(agent_code)

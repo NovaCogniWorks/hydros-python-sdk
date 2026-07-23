@@ -1,6 +1,6 @@
 import unittest
 
-from hydros_agent_sdk.runtime import TimeSeriesCache
+from hydros_agent_sdk.runtime.time_series_cache import TimeSeriesCache
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
 
 

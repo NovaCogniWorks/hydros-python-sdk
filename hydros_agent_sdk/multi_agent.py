@@ -5,7 +5,8 @@
 """
 
 import logging
-from typing import Dict, Optional, Any
+from threading import Lock
+from typing import Dict, List, Optional, Any
 
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -17,6 +18,8 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesRequest,
+    EdgeControlExecutionReport,
+    AgentInstanceStatusReport,
 )
 from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
@@ -43,27 +46,22 @@ class MultiAgentCallback(SimCoordinationCallback):
     多个智能体实例化，但只应返回一个 SimTaskInitResponse。
 
     示例：
-        callback = MultiAgentCallback(node_id="LOCAL")
+        callback = MultiAgentCallback()
         callback.register_agent_factory("TWINS_SIMULATION_AGENT", twins_factory)
         callback.register_agent_factory("ONTOLOGY_SIMULATION_AGENT", ontology_factory)
     """
 
-    def __init__(self, node_id: str = "LOCAL"):
-        """
-        初始化多智能体回调。
-
-        Args:
-            node_id: 当前智能体宿主节点标识
-        """
-        self.node_id = node_id
+    def __init__(self):
+        """初始化多智能体回调。"""
         self.agent_factories: Dict[str, Any] = {}  # {agent_code: 工厂}
         self.agent_factory_types: Dict[str, str] = {}  # {agent_code: agent_type}
-        self.agents: Dict[str, Dict[str, Any]] = {}  # {context_id: {agent_code: 智能体}}
         self._client: Optional[Any] = None
         self._status_support: Optional[AgentInstanceStatusSupport] = None
+        self._pending_status_reports: Dict[str, List[AgentInstanceStatusReport]] = {}
+        self._pending_status_reports_lock = Lock()
         self._logging_context_setter = AgentLoggingContextSetter()
 
-        logger.info(f"MultiAgentCallback created for node: {node_id}")
+        logger.info("MultiAgentCallback created")
 
     def register_agent_factory(self, agent_code: str, factory: Any, agent_type: Optional[str] = None):
         """
@@ -161,8 +159,27 @@ class MultiAgentCallback(SimCoordinationCallback):
     def set_client(self, client: Any):
         """设置协调客户端引用。"""
         self._client = client
-        self._status_support = AgentInstanceStatusSupport(sim_coordination_client=client)
+        self._status_support = AgentInstanceStatusSupport(
+            report_sink=self._record_status_report,
+        )
         logger.info("Coordination client reference set")
+
+    def _task_agents(self, context_id: str) -> Dict[str, Any]:
+        if self._client is None:
+            raise RuntimeError("Coordination client not set")
+        return self._client.state_manager.get_agents_by_code(context_id)
+
+    def _record_status_report(self, report: AgentInstanceStatusReport) -> None:
+        context_id = report.context.biz_scene_instance_id
+        with self._pending_status_reports_lock:
+            self._pending_status_reports.setdefault(context_id, []).append(report)
+
+    def consume_pending_status_reports(
+        self,
+        context_id: str,
+    ) -> List[AgentInstanceStatusReport]:
+        with self._pending_status_reports_lock:
+            return self._pending_status_reports.pop(context_id, [])
 
     def get_component(self) -> str:
         """
@@ -242,6 +259,10 @@ class MultiAgentCallback(SimCoordinationCallback):
         if self._client is None:
             raise RuntimeError("Coordination client not set")
 
+        # 先登记初始化态，避免远端 edge 在本地耗时 on_init 期间返回的
+        # task_init_response 被 MQTT message filter 当作 inactive context 丢弃。
+        self._client.state_manager.begin_task_initialization(request.context)
+
         logger.debug("Task configuration URL: %s", request.biz_scene_configuration_url)
         logger.info(f"Processing SimTaskInitRequest for task: {context_id}")
         logger.info(f"  Requested agents: {[a.agent_code for a in request.agent_list]}")
@@ -259,6 +280,8 @@ class MultiAgentCallback(SimCoordinationCallback):
         created_agents = []
         context_agents = {}
         routed_agent_codes = set()
+        failed_agents = []
+        init_error_messages = []
 
         # 逐个处理 agent_list 中的智能体
         for agent_def in request.agent_list:
@@ -278,6 +301,7 @@ class MultiAgentCallback(SimCoordinationCallback):
 
             logger.info(f"  Creating agent: {routed_agent_code} (requested: {agent_code})")
 
+            agent = None
             try:
                 # 创建智能体实例
                 agent = factory.create_agent(
@@ -309,22 +333,23 @@ class MultiAgentCallback(SimCoordinationCallback):
                             "biz_scene_instance_id": context_id,
                         },
                     )
-
-                # 存储智能体
-                context_agents[created_agent_code] = agent
+                    context_agents[created_agent_code] = agent
 
                 logger.info(f"  ✓ Agent created and initialized: {created_agent_code}")
 
             except Exception as e:
+                if agent is not None:
+                    failed_agents.append(agent)
+                init_error_messages.append(f"{routed_agent_code}: {e}")
                 logger.error(f"  ✗ Failed to create agent {routed_agent_code}: {e}", exc_info=True)
                 # 继续处理其他智能体
 
-        # 存储该上下文下的智能体
-        if context_agents:
-            self.agents[context_id] = context_agents
-
         # 返回包含全部已创建实例的单个响应
         if created_agents:
+            self._client.state_manager.activate_task(
+                request.context,
+                list(context_agents.values()),
+            )
             # 使用第一个已创建智能体作为 source_agent_instance
             # 协议限制：理想情况下应支持多个 source_agent_instance
             first_agent = created_agents[0]
@@ -338,6 +363,14 @@ class MultiAgentCallback(SimCoordinationCallback):
             logger.info(f"SimTaskInitResponse created with {len(created_agents)} agent(s)")
             return response
         else:
+            self._client.state_manager.cancel_task_initialization(request.context)
+            if failed_agents:
+                return ResponseFactory.init_failed(
+                    failed_agents[0],
+                    request,
+                    error_code="AGENT_INIT_FAILURE",
+                    error_message="; ".join(init_error_messages),
+                )
             logger.warning(f"No agents created for task {context_id}")
             return None
 
@@ -352,6 +385,9 @@ class MultiAgentCallback(SimCoordinationCallback):
                 "agent_configuration_url",
                 agent_def.agent_configuration_url,
             )
+        refresh_identity = getattr(agent, "refresh_execution_context_identity", None)
+        if callable(refresh_identity):
+            refresh_identity()
 
     @classmethod
     def _sync_init_response_agent_definition(
@@ -368,7 +404,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_tick(self, request: TickCmdRequest):
         """处理上下文中全部智能体的 tick 指令。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -408,11 +444,13 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_task_terminate(self, request: SimTaskTerminateRequest):
         """处理上下文中全部智能体的任务终止。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
-            return None
+            self._client.state_manager.terminate_task(request.context)
+            super().on_task_terminate(request)
+            return []
 
         # 终止该上下文中的全部智能体
         responses = []
@@ -465,8 +503,7 @@ class MultiAgentCallback(SimCoordinationCallback):
                 )
                 logger.error(f"Error terminating {agent_code}: {e}", exc_info=True)
 
-        # 从跟踪结构中移除智能体
-        del self.agents[context_id]
+        self._client.state_manager.terminate_task(request.context)
         super().on_task_terminate(request)
         logger.info(f"All agents terminated for context: {context_id}")
         return responses
@@ -474,7 +511,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest):
         """处理上下文中全部智能体的时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -507,7 +544,7 @@ class MultiAgentCallback(SimCoordinationCallback):
     def on_outflow_time_series_data_update(self, request: OutflowTimeSeriesDataUpdateRequest):
         """处理上下文中全部智能体的出流时间序列数据更新。"""
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -545,7 +582,7 @@ class MultiAgentCallback(SimCoordinationCallback):
         该方法只把请求路由给请求中指定的目标智能体。
         """
         context_id = request.context.biz_scene_instance_id
-        context_agents = self.agents.get(context_id)
+        context_agents = self._task_agents(context_id)
 
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
@@ -586,3 +623,11 @@ class MultiAgentCallback(SimCoordinationCallback):
                 exc_info=True
             )
             return None
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport):
+        """把 edge 控制终态交给同一任务中的中心调度 Agent。"""
+        context_agents = self._task_agents(report.context.biz_scene_instance_id)
+        for agent in context_agents.values():
+            handler = getattr(agent, "on_station_control_execution", None)
+            if callable(handler):
+                handler(report)

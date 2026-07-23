@@ -1,10 +1,15 @@
 import os
+import socket
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 from paho.mqtt.reasoncodes import ReasonCode
 
-from hydros_agent_sdk import AgentCommandClient, HydrosTopics, SimCoordinationCallback, SimCoordinationClient
+from hydros_agent_sdk import SimCoordinationCallback, SimCoordinationClient
+from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
+from hydros_agent_sdk.topics import HydrosTopics
+from hydros_agent_sdk.transport.mqtt_coordination import MqttCoordinationTransport
 
 
 class DummyCoordinationCallback(SimCoordinationCallback):
@@ -28,46 +33,40 @@ class HydrosTopicsTest(unittest.TestCase):
         os.chdir(self._cwd)
         self._temp_dir.cleanup()
 
-    def test_coordination_client_on_connect_accepts_reason_code_object(self):
-        client = SimCoordinationClient(
+    def test_coordination_transport_on_connect_accepts_reason_code_object(self):
+        transport = MqttCoordinationTransport(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
-            hydros_cluster_id="demo_cluster",
-            sim_coordination_callback=DummyCoordinationCallback(),
+            client_id="test-client",
+            topic="/hydros/commands/coordination/demo_cluster",
+            handler=lambda _topic, _payload: None,
         )
 
         subscriptions = []
-        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
+        transport.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
 
-        client._on_connect(
+        transport._on_connect(
             None,
             None,
             None,
             ReasonCode(packetType=2, aName="Success"),
         )
 
-        self.assertTrue(client.connected.is_set())
+        self.assertTrue(transport.connected.is_set())
         self.assertEqual(subscriptions, [("/hydros/commands/coordination/demo_cluster", 1)])
 
-    def test_agent_command_client_on_connect_accepts_reason_code_object(self):
+    def test_agent_command_client_subscribes_through_shared_transport(self):
+        transport = Mock()
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=transport,
             hydros_cluster_id="demo_cluster",
         )
 
-        subscriptions = []
-        client.mqtt_client.subscribe = lambda topic, qos=0: subscriptions.append((topic, qos))
-
-        client._on_connect(
-            None,
-            None,
-            None,
-            ReasonCode(packetType=2, aName="Success"),
+        transport.subscribe.assert_called_once_with(
+            "/hydros/commands/agent/demo_cluster",
+            client._handle_transport_payload,
+            qos=1,
         )
-
-        self.assertTrue(client._connected.is_set())
-        self.assertEqual(subscriptions, [("/hydros/commands/agent/demo_cluster", 1)])
 
     def test_topic_builders_match_java_rules(self):
         self.assertEqual(
@@ -103,8 +102,7 @@ class HydrosTopicsTest(unittest.TestCase):
 
     def test_agent_command_client_can_build_topic_from_cluster_id(self):
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=Mock(),
             hydros_cluster_id="demo_cluster",
         )
         self.assertEqual(client.topic, "/hydros/commands/agent/demo_cluster")
@@ -112,8 +110,7 @@ class HydrosTopicsTest(unittest.TestCase):
     def test_agent_command_client_requires_topic_or_cluster_id(self):
         with self.assertRaises(ValueError):
             AgentCommandClient(
-                broker_url="tcp://127.0.0.1",
-                broker_port=1883,
+                transport=Mock(),
             )
 
     def test_coordination_client_can_build_topic_from_cluster_id(self):
@@ -132,6 +129,30 @@ class HydrosTopicsTest(unittest.TestCase):
                 broker_port=1883,
                 sim_coordination_callback=DummyCoordinationCallback(),
             )
+
+    def test_coordination_client_start_wraps_dns_failure(self):
+        client = SimCoordinationClient(
+            broker_url="tcp://hydros-mqtt-broker-internal.hydros.svc.cluster.local",
+            broker_port=1883,
+            hydros_cluster_id="demo_cluster",
+            sim_coordination_callback=DummyCoordinationCallback(),
+        )
+
+        def fail_connect(*_args, **_kwargs):
+            raise socket.gaierror(-2, "Name or service not known")
+
+        client.transport.mqtt_client.connect = fail_connect
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to connect to MQTT broker "
+            "hydros-mqtt-broker-internal.hydros.svc.cluster.local:1883",
+        ) as context:
+            client.start()
+
+        self.assertIn("env.properties mqtt_broker_url/mqtt_broker_port", str(context.exception))
+        self.assertIn("DNS resolution", str(context.exception))
+        self.assertFalse(client._task_runtime_registry.running.is_set())
 
 
 if __name__ == "__main__":

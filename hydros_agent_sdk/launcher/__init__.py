@@ -1,45 +1,5 @@
-"""可复用启动器支撑，用于 Hydros Python agent 应用。"""
+"""Hydros Python Agent 应用的公共 launcher 入口。"""
 
-from .support import (
-    AgentClassResolver,
-    AgentDirectoryResolver,
-    AgentDiscoveryService,
-    AgentFactoryRegistrationService,
-    AgentModuleInfo,
-    AgentModuleLoader,
-    CoordinationClientFactory,
-    LauncherCli,
-    LauncherDebugSupport,
-    LauncherLoggingConfigurator,
-    LauncherOptions,
-    LauncherRuntime,
-    LauncherServiceFactory,
-    LauncherServices,
-    LauncherStartupReporter,
-    MultiAgentCoordinator,
-    MultiAgentLauncherApp,
-    PropertiesFileLoader,
-    RegisteredAgentInfo,
-)
+from hydros_agent_sdk.launcher.support import MultiAgentLauncherApp
 
-__all__ = [
-    "AgentClassResolver",
-    "AgentDirectoryResolver",
-    "AgentDiscoveryService",
-    "AgentFactoryRegistrationService",
-    "AgentModuleInfo",
-    "AgentModuleLoader",
-    "CoordinationClientFactory",
-    "LauncherCli",
-    "LauncherDebugSupport",
-    "LauncherLoggingConfigurator",
-    "LauncherOptions",
-    "LauncherRuntime",
-    "LauncherServiceFactory",
-    "LauncherServices",
-    "LauncherStartupReporter",
-    "MultiAgentCoordinator",
-    "MultiAgentLauncherApp",
-    "PropertiesFileLoader",
-    "RegisteredAgentInfo",
-]
+__all__ = ["MultiAgentLauncherApp"]

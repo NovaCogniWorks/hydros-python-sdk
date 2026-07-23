@@ -667,8 +667,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
 
         该方法：
         1. 清理计划资源
-        2. 在状态管理器中注销
-        3. 返回终止响应
+        2. 返回终止响应；任务状态由 SDK Runtime 统一清理
         """
         logger.info(f"Terminating outflow plan agent: {self.agent_id}")
 
@@ -681,10 +680,6 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
             except Exception:
                 logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
         self._hydrosim_initialized = False
-        # 在状态管理器中注销
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
         logger.info(f"Outflow plan agent terminated: {self.agent_id}")
 
         return SimTaskTerminateResponse(

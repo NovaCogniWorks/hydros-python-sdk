@@ -1,15 +1,16 @@
 """
-面向不同使用场景的专用智能体类型。
+SDK 内置和专用 Agent 类型。
 
-本模块提供预置的 BaseHydroAgent 扩展类型：
-- TickableAgent: tick 驱动仿真智能体基类
-- OntologySimulationAgent: 基于本体的仿真智能体
-- TwinsSimulationAgent: 数字孪生仿真智能体
-- ModelCalculationAgent: 事件驱动模型计算智能体
-- CentralSchedulingAgent: 中央调度智能体通用基类
-- OutflowPlanAgent: 事件驱动外发流量计划智能体
+本模块提供预构建的 BaseHydroAgent 扩展：
+- TickableAgent：由 tick 驱动的仿真 Agent 基类
+- OntologySimulationAgent：基于本体的仿真 Agent
+- TwinsSimulationAgent：数字孪生仿真 Agent
+- ModelCalculationAgent：事件驱动的模型计算 Agent
+- CentralSchedulingAgent：中央调度 Agent 基类
+- ControllerAgent：泵站、闸站等现地控制器 Agent 基类
+- OutflowPlanAgent：事件驱动的出流计划 Agent
 
-MPC 中央调度基类属于可选 MPC 能力，请从具体模块导入：
+MPC 能力由以下可选 Agent 模块提供：
 hydros_agent_sdk.agents.mpc_central_scheduling_agent
 hydros_agent_sdk.agents.system_central_scheduling_agent
 """
@@ -19,6 +20,7 @@ from .ontology_simulation_agent import OntologySimulationAgent
 from .twins_simulation_agent import TwinsSimulationAgent
 from .model_calculation_agent import ModelCalculationAgent
 from .central_scheduling_agent import CentralSchedulingAgent
+from .controller_agent import ControllerAgent
 from .outflow_plan_agent import OutflowPlanAgent
 
 __all__ = [
@@ -27,5 +29,6 @@ __all__ = [
     'TwinsSimulationAgent',
     'ModelCalculationAgent',
     'CentralSchedulingAgent',
+    'ControllerAgent',
     'OutflowPlanAgent',
 ]

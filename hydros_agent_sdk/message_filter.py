@@ -12,7 +12,9 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimCoordinationRequest,
     AgentInstanceStatusReport,
-    MpcResultReport,
+    EdgeControlExecutionReport,
+    MpcExecutionStatusReport,
+    MpcPredictionResultReport,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -61,6 +63,18 @@ class MessageFilter:
         # 始终接受任务初始化请求
         if isinstance(sim_command, SimTaskInitRequest):
             logger.debug(f"Accepting SimTaskInitRequest: {sim_command.command_id}")
+            return True
+
+        # edge 可能在本地 Agent 耗时初始化期间先返回初始化响应。
+        # 只放行当前 task 的 response 建立 sibling cache；tick/event 仍必须等待 ACTIVE。
+        if (
+            isinstance(sim_command, SimTaskInitResponse)
+            and self.context_manager.has_initializing_context(sim_command.context)
+        ):
+            logger.debug(
+                "Accepting SimTaskInitResponse for initializing context: %s",
+                sim_command.context.biz_scene_instance_id,
+            )
             return True
 
         # 检查指令上下文是否处于活跃状态
@@ -114,7 +128,10 @@ class MessageFilter:
             return True
 
         # 显式报告只接收远端智能体发出的消息
-        if isinstance(sim_command, (AgentInstanceStatusReport, MpcResultReport)):
+        if isinstance(
+            sim_command,
+            (AgentInstanceStatusReport, MpcPredictionResultReport, MpcExecutionStatusReport),
+        ):
             is_remote = self.context_manager.is_remote_agent(sim_command.source_agent_instance)
             if is_remote:
                 logger.debug(f"Receiving report from remote agent: {sim_command.command_type}")
@@ -156,6 +173,12 @@ class MessageFilter:
             logger.debug(f"Message filtered (inactive context): {sim_command.command_type}, "
                          f"command_id={sim_command.command_id}")
             return False
+
+        if isinstance(sim_command, EdgeControlExecutionReport):
+            if not self.context_manager.is_remote_agent(sim_command.source_agent_instance):
+                return False
+            target = sim_command.target_agent_instance
+            return target is None or self.context_manager.is_local_agent(target)
 
         # 第二层过滤：检查是否应接收
         if not self.is_received(sim_command):

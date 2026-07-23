@@ -1,109 +1,68 @@
-"""
-用于 agent command 的 MQTT 传输客户端。
-"""
+"""基于共享协调传输的 Agent 指令适配器。"""
 
 from __future__ import annotations
 
 import json
 import logging
 import time
-import warnings
-from threading import Event
 from typing import Callable, Optional, TYPE_CHECKING
 
-import paho.mqtt.client as mqtt
-
-from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.topics import HydrosTopics
+from hydros_agent_sdk.transport.base import Transport
 
-from hydros_agent_sdk.agent_commands.models import AgentCommand, AgentCommandEnvelope
+from .codec import AgentCommandDecoder
 
 if TYPE_CHECKING:
     from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
+
 
 logger = logging.getLogger(__name__)
 
 
 class AgentCommandClient:
-    """先给第一版最小可用的 agent command 客户端。"""
+    """通过共享 ``Transport`` 解码和发布 Agent 指令。"""
 
     def __init__(
         self,
-        broker_url: str,
-        broker_port: int,
+        transport: Transport,
         topic: Optional[str] = None,
         hydros_cluster_id: Optional[str] = None,
-        state_manager: Optional[AgentStateManager] = None,
         qos: int = 1,
         max_retry_count: int = 5,
         base_retry_delay_ms: int = 1000,
-        mqtt_username: Optional[str] = None,
-        mqtt_password: Optional[str] = None,
-        pending_command_predicate: Optional[Callable[[AgentCommand], bool]] = None,
-        pending_retry_delay_ms: int = 50,
-        max_workers: int = 8,
-        runtime: Optional["AgentCommandRuntime"] = None,
-    ):
-        self.broker_url = broker_url.replace("tcp://", "")
-        self.broker_port = broker_port
+    ) -> None:
         if topic:
             self.topic = topic
         elif hydros_cluster_id:
             self.topic = HydrosTopics.get_agent_command_topic(hydros_cluster_id)
         else:
             raise ValueError("topic 和 hydros_cluster_id 不能同时为空")
+
+        self.transport = transport
         self.qos = qos
         self.max_retry_count = max_retry_count
         self.base_retry_delay_ms = base_retry_delay_ms
-        self.client_id = f"hydros_agent_cmd_{int(time.time() * 1000)}"
+        self._runtime: Optional["AgentCommandRuntime"] = None
+        self._decoder = AgentCommandDecoder()
+        self.transport.subscribe(self.topic, self._handle_transport_payload, qos=self.qos)
 
-        if state_manager is None:
-            state_manager = AgentStateManager()
-        self.state_manager = state_manager
-        self._pending_command_predicate = pending_command_predicate
-        self._pending_retry_delay_ms = pending_retry_delay_ms
-        self._max_workers = max_workers
-        self._runtime: Optional["AgentCommandRuntime"] = runtime
+    @property
+    def runtime(self) -> "AgentCommandRuntime":
+        if self._runtime is None:
+            raise RuntimeError("AgentCommandRuntime is not bound")
+        return self._runtime
 
-        self.mqtt_client = mqtt.Client(
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self.client_id,
-            protocol=mqtt.MQTTv311,
-        )
-        self.mqtt_client.on_connect = self._on_connect
-        self.mqtt_client.on_disconnect = self._on_disconnect
-        self.mqtt_client.on_message = self._on_message
-        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
-
-        if mqtt_username:
-            self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
-
-        self._connected = Event()
-        self._intentional_disconnect = False
+    def bind_runtime(self, runtime: "AgentCommandRuntime") -> None:
+        if self._runtime is not None:
+            raise RuntimeError("AgentCommandRuntime is already bound")
+        self._runtime = runtime
 
     def start(self) -> None:
-        self._intentional_disconnect = False
-        self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
-        self.mqtt_client.loop_start()
-        try:
-            if not self._connected.wait(timeout=10):
-                raise RuntimeError("AgentCommandClient 连接 MQTT 超时")
-            self.runtime.start()
-        except Exception:
-            self._intentional_disconnect = True
-            self.mqtt_client.loop_stop()
-            try:
-                self.mqtt_client.disconnect()
-            except Exception:
-                logger.debug("清理 MQTT 连接失败", exc_info=True)
-            raise
+        self.runtime.start()
 
     def stop(self) -> None:
-        if self._runtime is not None:
-            self._runtime.stop()
-        self._intentional_disconnect = True
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        self.runtime.stop()
 
     def register_handler(self, handler) -> None:
         self.runtime.register_handler(handler)
@@ -117,58 +76,21 @@ class AgentCommandClient:
     ) -> None:
         self.runtime.set_pending_command_predicate(predicate)
 
-    @property
-    def runtime(self) -> "AgentCommandRuntime":
-        return self._get_runtime()
-
-    def bind_runtime(self, runtime: "AgentCommandRuntime") -> None:
-        """绑定外部装配好的运行时。"""
-        if self._runtime is not None and self._runtime is not runtime:
-            raise RuntimeError("AgentCommandClient runtime already bound")
-        self._runtime = runtime
-
     def publish_command(self, command: AgentCommand) -> None:
-        """传输层只负责把命令发布到 MQTT。"""
-        self._send_with_retry(command)
-
-    def _on_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
-        rc = reason_code.value
-        if rc == 0:
-            self.mqtt_client.subscribe(self.topic, qos=self.qos)
-            self._connected.set()
-            logger.info("AgentCommandClient 已连接 MQTT 并订阅 topic=%s", self.topic)
-            return
-        logger.error("AgentCommandClient 连接 MQTT 失败: rc=%s", rc)
-
-    def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None) -> None:
-        rc = reason_code.value
-        self._connected.clear()
-        if rc == 0 or self._intentional_disconnect:
-            logger.info("AgentCommandClient 已断开 MQTT")
-            return
-        logger.warning("AgentCommandClient MQTT 意外断开: rc=%s", rc)
-
-    def _on_message(self, client, userdata, msg) -> None:
-        try:
-            payload_str = msg.payload.decode("utf-8")
-            payload = json.loads(payload_str)
-            envelope = AgentCommandEnvelope(command=payload)
-            self.runtime.handle_incoming_command(envelope.command)
-        except Exception as exc:
-            logger.error("处理 agent command 消息失败: %s", exc, exc_info=True)
-
-    def _send_with_retry(self, command: AgentCommand) -> None:
+        """通过共享传输序列化并发布一条 Agent 指令。"""
         attempt = 0
         while attempt <= self.max_retry_count:
             try:
-                payload = command.model_dump_json(by_alias=True)
-                result = self.mqtt_client.publish(self.topic, payload, qos=self.qos)
-                result.wait_for_publish()
+                self.transport.publish(
+                    self.topic,
+                    command.model_dump_json(by_alias=True),
+                    qos=self.qos,
+                )
                 return
             except Exception:
                 attempt += 1
                 logger.error(
-                    "发送 agent command 失败: type=%s id=%s attempt=%s/%s",
+                    "Failed to publish agent command: type=%s id=%s attempt=%s/%s",
                     command.command_type,
                     command.command_id,
                     attempt,
@@ -179,23 +101,14 @@ class AgentCommandClient:
                     raise
                 time.sleep((self.base_retry_delay_ms * (2 ** attempt)) / 1000.0)
 
-    def _get_runtime(self) -> "AgentCommandRuntime":
-        if self._runtime is None:
-            warnings.warn(
-                "AgentCommandClient lazy runtime creation is deprecated; "
-                "assemble AgentCommandRuntime outside transport and pass it with bind_runtime().",
-                DeprecationWarning,
-                stacklevel=2,
+    def _handle_transport_payload(self, topic: str, payload_str: str) -> None:
+        try:
+            payload = json.loads(payload_str)
+            self.runtime.handle_incoming_command(self._decoder.decode(payload))
+        except Exception as exc:
+            logger.error(
+                "Failed to process agent command payload on %s: %s",
+                topic,
+                exc,
+                exc_info=True,
             )
-            from hydros_agent_sdk.agent_commands.runtime import AgentCommandRuntime
-
-            self._runtime = AgentCommandRuntime(
-                state_manager=self.state_manager,
-                sender=self.publish_command,
-                pending_command_predicate=self._pending_command_predicate,
-                pending_retry_delay_ms=self._pending_retry_delay_ms,
-                max_workers=self._max_workers,
-            )
-            return self._runtime
-
-        return self._runtime

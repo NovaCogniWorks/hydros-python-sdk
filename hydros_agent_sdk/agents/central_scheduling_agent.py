@@ -5,20 +5,24 @@ CentralSchedulingAgent 提供不默认装配 MPC 的中央调度通用能力。
 """
 
 import logging
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 from abc import abstractmethod
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
+from hydros_agent_sdk.agent_commands.runtime import ControlExecutionBarrier
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
 from hydros_agent_sdk.agent_commands.transport import AgentCommandClient, AgentCommandGateway
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
+from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.transport.mqtt_metrics_subscriber import MqttMetricsSubscriber
 from hydros_agent_sdk.agents.target_agent_resolver import TargetAgentResolver
+from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 from .tickable_agent import TickableAgent
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     SimTaskInitRequest,
     SimTaskInitResponse,
     TickCmdRequest,
@@ -26,6 +30,10 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
+)
+from hydros_agent_sdk.protocol.agent_commands import (
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     SimulationContext,
@@ -38,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_METRICS_HISTORY_STEPS = 10
+DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS = 120.0
 
 
 class CentralSchedulingAgent(TickableAgent):
@@ -109,6 +118,13 @@ class CentralSchedulingAgent(TickableAgent):
             **kwargs: 其他关键字参数
         """
         configured_object_agent_code_map = kwargs.pop("object_agent_code_map", None)
+        control_execution_timeout_seconds = kwargs.pop(
+            "control_execution_timeout_seconds",
+            DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS,
+        )
+        control_execution_timeout_seconds = float(control_execution_timeout_seconds)
+        if control_execution_timeout_seconds <= 0:
+            raise ValueError("control_execution_timeout_seconds must be positive")
 
         super().__init__(
             sim_coordination_client=sim_coordination_client,
@@ -123,6 +139,11 @@ class CentralSchedulingAgent(TickableAgent):
             drive_mode=drive_mode,
             agent_configuration_url=agent_configuration_url,
             **kwargs
+        )
+        object.__setattr__(
+            self,
+            "_control_execution_timeout_seconds",
+            control_execution_timeout_seconds,
         )
 
         self._init_command_dispatching(
@@ -164,6 +185,64 @@ class CentralSchedulingAgent(TickableAgent):
             send_command=lambda command: self._agent_command_gateway.send_command(command),
             build_station_target_value_request=self._control_command_builder.build_station_target_value_request,
         )
+        self._control_execution_barrier = ControlExecutionBarrier()
+        self._agent_command_gateway.add_response_listener(
+            self._handle_control_command_response
+        )
+
+    def dispatch_control_commands_and_await_execution(
+        self,
+        control_commands: List[Any],
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> None:
+        """下发控制指令，并保持当前 central tick，直到边缘侧到达终态。
+
+        只有站点目标值请求进入终态屏障；其他指令类型仍保持只下发、不等待的语义。
+        """
+        prepared_commands = self._control_command_dispatcher.prepare(control_commands)
+        records = [
+            self._control_execution_barrier.register(
+                command=command,
+                biz_scene_instance_id=self.context.biz_scene_instance_id,
+                step=(
+                    command.main_step_index
+                    if command.main_step_index is not None
+                    else self._current_step
+                ),
+            )
+            for command in prepared_commands
+            if isinstance(command, HydroStationTargetValueRequest)
+        ]
+        try:
+            self._control_command_dispatcher.dispatch_prepared(prepared_commands)
+        except Exception as error:
+            if not records:
+                raise
+            self._control_execution_barrier.mark_dispatch_failed(records, error)
+
+        effective_timeout_seconds = (
+            self._control_execution_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if effective_timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._control_execution_barrier.await_all(records, effective_timeout_seconds)
+
+    def _handle_control_command_response(self, response: Any) -> None:
+        if isinstance(response, HydroStationTargetValueResponse):
+            self._control_execution_barrier.handle_response(response)
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport) -> None:
+        """消费边缘执行终态报告，并推进通用 central 控制屏障。"""
+        self._control_execution_barrier.handle_execution_report(report)
+
+    def discard_control_execution_waiters(self) -> None:
+        """任务终止完成后释放该任务范围内的屏障记录。"""
+        self._control_execution_barrier.discard_by_biz_scene_instance_id(
+            self.context.biz_scene_instance_id
+        )
 
     def _create_control_command_builder(self) -> StationTargetValueCommandBuilder:
         """创建中央调度控制指令 builder，子类可覆盖以扩展转换能力。"""
@@ -180,13 +259,44 @@ class CentralSchedulingAgent(TickableAgent):
 
     def _init_field_metrics(self, sim_coordination_client) -> None:
         """初始化现地设备实时指标缓存和 MQTT 订阅适配器。"""
-        self._metrics_data_cache = FieldMetricsCache(max_steps=DEFAULT_METRICS_HISTORY_STEPS)
+        self._metrics_data_cache = FieldMetricsCache(
+            max_steps=DEFAULT_METRICS_HISTORY_STEPS,
+            biz_scene_instance_id=self.context.biz_scene_instance_id,
+        )
         self._field_metrics_cache = self._metrics_data_cache.latest_metrics
         self._field_metrics_step_cache = self._metrics_data_cache.metrics_by_step
         self._metrics_subscriber = MqttMetricsSubscriber(
-            mqtt_client=sim_coordination_client.mqtt_client,
+            transport=sim_coordination_client.transport,
             metrics_data_cache=self._metrics_data_cache,
         )
+
+    def subscribe_field_metrics(self, metrics_topic: Optional[str] = None) -> Optional[str]:
+        """订阅当前任务的现地指标 topic，并返回实际订阅的完整 topic。"""
+        settings = load_runtime_env_settings()
+        base_topic = metrics_topic or PropertyParseUtils.get_string(
+            self.properties,
+            "metrics_topic",
+            settings.metrics_topic,
+        )
+        if not base_topic:
+            logger.info("No field metrics topic configured for central scheduling agent: %s", self.agent_id)
+            return None
+
+        cluster_id = self.cluster_id or settings.hydros_cluster_id or ""
+        rendered_topic = settings.render_topic(str(base_topic), cluster_id=cluster_id)
+        if not rendered_topic:
+            logger.info("No rendered field metrics topic for central scheduling agent: %s", self.agent_id)
+            return None
+
+        task_id = self.context.biz_scene_instance_id
+        full_topic = f"{rendered_topic.rstrip('/')}/{task_id}"
+        if self._metrics_subscriber.subscription_topic == full_topic:
+            logger.info("Field metrics topic already subscribed for central scheduling agent: %s", full_topic)
+            return full_topic
+
+        logger.info("Subscribing central field metrics topic: %s", full_topic)
+        self._metrics_subscriber.subscribe(full_topic)
+        return full_topic
 
     @abstractmethod
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -198,8 +308,7 @@ class CentralSchedulingAgent(TickableAgent):
         2. 加载水网拓扑
         3. 初始化优化模型
         4. 通过 MQTT 订阅现地指标
-        5. 在状态管理器中注册
-        6. 返回 SimTaskInitResponse
+        5. 返回 SimTaskInitResponse
 
         参数:
             request: 任务初始化请求
@@ -261,12 +370,7 @@ class CentralSchedulingAgent(TickableAgent):
             # 待办：更新优化模型约束
 
     def get_metrics_topic(self) -> str:
-        """
-        Get the MQTT topic for sending metrics data.
-
-        Returns:
-            MQTT topic string for central scheduling metrics
-        """
+        """返回中央调度指标数据使用的 MQTT topic。"""
         return f"/hydros/simulation/jobs/{self.biz_scene_instance_id}/centralscheduling/objects"
 
     @abstractmethod
@@ -277,8 +381,7 @@ class CentralSchedulingAgent(TickableAgent):
         子类应该：
         1. 清理优化模型
         2. 取消订阅 MQTT 主题
-        3. 从状态管理器中注销
-        4. 返回 SimTaskTerminateResponse
+        3. 返回 SimTaskTerminateResponse
 
         参数:
             request: 任务终止请求

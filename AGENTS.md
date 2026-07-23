@@ -135,15 +135,20 @@
 
 下面这些问题是当前仓库里已经存在的结构性问题，后续开发要优先收敛，不能继续沿着错误形态扩展。
 
+### 已关闭的 P0 边界，禁止回退
+
+- `hydros_agent_sdk/coordination_client.py` 只装配 transport、payload decode/filter、`TaskRuntime` 和 `CoordinationOutboxPublisher`。Paho 生命周期只属于 `MqttCoordinationTransport`；task mailbox、callback dispatch 和失败响应只属于 `TaskRuntime`；出站 mailbox、worker 和重试只属于 `CoordinationOutboxPublisher`。
+- `hydros_agent_sdk/agent_commands/transport/client.py` 只复用共享 `Transport` 做 agent command 的订阅、decode 和 publish；`AgentCommandGateway` 显式装配 `AgentCommandRuntime`，禁止重新创建 Paho client 或恢复 runtime 懒创建。
+- `AgentStateManager` 是 task lifecycle、task-agent 关联和本地 runtime Agent 的唯一事实来源。`MultiAgentCallback` 只通过它查询和路由任务 Agent；具体 Agent 的 `on_init()` / `on_terminate()` 只管理自身资源，不得自行登记或清理 task truth。
+- 根包 `hydros_agent_sdk` 只导出稳定开发者 API、协调装配入口、错误处理、日志初始化和控制算法扩展接口；protocol DTO、runtime/state/transport 实现和 testing helper 必须从明确子模块导入，不得重新扩散到根包。
+
 ### P0：职责过重的核心类
 
-- `hydros_agent_sdk/coordination_client.py` 当前同时承担 MQTT 连接、订阅、消息解析、过滤、路由、callback 调用、错误响应构造、发送队列、重试和日志上下文职责。后续新增能力不能继续塞进这个类，应逐步拆成 transport adapter、message parser、command router、callback invoker、outbox publisher、error response factory 等对象。
 - `custom-agent/pump/multi_agent_launcher.py` 已收敛为应用薄入口：通用 properties 读取、Agent 目录解析、Agent 发现、动态导入、Agent 类解析、CLI 参数解析、`--list` 展示、日志/debug 配置、`MultiAgentCoordinator` 注册/启动流程和 signal/runtime 运行封装已迁移到 `hydros_agent_sdk/launcher/`。泵站入口只保留目录、env、日志和调试端口等部署配置，后续其他自定义 Agent 独立部署应复用 SDK launcher，而不是重新复制启动逻辑。
 - `hydros_agent_sdk/base_agent.py` 当前同时继承协议模型并承载行为基类，还维护动态运行时属性、配置加载和多个生命周期默认入口。新增 Agent 能力要优先放到服务类或组合对象中，不要继续膨胀基类。
 
 ### P0：方向反转的对象关系
 
-- `hydros_agent_sdk/agent_commands/transport/client.py` 已支持外部绑定 `AgentCommandRuntime`，生产路径由 `AgentCommandGateway` 组装 runtime 后注入 transport。旧版 `AgentCommandClient.runtime` 懒创建只作为兼容过渡，后续不能再依赖它扩展新功能。
 - `hydros_agent_sdk/context_manager.py` 当前使用类级别状态管理上下文，容易形成隐式全局单例。后续新功能应通过实例化上下文仓储或 state manager 注入依赖，不再增加类级全局状态。
 
 ### P1：目录放置不合理
@@ -159,8 +164,7 @@
 
 ### 迁移要求
 
-- 重构时先补兼容测试，再做小步迁移，避免一次性移动大量文件导致导入路径失控。
-- 对外公共 API 需要保留旧入口时，可以增加薄 wrapper，但 wrapper 只能委托给新对象，不再承载新逻辑。
+- 未发布功能的重构直接迁移调用方和测试，不保留旧内部入口或兼容 wrapper。
 - 每迁移一个目录或核心类，都要同步更新 `__init__.py` 导出、测试导入路径和示例启动脚本。
 - 不确定归属的类，先按“谁拥有状态、谁承担生命周期、谁依赖谁”判断；仍不清楚时宁可先放到更具体的子包，不放入根目录或 `utils/`。
 

@@ -1,53 +1,45 @@
 from __future__ import annotations
 
-from .models import ControlObjectResult, PredictedResult
+from typing import List, Optional
+
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
+
+from .models import ControlObjectResult, DeviceResult, PredictedResult, ValueItem
 
 
 class MpcResultFactory:
-    """Factory for MPC optimizer result models."""
+    """MPC 优化结果模型工厂。"""
 
     @staticmethod
     def build_control_object_result(
         object_id: int,
-        target_value: float,
         object_type: str,
-        node_id: int | None = None,
-        node_name: str | None = None,
-        object_name: str | None = None,
-        target_value_type: str | None = None,
+        target_value_list: List[ValueItem],
+        object_name: Optional[str] = None,
+        algo_required_inputs: Optional[List[ControlSignal]] = None,
     ) -> ControlObjectResult:
         return ControlObjectResult(
             object_type=object_type,
-            node_id=node_id,
-            node_name=node_name,
             object_id=object_id,
             object_name=object_name,
-            target_value=target_value,
-            target_value_type=target_value_type,
+            target_value_list=target_value_list,
+            algo_required_inputs=algo_required_inputs or [],
         )
 
     @staticmethod
     def build_predicted_result(
         object_id: int,
         object_type: str,
-        front_water_level: float | None,
-        final_target_water_level: float | None,
-        back_water_level: float | None,
-        out_flow: float | None,
-        diversion_flow: float | None = None,
-        efficiency: float | None = None,
-        object_name: str | None = None,
-        command_type: str | None = None,
+        predicted_value_list: List[ValueItem],
+        object_name: Optional[str] = None,
+        target_value: Optional[ValueItem] = None,
+        device_result_list: Optional[List[DeviceResult]] = None,
     ) -> PredictedResult:
         return PredictedResult(
-            command_type=command_type,
             object_id=object_id,
             object_type=object_type,
             object_name=object_name,
-            front_water_level=front_water_level,
-            final_target_water_level=final_target_water_level,
-            back_water_level=back_water_level,
-            out_flow=out_flow,
-            diversion_flow=diversion_flow,
-            efficiency=efficiency,
+            target_value=target_value,
+            predicted_value_list=predicted_value_list,
+            device_result_list=device_result_list or [],
         )

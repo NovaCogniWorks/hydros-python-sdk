@@ -39,9 +39,6 @@ logs/
 examples/logs/
 *.log
 
-# Configuration files (keep .example files)
-examples/env.properties
-
 
 # Testing
 .pytest_cache/

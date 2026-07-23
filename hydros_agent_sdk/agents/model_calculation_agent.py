@@ -130,8 +130,7 @@ class ModelCalculationAgent(BaseHydroAgent):
         子类应完成：
         1. 使用 self.load_agent_configuration(request) 加载智能体配置
         2. 加载并初始化计算模型
-        3. 注册到状态管理器
-        4. 返回 SimTaskInitResponse
+        3. 返回 SimTaskInitResponse
 
         Args:
             request: 任务初始化请求
@@ -224,8 +223,7 @@ class ModelCalculationAgent(BaseHydroAgent):
 
         子类应完成：
         1. 清理模型资源
-        2. 从状态管理器注销
-        3. 返回 SimTaskTerminateResponse
+        2. 返回 SimTaskTerminateResponse
 
         Args:
             request: 任务终止请求

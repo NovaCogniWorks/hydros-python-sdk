@@ -1,51 +1,57 @@
 import unittest
 
-from hydros_agent_sdk.mpc.models import ControlObjectResult, PredictedResult
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
+from hydros_agent_sdk.mpc.models import ControlObjectResult, PredictedResult, ValueItem
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 
 
 class MpcResultFactoryTest(unittest.TestCase):
     def test_build_control_object_result(self):
+        planning_signal = ControlSignal(
+            type=SignalType.REFERENCE,
+            object_type="GateStation",
+            object_id=501,
+            value_type="front_water_level",
+            series=[3.4, 3.6],
+        )
         result = MpcResultFactory.build_control_object_result(
             object_id=501,
-            target_value=0.45,
             object_type="Gate",
-            node_id=101,
-            node_name="Gate Station 101",
             object_name="Gate 501",
-            target_value_type="OPENING",
+            target_value_list=[ValueItem(value_type="OPENING", value=0.45)],
+            algo_required_inputs=[planning_signal],
         )
 
         self.assertIsInstance(result, ControlObjectResult)
-        self.assertEqual(result.node_id, 101)
-        self.assertEqual(result.node_name, "Gate Station 101")
         self.assertEqual(result.object_id, 501)
         self.assertEqual(result.object_name, "Gate 501")
-        self.assertEqual(result.target_value, 0.45)
-        self.assertEqual(result.target_value_type, "OPENING")
         self.assertEqual(result.object_type, "Gate")
+        self.assertEqual(len(result.target_value_list), 1)
+        self.assertEqual(result.target_value_list[0].value, 0.45)
+        self.assertEqual(result.target_value_list[0].value_type, "OPENING")
+        self.assertEqual(result.algo_required_inputs, [planning_signal])
 
     def test_build_predicted_result(self):
         result = MpcResultFactory.build_predicted_result(
             object_id=102,
             object_type="Canal",
-            object_name="Canal-102",
-            front_water_level=2.1,
-            final_target_water_level=2.3,
-            back_water_level=1.9,
-            out_flow=33.0,
-            diversion_flow=12.5,
+            target_value=ValueItem(value_type="WATER_LEVEL", value=2.3),
+            predicted_value_list=[
+                ValueItem(value_type="front_water_level", value=2.1),
+                ValueItem(value_type="back_water_level", value=1.9),
+                ValueItem(value_type="out_flow", value=33.0),
+            ],
         )
 
         self.assertIsInstance(result, PredictedResult)
         self.assertEqual(result.object_id, 102)
         self.assertEqual(result.object_type, "Canal")
-        self.assertEqual(result.object_name, "Canal-102")
-        self.assertEqual(result.front_water_level, 2.1)
-        self.assertEqual(result.final_target_water_level, 2.3)
-        self.assertEqual(result.back_water_level, 1.9)
-        self.assertEqual(result.out_flow, 33.0)
-        self.assertEqual(result.diversion_flow, 12.5)
+        self.assertEqual(result.target_value.value, 2.3)
+        self.assertEqual(result.target_value.value_type, "WATER_LEVEL")
+        values = {item.value_type: item.value for item in result.predicted_value_list}
+        self.assertEqual(values["front_water_level"], 2.1)
+        self.assertEqual(values["back_water_level"], 1.9)
+        self.assertEqual(values["out_flow"], 33.0)
 
 
 if __name__ == "__main__":

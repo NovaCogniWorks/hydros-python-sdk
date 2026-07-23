@@ -5,7 +5,7 @@
 智能体实例和任务生命周期跟踪。
 """
 
-from typing import Optional, Set, Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 import logging
@@ -51,22 +51,15 @@ class AgentStateManager:
     """
     多任务智能体服务的统一状态管理器。
 
-    管理内容：
-    - 活跃仿真上下文（用于多任务隔离）
-    - 智能体实例及其生命周期
-    - 任务状态和状态流转
-    - 本地/远端智能体跟踪
-
-    该类整合原 AgentContextManager 的能力，并增强任务生命周期跟踪
-    和智能体实例管理。
+    TaskState 是任务是否活跃的唯一事实来源；任务与本地运行时智能体
+    在 activate_task / terminate_task 中一起登记和清理。
     """
 
     def __init__(self):
         # 核心状态
-        self._active_contexts: Set[str] = set()  # biz_scene_instance_id 集合
         self._task_states: Dict[str, TaskState] = {}  # context_id → 任务状态
         self._agent_instances: Dict[str, HydroAgentInstance] = {}  # agent_id → 实例
-        self._local_agent_instances: Set[str] = set()  # 本地 agent_id 集合
+        self._local_agent_instances: set[str] = set()  # 本地 agent_id 集合
         self._hydros_cluster_id: Optional[str] = None  # 当前集群 ID
         self._hydros_node_id: Optional[str] = None  # 当前节点 ID
         self._lock = RLock()
@@ -97,88 +90,59 @@ class AgentStateManager:
         with self._lock:
             return self._hydros_node_id
 
-    # ========================================================================
-    # 上下文管理（来自 AgentContextManager）
-    # ========================================================================
-
-    def add_active_context(self, context: SimulationContext):
-        """
-        将仿真上下文加入活跃集合。
-
-        任务初始化时调用。
-        """
-        if context and context.biz_scene_instance_id:
-            with self._lock:
-                self._active_contexts.add(context.biz_scene_instance_id)
-            logger.info(f"Added active context: {context.biz_scene_instance_id}")
-
-    def remove_active_context(self, context: SimulationContext):
-        """
-        从活跃集合移除仿真上下文。
-
-        任务终止时调用。
-        """
-        if context and context.biz_scene_instance_id:
-            with self._lock:
-                self._active_contexts.discard(context.biz_scene_instance_id)
-            logger.info(f"Removed active context: {context.biz_scene_instance_id}")
-
     def has_active_context(self, context: SimulationContext) -> bool:
-        """
-        检查仿真上下文当前是否活跃。
-
-        Args:
-            context: 要检查的仿真上下文
-
-        Returns:
-            上下文活跃时返回 True，否则返回 False
-        """
+        """判断 ``context`` 对应的任务是否处于活动状态。"""
         if not context or not context.biz_scene_instance_id:
             return False
 
         with self._lock:
-            is_active = context.biz_scene_instance_id in self._active_contexts
+            task_state = self._task_states.get(context.biz_scene_instance_id)
+            is_active = task_state is not None and task_state.status == TaskStatus.ACTIVE
         logger.debug(f"Context {context.biz_scene_instance_id} active: {is_active}")
         return is_active
 
-    def get_active_contexts(self) -> Set[str]:
-        """
-        获取全部活跃上下文 ID。
+    def begin_task_initialization(self, context: SimulationContext):
+        """登记任务初始化窗口，但不提前接收普通业务指令。"""
+        if not context or not context.biz_scene_instance_id:
+            logger.warning("Cannot begin task initialization: invalid context")
+            return
 
-        Returns:
-            活跃 biz_scene_instance_id 的集合
-        """
+        context_id = context.biz_scene_instance_id
         with self._lock:
-            return self._active_contexts.copy()
+            task_state = self._task_states.get(context_id)
+            if task_state is None or task_state.status == TaskStatus.TERMINATED:
+                self._task_states[context_id] = TaskState(context_id)
+                logger.info("Task initialization started: %s", context_id)
 
-    # ========================================================================
-    # 智能体实例管理
-    # ========================================================================
+    def has_initializing_context(self, context: SimulationContext) -> bool:
+        """判断任务是否正处于可接收初始化响应、但尚不可处理业务指令的阶段。"""
+        if not context or not context.biz_scene_instance_id:
+            return False
 
-    def register_agent_instance(self, agent: HydroAgentInstance):
-        """
-        注册智能体实例。
-
-        Args:
-            agent: 要注册的智能体实例
-        """
-        if agent and agent.agent_id:
-            with self._lock:
-                self._agent_instances[agent.agent_id] = agent
-            logger.info(f"Registered agent instance: {agent.agent_id}")
-
-    def unregister_agent_instance(self, agent_id: str):
-        """
-        注销智能体实例。
-
-        Args:
-            agent_id: 要注销的智能体 ID
-        """
         with self._lock:
-            if agent_id in self._agent_instances:
-                del self._agent_instances[agent_id]
-                self._local_agent_instances.discard(agent_id)
-                logger.info(f"Unregistered agent instance: {agent_id}")
+            task_state = self._task_states.get(context.biz_scene_instance_id)
+            return task_state is not None and task_state.status == TaskStatus.INITIALIZING
+
+    def cancel_task_initialization(self, context: SimulationContext):
+        """清理未成功激活的初始化任务，避免接受迟到的初始化响应。"""
+        if not context or not context.biz_scene_instance_id:
+            return
+
+        context_id = context.biz_scene_instance_id
+        with self._lock:
+            task_state = self._task_states.get(context_id)
+            if task_state is not None and task_state.status == TaskStatus.INITIALIZING:
+                self._task_states.pop(context_id, None)
+                logger.info("Task initialization cancelled: %s", context_id)
+
+    def get_active_contexts(self) -> set[str]:
+        """返回从活动任务状态推导出的 context ID 集合。"""
+        with self._lock:
+            return {
+                context_id
+                for context_id, task_state in self._task_states.items()
+                if task_state.status == TaskStatus.ACTIVE
+            }
 
     def get_agent_instance(self, agent_id: str) -> Optional[HydroAgentInstance]:
         """
@@ -223,34 +187,6 @@ class AgentStateManager:
         with self._lock:
             agent = self._agent_instances.get(agent_id)
             return agent.agent_status if agent else None
-
-    # ========================================================================
-    # 本地/远端智能体跟踪（来自 AgentContextManager）
-    # ========================================================================
-
-    def add_local_agent(self, agent_instance: HydroAgentInstance):
-        """
-        注册本地智能体实例。
-
-        Args:
-            agent_instance: 要注册的智能体实例
-        """
-        if agent_instance and agent_instance.agent_id:
-            with self._lock:
-                self._local_agent_instances.add(agent_instance.agent_id)
-            logger.info(f"Registered local agent: {agent_instance.agent_id}")
-
-    def remove_local_agent(self, agent_instance: HydroAgentInstance):
-        """
-        注销本地智能体实例。
-
-        Args:
-            agent_instance: 要注销的智能体实例
-        """
-        if agent_instance and agent_instance.agent_id:
-            with self._lock:
-                self._local_agent_instances.discard(agent_instance.agent_id)
-            logger.info(f"Unregistered local agent: {agent_instance.agent_id}")
 
     def is_local_agent(self, agent_instance: HydroAgentInstance) -> bool:
         """
@@ -300,39 +236,39 @@ class AgentStateManager:
     # 任务生命周期管理
     # ========================================================================
 
-    def init_task(self, context: SimulationContext, agents: Optional[List[HydroAgentInstance]] = None):
-        """
-        初始化新任务。
-
-        Args:
-            context: 任务对应的仿真上下文
-            agents: 与该任务关联的可选智能体列表
-        """
+    def activate_task(
+        self,
+        context: SimulationContext,
+        agents: List[HydroAgentInstance],
+    ) -> None:
+        """激活一个任务，并以原子方式登记该任务的全部本地 Agent。"""
         if not context or not context.biz_scene_instance_id:
-            logger.warning("Cannot init task: invalid context")
-            return
+            raise ValueError("context with biz_scene_instance_id is required")
 
         context_id = context.biz_scene_instance_id
-        agent_ids = [agent.agent_id for agent in agents if agent and agent.agent_id] if agents else []
+        valid_agents = [agent for agent in agents if agent and agent.agent_id]
+        if len(valid_agents) != len(agents):
+            raise ValueError("every task agent must have an agent_id")
+        agent_ids = [agent.agent_id for agent in valid_agents]
 
         with self._lock:
-            # 创建任务状态
-            task_state = TaskState(context_id, agent_ids)
-            self._task_states[context_id] = task_state
+            task_state = self._task_states.get(context_id)
+            if task_state is None or task_state.status == TaskStatus.TERMINATED:
+                task_state = TaskState(context_id)
+                self._task_states[context_id] = task_state
+            else:
+                for previous_agent_id in task_state.agent_ids:
+                    self._agent_instances.pop(previous_agent_id, None)
+                    self._local_agent_instances.discard(previous_agent_id)
 
-            # 注册智能体
-            if agents:
-                for agent in agents:
-                    if agent and agent.agent_id:
-                        self.register_agent_instance(agent)
-
-            # 加入活跃上下文
-            self.add_active_context(context)
-
-            # 将任务状态更新为 ACTIVE
+            task_state.agent_ids = agent_ids
+            task_state.terminated_at = None
             task_state.status = TaskStatus.ACTIVE
+            for agent in valid_agents:
+                self._agent_instances[agent.agent_id] = agent
+                self._local_agent_instances.add(agent.agent_id)
 
-        logger.info(f"Initialized task: {context_id} with {len(agent_ids)} agents")
+        logger.info("Activated task: %s with %s local agents", context_id, len(agent_ids))
 
     def terminate_task(self, context: SimulationContext):
         """
@@ -348,18 +284,15 @@ class AgentStateManager:
         context_id = context.biz_scene_instance_id
 
         with self._lock:
-            # 更新任务状态
             task_state = self._task_states.get(context_id)
-            if task_state:
-                task_state.status = TaskStatus.TERMINATING
-                task_state.terminated_at = datetime.now()
-
-            # 从活跃上下文移除
-            self.remove_active_context(context)
-
-            # 标记任务已终止
-            if task_state:
-                task_state.status = TaskStatus.TERMINATED
+            if task_state is None:
+                return
+            task_state.status = TaskStatus.TERMINATING
+            for agent_id in task_state.agent_ids:
+                self._agent_instances.pop(agent_id, None)
+                self._local_agent_instances.discard(agent_id)
+            task_state.terminated_at = datetime.now()
+            task_state.status = TaskStatus.TERMINATED
 
         logger.info(f"Terminated task: {context_id}")
 
@@ -412,6 +345,13 @@ class AgentStateManager:
 
             return agents
 
+    def get_agents_by_code(self, context_id: str) -> Dict[str, HydroAgentInstance]:
+        """返回当前任务按 ``agent_code`` 索引的本地运行时 Agent。"""
+        return {
+            agent.agent_code: agent
+            for agent in self.get_agents_for_context(context_id)
+        }
+
     # ========================================================================
     # 工具方法
     # ========================================================================
@@ -419,7 +359,6 @@ class AgentStateManager:
     def clear(self):
         """清空全部状态。"""
         with self._lock:
-            self._active_contexts.clear()
             self._task_states.clear()
             self._agent_instances.clear()
             self._local_agent_instances.clear()

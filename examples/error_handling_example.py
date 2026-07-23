@@ -80,10 +80,6 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
             # 当 URL 无效或文件不存在时会抛出异常
             self._topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
 
-        # 注册到状态管理器
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
-
         # 初始化孪生模型（可能抛出异常）
         self._initialize_twins_model()
 
@@ -200,10 +196,6 @@ class ErrorHandlingExampleAgent(TwinsSimulationAgent):
         """
         try:
             logger.info("Terminating agent...")
-
-            # 清理资源
-            self.state_manager.terminate_task(self.context)
-            self.state_manager.remove_local_agent(self)
 
             # 返回成功响应
             return SimTaskTerminateResponse(

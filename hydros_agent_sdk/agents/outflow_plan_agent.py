@@ -156,10 +156,6 @@ class OutflowPlanAgent(BaseHydroAgent):
         # 初始化计划模型
         self._initialize_planning_models()
 
-        # 在状态管理器中注册
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
-
         logger.info(f"Outflow plan agent initialized successfully: {self.agent_id}")
 
         # 将智能体状态更新为 ACTIVE
@@ -220,8 +216,7 @@ class OutflowPlanAgent(BaseHydroAgent):
 
         子类应该：
         1. 清理计划资源
-        2. 在状态管理器中注销
-        3. 返回 SimTaskTerminateResponse
+        2. 返回 SimTaskTerminateResponse
 
         参数:
             request: 任务终止请求

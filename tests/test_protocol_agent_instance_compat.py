@@ -1,6 +1,15 @@
+import unittest
+
+from pydantic import ValidationError
+
 from hydros_agent_sdk.protocol.commands import (
     AgentInstanceStatusReport,
     DeviceStatusChangeResponse,
+    EdgeControlExecutionReport,
+    EdgeControlResultReport,
+    ExecutionStatus,
+    MpcExecutionStatusReport,
+    MpcExecutionStatus,
     SimCommandEnvelope,
     SimTaskInitResponse,
 )
@@ -16,6 +25,23 @@ from hydros_agent_sdk.protocol.models import (
 
 def make_context():
     return SimulationContext(biz_scene_instance_id="TASK_001")
+
+
+def make_agent(context, agent_code="TEST_AGENT"):
+    return HydroAgentInstance(
+        agent_code=agent_code,
+        agent_type=agent_code,
+        agent_name="Test Agent",
+        agent_configuration_url="",
+        agent_id=f"AGT_{agent_code}",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        cluster_id="cluster-a",
+        node_id="node-a",
+        context=context,
+        agent_status=AgentStatus.ACTIVE,
+        agent_instance_status=AgentInstanceStatus.WAITING,
+        drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
+    )
 
 
 def test_agent_instance_accepts_legacy_sdk_names_and_serializes_java_names():
@@ -171,3 +197,132 @@ def test_device_status_change_response_envelope_matches_java_command_type():
     assert isinstance(envelope.command, DeviceStatusChangeResponse)
     assert envelope.command.command_id == "CMD_DEVICE_STATUS"
     assert envelope.command.object_time_series == []
+
+
+class CoordinationReportContractTest(unittest.TestCase):
+    def test_edge_control_result_report_envelope_matches_java_command_type(self):
+        context = make_context()
+        agent = make_agent(context, agent_code="GATE_STATION_AGENT")
+        payload = {
+            "command_id": "CMD_EDGE_CONTROL_RESULT_REPORT",
+            "command_type": "edge_control_result_report",
+            "context": context.model_dump(mode="json"),
+            "broadcast": True,
+            "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+            "report": {
+                "status": "SUCCEED",
+                "message": "ok",
+                "control_group_id": "control-group-001",
+                "main_step_index": 12,
+            },
+            "details": [{"object_id": 1001, "target_value": 1.25}],
+        }
+
+        envelope = SimCommandEnvelope(command=payload)
+
+        self.assertIsInstance(envelope.command, EdgeControlResultReport)
+        self.assertEqual(envelope.command.command_id, "CMD_EDGE_CONTROL_RESULT_REPORT")
+        self.assertEqual(envelope.command.report["status"], "SUCCEED")
+        self.assertEqual(envelope.command.report["control_group_id"], "control-group-001")
+        self.assertEqual(envelope.command.report["main_step_index"], 12)
+        self.assertEqual(envelope.command.details[0]["object_id"], 1001)
+
+    def test_pid_control_execution_report_discriminator_is_not_supported(self):
+        context = make_context()
+        agent = make_agent(context, agent_code="GATE_STATION_AGENT")
+        payload = {
+            "command_id": "CMD_OLD_REPORT",
+            "command_type": "pid_control_execution_report",
+            "context": context.model_dump(mode="json"),
+            "broadcast": True,
+            "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+            "run_result": {},
+            "actuator_results": [],
+        }
+
+        with self.assertRaises(ValidationError):
+            SimCommandEnvelope(command=payload)
+
+    def test_edge_control_execution_report_envelope_matches_java_command_type(self):
+        context = make_context()
+        source_agent = make_agent(context, agent_code="GATE_STATION_AGENT")
+        target_agent = make_agent(context, agent_code="CENTRAL_SCHEDULING_AGENT")
+        payload = {
+            "command_id": "CMD_EDGE_REPORT",
+            "command_type": "edge_control_execution_report",
+            "context": context.model_dump(mode="json"),
+            "broadcast": True,
+            "source_agent_instance": source_agent.model_dump(mode="json", by_alias=True),
+            "target_agent_instance": target_agent.model_dump(mode="json", by_alias=True),
+            "exec_command_id": "CMD_EXEC",
+            "exec_run_id": "RUN_001",
+            "object_type": "GATE",
+            "object_id": 1001,
+            "target_value_type": "GATE_OPENING",
+            "target_value": 1.5,
+            "exec_status": "COMPLETED",
+            "error_code": None,
+            "error_message": None,
+            "started_time": "2026-06-23T15:58:00+08:00",
+            "finished_time": "2026-06-23T15:58:01+08:00",
+        }
+
+        envelope = SimCommandEnvelope(command=payload)
+
+        self.assertIsInstance(envelope.command, EdgeControlExecutionReport)
+        self.assertEqual(envelope.command.exec_command_id, "CMD_EXEC")
+        self.assertEqual(envelope.command.exec_run_id, "RUN_001")
+        self.assertEqual(envelope.command.target_agent_instance.agent_code, "CENTRAL_SCHEDULING_AGENT")
+        self.assertEqual(envelope.command.exec_status, "COMPLETED")
+        self.assertIs(envelope.command.exec_status, ExecutionStatus.COMPLETED)
+        self.assertNotIn("group_id", EdgeControlExecutionReport.model_fields)
+        self.assertNotIn("session_id", EdgeControlExecutionReport.model_fields)
+        self.assertNotIn("sub_step_index", EdgeControlExecutionReport.model_fields)
+        serialized = envelope.command.model_dump(mode="json", by_alias=True)
+        self.assertEqual(serialized["exec_run_id"], "RUN_001")
+        self.assertNotIn("control_run_id", serialized)
+
+        old_field_payload = dict(payload)
+        old_field_payload.pop("exec_run_id")
+        old_field_payload["control_run_id"] = "OLD_RUN_001"
+        ignored_old_field = SimCommandEnvelope(command=old_field_payload)
+        self.assertIsNone(ignored_old_field.command.exec_run_id)
+
+    def test_mpc_execution_status_report_envelope_matches_java_command_type(self):
+        context = make_context()
+        agent = make_agent(context, agent_code="CENTRAL_SCHEDULING_AGENT")
+        payload = {
+            "command_id": "CMD_MPC_STATUS",
+            "command_type": "mpc_execution_status_report",
+            "context": context.model_dump(mode="json"),
+            "broadcast": True,
+            "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+            "optimize_step": 1,
+            "horizon_step": 2,
+            "biz_idem_key": "idem-1",
+            "node_id": 10,
+            "object_id": 1001,
+            "object_type": "GATE",
+            "target_value_type": "GATE_OPENING",
+            "target_value": 1.5,
+            "execution_command_id": "CMD_EXEC",
+            "dispatch_key": "dispatch-1",
+            "execution_status": "DISPATCHED",
+            "execution_error_code": None,
+            "execution_error_message": None,
+            "dispatched_at": "2026-06-23T15:58:00+08:00",
+            "executed_at": None,
+        }
+
+        envelope = SimCommandEnvelope(command=payload)
+
+        self.assertIsInstance(envelope.command, MpcExecutionStatusReport)
+        self.assertEqual(envelope.command.execution_command_id, "CMD_EXEC")
+        self.assertEqual(envelope.command.dispatch_key, "dispatch-1")
+        self.assertEqual(envelope.command.execution_status, "DISPATCHED")
+        self.assertIs(envelope.command.execution_status, MpcExecutionStatus.DISPATCHED)
+
+        invalid_status_payload = dict(payload)
+        invalid_status_payload["execution_status"] = "NOT_A_JAVA_MPC_EXECUTION_STATUS"
+        with self.assertRaises(ValidationError):
+            SimCommandEnvelope(command=invalid_status_payload)

@@ -166,10 +166,6 @@ class TwinsSimulationAgent(TickableAgent):
             # 将智能体状态更新为 ACTIVE
             object.__setattr__(self, 'agent_status', AgentStatus.ACTIVE)
 
-            # 注册到状态管理器
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
-
             logger.info(f"Digital twins simulation agent initialized: {self.agent_id}")
 
             response = ResponseFactory.init_succeed(self, request)
@@ -300,10 +296,6 @@ class TwinsSimulationAgent(TickableAgent):
             self._twins_model = None
             self._topology = None
             self._simulation_state.clear()
-
-            # 从状态管理器注销
-            self.state_manager.terminate_task(self.context)
-            self.state_manager.remove_local_agent(self)
 
             logger.info(f"Digital twins simulation agent terminated: {self.agent_id}")
 

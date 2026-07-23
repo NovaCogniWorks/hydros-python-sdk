@@ -10,6 +10,7 @@ from abc import abstractmethod
 from typing import Optional, List
 
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.error_codes import ErrorCodes
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.runtime.time_series_cache import TimeSeriesCache
 from hydros_agent_sdk.transport.mqtt_metrics_publisher import MqttMetricsPublisher
@@ -113,7 +114,12 @@ class TickableAgent(BaseHydroAgent):
 
         self.time_series_cache = TimeSeriesCache()
         self._time_series_cache = self.time_series_cache.store
-        self.metrics_publisher = MqttMetricsPublisher.from_coordination_client(sim_coordination_client)
+        self.metrics_publisher = MqttMetricsPublisher.from_coordination_client(
+            sim_coordination_client,
+            biz_scene_instance_id=context.biz_scene_instance_id,
+            cluster_id=hydros_cluster_id,
+            edge_node_code=hydros_node_id,
+        )
 
         logger.info(f"TickableAgent initialized: {self.agent_id}")
 
@@ -165,7 +171,15 @@ class TickableAgent(BaseHydroAgent):
         except Exception as e:
             logger.error(f"Error processing tick {request.step}: {e}", exc_info=True)
 
-            return ResponseFactory.tick_failed(self, request)
+            return ResponseFactory.tick_failed(
+                self,
+                request,
+                error_code=ErrorCodes.AGENT_TICK_FAILURE.code,
+                error_message=ErrorCodes.AGENT_TICK_FAILURE.format_message(
+                    self.agent_code,
+                    f"{type(e).__name__}: {e}",
+                ),
+            )
 
     @abstractmethod
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:

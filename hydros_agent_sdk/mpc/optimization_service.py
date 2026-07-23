@@ -11,8 +11,8 @@ from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.sensor_data import SensorData
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class MpcOptimizationService:
         configured_mpc_service_base_url: Optional[str] = None,
         configured_mpc_request_timeout_seconds: Optional[float] = None,
         mpc_planning_client: Optional[MpcPlanningClient] = None,
-        mpc_result_reporter: Optional[MpcResultReporter] = None,
+        mpc_prediction_result_reporter: Optional[MpcPredictionResultReporter] = None,
         mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = None,
     ):
         self.properties = properties
@@ -36,7 +36,7 @@ class MpcOptimizationService:
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
         self.configured_mpc_request_timeout_seconds = configured_mpc_request_timeout_seconds
         self.mpc_planning_client = mpc_planning_client
-        self.mpc_result_reporter = mpc_result_reporter or MpcResultReporter()
+        self.mpc_prediction_result_reporter = mpc_prediction_result_reporter or MpcPredictionResultReporter()
         self.mpc_sensor_provider = mpc_sensor_provider
 
     def get_or_create_mpc_planning_client(self) -> Optional[MpcPlanningClient]:
@@ -60,7 +60,7 @@ class MpcOptimizationService:
     def list_sensor_data(
         self,
         source_agent_instance: Any,
-        mpc_task_state: Optional[SchedulingTaskState] = None,
+        mpc_task_state: Optional[MpcTaskState] = None,
     ) -> List[SensorData]:
         if self.mpc_sensor_provider is not None:
             provided = self._call_sensor_provider(source_agent_instance, mpc_task_state)
@@ -74,7 +74,7 @@ class MpcOptimizationService:
     def optimize(
         self,
         source_agent_instance: Any,
-        mpc_task_state: SchedulingTaskState,
+        mpc_task_state: MpcTaskState,
         step: int,
     ) -> Optional[List[MpcOptimizeResponse]]:
         mpc_client = self.get_or_create_mpc_planning_client()
@@ -109,13 +109,13 @@ class MpcOptimizationService:
         if not responses:
             return None
 
-        self.mpc_result_reporter.publish(source_agent_instance, mpc_task_state, responses)
+        self.mpc_prediction_result_reporter.publish(source_agent_instance, mpc_task_state, responses)
         return responses
 
     def _call_sensor_provider(
         self,
         source_agent_instance: Any,
-        mpc_task_state: Optional[SchedulingTaskState],
+        mpc_task_state: Optional[MpcTaskState],
     ) -> Iterable[SensorData | Dict[str, Any]]:
         provider = self.mpc_sensor_provider
         if provider is None:

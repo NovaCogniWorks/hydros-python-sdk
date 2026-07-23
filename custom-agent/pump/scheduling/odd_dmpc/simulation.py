@@ -1509,7 +1509,7 @@ class ClosedLoopSimulation:
             station = self.system_config.station_by_id[station_id]
             action = actions[station_id]
             
-            # 1. Flow
+            # 1. 流量
             ax_flow = fig.add_subplot(gs[idx, 0])
             ax_flow.plot(times_hist, hist_flows[station_id], color=color, linestyle="-", label="Actual Q")
             ax_flow.plot(times_plan, lower_prediction_plan[station_id], color=color, linestyle="--", alpha=0.5, label="Lower Pred")
@@ -1520,7 +1520,7 @@ class ClosedLoopSimulation:
             ax_flow.legend(loc="upper right", fontsize=8)
             ax_flow.grid(True)
             
-            # 2. Head
+            # 2. 水头
             ax_head = fig.add_subplot(gs[idx, 1])
             
             act_back_arr = np.array(hist_back_levels[station_id]) if hist_back_levels[station_id] else np.array([])
@@ -1539,7 +1539,7 @@ class ClosedLoopSimulation:
             ax_head.legend(loc="upper right", fontsize=8)
             ax_head.grid(True)
             
-            # 3. Efficiency
+            # 3. 效率
             ax_eff = fig.add_subplot(gs[idx, 2])
             ax_eff.plot(times_hist, hist_efficiencies[station_id], color=color, linestyle="-", label="Efficiency %")
             ax_eff.plot(times_plan, self._predicted_series(action.predicted_efficiencies, hist_efficiencies[station_id], len(times_plan)), color=color, linestyle="--", alpha=0.5, label="Pred Eff")
@@ -1550,7 +1550,7 @@ class ClosedLoopSimulation:
             ax_eff.legend(loc="lower right", fontsize=8)
             ax_eff.grid(True)
             
-            # 4. Blade Angles
+            # 4. 叶片角
             ax_angle = fig.add_subplot(gs[idx, 3])
             palette_st = station_palettes[station_id]
             for u_idx, unit in enumerate(station.units):
@@ -1565,7 +1565,7 @@ class ClosedLoopSimulation:
             ax_angle.legend(loc="upper right", ncol=2, fontsize=7)
             ax_angle.grid(True)
             
-            # 5. ODD Domain
+            # 5. ODD 区域
             ax_odd = fig.add_subplot(gs[idx, 4])
             odd3_boundary = max(float(self.runtime.odd3_flow_tolerance), float(self.runtime.odd1_flow_tolerance))
             ymax = max(
@@ -1588,7 +1588,7 @@ class ClosedLoopSimulation:
             ax_odd.legend(loc="upper right", fontsize=7)
             ax_odd.grid(True)
             
-            # 6. Detailed Text Summary
+            # 6. 详细文本摘要
             ax_text = fig.add_subplot(gs[idx, 5])
             ax_text.axis("off")
             
@@ -1811,7 +1811,7 @@ class ClosedLoopSimulation:
             station = self.system_config.station_by_id[station_id]
             action = actions[station_id]
             
-            # 1. Flow
+            # 1. 流量
             ax_flow = fig.add_subplot(gs[idx, 0])
             ax_flow.plot(times_hist, hist_flows[station_id], color=color, linestyle="-", label="Actual Q")
             ax_flow.plot(times_plan, lower_prediction_plan[station_id], color=color, linestyle="--", alpha=0.5, label="Lower Pred")
@@ -1822,7 +1822,7 @@ class ClosedLoopSimulation:
             ax_flow.legend(loc="upper right", fontsize=8)
             ax_flow.grid(True)
             
-            # 2. Head
+            # 2. 水头
             ax_head = fig.add_subplot(gs[idx, 1])
             
             act_back_arr = np.array(hist_back_levels[station_id]) if hist_back_levels[station_id] else np.array([])
@@ -1841,7 +1841,7 @@ class ClosedLoopSimulation:
             ax_head.legend(loc="upper right", fontsize=8)
             ax_head.grid(True)
             
-            # 3. Efficiency
+            # 3. 效率
             ax_eff = fig.add_subplot(gs[idx, 2])
             ax_eff.plot(times_hist, hist_efficiencies[station_id], color=color, linestyle="-", label="Efficiency %")
             ax_eff.plot(times_plan, self._predicted_series(action.predicted_efficiencies, hist_efficiencies[station_id], len(times_plan)), color=color, linestyle="--", alpha=0.5, label="Pred Eff")
@@ -1852,7 +1852,7 @@ class ClosedLoopSimulation:
             ax_eff.legend(loc="lower right", fontsize=8)
             ax_eff.grid(True)
             
-            # 4. Blade Angles
+            # 4. 叶片角
             ax_angle = fig.add_subplot(gs[idx, 3])
             palette_st = station_palettes[station_id]
             for u_idx, unit in enumerate(station.units):
@@ -1867,7 +1867,7 @@ class ClosedLoopSimulation:
             ax_angle.legend(loc="upper right", ncol=2, fontsize=7)
             ax_angle.grid(True)
             
-            # 5. ODD Domain
+            # 5. ODD 区域
             ax_odd = fig.add_subplot(gs[idx, 4])
             odd3_boundary = max(float(self.runtime.odd3_flow_tolerance), float(self.runtime.odd1_flow_tolerance))
             ymax = max(
@@ -1890,7 +1890,7 @@ class ClosedLoopSimulation:
             ax_odd.legend(loc="upper right", fontsize=7)
             ax_odd.grid(True)
             
-            # 6. Detailed Text Summary
+            # 6. 详细文本摘要
             ax_text = fig.add_subplot(gs[idx, 5])
             ax_text.axis("off")
             
@@ -2017,14 +2017,14 @@ class ClosedLoopSimulation:
             mode_map = {"ODD1": 1, "ODD2": 2, "ODD3": 3}
             axes[1].step(station_df[time_col], station_df["mode"].map(mode_map), where="post", color=st_color, label=f"S{station_id}")
             
-            # Units Angle
+            # 泵组叶片角
             if unit_history is not None and not unit_history.empty:
                 st_uh = unit_history[unit_history["station_id"] == station_id]
                 for unit_id in st_uh["unit_id"].unique():
                     u_df = st_uh[st_uh["unit_id"] == unit_id]
                     axes[2].plot(u_df[time_col], u_df["opening"], label=f"U{unit_id} angle")
                     
-            # Units Efficiency
+            # 泵组效率
             if unit_history is not None and not unit_history.empty:
                 st_uh = unit_history[unit_history["station_id"] == station_id]
                 for unit_id in st_uh["unit_id"].unique():
@@ -2080,7 +2080,7 @@ class ClosedLoopSimulation:
             fig.savefig(self.output_dir / f"closed_loop_overview_{station_id}.png", dpi=200)
             plt.close(fig)
             
-        # Generate pool level overview plots
+        # 生成池段水位总览图
         for p_idx, pool_id in enumerate(pool_ids):
             if p_idx >= len(station_ids) - 1:
                 break
@@ -2113,14 +2113,14 @@ class ClosedLoopSimulation:
             fig_p.savefig(self.output_dir / f"pool_level_overview_{pool_id}.png", dpi=200)
             plt.close(fig_p)
             
-            # calculate pool average MAE for summary
+            # 计算池段平均 MAE，写入摘要
             pool_lvl_col = f"actual_pool_level_{pool_id}"
             if pool_lvl_col in observer_df.columns and len(observer_df) > 0:
                 first_lvl = observer_df[pool_lvl_col].iloc[0]
                 lvl_mae = (observer_df[pool_lvl_col] - first_lvl).abs().mean()
                 pool_mae_text.append(f"P{pool_id} Lvl Var: {lvl_mae:.3f}m")
                 
-        # Write summary to file
+        # 将摘要写入文件
         summary_lines.append("--- System Total ---")
         if pool_mae_text:
             summary_lines.append("Pool Level Mean Variation (Avg Water Level):")

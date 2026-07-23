@@ -22,7 +22,9 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     TimeSeriesCalculationRequest,
     AgentInstanceStatusReport,
-    MpcResultReport,
+    MpcPredictionResultReport,
+    MpcExecutionStatusReport,
+    EdgeControlExecutionReport,
     OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.context_manager import ContextManager
@@ -314,17 +316,33 @@ class SimCoordinationCallback(ABC):
         self._store_sibling_agent_instance(report.source_agent_instance)
         logger.debug(f"Sibling agent status updated: {report.source_agent_instance.agent_id}")
 
-    def on_mpc_result(self, report: MpcResultReport):
+    def on_mpc_prediction_result(self, report: MpcPredictionResultReport):
         """
-        收到 MPC 结果报告时调用。
+        收到 MPC 预测结果报告时调用。
 
         默认实现仅记录事件。协调侧或数据侧消费者应覆盖该方法，
-        用于持久化或转发 MPC 结果。
+        用于持久化或转发 MPC 预测结果。
         """
         logger.info(
-            "MPC result report received: source=%s, result_count=%s",
+            "MPC prediction result report received: source=%s, result_count=%s",
             report.source_agent_instance.agent_id,
-            len(report.mpc_results),
+            len(report.mpc_prediction_results),
+        )
+
+    def on_mpc_execution_status(self, report: MpcExecutionStatusReport):
+        """处理远端 central 回传的 MPC 控制执行状态。"""
+        logger.info(
+            "MPC execution status report received: command=%s, status=%s",
+            report.execution_command_id,
+            report.execution_status,
+        )
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport):
+        """处理远端 edge 回传的站点控制终态。"""
+        logger.info(
+            "Station control execution report received: command=%s, status=%s",
+            report.exec_command_id,
+            report.exec_status,
         )
 
     def on_time_series_calculation(self, request: TimeSeriesCalculationRequest):

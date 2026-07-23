@@ -187,8 +187,8 @@ global_params:
   rho: 1000
   g: 9.81
 flow_depart:
-  step_q: 1.0
-  step_h: 0.2
+  step_q: 2.0
+  step_h: 0.4
   data_dir: data
   output_dir: output
 scheduling:
@@ -219,7 +219,7 @@ runtime:
     flow_search_tolerance: 8.0
     candidate_pool_limit: 60
   upper_scheduler:
-    upper_level_correction_gain: 0.0
+    upper_level_correction_gain: 1.0
     upper_flow_bias_correction_gain: 1.0
     upper_mpc_optimization_method: greedy
   lower_controller:

@@ -15,9 +15,10 @@ from hydros_agent_sdk.sensor_data import SensorData
 from .models import MpcOptimizeRequest, MpcOptimizeResponse
 
 if TYPE_CHECKING:
-    from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+    from hydros_agent_sdk.mpc.task_state import MpcTaskState
 
 logger = logging.getLogger(__name__)
+DEFAULT_PREDICTION_HORIZON = 12
 
 
 class MpcPlanningError(RuntimeError):
@@ -53,7 +54,7 @@ class MpcPlanningClient:
 
     def execute_optimization(
         self,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> List[MpcOptimizeResponse]:
@@ -117,7 +118,7 @@ class MpcPlanningClient:
 
     def build_optimize_request(
         self,
-        mpc_task_state: "SchedulingTaskState",
+        mpc_task_state: "MpcTaskState",
         sensor_data: Iterable[SensorData | Dict[str, Any]],
         sensor_provider: Optional[Callable[[], Iterable[SensorData | Dict[str, Any]]]] = None,
     ) -> MpcOptimizeRequest:
@@ -145,19 +146,28 @@ class MpcPlanningClient:
             )
             raise MpcPlanningError("MPC optimization requires non-empty sensor data")
 
-        include_diversion = self.has_diversion_request(mpc_task_state.hydro_events)
+        diversion_boundaries = self.build_diversion_boundaries(
+            mpc_task_state.hydro_events,
+            mpc_task_state.current_step,
+        )
         return MpcOptimizeRequest(
             biz_scene_instance_id=mpc_task_state.context.biz_scene_instance_id,
             step_index=mpc_task_state.current_step,
             mpc_config_url=mpc_task_state.algorithm_config_url,
             control_config_url=mpc_task_state.control_config_url,
+            prediction_horizon=(
+                mpc_task_state.prediction_horizon
+                if mpc_task_state.prediction_horizon is not None
+                else DEFAULT_PREDICTION_HORIZON
+            ),
             upstream_boundaries=self.build_lateral_inflow_boundaries(
                 mpc_task_state.hydro_events,
                 mpc_task_state.current_step,
             ),
+            diversion_boundaries=diversion_boundaries or None,
             sensor_data=normalized_sensor_data,
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
-            include_diversion=include_diversion,
+            include_diversion=bool(diversion_boundaries),
             horizon_interval_seconds=mpc_task_state.output_step_size,
         )
 
@@ -188,6 +198,24 @@ class MpcPlanningClient:
     ) -> Dict[str, List[float]]:
         boundaries: Dict[str, List[float]] = {}
         for event in events or []:
+            if event.hydro_event_source_type == "WATER_USE":
+                continue
+            for object_time_series in event.object_time_series or []:
+                values = cls.collect_values_with_interpolation(object_time_series, current_step)
+                if values and object_time_series.object_id is not None:
+                    boundaries[str(object_time_series.object_id)] = values
+        return boundaries
+
+    @classmethod
+    def build_diversion_boundaries(
+        cls,
+        events: Iterable[TimeSeriesDataChangedEvent],
+        current_step: int,
+    ) -> Dict[str, List[float]]:
+        boundaries: Dict[str, List[float]] = {}
+        for event in events or []:
+            if event.hydro_event_source_type != "WATER_USE":
+                continue
             for object_time_series in event.object_time_series or []:
                 values = cls.collect_values_with_interpolation(object_time_series, current_step)
                 if values and object_time_series.object_id is not None:
@@ -248,18 +276,6 @@ class MpcPlanningClient:
                 if object_time_series.object_id is not None:
                     fixed_controls[str(object_time_series.object_id)] = 0.0
         return fixed_controls
-
-    @staticmethod
-    def has_diversion_request(events: Iterable[TimeSeriesDataChangedEvent]) -> bool:
-        for event in events or []:
-            if event.hydro_event_source_type != "WATER_USE":
-                continue
-            for object_time_series in event.object_time_series or []:
-                if object_time_series.object_id is None:
-                    continue
-                if any(item.value is not None for item in object_time_series.time_series):
-                    return True
-        return False
 
     @staticmethod
     def _find_prev_value(

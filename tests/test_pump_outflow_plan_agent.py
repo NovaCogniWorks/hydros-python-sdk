@@ -107,8 +107,7 @@ class TestPumpOutflowPlanAgent(unittest.TestCase):
         
         self.assertEqual(response.command_status, "SUCCEED")
         self.assertIsNone(self.agent._topology)
-        self.agent.state_manager.terminate_task.assert_called_once_with(self.context)
-        self.agent.state_manager.remove_local_agent.assert_called_once_with(self.agent)
+        self.agent.state_manager.terminate_task.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

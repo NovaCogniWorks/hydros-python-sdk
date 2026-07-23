@@ -4,6 +4,13 @@
 .codegraph
 .agents
 .codex
+.venv/
+.pycache-check/
+.uv-cache/
+.hf-cache/
+.xdg-cache/
+.ruff_cache/
+node_modules/
 
 __pycache__/
 *.py[cod]
@@ -19,8 +26,13 @@ build/
 dist/
 output/
 
+docs/
+tests/
+examples/
+
 examples/logs/
 custom-agent/*/logs/
+custom-agent/*/.runtime/
 logs/
 
 .DS_Store

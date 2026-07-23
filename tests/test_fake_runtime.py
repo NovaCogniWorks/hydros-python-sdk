@@ -47,6 +47,7 @@ class TickCallback(SimCoordinationCallback):
             context=request.context,
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self.agent,
+            completed_step=request.step,
             broadcast=False,
         )
 
@@ -56,32 +57,27 @@ def test_fake_runtime_dispatches_command_and_captures_response():
     agent = make_agent(context)
     state_manager = AgentStateManager()
     state_manager.set_node_id("node")
-    state_manager.init_task(context, [agent])
-    state_manager.add_local_agent(agent)
-    runtime = FakeRuntime(TickCallback(agent), state_manager=state_manager)
+    state_manager.activate_task(context, [agent])
+    with FakeRuntime(TickCallback(agent), state_manager=state_manager) as runtime:
+        responses = runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
 
-    responses = runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
-
-    assert len(responses) == 1
-    assert isinstance(responses[0], TickCmdResponse)
-    assert responses[0].command_status == CommandStatus.SUCCEED
-    assert runtime.responses == responses
+        assert len(responses) == 1
+        assert isinstance(responses[0], TickCmdResponse)
+        assert responses[0].command_status == CommandStatus.SUCCEED
+        assert runtime.responses == responses
 
 
-def test_fake_runtime_can_publish_queued_responses_through_fake_mqtt_client():
+def test_fake_runtime_can_publish_queued_responses_through_transport():
     context = make_context()
     agent = make_agent(context)
     state_manager = AgentStateManager()
     state_manager.set_node_id("node")
-    state_manager.init_task(context, [agent])
-    state_manager.add_local_agent(agent)
-    runtime = FakeRuntime(TickCallback(agent), state_manager=state_manager)
+    state_manager.activate_task(context, [agent])
+    with FakeRuntime(TickCallback(agent), state_manager=state_manager) as runtime:
+        runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
 
-    runtime.send(TickCmdRequest(command_id="CMD_TICK", context=context, step=2))
-    runtime.publish_all()
-
-    assert len(runtime.client.mqtt_client.published) == 1
-    topic, payload, qos = runtime.client.mqtt_client.published[0]
-    assert topic == "/hydros/commands/coordination/test"
-    assert '"command_id":"CMD_TICK"' in payload
-    assert qos == 1
+        assert len(runtime.transport.published) == 1
+        published = runtime.transport.published[0]
+        assert published.topic == "/hydros/commands/coordination/test"
+        assert '"command_id":"CMD_TICK"' in published.payload
+        assert published.qos == 1

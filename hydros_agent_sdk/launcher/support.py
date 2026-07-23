@@ -12,19 +12,31 @@ import signal
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, Type
 
-from hydros_agent_sdk import HydroAgentFactory, SimCoordinationClient, load_env_config, setup_logging
 from hydros_agent_sdk.base_agent import BaseHydroAgent
+from hydros_agent_sdk.config_loader import load_env_config
+from hydros_agent_sdk.coordination_client import SimCoordinationClient
+from hydros_agent_sdk.developer_api import CustomAgent
+from hydros_agent_sdk.factory import CustomAgentFactory, HydroAgentFactory
+from hydros_agent_sdk.logging_config import setup_logging
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
 )
-from hydros_agent_sdk.multi_agent import (
-    MultiAgentCallback,
-)
+from hydros_agent_sdk.multi_agent import MultiAgentCallback
 
 logger = logging.getLogger(__name__)
+
+
+class ManagedRuntimeService(Protocol):
+    """与多智能体进程共享生命周期的应用服务。"""
+
+    def start(self) -> None:
+        """启动服务；失败时抛出异常并阻止 Agent runtime 启动。"""
+
+    def stop(self) -> None:
+        """停止服务并释放端口、线程等运行时资源。"""
 
 
 @dataclass(frozen=True)
@@ -32,7 +44,7 @@ class AgentModuleInfo:
     """启动器发现到的智能体模块信息。"""
 
     name: str
-    agent_class: Type[BaseHydroAgent]
+    agent_class: Type
     script_dir: str
     agent_code: str
     agent_type: str
@@ -59,6 +71,7 @@ class LauncherOptions:
     debug_port: int = 5678
     enable_system_central_scheduling_agent: bool = False
     list_only: bool = False
+    check_only: bool = False
     show_help: bool = False
     all_requested: bool = False
 
@@ -148,9 +161,13 @@ class AgentDirectoryResolver:
 
 
 class AgentClassResolver:
-    """从智能体目录中寻找 BaseHydroAgent 子类。"""
+    """从智能体目录中寻找组合式 CustomAgent 或旧式 BaseHydroAgent。"""
 
-    def find_agent_class(self, agent_dir: str) -> Optional[Type[BaseHydroAgent]]:
+    def __init__(self):
+        self.last_import_errors: List[str] = []
+
+    def find_agent_class(self, agent_dir: str) -> Optional[Type]:
+        self.last_import_errors = []
         py_files = [
             f for f in os.listdir(agent_dir)
             if f.endswith(".py") and not f.startswith("__") and not f.startswith("test_")
@@ -171,19 +188,22 @@ class AgentClassResolver:
         agent_dir: str,
         py_files: List[str],
         preferred_only: bool,
-    ) -> Optional[Type[BaseHydroAgent]]:
+    ) -> Optional[Type]:
         for py_file in py_files:
             module_name = py_file[:-3]
             try:
                 module = self._load_module(module_name, os.path.join(agent_dir, py_file))
             except Exception as exc:
+                import_error = f"{py_file}: {type(exc).__name__}: {exc}"
+                if import_error not in self.last_import_errors:
+                    self.last_import_errors.append(import_error)
                 logger.debug("Failed to import %s: %s", py_file, exc)
                 continue
 
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if not self._is_agent_class(obj, module_name):
                     continue
-                if preferred_only and any(marker in name for marker in ["With", "Test", "Mock", "Demo"]):
+                if preferred_only and any(marker in name for marker in ["With", "Test", "Demo"]):
                     continue
                 logger.debug("Found agent class: %s in %s", name, py_file)
                 return obj
@@ -202,10 +222,11 @@ class AgentClassResolver:
 
     @staticmethod
     def _is_agent_class(obj, module_name: str) -> bool:
+        if obj.__module__ != module_name:
+            return False
         return (
-            obj != BaseHydroAgent
-            and issubclass(obj, BaseHydroAgent)
-            and obj.__module__ == module_name
+            (obj != CustomAgent and issubclass(obj, CustomAgent))
+            or (obj != BaseHydroAgent and issubclass(obj, BaseHydroAgent))
         )
 
 
@@ -296,9 +317,13 @@ class AgentModuleLoader:
 
         agent_class = self.class_resolver.find_agent_class(agent_dir)
         if agent_class is None:
+            import_details = ""
+            if self.class_resolver.last_import_errors:
+                import_details = " Import failures: " + "; ".join(self.class_resolver.last_import_errors)
             raise ValueError(
-                f"No BaseHydroAgent subclass found in {agent_dir}. "
-                f"Please ensure there is a Python file with a class that inherits from BaseHydroAgent."
+                f"No CustomAgent or BaseHydroAgent subclass found in {agent_dir}. "
+                f"Please define a CustomAgent implementation (recommended) or an existing BaseHydroAgent subclass."
+                f"{import_details}"
             )
 
         logger.debug("Found agent class: %s", agent_class.__name__)
@@ -367,11 +392,7 @@ class AgentFactoryRegistrationService:
                 self.logger.info("  Node ID: %s", env_config["hydros_node_id"])
 
             config_file = os.path.join(agent_info.script_dir, "agent.properties")
-            agent_factory = HydroAgentFactory(
-                agent_class=agent_info.agent_class,
-                config_file=config_file,
-                env_config=env_config,
-            )
+            agent_factory = self._create_agent_factory(agent_info, config_file, env_config)
             callback.register_agent_factory(agent_info.agent_code, agent_factory)
 
             registered_agent = RegisteredAgentInfo.from_module(agent_info)
@@ -394,6 +415,24 @@ class AgentFactoryRegistrationService:
                 self._log_registered_agent(registered_agent.name, registered_agent)
 
         return env_config, registered_agents
+
+    @staticmethod
+    def _create_agent_factory(
+        agent_info: AgentModuleInfo,
+        config_file: str,
+        env_config: Dict[str, str],
+    ):
+        if issubclass(agent_info.agent_class, CustomAgent):
+            return CustomAgentFactory(
+                custom_agent_class=agent_info.agent_class,
+                config_file=config_file,
+                env_config=env_config,
+            )
+        return HydroAgentFactory(
+            agent_class=agent_info.agent_class,
+            config_file=config_file,
+            env_config=env_config,
+        )
 
     def _log_registered_agent(self, agent_name: str, agent: RegisteredAgentInfo) -> None:
         self.logger.info("  ✓ %s agent registered", agent_name.upper())
@@ -487,15 +526,12 @@ class LauncherLoggingConfigurator:
             use_rolling=True,
         )
 
-    def _resolve_logging_context(self) -> Tuple[str, str]:
+    def _resolve_logging_context(self) -> Tuple[Optional[str], Optional[str]]:
         try:
             env_config = load_env_config(self.env_file)
-            return (
-                env_config.get("hydros_cluster_id", "hydros-cluster-staging"),
-                env_config.get("hydros_node_id", "LOCAL"),
-            )
-        except Exception:
-            return "hydros-cluster-staging", os.getenv("HYDROS_NODE_ID", "LOCAL")
+        except (FileNotFoundError, ValueError):
+            return os.getenv("HYDROS_CLUSTER_ID"), os.getenv("HYDROS_NODE_ID")
+        return env_config["hydros_cluster_id"], env_config["hydros_node_id"]
 
 
 class LauncherDebugSupport:
@@ -587,6 +623,16 @@ class LauncherCli:
                 list_only=True,
             )
 
+        if "--check" in argv or "--doctor" in argv:
+            return LauncherOptions(
+                agent_names=[],
+                debug_enabled=debug_enabled,
+                debug_wait=debug_wait,
+                debug_port=debug_port,
+                enable_system_central_scheduling_agent=enable_system_central,
+                check_only=True,
+            )
+
         all_requested = "--all" in argv
         if all_requested:
             agent_names = self.discovery_service.discover_all()
@@ -627,6 +673,7 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
 选项:
     --all              - 启动所有可用的 agents
     --list             - 列出所有可用的 agents
+    --check, --doctor  - 检查配置、agent.properties 和 Agent 类加载，不连接 MQTT
     --debug            - 启用远程调试模式 (debugpy)
     --debug-port PORT  - 指定调试端口 (默认: 5678)
     --debug-nowait     - 不等待调试器连接，直接启动
@@ -638,6 +685,9 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
 示例:
     # 列出所有可用的 agents
     python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --list
+
+    # 检查 launcher 目录是否具备启动条件
+    python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- --check
 
     # 启动单个 agent
     python -m hydros_agent_sdk.launcher --launcher-dir <dir> -- myagent
@@ -727,6 +777,92 @@ Multi-Agent Launcher - 在单个进程中运行多个 agents
         raise ValueError("Invalid --debug-port value")
 
 
+class LauncherDoctor:
+    """执行 launcher 目录的本地启动前检查。"""
+
+    def __init__(
+        self,
+        launcher_dir: str,
+        env_file: str,
+        discovery_service: AgentDiscoveryService,
+        module_loader: AgentModuleLoader,
+    ):
+        self.launcher_dir = launcher_dir
+        self.env_file = env_file
+        self.discovery_service = discovery_service
+        self.module_loader = module_loader
+        self._results: List[Tuple[bool, str, str]] = []
+
+    def run(self) -> int:
+        self._results = []
+        print("\n" + "=" * 70)
+        print("Hydros Launcher Doctor")
+        print("=" * 70)
+        print(f"Launcher directory: {self.launcher_dir}")
+        print(f"Environment file:   {self.env_file}")
+        print()
+
+        self._check_env_config()
+        self._check_agents()
+        self._print_summary()
+        return 0 if all(ok for ok, _title, _message in self._results) else 1
+
+    def _check_env_config(self) -> None:
+        try:
+            env_config = load_env_config(self.env_file)
+        except Exception as exc:
+            self._record(
+                False,
+                "env.properties",
+                f"{exc}. Create env.properties in the launcher directory and fill local values.",
+            )
+            return
+
+        cluster_id = env_config.get("hydros_cluster_id", "(missing)")
+        node_id = env_config.get("hydros_node_id", "(missing)")
+        self._record(True, "env.properties", f"cluster={cluster_id}, node={node_id}")
+
+    def _check_agents(self) -> None:
+        agent_names = self.discovery_service.discover_all()
+        if not agent_names:
+            self._record(
+                False,
+                "agents",
+                "No agents discovered. Add directories with agent.properties and a BaseHydroAgent subclass.",
+            )
+            return
+
+        self._record(True, "agents", f"discovered {len(agent_names)}: {', '.join(agent_names)}")
+        for agent_name in agent_names:
+            try:
+                agent_info = self.module_loader.load(agent_name)
+            except Exception as exc:
+                self._record(False, f"agent:{agent_name}", str(exc))
+                continue
+
+            self._record(
+                True,
+                f"agent:{agent_name}",
+                f"{agent_info.agent_code} -> {agent_info.agent_class.__name__}",
+            )
+
+    def _record(self, ok: bool, title: str, message: str) -> None:
+        self._results.append((ok, title, message))
+        mark = "OK" if ok else "FAIL"
+        print(f"[{mark}] {title}: {message}")
+
+    def _print_summary(self) -> None:
+        total = len(self._results)
+        failed = len([result for result in self._results if not result[0]])
+        print()
+        print("=" * 70)
+        if failed:
+            print(f"Doctor found {failed} issue(s) out of {total} check(s).")
+        else:
+            print(f"Doctor passed {total} check(s).")
+        print("=" * 70 + "\n")
+
+
 class MultiAgentCoordinator:
     """在单个进程中管理多个 Hydros Agent。"""
 
@@ -741,6 +877,7 @@ class MultiAgentCoordinator:
         client_factory: Optional[CoordinationClientFactory] = None,
         startup_reporter: Optional[LauncherStartupReporter] = None,
         callback_factory: Optional[Any] = None,
+        managed_services: Optional[Sequence[ManagedRuntimeService]] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.launcher_dir = launcher_dir
@@ -764,6 +901,8 @@ class MultiAgentCoordinator:
             logger=self.logger,
         )
         self.callback_factory = callback_factory or self._create_callback
+        self.managed_services = tuple(managed_services or ())
+        self._started_managed_services: List[ManagedRuntimeService] = []
         self.running = False
 
     def load_agent_module(self, agent_name: str) -> AgentModuleInfo:
@@ -786,14 +925,23 @@ class MultiAgentCoordinator:
             self.logger.error("Failed to register agents: %s", exc, exc_info=True)
             return False
 
-        self.logger.info("")
-        self.logger.info("Creating SimCoordinationClient...")
-        self.client = self.client_factory.create(env_config, self.callback)
-        self.callback.set_client(self.client)
+        if not self._start_managed_services():
+            return False
 
         self.logger.info("")
-        self.logger.info("Starting coordination client...")
-        self.client.start()
+        self.logger.info("Creating SimCoordinationClient...")
+        try:
+            self.client = self.client_factory.create(env_config, self.callback)
+            self.callback.set_client(self.client)
+
+            self.logger.info("")
+            self.logger.info("Starting coordination client...")
+            self.client.start()
+        except Exception as exc:
+            self.logger.error("Failed to start coordination client: %s", exc, exc_info=True)
+            self._stop_coordination_client()
+            self._stop_managed_services()
+            return False
 
         self.startup_reporter.log_started(env_config, registered_agents)
         self.running = True
@@ -801,27 +949,66 @@ class MultiAgentCoordinator:
 
     def stop_all(self) -> None:
         """停止所有 agents。"""
-        if not self.running:
+        if not self.running and not self._started_managed_services:
             return
 
+        self.running = False
         self.logger.info("")
         self.logger.info("=" * 70)
         self.logger.info("Stopping multi-agent system...")
         self.logger.info("=" * 70)
 
-        if self.client:
-            try:
-                self.logger.info("Stopping coordination client...")
-                self.client.stop()
-                self.logger.info("  ✓ Client stopped")
-            except Exception as exc:
-                self.logger.error("  ✗ Error stopping client: %s", exc)
-
-        self.running = False
+        self._stop_managed_services()
+        self._stop_coordination_client()
 
         self.logger.info("=" * 70)
         self.logger.info("Multi-agent system stopped")
         self.logger.info("=" * 70)
+
+    def _start_managed_services(self) -> bool:
+        for service in self.managed_services:
+            service_name = service.__class__.__name__
+            try:
+                self.logger.info("Starting managed runtime service: %s", service_name)
+                service.start()
+                self._started_managed_services.append(service)
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to start managed runtime service %s: %s",
+                    service_name,
+                    exc,
+                    exc_info=True,
+                )
+                self._stop_managed_services()
+                return False
+        return True
+
+    def _stop_managed_services(self) -> None:
+        while self._started_managed_services:
+            service = self._started_managed_services.pop()
+            service_name = service.__class__.__name__
+            try:
+                self.logger.info("Stopping managed runtime service: %s", service_name)
+                service.stop()
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to stop managed runtime service %s: %s",
+                    service_name,
+                    exc,
+                    exc_info=True,
+                )
+
+    def _stop_coordination_client(self) -> None:
+        if self.client is None:
+            return
+        try:
+            self.logger.info("Stopping coordination client...")
+            self.client.stop()
+            self.logger.info("  ✓ Client stopped")
+        except Exception as exc:
+            self.logger.error("  ✗ Error stopping client: %s", exc, exc_info=True)
+        finally:
+            self.client = None
 
     def run(self) -> None:
         """运行主循环，直到收到停止信号。"""
@@ -836,7 +1023,7 @@ class MultiAgentCoordinator:
 
     @staticmethod
     def _create_callback() -> MultiAgentCallback:
-        return MultiAgentCallback(node_id=os.getenv("HYDROS_NODE_ID", "LOCAL"))
+        return MultiAgentCallback()
 
 
 class LauncherRuntime:
@@ -878,6 +1065,7 @@ class MultiAgentLauncherApp:
         project_root: Optional[str] = None,
         default_debug_port: int = 5678,
         service_factory: Optional[LauncherServiceFactory] = None,
+        managed_services: Optional[Sequence[ManagedRuntimeService]] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.launcher_dir = launcher_dir
@@ -887,6 +1075,7 @@ class MultiAgentLauncherApp:
         self.project_root = project_root or launcher_dir
         self.default_debug_port = default_debug_port
         self.service_factory = service_factory or LauncherServiceFactory(launcher_dir)
+        self.managed_services = tuple(managed_services or ())
         self.logger = logger or logging.getLogger(__name__)
 
     def run(self, argv: List[str]) -> int:
@@ -911,6 +1100,14 @@ class MultiAgentLauncherApp:
         if options.list_only:
             cli.print_agent_list()
             return 0
+
+        if options.check_only:
+            return LauncherDoctor(
+                launcher_dir=self.launcher_dir,
+                env_file=self.env_file,
+                discovery_service=services.discovery_service,
+                module_loader=services.module_loader,
+            ).run()
 
         agent_names = options.agent_names
         if options.all_requested:
@@ -937,6 +1134,7 @@ class MultiAgentLauncherApp:
             log_file=self.log_file,
             module_loader=services.module_loader,
             register_default_central_scheduling_agent=options.enable_system_central_scheduling_agent,
+            managed_services=self.managed_services,
             logger=self.logger,
         )
         runtime = LauncherRuntime(coordinator, logger=self.logger)

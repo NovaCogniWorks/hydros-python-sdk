@@ -139,8 +139,8 @@ agent_code=TWINS_SIMULATION_AGENT
 agent_type=TWINS_SIMULATION_AGENT
 agent_name=Twins Simulation Agent
 drive_mode=SIM_TICK_DRIVEN
-hydros_cluster_id=hydros-k3s-staging
-hydros_node_id=default_node
+hydros_cluster_id=example-cluster
+hydros_node_id=example-node
 ```
 
 **env.properties** (MQTT connection)
@@ -263,11 +263,7 @@ class MyCustomAgent(TickableAgent):
             from hydros_agent_sdk.utils import HydroObjectUtilsV2
             self.topology = HydroObjectUtilsV2.build_waterway_topology(topology_url)
 
-        # Register with state manager
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
-
-        # Return response
+        # Return response; MultiAgentCallback registers task/runtime state
         return SimTaskInitResponse(...)
 
     def on_tick_simulation(self, request):
@@ -277,9 +273,7 @@ class MyCustomAgent(TickableAgent):
         return metrics_list
 
     def on_terminate(self, request):
-        # Clean up
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
+        # Clean up resources owned by this agent
         return SimTaskTerminateResponse(...)
 ```
 
@@ -413,7 +407,8 @@ Located in `hydros_agent_sdk/error_codes.py`, matching Java `com.hydros.common.E
 #### Pattern 1: Decorator (Recommended for Lifecycle Methods)
 
 ```python
-from hydros_agent_sdk import TwinsSimulationAgent, ErrorCodes, handle_agent_errors
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors
+from hydros_agent_sdk.agents import TwinsSimulationAgent
 
 class MyAgent(TwinsSimulationAgent):
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
@@ -479,4 +474,3 @@ When an error occurs, the response includes:
 - **Summary**: `ERROR_HANDLING_SUMMARY.md`
 - **Example**: `examples/error_handling_example.py`
 - **Agent Example**: `examples/agents/twins/twins_agent_with_error_handling.py`
-

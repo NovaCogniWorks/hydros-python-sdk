@@ -334,8 +334,7 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
 
         self.assertEqual(response.command_status, "SUCCEED")
         self.agent._hydrosim_api.cancel.assert_called_once()
-        self.agent.state_manager.terminate_task.assert_called_once_with(self.context)
-        self.agent.state_manager.remove_local_agent.assert_called_once_with(self.agent)
+        self.agent.state_manager.terminate_task.assert_not_called()
 
     def test_on_terminate_cleans_hydrosim_runtime_dir(self):
         runtime_marker = self.agent._hydrosim_runtime_dir / "marker.txt"

@@ -2,14 +2,15 @@
 面向生产的中央调度智能体示例。
 
 本示例刻意保持业务逻辑轻量，让 SDK 默认 MpcCentralSchedulingAgent 路径负责
-滚动 MPC、MpcResultReport 发布和智能体指令分派。
+滚动 MPC、MpcPredictionResultReport 发布和智能体指令分派。
 """
 
 import logging
 import json
 from typing import Optional
 
-from hydros_agent_sdk import ErrorCodes, handle_agent_errors, load_runtime_env_settings
+from hydros_agent_sdk import ErrorCodes, handle_agent_errors
+from hydros_agent_sdk.runtime.env_settings import load_runtime_env_settings
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitRequest,
@@ -38,8 +39,6 @@ class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
             self._load_object_agent_code_map()
             self._subscribe_configured_field_metrics()
 
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
@@ -96,16 +95,4 @@ class ProductionCentralSchedulingAgent(MpcCentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Terminating production central scheduling agent: %s", self.agent_id)
-
-        self._agent_command_gateway.shutdown()
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-        object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
-
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
-        )
+        return super().on_terminate(request)

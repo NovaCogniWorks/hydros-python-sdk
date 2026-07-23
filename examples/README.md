@@ -1,381 +1,134 @@
-# Hydros Agent SDK - Examples
+# Hydros Agent SDK Examples
 
-This directory contains example implementations and business logic for Hydros simulation agents.
+本目录只保留可以被当前 SDK launcher 自动发现并启动的示例。示例用于展示推荐的 Agent 目录布局、配置文件和业务逻辑拆分方式。
 
-## 📁 Directory Structure
+## 目录结构
 
-```
+```text
 examples/
-├── env.properties                 # Environment configuration (MQTT, cluster info)
-├── simple_multi_agent_example.py  # Simple multi-agent example
-├── start_agents.sh                # Shell script to start agents
-│
-└── agents/                        # Agent implementations
-    ├── ontology/                  # Ontology-based simulation agent
-    │   ├── agent.properties       # Agent metadata configuration
-    │   ├── ontology_agent.py      # Agent implementation example
-    │   └── ontology_rule_engine.py  # Business logic: rule engine
-    │
-    ├── twins/                     # Digital twins simulation agent
-    │   ├── agent.properties       # Agent metadata configuration
-    │   ├── twins_agent.py         # Agent implementation example
-    │   └── hydraulic_solver.py    # Business logic: hydraulic solver
-    │
-    └── centralscheduling/         # Central scheduling agent using SDK default MPC path
+├── start_agents.sh
+├── error_handling_example.py
+└── agents/
+    ├── centralscheduling/
+    │   ├── agent.properties
+    │   └── central_scheduling_agent.py
+    ├── template/
+    │   ├── agent.properties
+    │   └── template_agent.py
+    ├── ontology/
+    │   ├── README.md
+    │   ├── agent.properties
+    │   ├── ontology_agent.py
+    │   └── ontology_rule_engine.py
+    └── twins/
+        ├── README.md
         ├── agent.properties
-        └── central_scheduling_agent.py
+        ├── twins_agent.py
+        ├── hydraulic_solver.py
+        └── simulation_states.py
 ```
 
-## 🎯 What's in Examples vs SDK
+当前真实可用的示例：
 
-### SDK (hydros_agent_sdk/) - Framework Code
+- `template`：最小 `TickableAgent` 模板，适合复制成新 Agent。
+- `twins`：孪生仿真 Agent，展示 `TwinsSimulationAgent` 与业务 solver 拆分。
+- `ontology`：本体推理仿真 Agent，展示 `OntologySimulationAgent` 与规则引擎拆分。
+- `centralscheduling`：中央调度 Agent，展示 `MpcCentralSchedulingAgent` 的生产化薄封装。
 
-**Do NOT modify these - they are part of the pip package:**
+## 快速运行
 
-- `HydroAgentFactory` - Factory for creating agent instances
-- `MultiAgentCallback` - Multi-agent coordination callback
-- `load_env_config()` - Environment configuration loader
-- `BaseHydroAgent` - Base agent class
-- `SimCoordinationClient` - MQTT coordination client
-- Specialized agent base classes (TwinsSimulationAgent, OntologySimulationAgent, etc.)
-
-### Examples (examples/) - Business Logic & Samples
-
-**You CAN and SHOULD modify these:**
-
-- **Business Logic Modules** (your custom implementations):
-  - `ontology_rule_engine.py` - Ontology reasoning rules
-  - `hydraulic_solver.py` - Hydraulic calculation logic
-  - Add your own: `my_solver.py`, `my_optimizer.py`, etc.
-
-- **Agent Implementations** (examples showing how to use SDK):
-  - `ontology_agent.py` - How to implement ontology agent
-  - `twins_agent.py` - How to implement twins agent
-  - Add your own agent implementations here
-
-- **Configuration Files**:
-  - `env.properties` - MQTT broker and cluster configuration
-  - `agent.properties` - Agent metadata (code, type, name)
-
-- **Utility Scripts**:
-  - `start_agents.sh` - Launch multiple agents through the SDK launcher
-  - `simple_multi_agent_example.py` - Simple usage example
-
-## 🚀 Quick Start
-
-### 1. Configure Environment
-
-Edit `env.properties`:
-
-```properties
-mqtt_broker_url=tcp://192.168.1.24
-mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
-hydros_cluster_id=hydros-k3s-staging
-hydros_node_id=default_central
-```
-
-### 2. Run a Single Agent
+从仓库根目录准备示例环境配置：
 
 ```bash
-# Run ontology agent
-cd examples/agents/ontology
-python ontology_agent.py
-
-# Run twins agent
-cd examples/agents/twins
-python twins_agent.py
+$EDITOR examples/env.properties
 ```
 
-### 3. Run Multiple Agents
+编辑 `examples/env.properties`，填写 MQTT broker、cluster 和 node。
+
+列出可用示例：
 
 ```bash
-# Run multiple agents in one process
-cd examples
-./start_agents.sh twins ontology
-
-# Or use the simple example
-python simple_multi_agent_example.py
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --list
 ```
 
-### 4. Use the Launcher Tool
+启动前检查：
+
+```bash
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --check
+```
+
+启动单个示例：
+
+```bash
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- template
+```
+
+启动多个示例：
+
+```bash
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- twins ontology
+```
+
+也可以使用脚本包装：
 
 ```bash
 cd examples
-
-# Launch specific agents
+./start_agents.sh --list
+./start_agents.sh --check
 ./start_agents.sh twins ontology
-
-# Launch all agents
-./start_agents.sh --all
-
-# Enable debug mode
 ./start_agents.sh --debug twins
-
-# Show help
-./start_agents.sh --help
 ```
 
-## 💡 How to Create Your Own Agent
+## 如何新增示例 Agent
 
-### Step 1: Choose a Base Class
+1. 在 `examples/agents/` 下创建新目录，例如 `myagent/`。
+2. 添加 `agent.properties`，包含 `agent_code`、`agent_type`、`agent_name`。
+3. 添加 Python 文件，实现 `BaseHydroAgent` 的子类。
+4. 将业务算法放入独立模块，不要塞进 launcher。
+5. 运行 `python -m hydros_agent_sdk.launcher --launcher-dir examples -- myagent`。
 
-```python
-from hydros_agent_sdk.agents import (
-    TwinsSimulationAgent,      # For high-fidelity simulation
-    OntologySimulationAgent,   # For ontology-based reasoning
-    ModelCalculationAgent,     # For event-driven calculation
-    CentralSchedulingAgent,    # For MPC optimization
-)
-```
-
-### Step 2: Implement Your Agent
-
-```python
-from hydros_agent_sdk.agents import TwinsSimulationAgent
-from hydros_agent_sdk import (
-    HydroAgentFactory,
-    MultiAgentCallback,
-    load_env_config,
-)
-
-class MyCustomAgent(TwinsSimulationAgent):
-    """Your custom agent implementation."""
-
-    def _initialize_twins_model(self):
-        """Initialize your simulation model."""
-        # Load your custom solver
-        self.solver = MyCustomSolver()
-        self.solver.initialize(self._topology)
-
-    def _execute_twins_simulation(self, step: int):
-        """Execute one simulation step."""
-        # Collect boundary conditions
-        bc = self._collect_boundary_conditions(step)
-        
-        # Run your solver
-        results = self.solver.solve(step, bc)
-        
-        # Convert to metrics
-        return self._convert_results_to_metrics(results)
-```
-
-### Step 3: Create Business Logic Module
-
-Create `my_solver.py`:
-
-```python
-class MyCustomSolver:
-    """Your custom solver implementation."""
-    
-    def initialize(self, topology):
-        """Initialize solver with topology."""
-        pass
-    
-    def solve(self, step, boundary_conditions):
-        """Solve for one time step."""
-        # Your calculation logic here
-        return results
-```
-
-### Step 4: Configure Your Agent
-
-Create `agent.properties`:
+最小 `agent.properties`：
 
 ```properties
-agent_code=MY_CUSTOM_AGENT
-agent_type=TWINS_SIMULATION_AGENT
-agent_name=My Custom Agent
+agent_code=MY_AGENT
+agent_type=MY_AGENT
+agent_name=My Agent
 ```
 
-### Step 5: Run Your Agent
+launcher 的发现规则是：`examples/agents/<agent>/` 内存在 `agent.properties`，并且目录中有继承 `BaseHydroAgent` 的 Python 类。
 
-```python
-def main():
-    # Load configuration
-    env_config = load_env_config()
-    
-    # Create factory
-    factory = HydroAgentFactory(
-        agent_class=MyCustomAgent,
-        config_file="./agent.properties",
-        env_config=env_config
-    )
-    
-    # Create callback and register factory
-    callback = MultiAgentCallback()
-    callback.register_agent_factory("MY_CUSTOM_AGENT", factory)
-    
-    # Create and start client
-    client = SimCoordinationClient(
-        broker_url=env_config['mqtt_broker_url'],
-        broker_port=int(env_config['mqtt_broker_port']),
-        topic=env_config['mqtt_topic'],
-        sim_coordination_callback=callback
-    )
-    callback.set_client(client)
-    client.start()
-    
-    # Keep running
-    while True:
-        time.sleep(1)
-```
+## SDK 代码和示例代码边界
 
-## 📚 Examples Explained
+`hydros_agent_sdk/` 是 SDK 框架代码，示例开发者通常不应修改。
 
-### 1. Ontology Simulation Agent
+可以修改或复制的内容：
 
-**Purpose**: Demonstrates ontology-based reasoning for water network simulation.
+- `examples/agents/<agent>/agent.properties`
+- `examples/agents/<agent>/*_agent.py`
+- `examples/agents/<agent>/` 下的业务 solver、rule engine、adapter 模块
+- `examples/env.properties` 的本地副本
 
-**Key Files**:
-- `ontology_agent.py` - Agent implementation
-- `ontology_rule_engine.py` - Business logic (rule-based reasoning)
+真实环境配置不应提交；文档中说明必需配置项即可。
 
-**What it shows**:
-- How to inherit from `OntologySimulationAgent`
-- How to implement `_initialize_ontology_model()`
-- How to implement `_execute_ontology_simulation()`
-- How to integrate custom business logic (rule engine)
+## 调试
 
-### 2. Digital Twins Simulation Agent
-
-**Purpose**: Demonstrates high-fidelity hydraulic simulation.
-
-**Key Files**:
-- `twins_agent.py` - Agent implementation
-- `hydraulic_solver.py` - Business logic (hydraulic calculations)
-
-**What it shows**:
-- How to inherit from `TwinsSimulationAgent`
-- How to implement `_initialize_twins_model()`
-- How to implement `_execute_twins_simulation()`
-- How to handle boundary condition updates
-- How to integrate custom business logic (solver)
-
-### 3. Multi-Agent Example
-
-**Purpose**: Shows how to run multiple agent types in one process.
-
-**Key Files**:
-- `simple_multi_agent_example.py` - Simple example
-- `start_agents.sh` - Shell wrapper for the SDK launcher
-
-**What it shows**:
-- How to use `MultiAgentCallback`
-- How to register multiple agent factories
-- How to handle multiple agent types
-- Command-line argument parsing
-- Debug mode support
-
-## 🔧 Configuration Files
-
-### env.properties (Environment Configuration)
-
-Shared by all agents in this directory:
-
-```properties
-# MQTT Broker Configuration
-mqtt_broker_url=tcp://192.168.1.24
-mqtt_broker_port=1883
-mqtt_topic=/hydros/commands/coordination/hydros-k3s-staging
-
-# Cluster Configuration
-hydros_cluster_id=hydros-k3s-staging
-hydros_node_id=default_central
-```
-
-### agent.properties (Agent Metadata)
-
-Each agent has its own local metadata. Runtime parameters should come from
-the coordinator-provided `agent_configuration_url`, not from this local file.
-
-```properties
-# Agent Identification
-agent_code=TWINS_SIMULATION_AGENT
-agent_type=TWINS_SIMULATION_AGENT
-agent_name=Twins Simulation Agent
-```
-
-## 🐛 Debugging
-
-### Enable Debug Logging
-
-```python
-from hydros_agent_sdk import setup_logging
-import logging
-
-setup_logging(
-    level=logging.DEBUG,  # Change to DEBUG
-    console=True,
-    log_file="hydros.log",
-    use_rolling=True
-)
-```
-
-### Use Remote Debugger
+安装 debug 依赖：
 
 ```bash
-# Install debugpy
-pip install debugpy
+pip install -e ".[debug]"
+```
 
-# Run with debug mode
+启动远程调试：
+
+```bash
 ./start_agents.sh --debug twins
 ```
 
-Then attach your IDE debugger to `localhost:5678`.
+然后用 IDE attach 到 `localhost:5678`。更多信息见 [DEBUG_GUIDE.md](DEBUG_GUIDE.md)。
 
-See `DEBUG_GUIDE.md` for detailed debugging instructions.
+## 相关文档
 
-## 📖 Additional Resources
-
-- **SDK Documentation**: See `../CLAUDE.md` for SDK architecture
-- **Refactoring Plan**: See `../REFACTORING_PLAN.md` for code organization
-- **API Reference**: Check SDK source code for detailed API docs
-
-## ❓ FAQ
-
-### Q: Can I modify files in `hydros_agent_sdk/`?
-
-**A**: No. The SDK is framework code and will be distributed as a pip package. Only modify files in `examples/`.
-
-### Q: Where should I put my custom business logic?
-
-**A**: Create new Python modules in `examples/agents/your_agent/` directory. For example:
-- `my_solver.py` - Your custom solver
-- `my_optimizer.py` - Your custom optimizer
-- `my_rules.py` - Your custom rules
-
-### Q: How do I add a new agent type?
-
-**A**: 
-1. Create a new directory: `examples/agents/my_agent/`
-2. Create `agent.properties` with your agent metadata
-3. Create `my_agent.py` inheriting from appropriate base class
-4. Create your business logic modules
-5. Run it with `./start_agents.sh my_agent`
-
-### Q: Can I use a different MQTT broker?
-
-**A**: Yes, just update `env.properties` with your broker URL and port.
-
-### Q: How do I run multiple agents on different machines?
-
-**A**: Each machine should:
-1. Have its own `agent.properties` with unique `agent_code`
-2. Share the same `env.properties` (same MQTT broker)
-3. Run its own agent process
-
-## 🤝 Contributing
-
-When adding new examples:
-
-1. **Keep business logic separate** - Create dedicated modules for your logic
-2. **Follow naming conventions** - Use descriptive names for files and classes
-3. **Add documentation** - Include docstrings and comments
-4. **Test thoroughly** - Ensure your example works end-to-end
-5. **Update this README** - Add your example to the list
-
----
-
-**Last Updated**: 2026-02-04
-**SDK Version**: 0.1.3
+- [根 README](../README.md)
+- [文档中心](../docs/README.md)
+- [新手智能体开发指南](../docs/新手智能体开发指南.md)
+- [测试基线](../docs/TESTING_BASELINE.md)

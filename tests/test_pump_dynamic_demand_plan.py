@@ -20,7 +20,6 @@ from pump_scheduling_agent import PumpCentralSchedulingAgent
 class MockClient:
     def __init__(self):
         self.state_manager = self
-        self.mqtt_client = Mock()
         self.topic = "test/topic"
 
     def send_command(self, req):
@@ -28,14 +27,6 @@ class MockClient:
 
     def subscribe(self, topic):
         del topic
-
-    def init_task(self, ctx, agents):
-        del ctx
-        del agents
-
-    def add_local_agent(self, agent):
-        del agent
-
 
 class TestPumpDynamicDemandPlan(unittest.TestCase):
     def setUp(self):

@@ -31,6 +31,7 @@ show_help() {
     echo "选项:"
     echo "  -h, --help          显示帮助信息"
     echo "  -l, --list          列出所有可用的 agent"
+    echo "  --check, --doctor   检查配置和 agent 加载，不连接 MQTT"
     echo "  -a, --all           启动所有 agent"
     echo "  -L, --logs          查看日志"
     echo "  -d, --debug         启用远程调试模式 (debugpy)"
@@ -39,17 +40,23 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  outflowplan         Power Outflow Plan Agent"
-    echo "  pump                Pump Agent"
-    echo "  scheduling          Scheduling Agent"
+    echo "  使用 $0 --list 查看当前目录自动发现的真实 agent 列表"
     echo ""
     echo "示例:"
     echo "  $0 outflowplan               # 启动 power outflow plan agent"
-    echo "  $0 outflowplan pump          # 在同一进程中启动 power outflow plan 和 pump agents"
-    echo "  $0 --all                     # 启动所有 agents"
-    echo "  $0 --logs                    # 查看日志"
-    echo "  $0 --debug outflowplan       # 调试模式启动 power outflow plan agent"
-    echo "  $0 -d outflowplan pump       # 调试模式启动多个 agents"
+    echo "  $0 outflowplan scheduling    # 在同一进程中启动多个 agents"
+    echo "  $0 --all                    # 启动所有 agents"
+    echo "  $0 --logs                   # 查看日志"
+    echo "  $0 --debug outflowplan       # 启用调试模式启动 power outflow plan agent"
+    echo "  $0 -d outflowplan pump       # 启用调试模式启动多个 agents"
+    echo "  $0 --debug --debug-nowait outflowplan  # 调试模式但不等待调试器"
+    echo ""
+    echo "调试模式:"
+    echo "  • 使用 debugpy 进行远程调试"
+    echo "  • 默认监听端口: 5678"
+    echo "  • 支持 VS Code、PyCharm 等 IDE"
+    echo "  • 可以设置断点、单步调试、查看变量等"
+    echo "  • 需要先安装: pip install debugpy"
     echo ""
     echo "特性:"
     echo "  • 所有 agents 在同一个进程中运行"
@@ -60,43 +67,13 @@ show_help() {
     echo ""
 }
 
-list_agents() {
-    echo -e "${GREEN}可用的 Agents:${NC}"
-    echo ""
-
-    if [ -f "${SCRIPT_DIR}/outflowplan/power_outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Power Outflow Plan Agent"
-        echo "                 路径: ${SCRIPT_DIR}/outflowplan/power_outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/pump/outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}pump${NC}       - Pump Agent"
-        echo "                 路径: ${SCRIPT_DIR}/pump/outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/scheduling/power_scheduling_agent.py" ]; then
-        echo -e "  ${BLUE}scheduling${NC} - Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/scheduling/power_scheduling_agent.py"
-    fi
-
-    echo ""
-}
-
+# 检查配置文件
 check_config() {
     if [ ! -f "${SCRIPT_DIR}/env.properties" ]; then
         echo -e "${YELLOW}警告: 共享配置文件不存在${NC}"
-        echo -e "${YELLOW}正在从模板创建配置文件...${NC}"
-
-        if [ -f "${SCRIPT_DIR}/env.properties.example" ]; then
-            cp "${SCRIPT_DIR}/env.properties.example" "${SCRIPT_DIR}/env.properties"
-            echo -e "${GREEN}✓ 配置文件已创建: ${SCRIPT_DIR}/env.properties${NC}"
-            echo -e "${YELLOW}请编辑配置文件，填入实际的 MQTT broker 信息${NC}"
-            echo ""
-            return 1
-        else
-            echo -e "${RED}错误: 找不到配置模板文件${NC}"
-            return 1
-        fi
+        echo -e "${YELLOW}请创建 ${SCRIPT_DIR}/env.properties 并填入实际的 MQTT broker、cluster 和 node 信息${NC}"
+        echo ""
+        return 1
     fi
     return 0
 }
@@ -197,6 +174,7 @@ main() {
     fi
 
     PYTHON_ARGS=()
+    SKIP_CONFIG_CHECK=0
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -205,8 +183,14 @@ main() {
                 exit 0
                 ;;
             -l|--list)
-                list_agents
-                exit 0
+                PYTHON_ARGS+=("--list")
+                SKIP_CONFIG_CHECK=1
+                shift
+                ;;
+            --check|--doctor)
+                PYTHON_ARGS+=("$1")
+                SKIP_CONFIG_CHECK=1
+                shift
                 ;;
             -L|--logs)
                 view_logs
@@ -243,19 +227,21 @@ main() {
         esac
     done
 
-    if ! check_config; then
-        exit 1
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        if ! check_config; then
+            exit 1
+        fi
+        apply_environment_overrides
+        echo -e "${GREEN}启动 Hydros Agents...${NC}"
+        echo ""
     fi
-
-    apply_environment_overrides
-
-    echo -e "${GREEN}启动 Hydros Agents...${NC}"
-    echo ""
 
     trap cleanup_control_service EXIT INT TERM
 
-    if ! start_control_algorithm_service; then
-        exit 1
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        if ! start_control_algorithm_service; then
+            exit 1
+        fi
     fi
 
     "${PYTHON_EXEC}" -m hydros_agent_sdk.launcher \

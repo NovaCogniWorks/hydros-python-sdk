@@ -10,7 +10,7 @@ from threading import RLock
 from typing import Any, Dict, List, Optional, Union
 
 from hydros_agent_sdk.protocol.models import HydroAgentInstance, SimulationContext
-from hydros_agent_sdk.scenario_config import BizScenarioConfiguration
+from hydros_agent_sdk.scenario_config import BizScenarioConfiguration, SimulationRuntimeOptions
 from hydros_agent_sdk.utils import HydroObjectUtilsV2, WaterwayTopology
 from hydros_agent_sdk.utils.yaml_loader import YamlLoader
 
@@ -36,6 +36,12 @@ class HydroModelContext:
         if self.scenario_config is None:
             return None
         return self.scenario_config.sim_agent_properties
+
+    @property
+    def simulation_runtime_options(self):
+        if self.scenario_config is None:
+            return None
+        return self.scenario_config.simulation_runtime_options
 
     @staticmethod
     def _extract_object_id(hydro_object: Any) -> Optional[int]:
@@ -158,8 +164,16 @@ class HydroModelContextRepository:
 
         config = YamlLoader.from_url(config_url)
         scenario_config = BizScenarioConfiguration.model_validate(config)
+        request_runtime_options = getattr(request, "simulation_runtime_options", None)
+        if request_runtime_options is not None:
+            scenario_config.merge_simulation_runtime_options(request_runtime_options)
+        elif getattr(request, "sim_agent_properties", None) is not None:
+            scenario_config.merge_simulation_runtime_options(
+                SimulationRuntimeOptions.from_sim_agent_properties(request.sim_agent_properties)
+            )
+
         modeling_url = scenario_config.hydros_objects_modeling_url
-        if not modeling_url and scenario_config.sim_agent_properties is None:
+        if not modeling_url and scenario_config.simulation_runtime_options is None:
             logger.info(
                 "Skip hydro model context init: hydros_objects_modeling_url missing, bizSceneInstanceId=%s",
                 context.biz_scene_instance_id,

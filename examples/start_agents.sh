@@ -32,6 +32,7 @@ show_help() {
     echo "选项:"
     echo "  -h, --help          显示帮助信息"
     echo "  -l, --list          列出所有可用的 agent"
+    echo "  --check, --doctor   检查配置和 agent 加载，不连接 MQTT"
     echo "  -a, --all           启动所有 agent"
     echo "  -L, --logs          查看日志"
     echo "  -d, --debug         启用远程调试模式 (debugpy)"
@@ -40,11 +41,7 @@ show_help() {
     echo "  --full-log          使用完整日志格式（生产环境），默认使用简化格式"
     echo ""
     echo "可用的 agent:"
-    echo "  twins               Twins Simulation Agent"
-    echo "  ontology            Ontology Simulation Agent"
-    echo "  outflowplan         Outflow Plan Agent"
-    echo "  centralscheduling   Central Scheduling Agent"
-    echo "  lite                Lite Agent Example"
+    echo "  使用 $0 --list 查看当前目录自动发现的真实 agent 列表"
     echo ""
     echo "示例:"
     echo "  $0 twins                    # 启动 twins agent"
@@ -70,55 +67,13 @@ show_help() {
     echo ""
 }
 
-# 列出所有可用的 agent
-list_agents() {
-    echo -e "${GREEN}可用的 Agents:${NC}"
-    echo ""
-
-    if [ -f "${SCRIPT_DIR}/agents/twins/twins_agent.py" ]; then
-        echo -e "  ${BLUE}twins${NC}      - Twins Simulation Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/twins/twins_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/ontology/ontology_agent.py" ]; then
-        echo -e "  ${BLUE}ontology${NC}   - Ontology Simulation Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/ontology/ontology_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py" ]; then
-        echo -e "  ${BLUE}outflowplan${NC} - Outflow Plan Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/outflowplan/outflow_plan_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py" ]; then
-        echo -e "  ${BLUE}centralscheduling${NC} - Central Scheduling Agent"
-        echo "                 路径: ${SCRIPT_DIR}/agents/centralscheduling/central_scheduling_agent.py"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/agents/lite/agent_example.py" ]; then
-        echo -e "  ${BLUE}lite${NC}       - Lite Agent Example"
-        echo "                 路径: ${SCRIPT_DIR}/agents/lite/agent_example.py"
-    fi
-
-    echo ""
-}
-
 # 检查配置文件
 check_config() {
     if [ ! -f "${SCRIPT_DIR}/env.properties" ]; then
         echo -e "${YELLOW}警告: 共享配置文件不存在${NC}"
-        echo -e "${YELLOW}正在从模板创建配置文件...${NC}"
-
-        if [ -f "${SCRIPT_DIR}/env.properties.example" ]; then
-            cp "${SCRIPT_DIR}/env.properties.example" "${SCRIPT_DIR}/env.properties"
-            echo -e "${GREEN}✓ 配置文件已创建: ${SCRIPT_DIR}/env.properties${NC}"
-            echo -e "${YELLOW}请编辑配置文件，填入实际的 MQTT broker 信息${NC}"
-            echo ""
-            return 1
-        else
-            echo -e "${RED}错误: 找不到配置模板文件${NC}"
-            return 1
-        fi
+        echo -e "${YELLOW}请创建 ${SCRIPT_DIR}/env.properties 并填入实际的 MQTT broker、cluster 和 node 信息${NC}"
+        echo ""
+        return 1
     fi
     return 0
 }
@@ -162,6 +117,7 @@ main() {
 
     # 收集 Python 参数
     PYTHON_ARGS=()
+    SKIP_CONFIG_CHECK=0
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -170,8 +126,14 @@ main() {
                 exit 0
                 ;;
             -l|--list)
-                list_agents
-                exit 0
+                PYTHON_ARGS+=("--list")
+                SKIP_CONFIG_CHECK=1
+                shift
+                ;;
+            --check|--doctor)
+                PYTHON_ARGS+=("$1")
+                SKIP_CONFIG_CHECK=1
+                shift
                 ;;
             -L|--logs)
                 view_logs
@@ -204,14 +166,17 @@ main() {
         esac
     done
 
-    # 检查配置
-    if ! check_config; then
-        exit 1
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        if ! check_config; then
+            exit 1
+        fi
     fi
 
     # 使用 SDK 统一启动器启动 agents
-    echo -e "${GREEN}启动 Hydros Agents...${NC}"
-    echo ""
+    if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
+        echo -e "${GREEN}启动 Hydros Agents...${NC}"
+        echo ""
+    fi
 
     "$PYTHON_EXEC" -m hydros_agent_sdk.launcher \
         --launcher-dir "${SCRIPT_DIR}" \

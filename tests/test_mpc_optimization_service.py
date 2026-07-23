@@ -5,7 +5,7 @@ from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.models import SimulationContext
 from hydros_agent_sdk.sensor_data import SensorData
 
@@ -26,7 +26,7 @@ class FakeMpcPlanningClient:
         return self.responses
 
 
-class FakeMpcResultReporter:
+class FakeMpcPredictionResultReporter:
     def __init__(self):
         self.published = []
 
@@ -61,7 +61,7 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_optimizes_with_cache_sensor_data_and_reports_responses(self):
         context = SimulationContext(biz_scene_instance_id="scene-service")
         source = SimpleNamespace(context=context)
-        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
         cache = FieldMetricsCache(max_steps=3)
         cache.update(
             {
@@ -74,12 +74,12 @@ class MpcOptimizationServiceTest(unittest.TestCase):
         )
         response = MpcOptimizeResponse(plan_type="OPTIMAL")
         mpc_client = FakeMpcPlanningClient([response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         service = MpcOptimizationService(
             properties=AgentProperties(),
             metrics_data_cache=cache,
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
         )
 
         responses = service.optimize(source, state, step=4)
@@ -93,13 +93,13 @@ class MpcOptimizationServiceTest(unittest.TestCase):
     def test_uses_injected_sensor_provider(self):
         context = SimulationContext(biz_scene_instance_id="scene-provider")
         source = SimpleNamespace(context=context)
-        state = SchedulingTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
+        state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
         mpc_client = FakeMpcPlanningClient([MpcOptimizeResponse(plan_type="OPTIMAL")])
         service = MpcOptimizationService(
             properties=AgentProperties(),
             metrics_data_cache=FieldMetricsCache(max_steps=3),
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=FakeMpcResultReporter(),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
             mpc_sensor_provider=lambda agent, task_state: [
                 SensorData(object_id=2001, metrics_code="flow", value=3.5, step_index=task_state.current_step)
             ],

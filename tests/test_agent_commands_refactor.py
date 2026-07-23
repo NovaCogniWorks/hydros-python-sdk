@@ -8,17 +8,14 @@ from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
-from hydros_agent_sdk import HydroObjectType, generate_agent_command_id, get_default_env_config_path, load_env_config
+from hydros_agent_sdk.config_loader import get_default_env_config_path, load_env_config
 from hydros_agent_sdk.agent_properties import AgentProperties
-from hydros_agent_sdk.agent_commands import (
-    AgentCommandClient,
-    AgentCommandEnvelope,
-    AgentCommandHandler,
-    AgentCommandRuntime,
-    HydroStationTargetValueRequest,
-    HydroStationTargetValueResponse,
-)
-from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
+from hydros_agent_sdk.agent_commands.runtime.handlers import AgentCommandHandler
+from hydros_agent_sdk.agent_commands.runtime.runtime import AgentCommandRuntime
+from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest, HydroStationTargetValueResponse
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
+from hydros_agent_sdk.agent_commands.transport.codec import AgentCommandDecoder
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
 from hydros_agent_sdk.context_manager import ContextManager, HydroModelContextRepository
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
@@ -26,16 +23,21 @@ from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
+from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     HorizonStep,
+    MpcOptimizeRequest,
     MpcOptimizeResponse,
     PredictedResult,
+    ValueItem,
 )
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
-    MpcResultReport,
+    EdgeControlExecutionReport,
+    MpcPredictionResultReport,
+    SimCommandEnvelope,
     SimTaskInitRequest,
     SimTaskInitResponse,
     SimTaskTerminateRequest,
@@ -58,10 +60,16 @@ from hydros_agent_sdk.protocol.models import (
     TopHydroObject,
     Waterway,
 )
-from hydros_agent_sdk.runtime import RuntimeEnvSettings
-from hydros_agent_sdk.scenario_config import BizScenarioConfiguration, SimAgentProperties
+from hydros_agent_sdk.runtime.env_settings import RuntimeEnvSettings
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimAgentProperties,
+    SimulationRuntimeOptions,
+)
 from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.transport.in_memory import InMemoryTransport
+from hydros_agent_sdk.utils import HydroObjectType, generate_agent_command_id
 from hydros_agent_sdk.utils import (
     SimpleChildObject,
     TopHydroObject as TopologyTopHydroObject,
@@ -82,6 +90,59 @@ def build_agent_instance(agent_id: str, agent_code: str, node_id: str, context: 
         context=context,
         agent_status=AgentStatus.INIT,
         drive_mode=AgentDriveMode.PROACTIVE,
+    )
+
+
+def build_control_object_result(
+    *,
+    object_type: str,
+    object_id: int,
+    target_value: float,
+    target_value_type: str,
+    object_name: str | None = None,
+    **_unused,
+) -> ControlObjectResult:
+    return ControlObjectResult(
+        object_type=object_type,
+        object_id=object_id,
+        object_name=object_name,
+        target_value_list=[
+            ValueItem(value_type=target_value_type, value=target_value)
+        ],
+    )
+
+
+def build_predicted_result(
+    *,
+    object_type: str,
+    object_id: int,
+    front_water_level: float | None = None,
+    final_target_value: float | None = None,
+    final_target_value_type: str | None = None,
+    back_water_level: float | None = None,
+    out_flow: float | None = None,
+    efficiency: float | None = None,
+    object_name: str | None = None,
+) -> PredictedResult:
+    return PredictedResult(
+        object_type=object_type,
+        object_id=object_id,
+        object_name=object_name,
+        target_value=(
+            ValueItem(value_type=final_target_value_type, value=final_target_value)
+            if final_target_value is not None and final_target_value_type is not None
+            else None
+        ),
+        predicted_value_list=[
+            ValueItem(value_type=value_type, value=value)
+            for value_type, value in (
+                ("front_water_level", front_water_level),
+                ("back_water_level", back_water_level),
+                ("out_flow", out_flow),
+                ("efficiency", efficiency),
+            )
+            if value is not None
+        ],
     )
 
 
@@ -181,7 +242,7 @@ class FakeMpcPlanningClient:
         return self.responses
 
 
-class FakeMpcResultReporter:
+class FakeMpcPredictionResultReporter:
     def __init__(self):
         self.published = []
 
@@ -268,13 +329,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self._temp_dir.cleanup()
         ContextManager.clear()
 
-    def test_agent_command_envelope_uses_registry_parser(self):
+    def test_agent_command_decoder_uses_command_catalog(self):
         context = SimulationContext(biz_scene_instance_id="scene-001")
         source = build_agent_instance("source-001", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-001", "TARGET_AGENT", "node-b", context)
 
-        envelope = AgentCommandEnvelope(
-            command={
+        command = AgentCommandDecoder().decode(
+            {
                 "command_id": "cmd-001",
                 "command_type": "update_station_target_value_request",
                 "source": source.model_dump(mode="json"),
@@ -286,9 +347,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             }
         )
 
-        self.assertIsInstance(envelope.command, HydroStationTargetValueRequest)
-        self.assertEqual(envelope.command.command_id, "cmd-001")
-        self.assertAlmostEqual(envelope.command.target_value, 0.75)
+        self.assertIsInstance(command, HydroStationTargetValueRequest)
+        self.assertEqual(command.command_id, "cmd-001")
+        self.assertAlmostEqual(command.target_value, 0.75)
 
     def test_context_repository_keeps_instance_state_isolated(self):
         context = SimulationContext(biz_scene_instance_id="scene-repository")
@@ -334,6 +395,55 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(config.sim_agent_properties.sim_step_size, 120)
         self.assertEqual(config.sim_agent_properties.output_step_size, 7200)
 
+    def test_scenario_config_parses_simulation_runtime_options(self):
+        config = BizScenarioConfiguration.model_validate(
+            {
+                "hydros_objects_modeling_url": "https://example.test/objects.yaml",
+                "simulationRuntimeOptions": {
+                    "tickSeconds": 120,
+                    "total_steps": 36,
+                    "output_precision_seconds": 7200,
+                    "business_start_time": "2026/07/04 08:00:00",
+                    "roll_steps": 60,
+                    "output_future_steps": 12,
+                    "properties": {"experiment_group": "A"},
+                },
+            }
+        )
+
+        self.assertIsNotNone(config.simulation_runtime_options)
+        self.assertEqual(config.simulation_runtime_options.tick_seconds, 120)
+        self.assertEqual(config.simulation_runtime_options.max_steps, 36)
+        self.assertEqual(config.simulation_runtime_options.output_step_seconds, 7200)
+        self.assertEqual(config.simulation_runtime_options.biz_start_time, "2026/07/04 08:00:00")
+        self.assertEqual(config.simulation_runtime_options.roll_steps, 60)
+        self.assertEqual(config.simulation_runtime_options.output_future_steps, 12)
+        self.assertEqual(config.simulation_runtime_options.runtime_properties["experiment_group"], "A")
+
+        self.assertIsNotNone(config.sim_agent_properties)
+        self.assertEqual(config.sim_agent_properties.sim_step_size, 120)
+        self.assertEqual(config.sim_agent_properties.total_steps, 36)
+        self.assertEqual(config.sim_agent_properties.output_step_size, 7200)
+        self.assertEqual(config.sim_agent_properties.properties["experiment_group"], "A")
+
+    def test_sim_task_init_request_parses_simulation_runtime_options(self):
+        context = SimulationContext(biz_scene_instance_id="scene-runtime-options")
+        request = SimTaskInitRequest(
+            command_id="cmd-runtime-options",
+            context=context,
+            agent_list=[],
+            simulationRuntimeOptions={
+                "tickSeconds": 300,
+                "maxSteps": 48,
+                "outputStepSeconds": 900,
+            },
+        )
+
+        self.assertIsInstance(request.simulation_runtime_options, SimulationRuntimeOptions)
+        self.assertEqual(request.simulation_runtime_options.tick_seconds, 300)
+        self.assertEqual(request.simulation_runtime_options.max_steps, 48)
+        self.assertEqual(request.simulation_runtime_options.output_step_seconds, 900)
+
     def test_context_repository_keeps_scenario_config_without_modeling_url(self):
         context = SimulationContext(biz_scene_instance_id="scene-sim-agent-only")
         repository = HydroModelContextRepository()
@@ -358,13 +468,47 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(model_context.sim_agent_properties.roll_steps, 60)
         self.assertEqual(model_context.sim_agent_properties.total_steps, 36)
 
+    def test_context_repository_applies_request_simulation_runtime_options(self):
+        context = SimulationContext(biz_scene_instance_id="scene-runtime-options")
+        repository = HydroModelContextRepository()
+        request = SimpleNamespace(
+            context=context,
+            biz_scene_configuration_url="https://example.test/scenario.yaml",
+            simulation_runtime_options=SimulationRuntimeOptions(
+                tick_seconds=300,
+                max_steps=48,
+            ),
+        )
+
+        with patch(
+            "hydros_agent_sdk.context_manager.YamlLoader.from_url",
+            return_value={
+                "sim_agent_properties": {
+                    "roll_steps": 60,
+                    "total_steps": 36,
+                    "sim_step_size": 120,
+                },
+            },
+        ):
+            model_context = repository.create_from_init_request(request)
+
+        self.assertIsNotNone(model_context)
+        self.assertIsNone(model_context.topology)
+        self.assertEqual(model_context.simulation_runtime_options.tick_seconds, 300)
+        self.assertEqual(model_context.simulation_runtime_options.max_steps, 48)
+        self.assertEqual(model_context.simulation_runtime_options.roll_steps, 60)
+        self.assertEqual(model_context.sim_agent_properties.sim_step_size, 300)
+        self.assertEqual(model_context.sim_agent_properties.total_steps, 48)
+        self.assertEqual(model_context.sim_agent_properties.roll_steps, 60)
+
     def test_client_on_message_no_longer_filters_remote_target_early(self):
+        transport = InMemoryTransport()
+        runtime = Mock()
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=transport,
             hydros_cluster_id="demo-cluster",
         )
-        client.runtime.handle_incoming_command = Mock()
+        client.bind_runtime(runtime)
 
         context = SimulationContext(biz_scene_instance_id="scene-002")
         source = build_agent_instance("source-002", "SOURCE_AGENT", "node-a", context)
@@ -380,45 +524,42 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             "target_value": 0.31,
         }
 
-        client._on_message(None, None, SimpleNamespace(payload=json.dumps(payload).encode("utf-8")))
+        transport.start()
+        transport.deliver(client.topic, json.dumps(payload))
+        transport.stop()
 
-        client.runtime.handle_incoming_command.assert_called_once()
+        runtime.handle_incoming_command.assert_called_once()
 
-    def test_client_start_cleans_up_when_connection_times_out(self):
+    def test_client_start_and_stop_only_manage_agent_command_runtime(self):
+        transport = Mock()
+        runtime = Mock()
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=transport,
             hydros_cluster_id="demo-cluster",
         )
-        client.mqtt_client.connect = Mock()
-        client.mqtt_client.loop_start = Mock()
-        client.mqtt_client.loop_stop = Mock()
-        client.mqtt_client.disconnect = Mock()
-        client._connected.wait = Mock(return_value=False)
-        client.runtime.start = Mock()
+        client.bind_runtime(runtime)
 
-        with self.assertRaises(RuntimeError):
-            client.start()
+        client.start()
+        client.stop()
 
-        client.mqtt_client.loop_stop.assert_called_once()
-        client.mqtt_client.disconnect.assert_called_once()
-        client.runtime.start.assert_not_called()
-        self.assertTrue(client._intentional_disconnect)
+        runtime.start.assert_called_once()
+        runtime.stop.assert_called_once()
+        transport.start.assert_not_called()
+        transport.stop.assert_not_called()
 
-    def test_client_lazy_builds_runtime(self):
+    def test_client_requires_explicit_runtime_binding(self):
         client = AgentCommandClient(
-            broker_url="tcp://127.0.0.1",
-            broker_port=1883,
+            transport=InMemoryTransport(),
             hydros_cluster_id="demo-cluster",
         )
 
         self.assertIsNone(client._runtime)
+        self.assertFalse(hasattr(client, "mqtt_client"))
+        self.assertFalse(hasattr(client, "_on_message"))
         self.assertFalse(os.path.exists(os.path.join("data", "agent_data.db")))
 
-        runtime = client.runtime
-
-        self.assertIsNotNone(runtime)
-        self.assertIsNotNone(client._runtime)
+        with self.assertRaisesRegex(RuntimeError, "AgentCommandRuntime is not bound"):
+            _ = client.runtime
         self.assertFalse(os.path.exists(os.path.join("data", "agent_data.db")))
 
     def test_runtime_executes_command_without_persistence_side_effect(self):
@@ -435,8 +576,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         source = build_agent_instance("source-010", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-010", "TARGET_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
-        state_manager.add_local_agent(target)
+        state_manager.activate_task(context, [source, target])
 
         runtime = AgentCommandRuntime(
             state_manager=state_manager,
@@ -479,8 +619,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         context = SimulationContext(biz_scene_instance_id="scene-003")
         source = build_agent_instance("source-003", "SOURCE_AGENT", "node-a", context)
         target = build_agent_instance("target-003", "TARGET_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
-        state_manager.add_local_agent(target)
+        state_manager.activate_task(context, [source, target])
 
         sent_commands = []
         runtime = AgentCommandRuntime(
@@ -538,7 +677,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
             mqtt_username="cmd-user",
             mqtt_password="cmd-pass",
         )
@@ -575,12 +714,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             agent.on_terminate(SimTaskTerminateRequest(command_id="term-004", context=context))
 
             mock_client_cls.assert_called_once_with(
-                broker_url="127.0.0.1",
-                broker_port=1883,
+                transport=sim_client.transport,
                 hydros_cluster_id="demo-cluster",
-                state_manager=state_manager,
-                mqtt_username="cmd-user",
-                mqtt_password="cmd-pass",
             )
             mock_client.start.assert_called_once()
             mock_client.send_command.assert_called_once()
@@ -596,7 +731,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-006")
@@ -690,13 +825,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_id=501,
                             object_type=" ",
                             target_value_type="gate_opening",
                             target_value=0.45,
                         ),
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_id=502,
                             object_type="Gate",
                             target_value_type=" ",
@@ -707,7 +842,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(builder.build_from_mpc_responses([response]), [])
+        plan = MpcControlExecutionPlan.from_responses(1, [response])
+        self.assertEqual(
+            builder.build_from_control_plan(plan, horizon_step=1, current_step=1),
+            [],
+        )
         resolver.assert_not_called()
 
     def test_control_command_dispatcher_sends_control_commands(self):
@@ -720,7 +859,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-008")
@@ -759,6 +898,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             target_value=85.5,
             object_id=1021,
             object_type=HydroObjectType.TURBINE,
+            group_id=None,
+            group_size=None,
+            main_step_index=None,
         )
         send_command.assert_called_once_with(pump_request)
 
@@ -772,7 +914,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-007")
@@ -792,7 +934,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 "metrics/topic",
                 {
                     "object_id": 1001,
-                    "metrics_code": "flow",
+                    "metrics_code": "water_flow",
                     "value": float(step_index),
                     "timestamp": f"ts-{step_index}",
                     "step_index": step_index,
@@ -800,12 +942,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 11.0)
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "water_flow"), 11.0)
         self.assertEqual(set(agent._metrics_data_cache.history().keys()), set(range(2, 12)))
         self.assertNotIn(1, agent._metrics_data_cache.history())
-        self.assertEqual(agent._metrics_data_cache.by_step(11)["1001_flow"]["value"], 11.0)
+        step_metrics = list(agent._metrics_data_cache.by_step(11).values())
+        self.assertEqual(len(step_metrics), 1)
+        self.assertEqual(step_metrics[0]["value"], 11.0)
 
-    def test_central_scheduling_agent_filters_field_metrics_by_position_code(self):
+    def test_central_scheduling_agent_keeps_position_scoped_field_metrics(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -815,7 +959,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-007-position")
@@ -834,26 +978,32 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             "metrics/topic",
             {
                 "object_id": 1001,
-                "metrics_code": "flow",
+                "metrics_code": "water_flow",
                 "value": 1.0,
                 "step_index": 1,
-                "position_code": "upstream",
+                "position_code": "up_stream",
             },
         )
         agent._metrics_subscriber.handle_payload(
             "metrics/topic",
             {
                 "object_id": 1001,
-                "metrics_code": "flow",
+                "metrics_code": "water_flow",
                 "value": 2.0,
                 "step_index": 2,
                 "position_code": "none",
             },
         )
 
-        self.assertEqual(agent._metrics_data_cache.get_value(1001, "flow"), 2.0)
-        self.assertEqual(agent._metrics_data_cache.by_step(1), {})
-        self.assertEqual(agent._metrics_data_cache.by_step(2)["1001_flow"]["position_code"], "none")
+        self.assertEqual(agent._metrics_data_cache.get_value(1001, "water_flow"), 2.0)
+        self.assertEqual(
+            next(iter(agent._metrics_data_cache.by_step(1).values()))["position_code"],
+            "up_stream",
+        )
+        self.assertEqual(
+            next(iter(agent._metrics_data_cache.by_step(2).values()))["position_code"],
+            "none",
+        )
 
     def test_central_scheduling_agent_activates_mpc_on_time_series_update(self):
         state_manager = AgentStateManager()
@@ -865,7 +1015,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011")
@@ -891,14 +1041,14 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [5])
         runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
-        self.assertEqual(runtime.mpc_task_state.start_step, 5)
-        self.assertEqual(runtime.mpc_task_state.current_step, 5)
-        self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 3)
-        self.assertEqual(runtime.mpc_task_state.total_steps, 20)
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 7200)
-        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
-        self.assertEqual(runtime.mpc_task_state.control_config_url, "http://config/control.yaml")
-        self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
+        self.assertEqual(runtime.task_state.start_step, 5)
+        self.assertEqual(runtime.task_state.current_step, 5)
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 3)
+        self.assertEqual(runtime.task_state.total_steps, 20)
+        self.assertEqual(runtime.task_state.output_step_size, 7200)
+        self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.task_state.control_config_url, "http://config/control.yaml")
+        self.assertEqual(len(runtime.task_state.hydro_events), 1)
         self.assertEqual(agent.agent_status, AgentStatus.ACTIVE)
 
     def test_central_scheduling_agent_fails_without_rolling_config(self):
@@ -911,7 +1061,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-missing-roll")
@@ -931,7 +1081,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         self.assertEqual(response.command_status, CommandStatus.FAILED)
-        self.assertIsNone(agent._mpc_rolling_runtime.mpc_task_state)
+        self.assertIsNone(agent._mpc_rolling_runtime.task_state)
 
     def test_central_scheduling_agent_prefers_scenario_sim_agent_properties(self):
         state_manager = AgentStateManager()
@@ -943,7 +1093,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-scenario-config")
@@ -975,9 +1125,69 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
-        self.assertEqual(runtime.mpc_task_state.rolling_interval_steps, 60)
-        self.assertEqual(runtime.mpc_task_state.total_steps, 36)
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 1800)
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 60)
+        self.assertEqual(runtime.task_state.total_steps, 36)
+        self.assertEqual(runtime.task_state.output_step_size, 1800)
+
+    def test_central_scheduling_agent_prefers_simulation_runtime_options(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            transport=InMemoryTransport(),
+        )
+
+        context = SimulationContext(biz_scene_instance_id="scene-011-runtime-options")
+        ContextManager.create(
+            context=context,
+            scenario_config=BizScenarioConfiguration(
+                simulation_runtime_options=SimulationRuntimeOptions(
+                    roll_steps=8,
+                    max_steps=32,
+                    output_step_seconds=900,
+                    output_future_steps=24,
+                ),
+                sim_agent_properties=SimAgentProperties(
+                    roll_steps=60,
+                    total_steps=36,
+                    output_step_size=1800,
+                    output_future_steps=12,
+                ),
+            ),
+        )
+        agent = CentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-011-runtime-options",
+            agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+        )
+        agent.properties.update(
+            {
+                "roll_steps": "10",
+                "total_steps": "40",
+                "output_step_size": "7200",
+            }
+        )
+
+        response = agent.on_time_series_data_update(
+            build_time_series_update_request(context, auto_schedule_at_step=5)
+        )
+
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        runtime = agent._mpc_rolling_runtime
+        self.assertEqual(runtime.task_state.rolling_interval_steps, 8)
+        self.assertEqual(runtime.task_state.total_steps, 32)
+        self.assertEqual(runtime.task_state.output_step_size, 900)
+        self.assertEqual(runtime.task_state.prediction_horizon, 24)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
         state_manager = AgentStateManager()
@@ -989,7 +1199,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-config-alias")
@@ -1018,12 +1228,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
-        self.assertEqual(runtime.mpc_task_state.algorithm_config_url, "http://config/mpc.yaml")
+        self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
         self.assertEqual(
-            runtime.mpc_task_state.control_config_url,
+            runtime.task_state.control_config_url,
             "http://config/control.yaml",
         )
-        self.assertEqual(runtime.mpc_task_state.output_step_size, 3600)
+        self.assertEqual(runtime.task_state.output_step_size, 3600)
 
     def test_central_scheduling_agent_can_opt_into_tick_auto_start_and_rolls(self):
         state_manager = AgentStateManager()
@@ -1035,7 +1245,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-012")
@@ -1056,20 +1266,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [0])
         runtime = agent._mpc_rolling_runtime
         self.assertTrue(runtime.is_mpc_optimizing_on_the_loop())
-        self.assertEqual(runtime.mpc_task_state.start_step, 0)
+        self.assertEqual(runtime.task_state.start_step, 0)
 
         agent.on_time_series_data_update(
             build_time_series_update_request(context, command_id="ts-update-012", auto_schedule_at_step=1)
         )
         self.assertEqual(agent.optimization_steps, [0])
-        self.assertEqual(len(runtime.mpc_task_state.hydro_events), 1)
+        self.assertEqual(len(runtime.task_state.hydro_events), 1)
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-2", context=context, step=2))
         self.assertEqual(agent.optimization_steps, [0])
 
         agent.on_tick_simulation(TickCmdRequest(command_id="tick-3", context=context, step=3))
         self.assertEqual(agent.optimization_steps, [0, 3])
-        self.assertEqual(runtime.mpc_task_state.current_loop, 3)
+        self.assertEqual(runtime.task_state.current_loop, 3)
 
     def test_central_scheduling_agent_does_not_auto_start_mpc_on_tick_by_default(self):
         state_manager = AgentStateManager()
@@ -1081,7 +1291,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-012-disabled")
@@ -1203,7 +1413,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
         context = SimulationContext(biz_scene_instance_id="scene-012-factory-url")
         factory = SystemCentralSchedulingAgentFactory(
@@ -1222,7 +1432,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(client.base_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
         self.assertEqual(client.timeout_seconds, 210.0)
 
-    def test_system_central_factory_can_create_agent_without_env_properties_file(self):
+    def test_system_central_factory_requires_deployment_identity_configuration(self):
         from hydros_agent_sdk.factory import SystemCentralSchedulingAgentFactory
 
         state_manager = AgentStateManager()
@@ -1234,20 +1444,21 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
         )
         context = SimulationContext(biz_scene_instance_id="scene-012-no-env")
-        factory = SystemCentralSchedulingAgentFactory()
-
-        agent = factory.create_agent(sim_client, context)
-
-        self.assertEqual(agent.cluster_id, "demo-cluster")
-        self.assertEqual(agent.node_id, "node-a")
-        self.assertEqual(agent.agent_code, "CENTRAL_SCHEDULING_AGENT")
+        for missing_key, env_config in (
+            ("hydros_cluster_id", {"hydros_node_id": "node-a"}),
+            ("hydros_node_id", {"hydros_cluster_id": "demo-cluster"}),
+        ):
+            with self.subTest(missing_key=missing_key), patch.dict(os.environ, {}, clear=True):
+                factory = SystemCentralSchedulingAgentFactory(env_config=env_config)
+                with self.assertRaisesRegex(ValueError, missing_key):
+                    factory.create_agent(sim_client, context)
 
     def test_mpc_planning_client_builds_java_compatible_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=10,
@@ -1306,8 +1517,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["step_index"], 15)
         self.assertEqual(payload["mpc_config_url"], "http://config/mpc.yaml")
         self.assertEqual(payload["control_config_url"], "http://config/control.yaml")
+        self.assertEqual(payload["predictionHorizon"], 12)
         self.assertEqual(payload["horizon_interval_seconds"], 7200)
         self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
+        self.assertEqual(payload["diversionBoundaries"]["3001"], [3.0, 4.0])
+        self.assertNotIn("3001", payload["upstream_boundaries"])
         self.assertEqual(payload["sensor_data"][0]["object_id"], 9001)
         self.assertEqual(payload["sensor_data"][0]["metrics_code"], "water_level")
         self.assertEqual(payload["fixed_controls"], {"2001": 0.0})
@@ -1315,12 +1529,45 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn("bizSceneInstanceId", payload)
         self.assertNotIn("upstreamBoundaries", payload)
         self.assertNotIn("sensorData", payload)
+        self.assertNotIn("downstreamBoundaries", payload)
         self.assertNotIn("targets", payload)
-        self.assert_snake_case_keys(payload)
+
+    def test_mpc_planning_client_uses_task_prediction_horizon(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-013-custom-horizon"),
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=2,
+            prediction_horizon=24,
+        )
+        client = MpcPlanningClient(
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
+            require_sensor_data=False,
+        )
+
+        request = client.build_optimize_request(state, [])
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        self.assertEqual(request.prediction_horizon, 24)
+        self.assertEqual(payload["predictionHorizon"], 24)
+
+    def test_mpc_optimize_request_preserves_targets_contract(self):
+        request = MpcOptimizeRequest(
+            biz_scene_instance_id="scene-targets",
+            step_index=1,
+            prediction_horizon=12,
+            sensor_data=[],
+            targets={1009: [57.0, 57.5]},
+        )
+
+        payload = request.model_dump(by_alias=True, exclude_none=True)
+
+        self.assertEqual(payload["targets"], {1009: [57.0, 57.5]})
+        self.assertNotIn("diversionBoundaries", payload)
 
     def test_mpc_planning_client_logs_request_and_response_summaries(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-log")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1339,10 +1586,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "horizon_step": 1,
                             "control_object_list": [
                                 {
-                                    "object_type": "Gate",
-                                    "node_id": 101,
+                                    "object_type": "GateStation",
                                     "object_id": 501,
-                                    "target_value": 0.8,
+                                    "target_value_list": [
+                                        {"value_type": "water_level", "value": 3.8}
+                                    ],
                                 }
                             ],
                         },
@@ -1350,10 +1598,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "horizon_step": 2,
                             "control_object_list": [
                                 {
-                                    "object_type": "Gate",
-                                    "node_id": 102,
+                                    "object_type": "GateStation",
                                     "object_id": 502,
-                                    "target_value": 0.7,
+                                    "target_value_list": [
+                                        {"value_type": "water_level", "value": 3.7}
+                                    ],
                                 }
                             ],
                         },
@@ -1361,10 +1610,11 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             "horizon_step": 3,
                             "control_object_list": [
                                 {
-                                    "object_type": "Gate",
-                                    "node_id": 103,
+                                    "object_type": "GateStation",
                                     "object_id": 503,
-                                    "target_value": 0.6,
+                                    "target_value_list": [
+                                        {"value_type": "water_level", "value": 3.6}
+                                    ],
                                 }
                             ],
                         }
@@ -1380,6 +1630,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         def fake_opener(request, timeout_seconds):
             self.assertEqual(request.full_url, "http://mpc.local/hydros/api/v1/mpc/planning/start")
             self.assertIn(b'"biz_scene_instance_id": "scene-013-log"', request.data)
+            self.assertIn(b'"predictionHorizon": 12', request.data)
+            self.assertNotIn(b'"diversionBoundaries"', request.data)
             self.assertIn(b'"sensor_data"', request.data)
             self.assertIn(b'"object_id": 9001', request.data)
             self.assertNotIn(b'"bizSceneInstanceId"', request.data)
@@ -1438,7 +1690,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
     def test_mpc_planning_client_logs_empty_sensor_data_before_request(self):
         context = SimulationContext(biz_scene_instance_id="scene-013-empty-sensor")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1464,7 +1716,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIn("MPC sensor_data is empty; request will not be sent", log_output)
         opener.assert_not_called()
 
-    def test_mpc_result_reporter_builds_result_report_payload(self):
+    def test_mpc_prediction_result_reporter_builds_result_report_payload(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014",
             tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
@@ -1475,7 +1727,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1490,92 +1742,101 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
-                            node_id=101,
-                            object_id=501,
-                            target_value=0.45,
-                            target_value_type="OPENING",
+                        build_control_object_result(
+                            object_type="GateStation",
+                            node_id=102,
+                            object_id=102,
+                            target_value=2.3,
+                            target_value_type="water_level",
                         )
                     ],
                     predicted_result_list=[
-                        PredictedResult(
+                        build_predicted_result(
                             object_type="Canal",
                             object_id=102,
-                            object_name="Canal-102",
                             front_water_level=2.1,
-                            final_target_water_level=2.3,
+                            final_target_value=2.3,
+                            final_target_value_type="WATER_LEVEL",
                             back_water_level=1.9,
                             out_flow=33.0,
-                            diversion_flow=5.5,
                         )
                     ],
                 )
             ],
         )
 
-        report = MpcResultReporter().build_report(source, state, [response])
+        report = MpcPredictionResultReporter().build_report(source, state, [response])
         payload = report.model_dump(by_alias=True)
 
-        self.assertIsInstance(report, MpcResultReport)
+        self.assertIsInstance(report, MpcPredictionResultReport)
         self.assertEqual(report.command_type, "mpc_prediction_result_report")
+        parsed_report = SimCommandEnvelope.model_validate({"command": payload}).command
+        self.assertIsInstance(parsed_report, MpcPredictionResultReport)
         self.assertTrue(report.broadcast)
         self.assertEqual(payload["source_agent_instance"]["agent_id"], "agent-014")
-        self.assertNotIn("mpc_results", payload)
         self.assertEqual(payload["mpc_prediction_results"][0]["biz_scene_instance_id"], "scene-014")
         self.assertEqual(payload["mpc_prediction_results"][0]["waterway_id"], "waterway-014")
         self.assertEqual(payload["mpc_prediction_results"][0]["tenant_id"], "tenant-014")
         self.assertEqual(payload["mpc_prediction_results"][0]["biz_scenario_id"], "scenario-014")
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["command_type"], "OPENING")
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_type"], "Gate")
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["node_id"], 101)
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["object_id"], 501)
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][0]["target_value"], 0.45)
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["command_type"], "water_level")
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["node_id"], 102)
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["object_id"], 102)
-        self.assertEqual(payload["mpc_prediction_results"][0]["details"][1]["target_value"], 2.3)
-        attributes = json.loads(payload["mpc_prediction_results"][0]["details"][1]["attributes"])
-        self.assertEqual(attributes["front_water_level"], 2.1)
-        self.assertEqual(attributes["back_water_level"], 1.9)
+        self.assertEqual(payload["mpc_prediction_results"][0]["total_step"], 36)
+        self.assertEqual(payload["mpc_prediction_results"][0]["roll_steps"], 3)
+        self.assertEqual(payload["mpc_prediction_results"][0]["execution_status"], "PENDING")
+        result_attributes = json.loads(payload["mpc_prediction_results"][0]["attributes"])
+        self.assertNotIn("rolling_step", result_attributes)
+        self.assertEqual(result_attributes["loss"], 0.12)
+        self.assertEqual(result_attributes["gate_operations"], 1)
+        self.assertEqual(result_attributes["gate_amplitude"], 0.4)
+        result_payload = payload["mpc_prediction_results"][0]
+        self.assertEqual(len(result_payload["station_prediction_details"]), 1)
+        self.assertEqual(result_payload["device_prediction_details"], [])
+        self.assertEqual(result_payload["details"], result_payload["station_prediction_details"])
+        detail = result_payload["station_prediction_details"][0]
+        self.assertEqual(detail["command_type"], "WATER_LEVEL")
+        self.assertEqual(detail["node_id"], 102)
+        self.assertEqual(detail["object_id"], 102)
+        self.assertEqual(detail["target_value"], 2.3)
+        self.assertEqual(detail["front_water_level"], 2.1)
+        self.assertEqual(detail["back_water_level"], 1.9)
+        self.assertEqual(detail["out_flow"], 33.0)
+        self.assertEqual(detail["biz_idem_key"], "MPC_DETAIL:4:1:102:102:water_level")
+        attributes = json.loads(detail["attributes"])
         self.assertEqual(attributes["final_target_water_level"], 2.3)
-        self.assertEqual(attributes["out_flow"], 33.0)
-        self.assertEqual(attributes["diversion_flow"], 5.5)
-        self.assertEqual(attributes["object_name"], "Canal-102")
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
 
-    def test_mpc_result_reporter_builds_single_result_from_horizon_steps(self):
+    def test_mpc_prediction_result_reporter_builds_single_result_from_horizon_steps(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-single-result")
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
             current_step=4,
         )
 
-        result = MpcResultReporter.build_result(
+        result = MpcPredictionResultReporter.build_prediction_result(
             mpc_task_state=state,
             horizon_step=[
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
-                            node_id=101,
-                            object_id=501,
-                            target_value=0.45,
-                            target_value_type="OPENING",
+                        build_control_object_result(
+                            object_type="GateStation",
+                            node_id=102,
+                            object_id=102,
+                            target_value=2.3,
+                            target_value_type="water_level",
                         )
                     ],
                     predicted_result_list=[
-                        PredictedResult(
+                        build_predicted_result(
                             object_type="Canal",
                             object_id=102,
-                            object_name="Canal-102",
                             front_water_level=2.1,
-                            final_target_water_level=2.3,
+                            final_target_value=2.3,
+                            final_target_value_type="WATER_LEVEL",
                             back_water_level=1.9,
                             out_flow=33.0,
-                            diversion_flow=5.5,
                         )
                     ],
                 )
@@ -1589,45 +1850,42 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(result.biz_scene_instance_id, "scene-014-single-result")
         self.assertEqual(result.step, 4)
         self.assertEqual(result.plan_type, "OPTIMAL")
-        self.assertEqual(result.loss, 0.12)
-        self.assertEqual(result.gate_operations, 1)
-        self.assertEqual(result.gate_amplitude, 0.4)
-        self.assertEqual(len(result.details), 2)
-        self.assertEqual(result.details[0].command_type, "OPENING")
-        self.assertEqual(result.details[0].object_type, "Gate")
-        self.assertEqual(result.details[0].node_id, 101)
-        self.assertEqual(result.details[0].object_id, 501)
-        self.assertEqual(result.details[0].target_value, 0.45)
-        self.assertEqual(result.details[1].command_type, "water_level")
-        self.assertEqual(result.details[1].node_id, 102)
-        self.assertEqual(result.details[1].object_id, 102)
-        self.assertEqual(result.details[1].object_type, "Canal")
-        self.assertEqual(result.details[1].node_id, 102)
-        self.assertEqual(result.details[1].target_value, 2.3)
+        result_attributes = json.loads(result.attributes)
+        self.assertEqual(result_attributes["loss"], 0.12)
+        self.assertEqual(result_attributes["gate_operations"], 1)
+        self.assertEqual(result_attributes["gate_amplitude"], 0.4)
+        self.assertEqual(len(result.station_prediction_details), 1)
+        self.assertEqual(result.device_prediction_details, [])
+        self.assertEqual(result.details, result.station_prediction_details)
+        self.assertEqual(result.details[0].command_type, "WATER_LEVEL")
+        self.assertEqual(result.details[0].object_type, "Canal")
+        self.assertEqual(result.details[0].node_id, 102)
+        self.assertEqual(result.details[0].object_id, 102)
+        self.assertEqual(result.details[0].target_value, 2.3)
 
-    def test_mpc_result_reporter_builds_customize_report(self):
+    def test_mpc_prediction_result_reporter_builds_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-report")
         source = build_agent_instance("agent-014-customize-report", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
             current_step=4,
         )
 
-        report = MpcResultReporter().build_customize_report(
+        report = MpcPredictionResultReporter().build_customize_report(
             source_agent_instance=source,
             mpc_task_state=state,
             horizon_step=[
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=101,
                             object_id=501,
-                            target_value=0.45,
-                            target_value_type="OPENING",
+                            target_value=3.45,
+                            target_value_type="water_level",
                         )
                     ],
                 )
@@ -1635,26 +1893,26 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             plan_type="CUSTOMIZE",
         )
 
-        self.assertIsInstance(report, MpcResultReport)
+        self.assertIsInstance(report, MpcPredictionResultReport)
         self.assertEqual(report.context.biz_scene_instance_id, "scene-014-customize-report")
         self.assertEqual(report.source_agent_instance.agent_id, "agent-014-customize-report")
-        self.assertEqual(len(report.mpc_results), 1)
-        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
-        self.assertEqual(report.mpc_results[0].details[0].object_type, "Gate")
-        self.assertEqual(report.mpc_results[0].details[0].node_id, 101)
-        self.assertEqual(report.mpc_results[0].details[0].object_id, 501)
+        self.assertEqual(len(report.mpc_prediction_results), 1)
+        self.assertEqual(report.mpc_prediction_results[0].plan_type, "CUSTOMIZE")
+        self.assertEqual(report.mpc_prediction_results[0].details[0].object_type, "GateStation")
+        self.assertEqual(report.mpc_prediction_results[0].details[0].node_id, 501)
+        self.assertEqual(report.mpc_prediction_results[0].details[0].object_id, 501)
 
-    def test_mpc_result_reporter_publishes_customize_report(self):
+    def test_mpc_prediction_result_reporter_publishes_customize_report(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-customize-publish")
         source = build_agent_instance("agent-014-customize-publish", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
             current_step=4,
         )
         enqueued = []
-        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+        reporter = MpcPredictionResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
 
         with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
             report = reporter.publish_customize_report(
@@ -1664,12 +1922,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     HorizonStep(
                         horizon_step=1,
                         control_object_list=[
-                            ControlObjectResult(
-                                object_type="Gate",
+                            build_control_object_result(
+                                object_type="GateStation",
                                 node_id=101,
                                 object_id=501,
-                                target_value=0.45,
-                                target_value_type="OPENING",
+                                target_value=3.45,
+                                target_value_type="water_level",
                             )
                         ],
                     )
@@ -1678,15 +1936,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             )
 
         self.assertIs(enqueued[0], report)
-        self.assertEqual(report.mpc_results[0].plan_type, "CUSTOMIZE")
+        self.assertEqual(report.mpc_prediction_results[0].plan_type, "CUSTOMIZE")
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC customize result report prepared for coordinator", log_output)
-        self.assertIn("MPC customize result report enqueued to coordinator", log_output)
+        self.assertIn("MPC customize prediction result report prepared for coordinator", log_output)
+        self.assertIn("MPC customize prediction result report enqueued to coordinator", log_output)
         self.assertIn(report.command_id, log_output)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=1", log_output)
 
-    def test_mpc_result_reporter_accepts_current_predicted_result_fields(self):
+    def test_mpc_prediction_result_reporter_accepts_current_predicted_result_fields(self):
         context = SimulationContext(
             biz_scene_instance_id="scene-014-renamed-fields",
             tenant=Tenant(tenant_id="tenant-014", tenant_name="Tenant"),
@@ -1697,7 +1955,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             waterway=Waterway(waterway_id="waterway-014", waterway_name="Waterway"),
         )
         source = build_agent_instance("agent-014-renamed-fields", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1713,12 +1971,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             {
                                 "object_type": "Canal",
                                 "object_id": 31400,
-                                "object_name": "Canal-31400",
-                                "front_water_level": 63.0,
-                                "final_target_water_level": 63.12,
-                                "back_water_level": 62.8,
-                                "out_flow": 18.5,
-                                "diversion_flow": 7.2,
+                                "target_value": {
+                                    "value_type": "WATER_LEVEL",
+                                    "value": 63.12,
+                                },
+                                "predicted_value_list": [
+                                    {"value_type": "front_water_level", "value": 63.0},
+                                    {"value_type": "back_water_level", "value": 62.8},
+                                    {"value_type": "out_flow", "value": 18.5},
+                                ],
                             }
                         ],
                     }
@@ -1726,31 +1987,77 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             }
         )
 
-        report = MpcResultReporter().build_report(source, state, [response])
+        report = MpcPredictionResultReporter().build_report(source, state, [response])
         payload = report.model_dump(by_alias=True)
         detail = payload["mpc_prediction_results"][0]["details"][0]
 
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].final_target_water_level, 63.12)
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].back_water_level, 62.8)
-        self.assertEqual(response.horizon_controls[0].predicted_result_list[0].diversion_flow, 7.2)
-        self.assertEqual(detail["command_type"], "water_level")
+        prediction = response.horizon_controls[0].predicted_result_list[0]
+        self.assertEqual(prediction.target_value.value, 63.12)
+        self.assertEqual(prediction.target_value.value_type, "WATER_LEVEL")
+        self.assertEqual(prediction.predicted_value_list[1].value, 62.8)
+        self.assertEqual(detail["command_type"], "WATER_LEVEL")
         self.assertEqual(detail["object_type"], "Canal")
         self.assertEqual(detail["node_id"], 31400)
         self.assertEqual(detail["object_id"], 31400)
         self.assertEqual(detail["value"], 63.0)
         self.assertEqual(detail["target_value"], 63.12)
+        self.assertEqual(detail["front_water_level"], 63.0)
+        self.assertEqual(detail["back_water_level"], 62.8)
+        self.assertEqual(detail["out_flow"], 18.5)
         attributes = json.loads(detail["attributes"])
-        self.assertEqual(attributes["front_water_level"], 63.0)
-        self.assertEqual(attributes["back_water_level"], 62.8)
         self.assertEqual(attributes["final_target_water_level"], 63.12)
-        self.assertEqual(attributes["out_flow"], 18.5)
-        self.assertEqual(attributes["diversion_flow"], 7.2)
-        self.assertEqual(attributes["object_name"], "Canal-31400")
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
 
-    def test_mpc_result_reporter_logs_coordinator_payload_when_publishing(self):
+    def test_mpc_prediction_result_reporter_converts_water_flow_target_attribute(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-014-flow-target"),
+            rolling_interval_steps=3,
+            start_step=1,
+            current_step=4,
+        )
+        result = MpcPredictionResultReporter.build_prediction_result(
+            mpc_task_state=state,
+            horizon_step=[
+                HorizonStep(
+                    horizon_step=1,
+                    predicted_result_list=[
+                        build_predicted_result(
+                            object_type="Canal",
+                            object_id=31401,
+                            front_water_level=63.0,
+                            final_target_value=18.7,
+                            final_target_value_type="WATER_FLOW",
+                            back_water_level=62.8,
+                            out_flow=18.5,
+                        )
+                    ],
+                )
+            ],
+            plan_type="OPTIMAL",
+        )
+
+        detail = result.details[0]
+        attributes = json.loads(detail.attributes)
+
+        self.assertEqual(detail.command_type, "WATER_FLOW")
+        self.assertEqual(detail.node_id, 31401)
+        self.assertEqual(detail.object_id, 31401)
+        self.assertEqual(detail.target_value, 18.7)
+        self.assertEqual(detail.front_water_level, 63.0)
+        self.assertEqual(detail.back_water_level, 62.8)
+        self.assertEqual(detail.out_flow, 18.5)
+        self.assertEqual(attributes["final_target_water_flow"], 18.7)
+        self.assertNotIn("final_target_water_level", attributes)
+        self.assertNotIn("front_water_level", attributes)
+        self.assertNotIn("back_water_level", attributes)
+        self.assertNotIn("out_flow", attributes)
+
+    def test_mpc_prediction_result_reporter_logs_coordinator_payload_when_publishing(self):
         context = SimulationContext(biz_scene_instance_id="scene-014-log")
         source = build_agent_instance("agent-014-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state = SchedulingTaskState(
+        state = MpcTaskState(
             context=context,
             rolling_interval_steps=3,
             start_step=1,
@@ -1762,54 +2069,54 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=101,
                             object_id=501,
-                            target_value=0.45,
-                            target_value_type="OPENING",
+                            target_value=3.45,
+                            target_value_type="water_level",
                         )
                     ],
                 ),
                 HorizonStep(
                     horizon_step=2,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=102,
                             object_id=502,
-                            target_value=0.55,
-                            target_value_type="OPENING",
+                            target_value=3.55,
+                            target_value_type="water_level",
                         )
                     ],
                 ),
                 HorizonStep(
                     horizon_step=3,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=103,
                             object_id=503,
-                            target_value=0.65,
-                            target_value_type="OPENING",
+                            target_value=3.65,
+                            target_value_type="water_level",
                         )
                     ],
                 )
             ],
         )
         enqueued = []
-        reporter = MpcResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
+        reporter = MpcPredictionResultReporter(sim_coordination_client=SimpleNamespace(enqueue=enqueued.append))
 
         with self.assertLogs("hydros_agent_sdk.mpc.reporter", level="INFO") as logs:
             report = reporter.publish(source, state, [response])
 
         self.assertIs(enqueued[0], report)
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC result report prepared for coordinator", log_output)
-        self.assertIn("MPC result report enqueued to coordinator", log_output)
+        self.assertIn("MPC prediction result report prepared for coordinator", log_output)
+        self.assertIn("MPC prediction result report enqueued to coordinator", log_output)
         self.assertIn("scene-014-log", log_output)
         self.assertIn(report.command_id, log_output)
-        self.assertEqual(len(report.mpc_results[0].details), 3)
+        self.assertEqual(len(report.mpc_prediction_results[0].details), 3)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
         self.assertNotIn('"command_type":"mpc_prediction_result_report"', log_output)
@@ -1817,45 +2124,21 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
-    def test_mpc_result_report_accepts_legacy_mpc_results_field(self):
-        context = SimulationContext(biz_scene_instance_id="scene-014-legacy")
-        source = build_agent_instance("agent-014-legacy", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-
-        report = MpcResultReport.model_validate(
-            {
-                "command_id": "report-legacy-014",
-                "command_type": "mpc_prediction_result_report",
-                "context": context.model_dump(mode="json"),
-                "source_agent_instance": source.model_dump(mode="json"),
-                "mpc_results": [
-                    {
-                        "biz_scene_instance_id": "scene-014-legacy",
-                        "step": 4,
-                        "details": [],
-                    }
-                ],
-            }
-        )
-
-        self.assertEqual(len(report.mpc_results), 1)
-        self.assertEqual(report.mpc_results[0].biz_scene_instance_id, "scene-014-legacy")
-        payload = report.model_dump(by_alias=True)
-        self.assertIn("mpc_prediction_results", payload)
-        self.assertNotIn("mpc_results", payload)
-
-    def test_central_scheduling_agent_default_mpc_path_reports_and_sends_opening(self):
+    def test_central_scheduling_agent_default_mpc_path_dispatches_station_water_level(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
         callback = TestSiblingCacheCallback()
 
+        execution_reports = []
         sim_client = SimpleNamespace(
             broker_url="127.0.0.1",
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
             sim_coordination_callback=callback,
+            enqueue=execution_reports.append,
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-015")
@@ -1868,20 +2151,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=101,
                             object_id=501,
                             object_name="Gate 501",
-                            target_value=0.45,
-                            target_value_type="OPENING",
+                            target_value=3.45,
+                            target_value_type="water_level",
                         )
                     ],
                 )
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015",
@@ -1892,7 +2175,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
             object_agent_code_map={501: "GATE_AGENT_015"},
         )
         agent._metrics_subscriber.handle_payload(
@@ -1908,7 +2191,32 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         sent_commands = []
 
-        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
+        def send_and_complete(command):
+            sent_commands.append(command)
+            agent._handle_agent_command_response(
+                HydroStationTargetValueResponse.from_request(
+                    command,
+                    command_status=CommandStatus.SUCCEED,
+                    success=True,
+                )
+            )
+            agent.on_station_control_execution(
+                EdgeControlExecutionReport(
+                    command_id="edge-terminal-015",
+                    context=context,
+                    broadcast=True,
+                    source_agent_instance=target,
+                    target_agent_instance=agent,
+                    exec_command_id=command.command_id,
+                    object_type=command.object_type,
+                    object_id=command.object_id,
+                    target_value_type=command.target_value_type,
+                    target_value=command.target_value,
+                    exec_status="COMPLETED",
+                )
+            )
+
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=send_and_complete):
             agent.on_time_series_data_update(
                 build_time_series_update_request(context, command_id="ts-update-015", auto_schedule_at_step=1)
             )
@@ -1922,9 +2230,161 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
         self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015")
         self.assertEqual(sent_commands[0].object_id, 501)
-        self.assertEqual(sent_commands[0].object_type, "Gate")
-        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
-        self.assertEqual(sent_commands[0].target_value, 0.45)
+        self.assertEqual(sent_commands[0].object_type, "GateStation")
+        self.assertEqual(sent_commands[0].target_value_type, "water_level")
+        self.assertEqual(sent_commands[0].target_value, 3.45)
+        self.assertEqual(sent_commands[0].group_size, 1)
+        self.assertEqual(sent_commands[0].main_step_index, 1)
+        self.assertEqual(
+            [report.execution_status for report in execution_reports],
+            ["DISPATCHED", "STARTED", "COMPLETED"],
+        )
+
+    def test_mpc_central_dispatches_the_current_horizon_on_each_tick(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+        execution_reports = []
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            transport=InMemoryTransport(),
+            sim_coordination_callback=callback,
+            enqueue=execution_reports.append,
+        )
+        context = SimulationContext(biz_scene_instance_id="scene-current-horizon")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
+        target = build_agent_instance("gate-agent-current", "GATE_AGENT_CURRENT", "node-b", context)
+        callback._store_sibling_agent_instance(target)
+        mpc_response = MpcOptimizeResponse(
+            plan_type="optimal",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        build_control_object_result(object_type="GateStation", object_id=501, target_value=3.45, target_value_type="water_level")
+                    ],
+                ),
+                HorizonStep(
+                    horizon_step=2,
+                    control_object_list=[
+                        build_control_object_result(object_type="GateStation", object_id=501, target_value=3.55, target_value_type="water_level")
+                    ],
+                ),
+            ],
+        )
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-current-horizon",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            mpc_planning_client=FakeMpcPlanningClient([mpc_response]),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
+            object_agent_code_map={501: "GATE_AGENT_CURRENT"},
+        )
+        sent_commands = []
+
+        def send_and_complete(command):
+            sent_commands.append(command)
+            agent._handle_agent_command_response(
+                HydroStationTargetValueResponse.from_request(
+                    command,
+                    command_status=CommandStatus.SUCCEED,
+                    success=True,
+                )
+            )
+            agent.on_station_control_execution(
+                EdgeControlExecutionReport(
+                    command_id=f"edge-{command.command_id}",
+                    context=context,
+                    broadcast=True,
+                    source_agent_instance=target,
+                    target_agent_instance=agent,
+                    exec_command_id=command.command_id,
+                    object_type=command.object_type,
+                    object_id=command.object_id,
+                    target_value_type=command.target_value_type,
+                    target_value=command.target_value,
+                    exec_status="COMPLETED",
+                )
+            )
+
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=send_and_complete):
+            agent.on_time_series_data_update(
+                build_time_series_update_request(context, auto_schedule_at_step=1)
+            )
+            agent.on_tick(TickCmdRequest(command_id="tick-current-horizon", context=context, step=2))
+
+        self.assertEqual([command.target_value for command in sent_commands], [3.45, 3.55])
+        self.assertEqual(
+            [report.execution_status for report in execution_reports],
+            ["DISPATCHED", "STARTED", "COMPLETED", "DISPATCHED", "STARTED", "COMPLETED"],
+        )
+
+    def test_mpc_control_timeout_returns_failed_tick_response(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+        context = SimulationContext(biz_scene_instance_id="scene-mpc-timeout")
+        target = build_agent_instance("station-timeout", "STATION_TIMEOUT", "node-b", context)
+        callback._store_sibling_agent_instance(target)
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            transport=InMemoryTransport(),
+            sim_coordination_callback=callback,
+            enqueue=Mock(),
+        )
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_type="GateStation",
+                            object_id=501,
+                            target_value=3.45,
+                            target_value_type="water_level",
+                        )
+                    ],
+                )
+            ],
+        )
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-mpc-timeout",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            mpc_planning_client=FakeMpcPlanningClient([response]),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
+            mpc_control_execution_timeout_seconds=0.001,
+            object_agent_code_map={501: "STATION_TIMEOUT"},
+        )
+        agent.properties["auto_start_mpc_on_tick"] = True
+
+        with patch.object(agent._control_command_dispatcher, "send_command"):
+            tick_response = agent.on_tick(
+                TickCmdRequest(command_id="tick-mpc-timeout", context=context, step=1)
+            )
+
+        self.assertEqual(tick_response.command_status, CommandStatus.FAILED)
+        self.assertIn("timed out", tick_response.error_message)
 
     def test_central_scheduling_agent_resolves_mpc_target_from_managed_top_objects(self):
         state_manager = AgentStateManager()
@@ -1937,7 +2397,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
             sim_coordination_callback=callback,
         )
 
@@ -1989,20 +2449,20 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
-                            object_type="Gate",
+                        build_control_object_result(
+                            object_type="GateStation",
                             node_id=20600,
-                            object_id=20601,
-                            object_name="Gate 20601",
-                            target_value=1.68,
-                            target_value_type="OPENING",
+                            object_id=20600,
+                            object_name="Gate Station 20600",
+                            target_value=3.68,
+                            target_value_type="water_level",
                         )
                     ],
                 )
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015-managed",
@@ -2013,7 +2473,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
         )
         agent._metrics_subscriber.handle_payload(
             "metrics/topic",
@@ -2028,20 +2488,39 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
         sent_commands = []
 
-        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
-            agent.on_time_series_data_update(
+        def send_and_complete(command):
+            sent_commands.append(command)
+            agent.on_station_control_execution(
+                EdgeControlExecutionReport(
+                    command_id="edge-terminal-015-managed",
+                    context=context,
+                    broadcast=True,
+                    source_agent_instance=target,
+                    target_agent_instance=agent,
+                    exec_command_id=command.command_id,
+                    object_type=command.object_type,
+                    object_id=command.object_id,
+                    target_value_type=command.target_value_type,
+                    target_value=command.target_value,
+                    exec_status="COMPLETED",
+                )
+            )
+
+        with patch.object(agent._control_command_dispatcher, "send_command", side_effect=send_and_complete):
+            response = agent.on_time_series_data_update(
                 build_time_series_update_request(context, command_id="ts-update-015-managed", auto_schedule_at_step=1)
             )
 
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         self.assertEqual(len(sent_commands), 1)
         self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
         self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015_MANAGED")
-        self.assertEqual(sent_commands[0].object_id, 20601)
-        self.assertEqual(sent_commands[0].object_type, "Gate")
-        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
-        self.assertEqual(sent_commands[0].target_value, 1.68)
+        self.assertEqual(sent_commands[0].object_id, 20600)
+        self.assertEqual(sent_commands[0].object_type, "GateStation")
+        self.assertEqual(sent_commands[0].target_value_type, "water_level")
+        self.assertEqual(sent_commands[0].target_value, 3.68)
 
-    def test_central_scheduling_agent_resolves_mpc_target_from_parent_object_mapping(self):
+    def test_central_scheduling_agent_rejects_device_opening_as_mpc_control(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -2052,7 +2531,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
             sim_coordination_callback=callback,
         )
 
@@ -2088,7 +2567,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 HorizonStep(
                     horizon_step=1,
                     control_object_list=[
-                        ControlObjectResult(
+                        build_control_object_result(
                             object_type="Gate",
                             node_id=20600,
                             object_id=20601,
@@ -2101,7 +2580,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
         mpc_client = FakeMpcPlanningClient([mpc_response])
-        reporter = FakeMpcResultReporter()
+        reporter = FakeMpcPredictionResultReporter()
         agent = ProductionCentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-015-parent-map",
@@ -2112,7 +2591,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             hydros_cluster_id="demo-cluster",
             hydros_node_id="node-a",
             mpc_planning_client=mpc_client,
-            mpc_result_reporter=reporter,
+            mpc_prediction_result_reporter=reporter,
             object_agent_code_map={20600: "GATE_AGENT_015_PARENT"},
         )
         agent._metrics_subscriber.handle_payload(
@@ -2129,7 +2608,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         sent_commands = []
 
         with patch.object(agent._control_command_dispatcher, "send_command", side_effect=sent_commands.append):
-            agent.on_time_series_data_update(
+            response = agent.on_time_series_data_update(
                 build_time_series_update_request(
                     context,
                     command_id="ts-update-015-parent-map",
@@ -2137,21 +2616,16 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(len(sent_commands), 1)
-        self.assertIsInstance(sent_commands[0], HydroStationTargetValueRequest)
-        self.assertEqual(sent_commands[0].target.agent_code, "GATE_AGENT_015_PARENT")
-        self.assertEqual(sent_commands[0].object_id, 20601)
-        self.assertEqual(sent_commands[0].object_type, "Gate")
-        self.assertEqual(sent_commands[0].target_value_type, "OPENING")
-        self.assertEqual(sent_commands[0].target_value, 1.68)
+        self.assertEqual(response.command_status, CommandStatus.FAILED)
+        self.assertEqual(sent_commands, [])
 
-    def test_coordination_client_sends_local_mpc_result_report(self):
+    def test_coordination_client_sends_local_mpc_prediction_result_report(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016")
         source = build_agent_instance("agent-016", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
@@ -2159,23 +2633,23 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        report = MpcResultReport(
+        report = MpcPredictionResultReport(
             command_id="report-016",
             context=context,
             source_agent_instance=source,
-            mpc_results=[],
+            mpc_prediction_results=[],
             broadcast=True,
         )
 
-        self.assertTrue(client._should_send(report))
+        self.assertTrue(client.outbox_publisher.should_send(report))
 
-    def test_coordination_client_logs_mpc_result_report_payload_when_sent(self):
+    def test_coordination_client_logs_mpc_prediction_result_report_payload_when_sent(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016-log")
         source = build_agent_instance("agent-016-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
@@ -2183,12 +2657,10 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        publish_result = Mock()
-        client.mqtt_client = Mock()
-        client.mqtt_client.publish.return_value = publish_result
-        report = MpcResultReporter().build_report(
+        client.outbox_publisher.transport = Mock()
+        report = MpcPredictionResultReporter().build_report(
             source,
-            SchedulingTaskState(
+            MpcTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,
@@ -2201,36 +2673,36 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=1,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=101,
                                     object_id=501,
-                                    target_value=0.45,
-                                    target_value_type="OPENING",
+                                    target_value=3.45,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
                         HorizonStep(
                             horizon_step=2,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=102,
                                     object_id=502,
-                                    target_value=0.55,
-                                    target_value_type="OPENING",
+                                    target_value=3.55,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
                         HorizonStep(
                             horizon_step=3,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=103,
                                     object_id=503,
-                                    target_value=0.65,
-                                    target_value_type="OPENING",
+                                    target_value=3.65,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
@@ -2239,13 +2711,12 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
 
-        with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
-            client._send_with_retry(report)
+        with self.assertLogs("hydros_agent_sdk.runtime.coordination_outbox", level="INFO") as logs:
+            client.outbox_publisher.send_with_retry(report)
 
-        client.mqtt_client.publish.assert_called_once()
-        publish_result.wait_for_publish.assert_called_once()
+        client.outbox_publisher.transport.publish.assert_called_once()
         log_output = "\n".join(logs.output)
-        self.assertIn("MPC result report sent to coordinator", log_output)
+        self.assertIn("MPC prediction result report sent to coordinator", log_output)
         self.assertIn(report.command_id, log_output)
         self.assertIn("result_count=1", log_output)
         self.assertIn("detail_count=3", log_output)
@@ -2254,13 +2725,13 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertNotIn('"object_id":502', log_output)
         self.assertNotIn('"object_id":503', log_output)
 
-    def test_coordination_client_truncates_mpc_result_report_when_enqueued(self):
+    def test_coordination_client_truncates_mpc_prediction_result_report_when_enqueued(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
         context = SimulationContext(biz_scene_instance_id="scene-016-enqueue-log")
         source = build_agent_instance("agent-016-enqueue-log", "CENTRAL_SCHEDULING_AGENT", "node-a", context)
-        state_manager.add_local_agent(source)
+        state_manager.activate_task(context, [source])
         client = SimCoordinationClient(
             broker_url="tcp://127.0.0.1",
             broker_port=1883,
@@ -2268,9 +2739,9 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             sim_coordination_callback=TestSiblingCacheCallback(),
             state_manager=state_manager,
         )
-        report = MpcResultReporter().build_report(
+        report = MpcPredictionResultReporter().build_report(
             source,
-            SchedulingTaskState(
+            MpcTaskState(
                 context=context,
                 rolling_interval_steps=3,
                 start_step=1,
@@ -2283,36 +2754,36 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         HorizonStep(
                             horizon_step=1,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=101,
                                     object_id=501,
-                                    target_value=0.45,
-                                    target_value_type="OPENING",
+                                    target_value=3.45,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
                         HorizonStep(
                             horizon_step=2,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=102,
                                     object_id=502,
-                                    target_value=0.55,
-                                    target_value_type="OPENING",
+                                    target_value=3.55,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
                         HorizonStep(
                             horizon_step=3,
                             control_object_list=[
-                                ControlObjectResult(
-                                    object_type="Gate",
+                                build_control_object_result(
+                                    object_type="GateStation",
                                     node_id=103,
                                     object_id=503,
-                                    target_value=0.65,
-                                    target_value_type="OPENING",
+                                    target_value=3.65,
+                                    target_value_type="water_level",
                                 )
                             ],
                         ),
@@ -2321,7 +2792,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             ],
         )
 
-        with self.assertLogs("hydros_agent_sdk.coordination_client", level="INFO") as logs:
+        with self.assertLogs("hydros_agent_sdk.runtime.coordination_outbox", level="INFO") as logs:
             client.enqueue(report)
 
         log_output = "\n".join(logs.output)
@@ -2389,7 +2860,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             broker_port=1883,
             topic="/hydros/commands/coordination/demo-cluster",
             state_manager=state_manager,
-            mqtt_client=Mock(),
+            transport=InMemoryTransport(),
             sim_coordination_callback=callback,
         )
 

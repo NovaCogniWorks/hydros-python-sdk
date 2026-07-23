@@ -1,6 +1,7 @@
 from __future__ import annotations
+from enum import Enum
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import Field, AliasChoices
+from pydantic import ConfigDict, Field, AliasChoices
 from .models import (
     AgentInstanceStatus,
     SimulationContext,
@@ -9,8 +10,9 @@ from .models import (
     TopHydroObject,
     CommandStatus,
 )
-from .base import HydroBaseModel
-from .mpc_results import MpcResult
+from .base import HydroBaseModel, HydroCmd
+from .mpc_prediction_results import MpcPredictionResult
+from hydros_agent_sdk.scenario_config import SimAgentProperties, SimulationRuntimeOptions
 
 # 指令类型常量
 SIMCMD_TASK_INIT_REQUEST = "task_init_request"
@@ -26,7 +28,10 @@ SIMCMD_TIME_SERIES_DATA_UPDATE_RESPONSE = "time_series_data_update_response"
 SIMCMD_HYDRO_EVENT_COMMAND = "hydro_event_command"
 SIMCMD_HYDRO_EVENT_ACK_RESPONSE = "hydro_event_ack_response"
 SIMCMD_AGENT_INSTANCE_STATUS_REPORT = "report_agent_instance_status"
-SIMCMD_MPC_RESULT_REPORT = "mpc_prediction_result_report"
+SIMCMD_MPC_PREDICTION_RESULT_REPORT = "mpc_prediction_result_report"
+SIMCMD_MPC_EXECUTION_STATUS_REPORT = "mpc_execution_status_report"
+SIMCMD_EDGE_CONTROL_RESULT_REPORT = "edge_control_result_report"
+SIMCMD_EDGE_CONTROL_EXECUTION_REPORT = "edge_control_execution_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
 SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
@@ -35,8 +40,25 @@ SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_updat
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
 SIMCMD_DEVICE_STATUS_CHANGE_RESPONSE = "device_status_change_response"
 
-class HydroCmd(HydroBaseModel):
-    command_id: str
+
+class MpcExecutionStatus(str, Enum):
+    """与 Java ``MpcExecutionStatus`` 对齐的 wire value。"""
+
+    PENDING = "PENDING"
+    DISPATCHED = "DISPATCHED"
+    STARTED = "STARTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ExecutionStatus(str, Enum):
+    """与 Java edge ``ExecutionStatus`` 对齐的 wire value。"""
+
+    COMPLETED = "COMPLETED"
+    SKIPPED = "SKIPPED"
+    FAILED = "FAILED"
+    TIMEOUT = "TIMEOUT"
+    CANCELLED = "CANCELLED"
 
 class SimCommand(HydroCmd):
     command_type: str
@@ -60,6 +82,18 @@ class SimTaskInitRequest(SimCoordinationRequest):
     command_type: Literal["task_init_request"] = SIMCMD_TASK_INIT_REQUEST
     agent_list: List[HydroAgent]
     biz_scene_configuration_url: Optional[str] = None
+    agent_config_params: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("agent_config_params", "agentConfigParams"),
+    )
+    simulation_runtime_options: Optional[SimulationRuntimeOptions] = Field(
+        default=None,
+        validation_alias=AliasChoices("simulation_runtime_options", "simulationRuntimeOptions"),
+    )
+    sim_agent_properties: Optional[SimAgentProperties] = Field(
+        default=None,
+        validation_alias=AliasChoices("sim_agent_properties", "simAgentProperties"),
+    )
 
 class SimTaskInitResponse(SimCoordinationResponse):
     command_type: Literal["task_init_response"] = SIMCMD_TASK_INIT_RESPONSE
@@ -79,6 +113,9 @@ class TickCmdRequest(SimCoordinationRequest):
 
 class TickCmdResponse(SimCoordinationResponse):
     command_type: Literal["tick_cmd_response"] = SIMCMD_TICK_CMD_RESPONSE
+    completed_step: int = Field(
+        validation_alias=AliasChoices("completed_step", "completedStep")
+    )
 
 # --- 时间序列指令 ---
 
@@ -151,17 +188,97 @@ class AgentInstanceStatusReport(SimCommand):
     )
     init_result: Optional[Dict[str, Any]] = None
 
-class MpcResultReport(SimCommand):
+class MpcPredictionResultReport(SimCommand):
     """
-    MPC 优化结果报告。
+    MPC 预测结果报告。
     由中央调度智能体发送，并由协调器或数据侧消费。
     """
-    command_type: Literal["mpc_prediction_result_report"] = SIMCMD_MPC_RESULT_REPORT
+    command_type: Literal["mpc_prediction_result_report"] = SIMCMD_MPC_PREDICTION_RESULT_REPORT
     source_agent_instance: HydroAgentInstance
-    mpc_results: List[MpcResult] = Field(
-        validation_alias=AliasChoices("mpc_prediction_results", "mpc_results"),
-        serialization_alias="mpc_prediction_results",
+    mpc_prediction_results: List[MpcPredictionResult]
+
+class MpcExecutionStatusReport(SimCommand):
+    """
+    MPC 执行状态报告。
+    Python SDK 只承载 Java 协议反序列化，具体状态语义由协调器消费。
+    """
+    command_type: Literal["mpc_execution_status_report"] = SIMCMD_MPC_EXECUTION_STATUS_REPORT
+    source_agent_instance: HydroAgentInstance
+    optimize_step: int = Field(validation_alias=AliasChoices("optimize_step", "optimizeStep"))
+    horizon_step: int = Field(validation_alias=AliasChoices("horizon_step", "horizonStep"))
+    biz_idem_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("biz_idem_key", "bizIdemKey"),
     )
+    node_id: Optional[int] = Field(
+        default=None,
+        validation_alias=AliasChoices("node_id", "nodeId"),
+    )
+    object_id: int = Field(validation_alias=AliasChoices("object_id", "objectId"))
+    object_type: str = Field(validation_alias=AliasChoices("object_type", "objectType"))
+    target_value_type: str = Field(
+        validation_alias=AliasChoices("target_value_type", "targetValueType")
+    )
+    target_value: float = Field(validation_alias=AliasChoices("target_value", "targetValue"))
+    execution_command_id: str = Field(
+        validation_alias=AliasChoices("execution_command_id", "executionCommandId")
+    )
+    dispatch_key: str = Field(validation_alias=AliasChoices("dispatch_key", "dispatchKey"))
+    execution_status: MpcExecutionStatus = Field(
+        validation_alias=AliasChoices("execution_status", "executionStatus")
+    )
+    execution_error_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_code", "executionErrorCode"),
+    )
+    execution_error_message: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("execution_error_message", "executionErrorMessage"),
+    )
+    dispatched_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("dispatched_at", "dispatchedAt"),
+    )
+    executed_at: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("executed_at", "executedAt"),
+    )
+
+class EdgeControlResultReport(SimCommand):
+    """
+    Edge 控制结果报告。
+    report/details 保持轻量 dict，避免在 SDK 内复制 Java 深层模型。
+    """
+    command_type: Literal["edge_control_result_report"] = SIMCMD_EDGE_CONTROL_RESULT_REPORT
+    source_agent_instance: HydroAgentInstance
+    report: Dict[str, Any]
+    details: List[Dict[str, Any]]
+
+class EdgeControlExecutionReport(SimCommand):
+    """
+    Edge 站点控制执行终态报告。
+    严格对齐当前 Java protocol；不要在 SDK 中预埋未发布的扩展字段。
+    """
+    # Java 协议解析器会忽略无法识别的旧 wire field。这里保持同样的边界行为，
+    # 不把旧名称映射到这个 V2 DTO 字段。
+    model_config = ConfigDict(extra="ignore")
+    command_type: Literal["edge_control_execution_report"] = SIMCMD_EDGE_CONTROL_EXECUTION_REPORT
+    source_agent_instance: HydroAgentInstance
+    target_agent_instance: HydroAgentInstance
+    exec_command_id: str
+    exec_run_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("exec_run_id", "execRunId"),
+    )
+    object_type: str
+    object_id: int
+    target_value_type: str
+    target_value: float
+    exec_status: ExecutionStatus
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    started_time: Optional[str] = None
+    finished_time: Optional[str] = None
 
 class ParameterIdentifiedReport(SimCommand):
     """
@@ -203,7 +320,10 @@ CommandUnion = Union[
     OutflowTimeSeriesDataUpdateResponse,
     DeviceStatusChangeResponse,
     AgentInstanceStatusReport,
-    MpcResultReport,
+    MpcPredictionResultReport,
+    MpcExecutionStatusReport,
+    EdgeControlResultReport,
+    EdgeControlExecutionReport,
     ParameterIdentifiedReport,
     HydroAlertUpdatedReport,
     # 后续按需在这里补充其他指令

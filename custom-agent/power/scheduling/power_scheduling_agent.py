@@ -21,16 +21,16 @@ if str(HYDROSIM_DIR) not in sys.path:
 
 from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
-    DeviceValueTypeEnum,
     ErrorCodes,
-    HydroObjectType,
     handle_agent_errors,
-    load_env_config,
 )
+from hydros_agent_sdk.utils import HydroObjectType
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
-from hydros_agent_sdk.mpc.models import HorizonStep, PredictedResult
+from hydros_agent_sdk.mpc.models import DeviceResult, HorizonStep, PredictedResult, ValueItem
+from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
-from hydros_agent_sdk.mpc.mpc_result_reporter import MpcResultReporter
+from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
@@ -43,7 +43,6 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateResponse,
 )
 from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus, SimulationContext
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
@@ -135,7 +134,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self._rolling_window_start_step: Optional[int] = None
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
-        self._local_mpc_task_state: Optional[SchedulingTaskState] = None
+        self._local_mpc_task_state: Optional[MpcTaskState] = None
         self._hydrosim_runtime_dir = RUNTIME_DIR
         self._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
         self._hydrosim_input_resolver = HydroSimInputFileResolver(
@@ -154,18 +153,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             self._initialize_hydrosim_session()
             self._ensure_hydrosim_power_plan_loaded()
 
-            env_config = load_env_config()
-            base_metrics_topic = env_config.get("metrics_topic")
-            if base_metrics_topic:
-                cluster_id = env_config.get("hydros_cluster_id", "hydros-cluster-testing")
-                base_metrics_topic = base_metrics_topic.replace("{hydros_cluster_id}", cluster_id)
-                task_id = self.context.biz_scene_instance_id
-                full_metrics_topic = f"{base_metrics_topic.rstrip('/')}/{task_id}"
-                logger.info("Subscribing rendered field metrics topic: %s", full_metrics_topic)
-                self._metrics_subscriber.subscribe(full_metrics_topic)
-
-            self.state_manager.init_task(self.context, [self])
-            self.state_manager.add_local_agent(self)
+            self.subscribe_field_metrics()
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
@@ -283,15 +271,15 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             )
         return commands
 
-    def _ensure_mpc_task_state(self, step: int) -> SchedulingTaskState:
+    def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
         return self._resolve_mpc_task_state(step)
 
-    def _resolve_mpc_task_state(self, step: int) -> SchedulingTaskState:
+    def _resolve_mpc_task_state(self, step: int) -> MpcTaskState:
         try:
             task_state = self._mpc_rolling_runtime.require_mpc_task_state()
         except Exception:
             if self._local_mpc_task_state is None:
-                self._local_mpc_task_state = SchedulingTaskState(
+                self._local_mpc_task_state = MpcTaskState(
                     context=self.context,
                     rolling_interval_steps=self._resolve_roll_steps(),
                     start_step=step,
@@ -311,7 +299,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         task_state.rolling_interval_steps = self._resolve_roll_steps()
         return task_state
 
-    def _activate_mpc_task_state_from_event(self, event: Any, step: Optional[int] = None) -> SchedulingTaskState:
+    def _activate_mpc_task_state_from_event(self, event: Any, step: Optional[int] = None) -> MpcTaskState:
         current_step = step
         event_step = getattr(event, "auto_schedule_at_step", None)
         if event_step is not None and int(event_step) >= 0:
@@ -345,7 +333,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             return 0
         return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
 
-    def _resolve_window_range(self, step: int, task_state: SchedulingTaskState) -> Tuple[int, int]:
+    def _resolve_window_range(self, step: int, task_state: MpcTaskState) -> Tuple[int, int]:
         roll_steps = max(int(task_state.rolling_interval_steps), 1)
         start_step = int(task_state.start_step)
         total_steps = int(task_state.total_steps)
@@ -359,7 +347,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             window_end = min(window_end, total_steps - 1)
         return window_start, window_end
 
-    def _should_refresh_rolling_window(self, step: int, task_state: SchedulingTaskState) -> bool:
+    def _should_refresh_rolling_window(self, step: int, task_state: MpcTaskState) -> bool:
         window_start, window_end = self._resolve_window_range(step, task_state)
         return (
             self._rolling_window_start_step != window_start
@@ -367,7 +355,7 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             or not self._rolling_window_dataset
         )
 
-    def _refresh_rolling_window_dataset(self, step: int, task_state: SchedulingTaskState) -> None:
+    def _refresh_rolling_window_dataset(self, step: int, task_state: MpcTaskState) -> None:
         window_start, window_end = self._resolve_window_range(step, task_state)
         horizon_steps = self._build_window_horizon_steps(window_start, window_end)
         self._rolling_window_start_step = window_start
@@ -378,13 +366,13 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     def _publish_rolling_window_report(
         self,
         step: int,
-        task_state: SchedulingTaskState,
+        task_state: MpcTaskState,
         horizon_steps: List[HorizonStep],
     ) -> None:
         if not horizon_steps:
             return
 
-        reporter = getattr(self, "_mpc_result_reporter", None) or MpcResultReporter(
+        reporter = getattr(self, "_mpc_result_reporter", None) or MpcPredictionResultReporter(
             sim_coordination_client=self.sim_coordination_client
         )
         reporter.publish_customize_report(
@@ -413,11 +401,14 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 control_object_list.append(
                     MpcResultFactory.build_control_object_result(
                         object_id=int(device["object_id"]),
-                        node_id=int(device["node_id"]) if device.get("node_id") is not None else None,
                         object_name=device.get("object_name"),
-                        target_value=float(device_row["value"]),
                         object_type=self._resolve_window_report_object_type(str(device["object_type"])),
-                        target_value_type=str(device["metrics_code"]),
+                        target_value_list=[
+                            ValueItem(
+                                value_type=str(device["metrics_code"]),
+                                value=float(device_row["value"]),
+                            )
+                        ],
                     )
                 )
 
@@ -517,38 +508,112 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 metrics_code=DeviceValueTypeEnum.OUTPUT_POWER.code,
                 step=step,
             )
-            if station_out_flow is not None or station_efficiency is not None:
+            turbine_device_results = self._build_station_device_results(
+                device_series, station_id, step, HydroObjectType.TURBINE.value
+            )
+            gate_device_results = self._build_station_device_results(
+                device_series, station_id, step, HydroObjectType.GATE.value
+            )
+            if station_out_flow is not None or station_efficiency is not None or turbine_device_results:
                 predicted_results.append(
                     MpcResultFactory.build_predicted_result(
                         object_id=station_id,
                         object_type=POWER_STATION_TURBINE,
                         object_name=station_name,
-                        front_water_level=front_water_level,
-                        final_target_water_level=final_target_water_level,
-                        back_water_level=back_water_level,
-                        out_flow=station_out_flow,
-                        diversion_flow=None,
-                        efficiency=station_efficiency,
-                        command_type=MPC_STATION_FLOW_COMMAND_TYPE,
+                        target_value=self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_out_flow),
+                        predicted_value_list=self._build_station_prediction_values(
+                            front_water_level=front_water_level,
+                            final_target_water_level=final_target_water_level,
+                            back_water_level=back_water_level,
+                            out_flow=station_out_flow,
+                            diversion_flow=None,
+                            efficiency=station_efficiency,
+                        ),
+                        device_result_list=turbine_device_results,
                     )
                 )
 
-            if station_diversion_flow is not None:
+            if station_diversion_flow is not None or gate_device_results:
                 predicted_results.append(
                     MpcResultFactory.build_predicted_result(
                         object_id=station_id,
                         object_type=POWER_STATION_GATE,
                         object_name=station_name,
-                        front_water_level=front_water_level,
-                        final_target_water_level=final_target_water_level,
-                        back_water_level=back_water_level,
-                        out_flow=None,
-                        diversion_flow=station_diversion_flow,
-                        efficiency=None,
-                        command_type=MPC_STATION_FLOW_COMMAND_TYPE,
+                        target_value=self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_diversion_flow),
+                        predicted_value_list=self._build_station_prediction_values(
+                            front_water_level=front_water_level,
+                            final_target_water_level=final_target_water_level,
+                            back_water_level=back_water_level,
+                            out_flow=None,
+                            diversion_flow=station_diversion_flow,
+                            efficiency=None,
+                        ),
+                        device_result_list=gate_device_results,
                     )
                 )
         return predicted_results
+
+    def _build_station_device_results(
+        self,
+        device_series: List[Dict[str, Any]],
+        station_id: int,
+        step: int,
+        object_type: str,
+    ) -> List[DeviceResult]:
+        results: List[DeviceResult] = []
+        for device in device_series:
+            if device.get("node_id") is None or int(device["node_id"]) != station_id:
+                continue
+            if str(device.get("object_type", "")).lower() != object_type.lower():
+                continue
+            row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if row is None:
+                continue
+            results.append(
+                DeviceResult(
+                    object_type=self._resolve_window_report_object_type(object_type),
+                    object_id=int(device["object_id"]),
+                    object_name=device.get("object_name"),
+                    value_list=[
+                        ValueItem(
+                            value_type=str(device["metrics_code"]),
+                            value=float(row["value"]),
+                        )
+                    ],
+                )
+            )
+        return results
+
+    @staticmethod
+    def _value_item(value_type: str, value: Optional[float]) -> Optional[ValueItem]:
+        if value is None:
+            return None
+        return ValueItem(value_type=value_type, value=float(value))
+
+    @classmethod
+    def _build_station_prediction_values(
+        cls,
+        *,
+        front_water_level: Optional[float],
+        final_target_water_level: Optional[float],
+        back_water_level: Optional[float],
+        out_flow: Optional[float],
+        diversion_flow: Optional[float],
+        efficiency: Optional[float],
+    ) -> List[ValueItem]:
+        values = (
+            ("front_water_level", front_water_level),
+            ("final_target_water_level", final_target_water_level),
+            ("back_water_level", back_water_level),
+            ("out_flow", out_flow),
+            ("diversion_flow", diversion_flow),
+            ("efficiency", efficiency),
+        )
+        return [
+            ValueItem(value_type=value_type, value=float(value))
+            for value_type, value in values
+            if value is not None
+        ]
 
     def _sum_device_metric_for_station_step(
         self,
@@ -849,7 +914,6 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
         logger.info("Stopping power scheduling agent: %s", self.agent_id)
-        self._agent_command_gateway.shutdown()
         self._optimization_model = None
 
         if self._hydrosim_initialized:
@@ -863,13 +927,4 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self._rolling_window_end_step = None
         self._rolling_window_dataset = []
         self._local_mpc_task_state = None
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
-
-        return SimTaskTerminateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
-        )
+        return super().on_terminate(request)

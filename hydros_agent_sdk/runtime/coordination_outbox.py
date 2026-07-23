@@ -1,0 +1,195 @@
+"""协调指令出站发布服务。"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from queue import Empty, Queue
+from threading import Event, Thread
+from typing import Optional
+
+from hydros_agent_sdk.protocol.commands import (
+    AgentInstanceStatusReport,
+    EdgeControlExecutionReport,
+    MpcExecutionStatusReport,
+    MpcPredictionResultReport,
+    SimCommand,
+    SimCoordinationRequest,
+    SimCoordinationResponse,
+    SimTaskTerminateResponse,
+)
+from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.transport.base import Transport
+
+
+logger = logging.getLogger(__name__)
+
+
+class CoordinationOutboxPublisher:
+    """判断哪些协调指令需要离开当前节点，并负责发布。"""
+
+    def __init__(
+        self,
+        transport: Transport,
+        state_manager: AgentStateManager,
+        topic: str,
+        qos: int = 1,
+        max_retry_count: int = 5,
+        base_retry_delay_ms: int = 1000,
+        log: Optional[logging.Logger] = None,
+    ) -> None:
+        self.transport = transport
+        self.state_manager = state_manager
+        self.topic = topic
+        self.qos = qos
+        self.max_retry_count = max_retry_count
+        self.base_retry_delay_ms = base_retry_delay_ms
+        self.logger = log or logger
+        self._queue: Queue[SimCommand] = Queue()
+        self._running = Event()
+        self._worker: Optional[Thread] = None
+
+    def start(self) -> None:
+        """启动出站发布 worker。"""
+        if self._running.is_set():
+            return
+        self._running.set()
+        self._worker = Thread(
+            target=self._run,
+            daemon=True,
+            name="CoordinationOutbox",
+        )
+        self._worker.start()
+
+    def stop(self) -> None:
+        """发送完 outbox 中已有的指令后停止发布服务。"""
+        if not self._running.is_set():
+            return
+        self._running.clear()
+        if self._worker and self._worker.is_alive():
+            self._worker.join(timeout=5)
+        self._worker = None
+
+    def enqueue(self, command: SimCommand) -> None:
+        """将一条指令加入出站过滤和发布队列。"""
+        self._queue.put(command)
+        self.logger.info("Enqueued command: %s", self.format_command_for_log(command))
+
+    def _run(self) -> None:
+        self.logger.info("Coordination outbox publisher started")
+        while self._running.is_set() or not self._queue.empty():
+            try:
+                command = self._queue.get(timeout=0.1)
+            except Empty:
+                continue
+
+            try:
+                if self.should_send(command):
+                    self.send_with_retry(command)
+            except Exception:
+                self.logger.error(
+                    "Error publishing outbound command: id=%s",
+                    command.command_id,
+                    exc_info=True,
+                )
+            finally:
+                self._queue.task_done()
+        self.logger.info("Coordination outbox publisher stopped")
+
+    def should_send(self, command: SimCommand) -> bool:
+        """判断一条出站协调指令是否应当发布。"""
+        if isinstance(command, SimCoordinationRequest):
+            return False
+
+        if isinstance(command, SimCoordinationResponse):
+            if isinstance(command, SimTaskTerminateResponse):
+                node_id = self.state_manager.get_node_id()
+                if node_id and command.source_agent_instance.hydros_node_id == node_id:
+                    return True
+            return self.state_manager.is_local_agent(command.source_agent_instance)
+
+        if isinstance(command, AgentInstanceStatusReport):
+            if self.state_manager.is_local_agent(command.source_agent_instance):
+                return True
+            node_id = self.state_manager.get_node_id()
+            return bool(node_id and command.source_agent_instance.hydros_node_id == node_id)
+
+        if isinstance(
+            command,
+            (MpcPredictionResultReport, MpcExecutionStatusReport, EdgeControlExecutionReport),
+        ):
+            return self._is_local_source(command.source_agent_instance)
+
+        return False
+
+    def _is_local_source(self, source_agent_instance) -> bool:
+        if self.state_manager.is_local_agent(source_agent_instance):
+            return True
+        node_id = self.state_manager.get_node_id()
+        return bool(node_id and source_agent_instance.hydros_node_id == node_id)
+
+    def send_with_retry(self, command: SimCommand) -> None:
+        """通过带重试和退避的方式向 MQTT 发布协调指令。"""
+        attempt = 0
+        command_id = command.command_id
+
+        while attempt <= self.max_retry_count:
+            try:
+                payload = command.model_dump_json(by_alias=True)
+                self.transport.publish(self.topic, payload, qos=self.qos)
+
+                if isinstance(command, MpcPredictionResultReport):
+                    self.logger.info(
+                        "MPC prediction result report sent to coordinator: topic=%s, command_id=%s, "
+                        "result_count=%s, detail_count=%s",
+                        self.topic,
+                        command_id,
+                        len(command.mpc_prediction_results or []),
+                        self.count_mpc_prediction_result_details(command),
+                    )
+                return
+
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to send command: id=%s, attempt=%s/%s: %s",
+                    command_id,
+                    attempt,
+                    self.max_retry_count,
+                    exc,
+                )
+
+                attempt += 1
+                if attempt > self.max_retry_count:
+                    self.logger.error("Max retry count exceeded for command: id=%s", command_id)
+                    raise
+
+                delay_ms = self.base_retry_delay_ms * (2 ** attempt)
+                self.logger.info(
+                    "Retrying after %sms... (attempt %s/%s)",
+                    delay_ms,
+                    attempt,
+                    self.max_retry_count,
+                )
+                time.sleep(delay_ms / 1000.0)
+
+    @classmethod
+    def format_command_for_log(cls, command: SimCommand) -> str:
+        if isinstance(command, MpcPredictionResultReport):
+            summary = {
+                "command_type": command.command_type,
+                "command_id": command.command_id,
+                "biz_scene_instance_id": (
+                    command.context.biz_scene_instance_id
+                    if command.context is not None
+                    else None
+                ),
+                "result_count": len(command.mpc_prediction_results or []),
+                "detail_count": cls.count_mpc_prediction_result_details(command),
+            }
+            return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+        return command.model_dump_json(indent=None)
+
+    @staticmethod
+    def count_mpc_prediction_result_details(command: MpcPredictionResultReport) -> int:
+        return sum(len(result.details or []) for result in command.mpc_prediction_results or [])

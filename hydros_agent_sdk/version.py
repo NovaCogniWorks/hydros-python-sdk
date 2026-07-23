@@ -1,8 +1,7 @@
-"""SDK version helpers.
+"""SDK 版本读取工具。
 
-`pyproject.toml` is the single source of truth for the package version.
-When running from a source checkout, read that file directly; when running
-from an installed wheel, fall back to package metadata.
+``pyproject.toml`` 是包版本的唯一事实源。从源码目录运行时直接读取该文件；
+从已安装的 wheel 运行时则回退到包元数据。
 """
 
 from __future__ import annotations
@@ -44,7 +43,7 @@ def _read_pyproject_version() -> str | None:
 
 
 def get_sdk_version() -> str:
-    """Return the Hydros Agent SDK version from the canonical source."""
+    """从规范事实源读取 Hydros Agent SDK 版本。"""
     source_version = _read_pyproject_version()
     if source_version:
         return source_version

@@ -22,7 +22,7 @@
 
 3. **[示例工程导航](../examples/README.md)**
    - 当前仓库内可直接运行的示例入口
-   - 包含 `twins`、`ontology`、`outflowplan` 和多 Agent 启动方式
+   - 包含 `template`、`twins`、`ontology`、`centralscheduling` 和多 Agent 启动方式
    - 适合基于现有示例改造自己的 Agent
 
 ---
@@ -41,7 +41,12 @@
    - 最佳实践
    - 示例代码
 
-6. **[故障排查指南](./故障排查指南.md)**
+6. **[Python SDK 测试基线](./TESTING_BASELINE.md)**
+   - 中央调度事件注入基线
+   - SDK 日常绿线和可选依赖测试边界
+   - 深度优化前后的推荐验证命令
+
+7. **[故障排查指南](./故障排查指南.md)**
    - 常见问题诊断
    - 解决方案
    - 调试技巧
@@ -51,12 +56,12 @@
 
 ### 📖 参考文档
 
-7. **[API 参考](../hydros_agent_sdk/)**
+8. **[API 参考](../hydros_agent_sdk/)**
    - SDK 源码和注释
    - 详细的 API 文档
    - 类和方法说明
 
-8. **[协议定义](../hydros_agent_sdk/protocol/)**
+9. **[协议定义](../hydros_agent_sdk/protocol/)**
    - 通信协议模型
    - 命令和响应格式
    - 事件定义
@@ -68,15 +73,16 @@
 ### 5 分钟快速上手
 
 ```bash
-# 1. 进入示例目录
-cd examples
+# 1. 准备本地示例配置
+$EDITOR examples/env.properties
 
-# 2. 先运行一个现成示例
-./start_agents.sh twins
+# 2. 查看当前真实可用的示例
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --list
 
-# 3. 再尝试多 Agent 或事件驱动示例
-./start_agents.sh twins ontology
-cd agents/outflowplan && python outflow_plan_agent.py
+# 3. 先检查并运行一个现成示例，再尝试多 Agent
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- --check
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- template
+python -m hydros_agent_sdk.launcher --launcher-dir examples -- twins ontology
 ```
 
 ### 学习路径
@@ -99,10 +105,10 @@ cd agents/outflowplan && python outflow_plan_agent.py
 
 ### 完整示例
 
+- **[最小模板智能体](../examples/agents/template/)** - 最小 TickableAgent 模板
 - **[孪生仿真智能体](../examples/agents/twins/)** - 高精度水力仿真
 - **[本体仿真智能体](../examples/agents/ontology/)** - 基于规则的推理
-- **[出流规划智能体](../examples/agents/outflowplan/)** - 事件驱动的 outflow planning 示例
-- **[中央调度目录](../examples/agents/centralscheduling/)** - 当前仅保留配置占位，暂无完整示例实现
+- **[中央调度智能体](../examples/agents/centralscheduling/)** - 复用 SDK 默认 MPC 路径的中央调度示例
 
 ### 代码片段
 
@@ -115,8 +121,6 @@ from hydros_agent_sdk.protocol.models import CommandStatus
 class MyAgent(TickableAgent):
     def on_init(self, request):
         self.load_agent_configuration(request)
-        self.state_manager.init_task(self.context, [self])
-        self.state_manager.add_local_agent(self)
         return SimTaskInitResponse(
             context=self.context,
             command_id=request.command_id,
@@ -132,8 +136,6 @@ class MyAgent(TickableAgent):
         return []
 
     def on_terminate(self, request):
-        self.state_manager.terminate_task(self.context)
-        self.state_manager.remove_local_agent(self)
         return SimTaskTerminateResponse(
             context=self.context,
             command_id=request.command_id,
@@ -152,6 +154,7 @@ class MyAgent(TickableAgent):
 - **学习如何开发智能体** → [新手智能体开发指南](./新手智能体开发指南.md)
 - **快速查找 API** → [快速参考](./快速参考.md)
 - **选择智能体类型** → [智能体类型对比](./智能体类型对比.md)
+- **做 SDK 深度优化前后跑哪些测试** → [Python SDK 测试基线](./TESTING_BASELINE.md)
 - **解决问题** → [故障排查指南](./故障排查指南.md)
 - **处理错误** → [错误处理指南](./ERROR_HANDLING.md)
 - **查看示例** → [examples/](../examples/)
@@ -174,18 +177,18 @@ docs/
 ├── 新手智能体开发指南.md          # 完整开发指南
 ├── 快速参考.md                    # API 速查手册
 ├── 智能体类型对比.md              # 类型选择指南
+├── TESTING_BASELINE.md             # SDK 测试基线
 ├── 故障排查指南.md                # 问题诊断和解决
 └── ERROR_HANDLING.md              # 错误处理详解
 
 examples/
 ├── README.md                      # 示例导航
 ├── start_agents.sh                # 多 Agent 启动入口
-├── env.properties                 # 默认环境配置
 ├── agents/
 │   ├── twins/                     # 孪生仿真示例
+│   ├── template/                  # 最小模板示例
 │   ├── ontology/                  # 本体仿真示例
-│   ├── outflowplan/               # 事件驱动出流规划示例
-│   └── centralscheduling/         # 中央调度配置占位
+│   └── centralscheduling/         # 中央调度示例
 └── error_handling_example.py      # 错误处理示例
 
 hydros_agent_sdk/
@@ -204,9 +207,10 @@ hydros_agent_sdk/
 
 **A**: 按以下顺序学习：
 1. 阅读《新手智能体开发指南》前 3 章
-2. 运行 `examples/start_agents.sh twins`
-3. 查看 `twins` 或 `ontology` 示例
-4. 实现自己的业务逻辑
+2. 运行 `examples/start_agents.sh --check`
+3. 运行 `examples/start_agents.sh template`
+4. 查看 `twins` 或 `ontology` 示例
+5. 实现自己的业务逻辑
 
 ### Q2: 如何选择智能体类型？
 

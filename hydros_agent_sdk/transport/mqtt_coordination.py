@@ -1,0 +1,110 @@
+"""协调指令使用的 MQTT 传输实现。"""
+
+from __future__ import annotations
+
+import logging
+import socket
+from threading import Event
+from typing import Dict, Optional, Tuple
+
+import paho.mqtt.client as mqtt
+
+from .base import MessageHandler
+
+
+logger = logging.getLogger(__name__)
+
+
+class MqttCoordinationTransport:
+    """统一负责 SDK 的 Paho 生命周期、订阅和 MQTT 发布。"""
+
+    def __init__(
+        self,
+        broker_url: str,
+        broker_port: int,
+        client_id: str,
+        topic: str,
+        handler: MessageHandler,
+        qos: int = 1,
+        mqtt_username: Optional[str] = None,
+        mqtt_password: Optional[str] = None,
+    ) -> None:
+        self.broker_url = broker_url.replace("tcp://", "")
+        self.broker_port = broker_port
+        self.client_id = client_id
+        self.topic = topic
+        self.qos = qos
+        self._subscriptions: Dict[str, Tuple[MessageHandler, int]] = {}
+        self.connected = Event()
+        self._intentional_disconnect = False
+        self.mqtt_client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id,
+            protocol=mqtt.MQTTv311,
+        )
+        self.mqtt_client.on_connect = self._on_connect
+        self.mqtt_client.on_disconnect = self._on_disconnect
+        self.mqtt_client.on_message = self._on_message
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=120)
+        if mqtt_username:
+            self.mqtt_client.username_pw_set(mqtt_username, mqtt_password)
+        self.subscribe(topic, handler, qos=qos)
+
+    def start(self) -> None:
+        self._intentional_disconnect = False
+        try:
+            self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
+            self.mqtt_client.loop_start()
+        except (OSError, socket.gaierror) as error:
+            raise RuntimeError(self.connection_failure_message(error)) from error
+        if not self.connected.wait(timeout=10):
+            self.stop()
+            raise RuntimeError(self.connection_failure_message("connection acknowledgement timed out after 10 seconds"))
+
+    def stop(self) -> None:
+        self._intentional_disconnect = True
+        try:
+            self.mqtt_client.loop_stop()
+        finally:
+            self.mqtt_client.disconnect()
+
+    def publish(self, topic: str, payload: str, qos: int = 1) -> None:
+        result = self.mqtt_client.publish(topic, payload, qos=qos)
+        result.wait_for_publish()
+
+    def subscribe(self, topic: str, handler: MessageHandler, qos: int = 1) -> None:
+        """在共享 Paho client 上登记 raw payload handler。"""
+        self._subscriptions[topic] = (handler, qos)
+        if self.connected.is_set():
+            self.mqtt_client.subscribe(topic, qos=qos)
+
+    def connection_failure_message(self, cause) -> str:
+        return (
+            f"Failed to connect to MQTT broker {self.broker_url}:{self.broker_port} "
+            f"for topic {self.topic}: {cause}. Check env.properties mqtt_broker_url/mqtt_broker_port, "
+            "DNS resolution, Kubernetes namespace/service name, and network reachability from this runtime."
+        )
+
+    def _on_connect(self, _client, _userdata, _flags, reason_code, _properties=None) -> None:
+        if reason_code.value != 0:
+            logger.error("Failed to connect to MQTT broker: rc=%s", reason_code.value)
+            return
+        for topic, (_handler, qos) in self._subscriptions.items():
+            self.mqtt_client.subscribe(topic, qos=qos)
+        self.connected.set()
+        logger.info("Coordination MQTT connected and subscribed: topic=%s", self.topic)
+
+    def _on_disconnect(self, _client, _userdata, _disconnect_flags=None, reason_code=0, _properties=None) -> None:
+        self.connected.clear()
+        if reason_code.value == 0 or self._intentional_disconnect:
+            logger.info("Coordination MQTT disconnected cleanly")
+        else:
+            logger.warning("Coordination MQTT disconnected unexpectedly: rc=%s", reason_code.value)
+
+    def _on_message(self, _client, _userdata, message) -> None:
+        subscription = self._subscriptions.get(message.topic)
+        if subscription is None:
+            logger.debug("Ignoring MQTT message without registered handler: topic=%s", message.topic)
+            return
+        handler, _qos = subscription
+        handler(message.topic, message.payload.decode("utf-8"))

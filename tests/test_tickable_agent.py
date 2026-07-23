@@ -1,6 +1,4 @@
 from hydros_agent_sdk.agents.tickable_agent import TickableAgent
-from hydros_agent_sdk.error_codes import ErrorCodes
-from hydros_agent_sdk.error_handling import handle_agent_errors
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateResponse,
@@ -19,7 +17,7 @@ class FakeClient:
     def __init__(self):
         self.state_manager = AgentStateManager()
         self.topic = "/hydros/commands/coordination/test"
-        self.mqtt_client = object()
+        self.transport = object()
         self.enqueued = []
 
     def enqueue(self, response):
@@ -49,6 +47,11 @@ class MinimalTickableAgent(TickableAgent):
             source_agent_instance=self,
             broadcast=False,
         )
+
+
+class FailingTickableAgent(MinimalTickableAgent):
+    def on_tick_simulation(self, request: TickCmdRequest):
+        raise ValueError("boom")
 
 
 def test_tickable_agent_can_be_instantiated():
@@ -93,19 +96,14 @@ def test_tickable_agent_exposes_runtime_context():
     assert runtime_context.config is agent.properties
 
 
-def test_tickable_agent_returns_decorated_tick_failure_response():
-    class FailingTickableAgent(MinimalTickableAgent):
-        @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
-        def on_tick_simulation(self, request: TickCmdRequest):
-            raise RuntimeError("sim failure")
-
-    context = SimulationContext(biz_scene_instance_id="TASK_002")
+def test_tick_failure_response_includes_error_detail():
+    context = SimulationContext(biz_scene_instance_id="TASK_001")
     agent = FailingTickableAgent(
         sim_coordination_client=FakeClient(),
-        agent_id="AGT_FAIL",
-        agent_code="FAIL_AGENT",
+        agent_id="AGT_TEST",
+        agent_code="TEST_AGENT",
         agent_type="TEST_AGENT",
-        agent_name="Fail Agent",
+        agent_name="Test Agent",
         context=context,
         hydros_cluster_id="cluster",
         hydros_node_id="node",
@@ -113,7 +111,9 @@ def test_tickable_agent_returns_decorated_tick_failure_response():
         drive_mode=AgentDriveMode.SIM_TICK_DRIVEN,
     )
 
-    response = agent.on_tick(TickCmdRequest(command_id="tick-fail", context=context, step=1, broadcast=False))
+    response = agent.on_tick(TickCmdRequest(command_id="CMD_TICK", context=context, step=1))
 
     assert response.command_status == CommandStatus.FAILED
-    assert response.error_code == ErrorCodes.SIMULATION_EXECUTION_FAILURE.code
+    assert response.error_code == "AGENT_TICK_FAILURE"
+    assert "TEST_AGENT" in response.error_message
+    assert "ValueError: boom" in response.error_message

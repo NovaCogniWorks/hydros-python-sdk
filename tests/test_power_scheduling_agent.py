@@ -11,13 +11,13 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
 )
-from hydros_agent_sdk.agent_commands.models import DeviceValueTypeEnum
+from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
-from hydros_agent_sdk.scheduling_task_state import SchedulingTaskState
+from hydros_agent_sdk.mpc.task_state import MpcTaskState as SchedulingTaskState
 
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
@@ -42,6 +42,7 @@ def _build_agent(module, scene_id: str):
     enqueued = []
     client = SimpleNamespace(
         mqtt_client=Mock(),
+        transport=Mock(),
         state_manager=Mock(),
         topic="/hydros/commands/coordination/test-cluster",
         enqueue=enqueued.append,
@@ -160,13 +161,15 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     assert metrics_map[(20101, "gate_opening")] == 1.3
     assert len(enqueued) == 1
     report = enqueued[0]
-    assert report.mpc_results[0].plan_type == "optimal"
-    assert report.mpc_results[0].step == 3
-    horizon_steps = {detail.horizon_step for detail in report.mpc_results[0].details}
+    assert report.mpc_prediction_results[0].plan_type == "optimal"
+    assert report.mpc_prediction_results[0].step == 3
+    horizon_steps = {detail.horizon_step for detail in report.mpc_prediction_results[0].details}
     assert horizon_steps == {1}
     report_details = {
-        (detail.object_id, detail.object_type, detail.command_type): detail.target_value
-        for detail in report.mpc_results[0].details
+        (detail.object_id, detail.object_type, detail.command_type): (
+            detail.target_value if detail.target_value is not None else detail.value
+        )
+        for detail in report.mpc_prediction_results[0].details
     }
     assert report_details[(20304, POWER_STATION_TURBINE, "output_power")] == 83.0
     assert report_details[(20101, POWER_STATION_GATE, "gate_opening")] == 1.3
@@ -174,11 +177,12 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     assert (20101, POWER_STATION_GATE, MPC_STATION_FLOW_COMMAND_TYPE) not in report_details
     turbine_station_detail = next(
         detail
-        for detail in report.mpc_results[0].details
-        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+        for detail in report.mpc_prediction_results[0].details
+        if detail.object_type == POWER_STATION_TURBINE and detail.object_id == 20300
     )
     assert turbine_station_detail.node_id == 20300
     assert turbine_station_detail.object_id == 20300
+    assert turbine_station_detail.command_type is None
     assert turbine_station_detail.value is None
     assert turbine_station_detail.target_value is None
     agent._control_command_dispatcher.dispatch.assert_called_once()
@@ -346,8 +350,8 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     agent.on_tick_simulation(TickCmdRequest(command_id="tick-001", context=context, step=1, broadcast=False))
     assert len(enqueued) == 1
     first_report = enqueued[0]
-    assert first_report.mpc_results[0].step == 1
-    assert {detail.horizon_step for detail in first_report.mpc_results[0].details} == set(range(1, 11))
+    assert first_report.mpc_prediction_results[0].step == 1
+    assert {detail.horizon_step for detail in first_report.mpc_prediction_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 1
     assert agent._rolling_window_end_step == 10
 
@@ -359,8 +363,8 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     agent.on_tick_simulation(TickCmdRequest(command_id="tick-011", context=context, step=11, broadcast=False))
     assert len(enqueued) == 2
     second_report = enqueued[1]
-    assert second_report.mpc_results[0].step == 11
-    assert {detail.horizon_step for detail in second_report.mpc_results[0].details} == set(range(1, 11))
+    assert second_report.mpc_prediction_results[0].step == 11
+    assert {detail.horizon_step for detail in second_report.mpc_prediction_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
     assert agent._control_command_dispatcher.dispatch.call_count == 2
@@ -559,7 +563,7 @@ def test_power_scheduling_report_only_contains_control_metrics():
     report = enqueued[0]
     control_detail_keys = {
         (detail.object_id, detail.object_type, detail.command_type)
-        for detail in report.mpc_results[0].details
+        for detail in report.mpc_prediction_results[0].details
         if detail.object_type in {POWER_STATION_TURBINE, POWER_STATION_GATE} and detail.command_type != MPC_STATION_FLOW_COMMAND_TYPE
     }
     assert control_detail_keys == {
@@ -568,7 +572,7 @@ def test_power_scheduling_report_only_contains_control_metrics():
     }
     turbine_station_detail = next(
         detail
-        for detail in report.mpc_results[0].details
+        for detail in report.mpc_prediction_results[0].details
         if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
     )
     turbine_attributes = json.loads(turbine_station_detail.attributes)
@@ -586,7 +590,7 @@ def test_power_scheduling_report_only_contains_control_metrics():
 
     gate_station_detail = next(
         detail
-        for detail in report.mpc_results[0].details
+        for detail in report.mpc_prediction_results[0].details
         if detail.object_type == POWER_STATION_GATE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
     )
     gate_attributes = json.loads(gate_station_detail.attributes)
@@ -736,7 +740,7 @@ def test_power_scheduling_report_includes_station_predicted_aggregates():
     report = enqueued[0]
     turbine_station_detail = next(
         detail
-        for detail in report.mpc_results[0].details
+        for detail in report.mpc_prediction_results[0].details
         if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
     )
     turbine_attributes = json.loads(turbine_station_detail.attributes)
@@ -754,7 +758,7 @@ def test_power_scheduling_report_includes_station_predicted_aggregates():
 
     gate_station_detail = next(
         detail
-        for detail in report.mpc_results[0].details
+        for detail in report.mpc_prediction_results[0].details
         if detail.object_type == POWER_STATION_GATE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
     )
     gate_attributes = json.loads(gate_station_detail.attributes)
@@ -999,10 +1003,6 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
     )
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[
             {
                 "node_id": 20100,
@@ -1082,10 +1082,6 @@ def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
     )
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-precision-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[
             {
                 "node_id": 20100,
@@ -1179,10 +1175,6 @@ def test_hydrosim_apply_time_series_event_update_merges_series_into_active_sessi
     api = hydrosim_api.HydroSimulationApi()
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-merge-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[],
         latest_device_output_series=[],
         step_runtime=SimpleNamespace(
@@ -1239,7 +1231,7 @@ def test_hydrosim_apply_time_series_event_update_merges_series_into_active_sessi
 
     assert merged_series[(1001, "flow")] == 25.0
     assert merged_series[(1002, "flow")] == 30.0
-    assert merged_series[(20300, "power")] == 100.0
+    assert merged_series[(20300, "output_power")] == 100.0
     assert result["updated_time_series_count"] == 2
 
 
@@ -1248,10 +1240,6 @@ def test_hydrosim_apply_time_series_event_update_replaces_matching_outflow_serie
     api = hydrosim_api.HydroSimulationApi()
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-merge-steps-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[],
         latest_device_output_series=[],
         step_runtime=SimpleNamespace(
@@ -1306,10 +1294,6 @@ def test_hydrosim_apply_time_series_event_update_removes_overlapping_station_pow
     api = hydrosim_api.HydroSimulationApi()
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-overlap-replace-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[],
         latest_device_output_series=[],
         step_runtime=SimpleNamespace(
@@ -1388,10 +1372,6 @@ def test_hydrosim_apply_time_series_event_update_keeps_step_merge_for_non_outflo
     api = hydrosim_api.HydroSimulationApi()
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-water-use-merge-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[],
         latest_device_output_series=[],
         step_runtime=SimpleNamespace(
@@ -1445,10 +1425,6 @@ def test_hydrosim_apply_time_series_event_update_uses_cache_for_current_step_onl
     api = hydrosim_api.HydroSimulationApi()
     api._session = hydrosim_api.HydroSimulationSession(
         session_id="session-cache-001",
-        time_series_file="base.json",
-        mpc_config_file="mpc.yaml",
-        initial_states_file="initial.yaml",
-        constraints_file="constraints.yaml",
         latest_station_power_series=[],
         latest_device_output_series=[],
         step_runtime=SimpleNamespace(

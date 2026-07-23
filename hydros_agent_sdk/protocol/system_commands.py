@@ -10,11 +10,11 @@ from pydantic import Field
 
 from hydros_agent_sdk.utils import generate_system_command_id
 
-from .base import HydroBaseModel
+from .base import HydroCmd
 from .models import CommandStatus
 
 
-class SystemCmd(HydroBaseModel):
+class SystemCmd(HydroCmd):
     """所有系统命令共享的基础模型。"""
 
     command_id: str = Field(default_factory=generate_system_command_id)
@@ -44,4 +44,3 @@ class SystemCommandResponse(SystemCommand):
 
     error_code: Optional[str] = None
     error_detail: Optional[str] = None
-
