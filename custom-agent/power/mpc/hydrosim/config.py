@@ -123,7 +123,7 @@ POWER_CONFIGS = [
 
 UNIT_CONFIGS = [
     [
-        {"ID": k, "Name": f"瀑布沟{k}#机组", "State": 1, "head": 154.6, "min_head": 114.3, "design_head": 154.6, "max_head": 181.7, "min_power": 200.0, "design_power": 600.0, "max_power": 660.0, "power_ramp_rate": 80.0, "design_efficiency": 0.92, "eta_head_coeff": 0.25, "eta_power_coeff": 0.40}
+        {"ID": k, "Name": f"瀑布沟{k}#机组", "State": 1, "head": 154.6, "min_head": 114.3, "design_head": 154.6, "max_head": 181.7, "min_power": 200.0, "design_power": 600.0, "max_power": 650.0, "power_ramp_rate": 80.0, "design_efficiency": 0.92, "eta_head_coeff": 0.25, "eta_power_coeff": 0.40}
         for k in range(1, 7)
     ],
     [

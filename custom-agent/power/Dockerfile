@@ -43,7 +43,9 @@ COPY custom-agent/power /opt/hydros/custom-agent/power
 
 WORKDIR /opt/hydros/custom-agent/power
 
-RUN mkdir -p /opt/hydros/custom-agent/power/logs
+RUN sed -i 's/\r$//' /opt/hydros/custom-agent/power/start_agents.sh \
+    && chmod +x /opt/hydros/custom-agent/power/start_agents.sh \
+    && mkdir -p /opt/hydros/custom-agent/power/logs
 
 EXPOSE 8015
 

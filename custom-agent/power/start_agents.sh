@@ -101,6 +101,35 @@ check_config() {
     return 0
 }
 
+apply_environment_override() {
+    local environment_name="$1"
+    local property_name="$2"
+    local value="${!environment_name:-}"
+
+    if [ -z "${value}" ]; then
+        return 0
+    fi
+
+    local escaped_value
+    escaped_value="$(printf '%s' "${value}" | sed 's/[&|\\]/\\&/g')"
+
+    if grep -q "^${property_name}=" "${SCRIPT_DIR}/env.properties"; then
+        sed -i "s|^${property_name}=.*$|${property_name}=${escaped_value}|" "${SCRIPT_DIR}/env.properties"
+    else
+        printf '\n%s=%s\n' "${property_name}" "${value}" >> "${SCRIPT_DIR}/env.properties"
+    fi
+}
+
+apply_environment_overrides() {
+    apply_environment_override "MQTT_BROKER_URL" "mqtt_broker_url"
+    apply_environment_override "MQTT_BROKER_PORT" "mqtt_broker_port"
+    apply_environment_override "MQTT_TOPIC" "mqtt_topic"
+    apply_environment_override "MQTT_USERNAME" "mqtt_username"
+    apply_environment_override "MQTT_PASSWORD" "mqtt_password"
+    apply_environment_override "HYDROS_CLUSTER_ID" "hydros_cluster_id"
+    apply_environment_override "HYDROS_NODE_ID" "hydros_node_id"
+}
+
 view_logs() {
     echo -e "${GREEN}日志文件:${NC}"
     echo ""
@@ -217,6 +246,8 @@ main() {
     if ! check_config; then
         exit 1
     fi
+
+    apply_environment_overrides
 
     echo -e "${GREEN}启动 Hydros Agents...${NC}"
     echo ""
