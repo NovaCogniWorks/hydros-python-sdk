@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
+from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
@@ -36,6 +37,7 @@ class StationTargetValueCommandBuilder:
         group_id: Optional[str] = None,
         group_size: Optional[int] = None,
         main_step_index: Optional[int] = None,
+        algo_required_inputs: Optional[List[ControlSignal]] = None,
     ) -> Optional[HydroStationTargetValueRequest]:
         target_agent = self.get_sibling_agent_instance(target_agent_code)
         if target_agent is None:
@@ -79,5 +81,6 @@ class StationTargetValueCommandBuilder:
             group_id=group_id,
             group_size=group_size,
             main_step_index=main_step_index,
+            algo_required_inputs=list(algo_required_inputs or []),
             need_ack_reply=True,
         )

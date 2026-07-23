@@ -63,6 +63,7 @@ class ControlCommandDispatcher:
                 group_id=command.get("group_id"),
                 group_size=command.get("group_size"),
                 main_step_index=command.get("main_step_index"),
+                algo_required_inputs=command.get("algo_required_inputs"),
             )
             if command_request is not None:
                 prepared.append(command_request)

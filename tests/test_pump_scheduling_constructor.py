@@ -5,6 +5,7 @@ import types
 from threading import Event, Thread
 from unittest.mock import Mock
 
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, ValueItem
@@ -249,6 +250,45 @@ def test_pump_scheduling_builds_grouped_station_flow_commands_from_current_horiz
             "main_step_index": 8,
         }
     ]
+
+
+def test_pump_scheduling_preserves_algo_required_inputs_in_station_flow_command(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    planning_signal = ControlSignal(
+        type=SignalType.REFERENCE,
+        object_type=HydroObjectType.PUMP_STATION,
+        object_id=1001,
+        value_type="station_front_water_level",
+        series=[12.3, 12.4],
+    )
+    commands = module.PumpCentralSchedulingAgent._build_station_flow_control_commands(
+        horizon_step_list=[
+            HorizonStep(
+                horizon_step=1,
+                control_object_list=[
+                    ControlObjectResult(
+                        object_id=1001,
+                        object_type=HydroObjectType.PUMP_STATION,
+                        target_value_list=[
+                            ValueItem(
+                                value_type=MetricsCodes.WATER_FLOW,
+                                value=123.456,
+                            ),
+                        ],
+                        algo_required_inputs=[planning_signal],
+                    ),
+                ],
+            ),
+        ],
+        current_step=8,
+    )
+
+    assert commands[0]["algo_required_inputs"] == [planning_signal]
 
 
 def test_pump_scheduling_agent_subscribes_metrics_before_lazy_init(monkeypatch):

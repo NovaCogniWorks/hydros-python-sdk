@@ -1051,15 +1051,18 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                         target_value.value,
                     )
                     continue
-                commands.append(
-                    {
-                        "target_agent_code": "GATE_STATION_AGENT",
-                        "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
-                        "target_value": str(round(water_flow, 2)),
-                        "object_id": int(control_object.object_id),
-                        "object_type": control_object.object_type,
-                    }
-                )
+                command: Dict[str, Any] = {
+                    "target_agent_code": "GATE_STATION_AGENT",
+                    "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
+                    "target_value": str(round(water_flow, 2)),
+                    "object_id": int(control_object.object_id),
+                    "object_type": control_object.object_type,
+                }
+                if control_object.algo_required_inputs:
+                    command["algo_required_inputs"] = list(
+                        control_object.algo_required_inputs
+                    )
+                commands.append(command)
 
         if not commands:
             logger.warning("首个 MPC horizon 没有可下发的 PumpStation water_flow 控制目标")
