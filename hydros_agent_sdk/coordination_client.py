@@ -17,6 +17,7 @@ from hydros_agent_sdk.state_manager import AgentStateManager
 from hydros_agent_sdk.message_filter import MessageFilter
 from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.protocol.commands import (
+    SIMCMD_TASK_INIT_RESPONSE,
     SimCommand,
     SimCommandEnvelope,
 )
@@ -231,7 +232,7 @@ class SimCoordinationClient:
             )
             if self._should_ignore_raw_command(data):
                 logger.debug(
-                    "MQTT command ignored: type=%s, id=%s, context=%s, reason=disabled_command_type",
+                    "MQTT command ignored: type=%s, id=%s, context=%s, reason=not_consumed_by_client",
                     data.get("command_type"),
                     data.get("command_id"),
                     self._raw_context_id(data),
@@ -272,4 +273,18 @@ class SimCoordinationClient:
     def _should_ignore_raw_command(data) -> bool:
         if not isinstance(data, dict):
             return False
-        return data.get("command_type") in IGNORED_COORDINATION_COMMAND_TYPES
+        command_type = data.get("command_type")
+        if command_type in IGNORED_COORDINATION_COMMAND_TYPES:
+            return True
+
+        # The shared coordination topic also carries responses emitted by sibling
+        # agents. MessageFilter only consumes task-init responses; all other
+        # responses are irrelevant to this client. Drop them before strict
+        # Pydantic deserialization so a malformed sibling response cannot break
+        # the MQTT receive callback. Messages this client does consume still go
+        # through the full protocol validation below.
+        return (
+            isinstance(command_type, str)
+            and command_type.endswith("_response")
+            and command_type != SIMCMD_TASK_INIT_RESPONSE
+        )

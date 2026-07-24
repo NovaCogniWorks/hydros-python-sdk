@@ -3,6 +3,7 @@ import time
 from queue import Queue
 from threading import Event
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
@@ -740,6 +741,38 @@ def test_monitor_rule_update_messages_are_ignored_before_envelope_parsing():
         client.transport.stop()
 
     assert not hasattr(client, "out_message_queue")
+
+
+def test_non_init_response_is_ignored_before_strict_envelope_parsing():
+    context = make_context()
+    agent = make_agent(context)
+    state_manager = AgentStateManager()
+    state_manager.set_node_id("node")
+    state_manager.activate_task(context, [agent])
+    client = make_client(ReturningCallback(agent), state_manager)
+    client.transport.start()
+
+    # Mirrors the production payload that omitted the required completed_step.
+    payload = {
+        "command_id": "CMD_TICK_RESPONSE",
+        "command_type": "tick_cmd_response",
+        "context": context.model_dump(mode="json"),
+        "source_agent_instance": agent.model_dump(mode="json", by_alias=True),
+        "command_status": CommandStatus.SUCCEED.value,
+        "broadcast": False,
+    }
+
+    try:
+        with patch(
+            "hydros_agent_sdk.coordination_client.SimCommandEnvelope",
+            side_effect=AssertionError("ignored response reached envelope parsing"),
+        ):
+            client.transport.deliver(
+                "/hydros/commands/coordination/test",
+                json.dumps(payload),
+            )
+    finally:
+        client.transport.stop()
 
 
 def test_station_control_execution_report_is_ignored_before_envelope_parsing():
