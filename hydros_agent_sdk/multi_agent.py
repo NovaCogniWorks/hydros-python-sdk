@@ -24,6 +24,7 @@ from hydros_agent_sdk.protocol.commands import (
 from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
 from hydros_agent_sdk.runtime.agent_logging_context import AgentLoggingContextSetter
+from hydros_agent_sdk.observability import observe_span
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
@@ -204,8 +205,14 @@ class MultiAgentCallback(SimCoordinationCallback):
         metadata: Optional[Dict[str, Any]] = None,
     ):
         def wrapped_action():
-            self._logging_context_setter.set_for_agent(agent)
-            return action()
+            span_attributes = dict(metadata or {})
+            span_attributes["hydros.agent.phase"] = phase
+            with self._logging_context_setter.bind_for_agent(agent):
+                with observe_span(
+                    f"hydros.agent.{phase.lower()}",
+                    attributes=span_attributes,
+                ):
+                    return action()
 
         if self._status_support is None:
             return wrapped_action()
@@ -313,8 +320,18 @@ class MultiAgentCallback(SimCoordinationCallback):
                     self._sync_agent_definition_from_request(agent, agent_def)
 
                 # 初始化智能体
-                self._logging_context_setter.set_for_agent(agent)
-                response = agent.on_init(request)
+                with self._logging_context_setter.bind_for_agent(agent):
+                    with observe_span(
+                        "hydros.agent.task_initialized",
+                        attributes={
+                            "hydros.agent.phase": "TASK_INITIALIZED",
+                            "command_id": request.command_id,
+                            "agent_code": routed_agent_code,
+                            "requested_agent_code": agent_code,
+                            "biz_scene_instance_id": context_id,
+                        },
+                    ):
+                        response = agent.on_init(request)
                 created_agent_code = getattr(agent, "agent_code", routed_agent_code)
 
                 # 收集已创建的智能体实例
@@ -467,8 +484,18 @@ class MultiAgentCallback(SimCoordinationCallback):
                         "reason": request.reason,
                     },
                 )
-                self._logging_context_setter.set_for_agent(agent)
-                response = agent.on_terminate(request)
+                with self._logging_context_setter.bind_for_agent(agent):
+                    with observe_span(
+                        "hydros.agent.task_terminate",
+                        attributes={
+                            "hydros.agent.phase": "TASK_TERMINATE",
+                            "command_id": request.command_id,
+                            "agent_code": agent_code,
+                            "biz_scene_instance_id": context_id,
+                            "reason": request.reason,
+                        },
+                    ):
+                        response = agent.on_terminate(request)
                 if response:
                     responses.append(response)
                 terminal_status = (
