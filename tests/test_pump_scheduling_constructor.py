@@ -291,6 +291,30 @@ def test_pump_scheduling_preserves_algo_required_inputs_in_station_flow_command(
     assert commands[0]["algo_required_inputs"] == [planning_signal]
 
 
+def test_pump_scheduling_serializes_disturbance_estimate_for_control_signal(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+
+    attributes = (
+        module.PumpCentralSchedulingAgent._serialize_disturbance_estimate(
+            {1: 0.25, 2: -0.5}
+        )
+    )
+    signal = ControlSignal(
+        type=SignalType.OBSERVATION,
+        object_type=HydroObjectType.PUMP_STATION,
+        object_id=1001,
+        value_type="disturbance_estimate",
+        attributes=attributes,
+    )
+
+    assert signal.attributes == {"1": 0.25, "2": -0.5}
+
+
 def test_pump_scheduling_agent_subscribes_metrics_before_lazy_init(monkeypatch):
     _install_optional_dependency_stubs(monkeypatch)
     scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
