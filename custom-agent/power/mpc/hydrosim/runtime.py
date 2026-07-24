@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import datetime
 import json
+import math
 import os
 import time
 from typing import Dict, List, Sequence, Tuple
@@ -261,6 +262,9 @@ class HydroUnit:
         self.design_power = float(cfg["design_power"])
         self.min_power = float(cfg["min_power"])
         self.max_power = float(cfg["max_power"])
+        # V45 站内分配以额定出力的 10% 作为可稳定开机下限；它不同于
+        # 机组物理最小出力，低于该值时仅在总出力闭合的兜底路径使用。
+        self.min_start_power = self.design_power * 0.10
 
         self.head = self.design_head
         self.target_power = self.design_power
@@ -373,7 +377,7 @@ class HydroStation:
     """
     单站电调：
     1) 机组启停（迟滞阈值）
-    2) 站内等微增率离散分配
+    2) 站内最少耗水离散分配
     """
 
     def __init__(
@@ -410,14 +414,18 @@ class HydroStation:
         self.simulate_power = self.design_power
         self.time = 0
         self.station_target_ramp_rate = float(station_target_ramp_rate)
-        self.unit_dispatch_min_p = float(
-            unit_dispatch_min_p
-            if unit_dispatch_min_p is not None
-            else max(1.0, round(self.multi_station[0].design_power * 0.05))
-        )
+        self.unit_start_min_p = np.array([u.min_start_power for u in self.multi_station], dtype=float)
+        default_step = float(self.unit_start_min_p[0])
+        self.unit_dispatch_min_p = float(unit_dispatch_min_p) if unit_dispatch_min_p is not None else default_step
+        self.new_unit_min_stable_ratio = 0.35
+        self.unit_commit_close_deadband_ratio = 0.10
+        self.unit_commitment_change_penalty = 25.0
+        self.unit_commitment_min_hold_steps = 12
+        self.unit_commitment_switch_deadband_mw = max(float(self.unit_dispatch_min_p) * 2.0, self.multi_station[0].design_power * 0.08)
+        self._commitment_hold_remaining = 0
+        self._last_commitment_signature: Tuple[int, ...] = tuple(range(self.num_current))
+        self._min_water_cache: Dict[Tuple, Tuple[np.ndarray, np.ndarray, float]] = {}
 
-        self.k_open = np.zeros(self.num_units + 1)
-        self.k_close = np.zeros(self.num_units + 1)
         self.unit_array = np.zeros((self.num_units, 6))
 
         self.history = {
@@ -432,6 +440,7 @@ class HydroStation:
         }
 
         self.signal_inti_set(self.design_power)
+        self._last_commitment_signature = self._current_commitment_signature()
 
     def signal_inti_set(self, signal_p: float) -> None:
         base = max(signal_p / self.num_units, 0.0)
@@ -445,86 +454,296 @@ class HydroStation:
             u.efficiency = eta
             self.current_p += u.current_power
         self.num_current = int(_clip(round(signal_p / self.multi_station[0].design_power), 1, self.num_units))
+        self._last_commitment_signature = self._current_commitment_signature()
 
-    def _target_commitment_count(self) -> int:
-        if self.target_p <= 1e-6:
-            return 0
-        self._build_hysteresis()
-        target_count = max(self.num_current, 1)
-        if target_count < self.num_units and self.target_p > self.k_open[target_count]:
-            target_count += 1
-        if target_count > 1 and self.target_p < self.k_close[target_count - 1]:
-            target_count -= 1
-        return int(_clip(target_count, 1, self.num_units))
+    def _current_commitment_signature(self) -> Tuple[int, ...]:
+        return tuple(
+            i for i, u in enumerate(self.multi_station)
+            if u.current_power > 1e-6 or u.state == 1
+        )
+
+    def _signature_feasible_for_target(self, signature: Tuple[int, ...], target: float) -> bool:
+        if target <= 1e-6:
+            return True
+        if not signature:
+            return False
+        max_sum = sum(self.multi_station[i].max_power for i in signature)
+        min_sum = sum(self.multi_station[i].min_start_power for i in signature)
+        return min_sum <= target + 1e-9 and target <= max_sum + 1e-9
+
+    def _indices_for_signature(self, signature: Tuple[int, ...]) -> np.ndarray:
+        return np.array(sorted(int(i) for i in signature), dtype=int)
+
+    def _apply_unit_target_ramp_limits(
+        self,
+        target: float,
+        indices: np.ndarray,
+        alloc: np.ndarray,
+        lower: np.ndarray,
+        max_powers: np.ndarray,
+    ) -> np.ndarray:
+        if len(indices) == 0:
+            return alloc
+
+        ramp_lower = lower.astype(float).copy()
+        ramp_upper = max_powers.astype(float).copy()
+        for local_idx, unit_idx in enumerate(indices):
+            u = self.multi_station[int(unit_idx)]
+            prev = float(u.current_power)
+            ramp = max(float(u.power_ramp_rate), 1e-6)
+            if prev > 1e-6 or u.state == 1:
+                ramp_lower[local_idx] = max(ramp_lower[local_idx], prev - ramp)
+                ramp_upper[local_idx] = min(ramp_upper[local_idx], prev + ramp)
+            else:
+                ramp_upper[local_idx] = min(ramp_upper[local_idx], max(ramp_lower[local_idx], ramp))
+            if ramp_upper[local_idx] < ramp_lower[local_idx] - 1e-9:
+                ramp_upper[local_idx] = ramp_lower[local_idx]
+
+        if float(np.sum(ramp_lower)) > target + 1e-6 or float(np.sum(ramp_upper)) < target - 1e-6:
+            return alloc
+
+        smoothed = np.minimum(np.maximum(alloc.astype(float), ramp_lower), ramp_upper)
+        residual = target - float(np.sum(smoothed))
+        while residual > 1e-6:
+            candidates = [i for i in range(len(indices)) if smoothed[i] < ramp_upper[i] - 1e-9]
+            if not candidates:
+                break
+            local_idx = min(candidates, key=lambda k: (smoothed[k] - alloc[k], int(indices[k])))
+            inc = min(residual, ramp_upper[local_idx] - smoothed[local_idx])
+            smoothed[local_idx] += inc
+            residual -= inc
+        while residual < -1e-6:
+            candidates = [i for i in range(len(indices)) if smoothed[i] > ramp_lower[i] + 1e-9]
+            if not candidates:
+                break
+            local_idx = max(candidates, key=lambda k: (smoothed[k] - alloc[k], -int(indices[k])))
+            dec = min(-residual, smoothed[local_idx] - ramp_lower[local_idx])
+            smoothed[local_idx] -= dec
+            residual += dec
+
+        if abs(target - float(np.sum(smoothed))) > 1e-5:
+            return alloc
+        return smoothed
 
     def set_head(self, head: float) -> None:
         self.head = float(head)
         for u in self.multi_station:
             u.set_head(head)
 
-    def _build_hysteresis(self) -> None:
-        n = self.num_units
-        self.k_open[:] = 0.0
-        self.k_close[:] = 0.0
+    def _unit_flow_for_power(self, unit: HydroUnit, power: float) -> float:
+        p = float(power)
+        if p <= 1e-6:
+            return 0.0
+        if p < unit.min_power:
+            q_min, _ = unit.nhq.query(unit.head, unit.min_power)
+            return float(q_min * p / unit.min_power)
+        q, _ = unit.nhq.query(unit.head, p)
+        return float(q)
 
-        pmin_cum = self.multi_station[0].min_power
-        pmax_cum = self.multi_station[0].max_power
-        self.k_open[0] = pmin_cum
-        self.k_close[0] = pmin_cum
-        for i in range(1, n):
-            pmin_cum += self.multi_station[i].min_power
-            avg = (pmin_cum + pmax_cum) / 2.0
-            gap = min(30.0, abs(pmax_cum - pmin_cum) / 2.0)
-            self.k_open[i] = avg + gap
-            self.k_close[i] = avg - gap
-            pmax_cum += self.multi_station[i].max_power
+    def _online_indices_for_count(self, count: int) -> np.ndarray:
+        count = int(_clip(count, 0, self.num_units))
+        if count <= 0:
+            return np.array([], dtype=int)
 
-        self.k_open[-1] = pmax_cum
-        self.k_close[-1] = pmax_cum
+        online = [
+            i for i, u in enumerate(self.multi_station)
+            if u.current_power > 1e-6 or u.state == 1
+        ]
+        online = sorted(online, key=lambda i: (-self.multi_station[i].current_power, i))
+        offline = [i for i in range(self.num_units) if i not in set(online)]
+        chosen = (online[:count] + offline[: max(0, count - len(online))])[:count]
+        return np.array(sorted(chosen), dtype=int)
 
-    def _update_commitment(self) -> None:
-        desired = self._target_commitment_count()
-        if desired > self.num_current:
-            self.num_current += 1
-        elif desired < self.num_current:
-            self.num_current -= 1
-        self.num_current = int(_clip(self.num_current, 1, self.num_units))
+    def _commitment_count_by_band(self, target: float) -> int:
+        if target <= 1e-6:
+            return 0
 
+        design_powers = np.array([u.design_power for u in self.multi_station], dtype=float)
+        max_powers = np.array([u.max_power for u in self.multi_station], dtype=float)
+        min_start_powers = np.array([u.min_start_power for u in self.multi_station], dtype=float)
+        unit_design = float(np.median(design_powers))
+        close_deadband = max(float(self.unit_dispatch_min_p), unit_design * self.unit_commit_close_deadband_ratio)
+
+        current_count = sum(1 for u in self.multi_station if u.current_power > 1e-6 or u.state == 1)
+        count = int(_clip(current_count if current_count > 0 else self.num_current, 1, self.num_units))
+
+        # 到达当前在线台数的额定满发边界时，提前开下一台并均衡分担；
+        # 关机仍保留死区，避免在边界附近来回切换。
+        # 低于上一档额定临界值并越过关机死区后，才关机，避免来回切换。
+        open_threshold = lambda c: unit_design * c
+        close_threshold = lambda c: unit_design * (c - 1) - close_deadband
+        while count < self.num_units and target >= open_threshold(count) - 1e-9:
+            count += 1
+
+        while count > 1 and target < close_threshold(count) - 1e-9:
+            count -= 1
+
+        # 物理可行性修正：当前台数装不下则继续开机；当前目标撑不起开机阈值则关机。
+        while count < self.num_units:
+            indices = self._online_indices_for_count(count)
+            if target <= float(max_powers[indices].sum()) + 1e-9:
+                break
+            count += 1
+        while count > 1:
+            indices = self._online_indices_for_count(count)
+            if target >= float(min_start_powers[indices].sum()) - 1e-9:
+                break
+            count -= 1
+
+        return int(_clip(count, 1, self.num_units))
+
+    def _balanced_allocation_for_indices(self, target: float, indices: np.ndarray) -> Tuple[np.ndarray, float]:
+        if len(indices) == 0:
+            return np.array([], dtype=float), 0.0
+
+        max_powers = np.array([self.multi_station[int(i)].max_power for i in indices], dtype=float)
+        min_start_powers = np.array([self.multi_station[int(i)].min_start_power for i in indices], dtype=float)
+        stable_powers = np.array(
+            [
+                max(self.multi_station[int(i)].min_start_power, self.multi_station[int(i)].design_power * self.new_unit_min_stable_ratio)
+                for i in indices
+            ],
+            dtype=float,
+        )
+        lower = stable_powers if target >= float(stable_powers.sum()) - 1e-9 else min_start_powers
+
+        alloc = np.full(len(indices), target / len(indices), dtype=float)
+        alloc = np.minimum(np.maximum(alloc, lower), max_powers)
+
+        residual = target - float(alloc.sum())
+        while residual > 1e-6:
+            candidates = [i for i in range(len(indices)) if alloc[i] < max_powers[i] - 1e-9]
+            if not candidates:
+                break
+            local_idx = min(candidates, key=lambda k: (alloc[k], int(indices[k])))
+            inc = min(residual, max_powers[local_idx] - alloc[local_idx])
+            alloc[local_idx] += inc
+            residual -= inc
+        while residual < -1e-6:
+            candidates = [i for i in range(len(indices)) if alloc[i] > lower[i] + 1e-9]
+            if not candidates:
+                break
+            local_idx = max(candidates, key=lambda k: (alloc[k], -int(indices[k])))
+            dec = min(-residual, alloc[local_idx] - lower[local_idx])
+            alloc[local_idx] -= dec
+            residual += dec
+
+        alloc = self._apply_unit_target_ramp_limits(target, indices, alloc, lower, max_powers)
+        flow = sum(
+            self._unit_flow_for_power(self.multi_station[int(unit_idx)], alloc[local_idx])
+            for local_idx, unit_idx in enumerate(indices)
+        )
+        return alloc, float(flow)
+
+    def _min_water_allocation(self, target_total: float) -> Tuple[np.ndarray, np.ndarray, float]:
+        target = _clip(target_total, 0.0, self.max_power)
+        if target <= 1e-6:
+            return np.array([], dtype=int), np.array([], dtype=float), 0.0
+
+        avg_head = round(float(np.mean([u.head for u in self.multi_station])), 3)
+        prev_state = tuple(round(float(u.current_power), 3) for u in self.multi_station)
+        prev_flow_state = tuple(round(float(u.flow), 3) for u in self.multi_station)
+        current_signature = self._current_commitment_signature()
+        cache_key = (
+            avg_head,
+            round(target, 6),
+            prev_state,
+            prev_flow_state,
+            current_signature,
+            int(self._commitment_hold_remaining),
+        )
+        cached = self._min_water_cache.get(cache_key)
+        if cached is not None:
+            indices, alloc, flow = cached
+            return indices.copy(), alloc.copy(), float(flow)
+
+        count = self._commitment_count_by_band(target)
+        candidate_indices = self._online_indices_for_count(count)
+        candidate_alloc, candidate_flow = self._balanced_allocation_for_indices(target, candidate_indices)
+
+        indices = candidate_indices
+        alloc = candidate_alloc
+        flow = candidate_flow
+
+        if self._signature_feasible_for_target(current_signature, target):
+            current_indices = self._indices_for_signature(current_signature)
+            current_alloc, current_flow = self._balanced_allocation_for_indices(target, current_indices)
+            current_ok = abs(float(current_alloc.sum()) - target) <= 1e-5
+            candidate_sig = tuple(int(i) for i in candidate_indices)
+            if current_ok and candidate_sig != current_signature:
+                flow_saving = current_flow - candidate_flow
+                current_design_sum = float(sum(self.multi_station[i].design_power for i in current_signature))
+                current_at_rated_full = target >= current_design_sum - 1e-9
+                near_switch_band = abs(target - current_design_sum) <= self.unit_commitment_switch_deadband_mw
+                if (
+                    not current_at_rated_full
+                    and (
+                        self._commitment_hold_remaining > 0
+                        or near_switch_band
+                        or flow_saving < self.unit_commitment_change_penalty
+                    )
+                ):
+                    indices = current_indices
+                    alloc = current_alloc
+                    flow = current_flow
+
+        if abs(float(alloc.sum()) - target) <= 1e-5:
+            self._min_water_cache[cache_key] = (indices.copy(), alloc.copy(), float(flow))
+            return indices, alloc, flow
+
+        # 极低目标出力可能低于任一机组 10% 开机阈值，此时无法同时满足零误差和开机阈值。
+        # 兜底选择该目标下耗水最低的一台机组，以保持全站出力目标不丢失。
+        feasible = []
         for i, u in enumerate(self.multi_station):
-            if i < self.num_current:
-                u.state = 1
-            else:
-                u.target_power = 0.0
+            if target <= u.max_power + 1e-9:
+                feasible.append((self._unit_flow_for_power(u, target), i))
+        if feasible:
+            flow, idx = min(feasible, key=lambda x: (x[0], x[1]))
+            indices = np.array([idx], dtype=int)
+            alloc = np.array([target], dtype=float)
+            self._min_water_cache[cache_key] = (indices.copy(), alloc.copy(), float(flow))
+            return indices, alloc, float(flow)
 
-    def _dispatch_units_equal_increment(self) -> None:
+        indices = np.array([self.num_units - 1], dtype=int)
+        alloc = np.array([target], dtype=float)
+        self._min_water_cache[cache_key] = (indices.copy(), alloc.copy(), 0.0)
+        return indices, alloc, 0.0
+
+    def _dispatch_units_equal_increment(self, update_commitment_memory: bool = False) -> None:
         target_total = _clip(self.target_p, 0.0, self.max_power)
         if target_total <= 1e-6:
+            old_signature = self._last_commitment_signature
             self.num_current = 0
             self.unit_array[:] = 0.0
             self.current_p = 0.0
             for u in self.multi_station:
                 u.state = 0
                 u.target_power = 0.0
+            if update_commitment_memory:
+                new_signature: Tuple[int, ...] = tuple()
+                if new_signature != old_signature:
+                    self._commitment_hold_remaining = self.unit_commitment_min_hold_steps
+                    self._last_commitment_signature = new_signature
+                else:
+                    self._commitment_hold_remaining = max(0, self._commitment_hold_remaining - 1)
             return
 
-        max_powers = np.array([u.max_power for u in self.multi_station], dtype=float)
-        cum_max = np.cumsum(max_powers)
-        n = int(np.searchsorted(cum_max, target_total, side="left") + 1)
-        n = int(_clip(n, 1, self.num_units))
+        old_signature = self._last_commitment_signature
+        indices, p_alloc, _ = self._min_water_allocation(target_total)
+        n = len(indices)
         self.num_current = n
-
         ua = np.zeros((n, 6), dtype=float)
-        remaining = target_total
+
         for i in range(n):
-            u = self.multi_station[i]
-            p = min(u.max_power, remaining)
+            uid = int(indices[i])
+            u = self.multi_station[uid]
+            p = p_alloc[i]
             ua[i, 0] = p
             ua[i, 2] = 0.0
             ua[i, 3] = u.max_power
             ua[i, 4] = 1.0 if p >= u.max_power - 1e-6 else 0.0
-            ua[i, 5] = float(i)
+            ua[i, 5] = float(uid)
             ua[i, 1] = u.nhq.incremental_rate(u.head, ua[i, 0])
-            remaining -= p
 
         self.unit_array[:] = 0.0
         self.unit_array[:n, :] = ua
@@ -538,15 +757,60 @@ class HydroStation:
             self.multi_station[uid].state = 1
             self.multi_station[uid].target_power = ua[i, 0]
 
+        if update_commitment_memory:
+            new_signature = tuple(int(i) for i in indices)
+            if new_signature != old_signature:
+                self._commitment_hold_remaining = self.unit_commitment_min_hold_steps
+                self._last_commitment_signature = new_signature
+            else:
+                self._commitment_hold_remaining = max(0, self._commitment_hold_remaining - 1)
+
     def estimate_flow_for_power(self, total_power: float) -> float:
-        if total_power <= 1e-6:
+        total = _clip(total_power, 0.0, self.max_power)
+        if total <= 1e-6:
             return 0.0
-        u0 = self.multi_station[0]
-        n = int(_clip(round(total_power / max(u0.design_power, 1e-6)), 1, self.num_units))
-        p_per = total_power / n
-        p_per = _clip(p_per, u0.min_power, u0.max_power)
-        q_per, _ = u0.nhq.query(self.head, p_per)
-        return q_per * n
+
+        max_powers = np.array([u.max_power for u in self.multi_station], dtype=float)
+        min_start_powers = np.array([u.min_start_power for u in self.multi_station], dtype=float)
+        design_powers = np.array([u.design_power for u in self.multi_station], dtype=float)
+        n = int(np.searchsorted(np.cumsum(max_powers), total, side="left") + 1)
+        n = int(_clip(n, 1, self.num_units))
+        while n > 1 and total < float(min_start_powers[:n].sum()) - 1e-9:
+            n -= 1
+
+        weights = design_powers[:n] / max(float(design_powers[:n].sum()), 1e-9)
+        alloc = total * weights
+        if total >= float(min_start_powers[:n].sum()) - 1e-9:
+            alloc = np.maximum(alloc, min_start_powers[:n])
+            excess = float(alloc.sum()) - total
+            if excess > 1e-9:
+                for i in range(n - 1, -1, -1):
+                    reducible = max(0.0, alloc[i] - min_start_powers[i])
+                    reduce = min(reducible, excess)
+                    alloc[i] -= reduce
+                    excess -= reduce
+                    if excess <= 1e-9:
+                        break
+        alloc = np.minimum(alloc, max_powers[:n])
+
+        diff = total - float(alloc.sum())
+        i = 0
+        while diff > 1e-6 and i < n:
+            add = min(diff, max_powers[i] - alloc[i])
+            alloc[i] += add
+            diff -= add
+            i += 1
+
+        flow = 0.0
+        for i in range(n):
+            flow += self._unit_flow_for_power(self.multi_station[i], alloc[i])
+        return float(flow)
+
+    def current_commitment_max_power(self) -> float:
+        online = [u for u in self.multi_station if u.current_power > 1e-6]
+        if not online:
+            return self.max_power
+        return float(sum(u.max_power for u in online))
 
     def step_simulate(self, signal_p: float) -> float:
         saved_target_p = self.target_p
@@ -562,8 +826,7 @@ class HydroStation:
         for i in range(n):
             uid = int(self.unit_array[i, 5])
             p = self.unit_array[i, 0]
-            q, _ = self.multi_station[uid].nhq.query(self.multi_station[uid].head, p)
-            q_sum += q
+            q_sum += self._unit_flow_for_power(self.multi_station[uid], p)
         self.simulate_power = float(self.unit_array[:n, 0].sum())
         self.simulate_flow = float(q_sum)
 
@@ -579,7 +842,7 @@ class HydroStation:
     def step_execute(self, signal_p: float) -> float:
         self.time += 1
         self.target_p = float(signal_p)
-        self._dispatch_units_equal_increment()
+        self._dispatch_units_equal_increment(update_commitment_memory=True)
 
         for u in self.multi_station:
             u.step()
@@ -668,9 +931,10 @@ class HydroStation:
 class HydroStair:
     """
     梯级电调（站间）：
-    1) 总功率目标按站间流量平衡思想分配。
-    2) 各站再执行站内等微增率分配。
-    3) V7：站间/站内最小分配单位 P 显式配置，并输出调度关键参数。
+    1) 先判定下游红区保护限额。
+    2) 总功率目标在可用限额内按站间总耗水一致分配。
+    3) 各站再执行站内最少耗水分配。
+    4) 站间/站内最小分配单位 P 显式配置，并输出调度关键参数。
     """
 
     def __init__(
@@ -701,13 +965,108 @@ class HydroStair:
                 min_power=float(sc["min_power"]),
                 max_power=float(sc["max_power"]),
                 unit_cfgs=unit_cfgs_by_station[i],
-                unit_dispatch_min_p=float(sc.get("unit_min_step_p", max(1.0, round(float(sc["design_power"]) * 0.05)))),
+                unit_dispatch_min_p=float(sc.get("unit_min_step_p", 0.0)) or None,
                 station_target_ramp_rate=float(sc.get("station_target_ramp_rate", 120.0)),
             )
             self.multi_stair.append(sta)
             self.stair_dispatch_min_p[i] = float(
                 sc.get("stair_min_step_p", max(1.0, round(float(sc["design_head"]) / 10.0)))
             )
+        self.station_unit_design_power = np.array(
+            [sta.multi_station[0].design_power for sta in self.multi_stair],
+            dtype=float,
+        )
+        self.station_design_head = np.array([sta.design_power * 0.0 + sta.head for sta in self.multi_stair], dtype=float)
+        self.station_flow_power_base = np.zeros(self.num_stairs, dtype=float)
+        self.station_design_unit_flow = np.zeros(self.num_stairs, dtype=float)
+        self.station_inter_efficiency_factor = np.array(
+            [float(sc.get("inter_station_efficiency_factor", 1.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.station_inter_efficiency_factor = np.maximum(self.station_inter_efficiency_factor, 1e-6)
+        self.station_low_stage_inter_efficiency_factor = np.array(
+            [float(sc.get("low_stage_inter_station_efficiency_factor", self.station_inter_efficiency_factor[i])) for i, sc in enumerate(station_cfgs)],
+            dtype=float,
+        )
+        self.station_low_stage_inter_efficiency_factor = np.maximum(self.station_low_stage_inter_efficiency_factor, 1e-6)
+        self.low_stage_relief_deadband_m = float(
+            station_cfgs[0].get("low_stage_relief_deadband_m", 0.2)
+        )
+        self.low_stage_factor_start_m = float(station_cfgs[0].get("low_stage_factor_start_m", self.low_stage_relief_deadband_m))
+        self.low_stage_factor_full_m = float(station_cfgs[0].get("low_stage_factor_full_m", 1.0))
+        self.upstream_efficiency_recovery_gain = float(
+            station_cfgs[0].get("upstream_efficiency_recovery_gain", 0.6)
+        )
+        self.inflow_deficit_balance_gain = float(station_cfgs[0].get("inflow_deficit_balance_gain", 0.35))
+        self.inflow_deficit_balance_deadband_m3s = np.array(
+            [float(sc.get("inflow_deficit_balance_deadband_m3s", station_cfgs[0].get("inflow_deficit_balance_deadband_m3s", 10.0))) for sc in station_cfgs],
+            dtype=float,
+        )
+        for i, sta in enumerate(self.multi_stair):
+            unit = sta.multi_station[0]
+            q_design, _ = unit.nhq.query(unit.design_head, unit.design_power)
+            self.station_design_unit_flow[i] = float(q_design)
+            self.station_flow_power_base[i] = (
+                float(unit.design_power) / max(float(q_design), 1e-9)
+            ) * self.station_inter_efficiency_factor[i]
+        self.station_flow_power_weight = self.station_flow_power_base / max(
+            float(self.station_flow_power_base.sum()),
+            1e-9,
+        )
+        self.station_flow_rebalance_deadband_m3s = float(
+            station_cfgs[0].get("flow_rebalance_deadband_m3s", 100.0)
+        )
+        self.station_slow_rebalance_max_delta_p = np.array(
+            [float(sc.get("slow_rebalance_max_delta_p", sc.get("flow_rebalance_max_delta_p", math.inf))) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.station_slow_rebalance_max_delta_q = np.array(
+            [float(sc.get("slow_rebalance_max_delta_q_m3s", math.inf)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.low_stage_pubugou_priority_spread_tolerance_m3s = float(
+            station_cfgs[0].get("low_stage_pubugou_priority_spread_tolerance_m3s", 0.0)
+        )
+        self.stage_pid_enable = bool(station_cfgs[0].get("stage_pid_enable", True))
+        self.stage_pid_deadband_m = float(station_cfgs[0].get("stage_pid_deadband_m", 0.2))
+        self.stage_pid_kp_mw_per_m = np.array(
+            [float(sc.get("stage_pid_kp_mw_per_m", 0.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_ki_mw_per_m_step = np.array(
+            [float(sc.get("stage_pid_ki_mw_per_m_step", 0.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_kd_mw_per_m = np.array(
+            [float(sc.get("stage_pid_kd_mw_per_m", 0.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_max_delta_p = np.array(
+            [float(sc.get("stage_pid_max_delta_p", 0.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_output_limit_p = np.array(
+            [float(sc.get("stage_pid_output_limit_p", sc.get("stage_pid_max_delta_p", 0.0))) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_forecast_min_scale = float(station_cfgs[0].get("stage_pid_forecast_min_scale", 0.3))
+        self.stage_pid_forecast_full_deficit_m3s = np.array(
+            [float(sc.get("stage_pid_forecast_full_deficit_m3s", 200.0)) for sc in station_cfgs],
+            dtype=float,
+        )
+        self.stage_pid_integral_limit_m_step = float(station_cfgs[0].get("stage_pid_integral_limit_m_step", 20.0))
+        self.stage_pid_integral = np.zeros(self.num_stairs, dtype=float)
+        self.stage_pid_prev_error = np.zeros(self.num_stairs, dtype=float)
+        self.stage_mpc_enable = bool(station_cfgs[0].get("stage_mpc_enable", True))
+        self.stage_mpc_horizon_steps = int(station_cfgs[0].get("stage_mpc_horizon_steps", 8))
+        self.stage_mpc_stage_weight = float(station_cfgs[0].get("stage_mpc_stage_weight", 18.0))
+        self.stage_mpc_forecast_weight = float(station_cfgs[0].get("stage_mpc_forecast_weight", 4.0))
+        self.stage_mpc_flow_spread_weight = float(station_cfgs[0].get("stage_mpc_flow_spread_weight", 0.002))
+        self.stage_mpc_move_weight = float(station_cfgs[0].get("stage_mpc_move_weight", 0.08))
+        self.stage_mpc_min_improve = float(station_cfgs[0].get("stage_mpc_min_improve", 1e-5))
+        self.stage_mpc_candidate_fracs = tuple(
+            float(x) for x in station_cfgs[0].get("stage_mpc_candidate_fracs", (0.25, 0.5, 1.0))
+        )
 
         self.stair_array = np.zeros((self.num_stairs, 8), dtype=float)
         for i, s in enumerate(self.multi_stair):
@@ -723,11 +1082,8 @@ class HydroStair:
         self.total_p_current = self.total_p_target
         self.flow = 0.0
         self.stage_hints: List[Dict] = [{} for _ in range(self.num_stairs)]
-        self.increment_guard_enable = True
-        self.increment_guard_upstream_idx = 0
-        self.increment_guard_protected_idxs = {1, 2, 3}
         self.low_stage_power_guard_enable = True
-        self.low_stage_guard_station_idxs = tuple(sorted(self.increment_guard_protected_idxs))
+        self.low_stage_guard_station_idxs = (1, 2, 3)
         self.low_stage_guard_station_idx = 3
         self.low_stage_guard_yellow_limit_ratio = 0.55
         self.low_stage_guard_red_limit_ratio = 0.30
@@ -772,53 +1128,36 @@ class HydroStair:
                     "station": sta.name,
                     "inter_station_min_p_mw": float(self.stair_dispatch_min_p[i]),
                     "intra_station_min_p_mw": float(sta.unit_dispatch_min_p),
+                    "design_unit_flow_m3s": float(self.station_design_unit_flow[i]),
+                    "inter_station_efficiency_factor": float(self.station_inter_efficiency_factor[i]),
+                    "low_stage_inter_station_efficiency_factor": float(self.station_low_stage_inter_efficiency_factor[i]),
+                    "low_stage_factor_start_m": float(self.low_stage_factor_start_m),
+                    "low_stage_factor_full_m": float(self.low_stage_factor_full_m),
+                    "upstream_efficiency_recovery_gain": float(self.upstream_efficiency_recovery_gain),
+                    "inflow_deficit_balance_gain": float(self.inflow_deficit_balance_gain),
+                    "inflow_deficit_balance_deadband_m3s": float(self.inflow_deficit_balance_deadband_m3s[i]),
+                    "flow_power_base_mw_per_m3s": float(self.station_flow_power_base[i]),
+                    "flow_power_weight": float(self.station_flow_power_weight[i]),
+                    "slow_rebalance_max_delta_q_m3s": float(self.station_slow_rebalance_max_delta_q[i]),
+                    "stage_pid_enable": bool(self.stage_pid_enable),
+                    "stage_pid_deadband_m": float(self.stage_pid_deadband_m),
+                    "stage_pid_kp_mw_per_m": float(self.stage_pid_kp_mw_per_m[i]),
+                    "stage_pid_ki_mw_per_m_step": float(self.stage_pid_ki_mw_per_m_step[i]),
+                    "stage_pid_kd_mw_per_m": float(self.stage_pid_kd_mw_per_m[i]),
+                    "stage_pid_max_delta_p": float(self.stage_pid_max_delta_p[i]),
+                    "stage_pid_output_limit_p": float(self.stage_pid_output_limit_p[i]),
+                    "stage_pid_forecast_min_scale": float(self.stage_pid_forecast_min_scale),
+                    "stage_pid_forecast_full_deficit_m3s": float(self.stage_pid_forecast_full_deficit_m3s[i]),
+                    "stage_mpc_enable": bool(self.stage_mpc_enable),
+                    "stage_mpc_horizon_steps": int(self.stage_mpc_horizon_steps),
+                    "stage_mpc_stage_weight": float(self.stage_mpc_stage_weight),
+                    "stage_mpc_forecast_weight": float(self.stage_mpc_forecast_weight),
+                    "stage_mpc_flow_spread_weight": float(self.stage_mpc_flow_spread_weight),
+                    "stage_mpc_move_weight": float(self.stage_mpc_move_weight),
+                    "unit_start_min_p_mw": [float(u.min_start_power) for u in sta.multi_station],
                 }
             )
         return report
-
-    def _guarded_station_max(self, i: int) -> float:
-        base_max = float(self.stair_array[i, 7])
-        if not self.low_stage_power_guard_enable or i not in self.low_stage_guard_station_idxs:
-            return base_max
-        if i >= len(self.stage_hints):
-            return base_max
-
-        hint = self.stage_hints[i]
-        direction = float(hint.get("direction", 0.0))
-        if direction >= 0.0:
-            return base_max
-
-        zone = hint.get("zone", "green")
-        if zone == "red":
-            ratio = self.low_stage_guard_red_limit_ratio
-        elif zone == "yellow":
-            severity = self._low_stage_yellow_severity(i, hint)
-            ratio = 1.0 - severity * (1.0 - self.low_stage_guard_yellow_limit_ratio)
-        else:
-            return base_max
-
-        guarded = max(float(self.stair_array[i, 5]), self.low_stage_guard_abs_floor_mw, base_max * ratio)
-        return min(base_max, guarded)
-
-    def _low_stage_yellow_severity(self, i: int, hint: Dict) -> float:
-        delta = abs(float(hint.get("delta", 0.0)))
-        if i < len(self.stage_hints):
-            green_band = 1.0 if i == 0 else 0.5
-            yellow_band = 3.0 if i == 0 else 1.0
-        else:
-            green_band = 0.5
-            yellow_band = 1.0
-        return _clip((delta - green_band) / max(yellow_band - green_band, 1e-6), 0.0, 1.0)
-
-    def _guarded_station_maxes(self) -> np.ndarray:
-        return np.array([self._guarded_station_max(i) for i in range(self.num_stairs)], dtype=float)
-
-    def _increment_blocked(self, i: int) -> bool:
-        if not self.increment_guard_enable or i not in self.increment_guard_protected_idxs:
-            return False
-        if i >= len(self.stage_hints):
-            return False
-        return float(self.stage_hints[i].get("delta", 0.0)) < -1e-9
 
     def _update_low_stage_guard_status(self, max_allowed: np.ndarray, unserved_mw: float = 0.0) -> None:
         guarded_items = []
@@ -853,77 +1192,968 @@ class HydroStair:
             "guarded_stations": guarded_items,
         }
 
-    def _allocate_increment_min_change(
+    def _station_min_start_power(self, i: int) -> float:
+        starts = [u.min_start_power for u in self.multi_stair[i].multi_station]
+        return float(min(starts)) if starts else 0.0
+
+    def _stage_penalty_terms(self, i: int) -> Tuple[float, float]:
+        if i >= len(self.stage_hints):
+            return 0.0, 0.0
+        hint = self.stage_hints[i]
+        direction = float(hint.get("direction", 0.0))
+        low_stage_penalty = max(0.0, -direction)
+        zone = str(hint.get("zone", "green"))
+        zone_penalty = 0.0
+        return low_stage_penalty, zone_penalty
+
+    def _station_power_for_flow(
         self,
-        remaining: float,
+        i: int,
+        target_flow: float,
+        min_power: float,
+        max_power: float,
+    ) -> Tuple[float, float]:
+        lo = max(0.0, float(min_power))
+        hi = max(lo, float(max_power))
+        if hi <= 1e-9 or target_flow <= 1e-9:
+            return lo, self.multi_stair[i].estimate_flow_for_power(lo)
+
+        q_lo = self._balance_flow_for_power(i, lo)
+        q_hi = self._balance_flow_for_power(i, hi)
+        if target_flow <= q_lo:
+            return lo, self.multi_stair[i].estimate_flow_for_power(lo)
+        if target_flow >= q_hi:
+            return hi, self.multi_stair[i].estimate_flow_for_power(hi)
+
+        for _ in range(20):
+            mid = (lo + hi) * 0.5
+            q_mid = self._balance_flow_for_power(i, mid)
+            if q_mid < target_flow:
+                lo = mid
+            else:
+                hi = mid
+        power = (lo + hi) * 0.5
+        flow = self.multi_stair[i].estimate_flow_for_power(power)
+        return float(power), float(flow)
+
+    def _balance_flow_for_power(self, i: int, power: float) -> float:
+        actual_flow = self.multi_stair[i].estimate_flow_for_power(power)
+        return float(actual_flow / max(self._current_inter_efficiency_factor(i), 1e-9))
+
+    def _current_inter_efficiency_factor(self, i: int) -> float:
+        def raw_factor(idx: int) -> float:
+            base_i = float(self.station_inter_efficiency_factor[idx])
+            low_i = float(self.station_low_stage_inter_efficiency_factor[idx])
+            if idx <= 0 or idx >= len(self.stage_hints):
+                return base_i
+            stage_delta_i = float(self.stage_hints[idx].get("delta", 0.0))
+            low_depth_i = max(0.0, -stage_delta_i)
+            if low_depth_i <= self.low_stage_factor_start_m:
+                return base_i
+            span_i = max(self.low_stage_factor_full_m - self.low_stage_factor_start_m, 1e-6)
+            ratio_i = _clip((low_depth_i - self.low_stage_factor_start_m) / span_i, 0.0, 1.0)
+            return base_i + (low_i - base_i) * ratio_i
+
+        base = float(self.station_inter_efficiency_factor[i])
+        if i == 0:
+            recovery = 0.0
+            for idx in range(1, self.num_stairs):
+                recovery += max(0.0, float(self.station_inter_efficiency_factor[idx]) - raw_factor(idx))
+            return max(1e-6, base + self.upstream_efficiency_recovery_gain * recovery)
+        return raw_factor(i)
+
+    def _inflow_deficit_balance_penalty(self, i: int, actual_flow: float) -> float:
+        if i <= 0 or i >= len(self.stage_hints):
+            return 0.0
+        hint = self.stage_hints[i]
+        upstream_inflow = float(hint.get("inflow_m3s", math.inf))
+        if not math.isfinite(upstream_inflow):
+            return 0.0
+        deficit = actual_flow - upstream_inflow - float(self.inflow_deficit_balance_deadband_m3s[i])
+        if deficit <= 0.0:
+            return 0.0
+        return float(deficit * self.inflow_deficit_balance_gain)
+
+    def _slow_rebalance_delta_p_limit(self, i: int, current_power: float, direction: float) -> float:
+        p_limit = float(self.station_slow_rebalance_max_delta_p[i])
+        q_limit = float(self.station_slow_rebalance_max_delta_q[i])
+        if not math.isfinite(q_limit) or q_limit <= 0.0:
+            return max(0.0, p_limit)
+
+        current_power = _clip(float(current_power), 0.0, float(self.stair_array[i, 7]))
+        direction = 1.0 if direction >= 0.0 else -1.0
+        probe_p = _clip(
+            current_power + direction * min(max(p_limit, 1e-6), 1.0),
+            0.0,
+            float(self.stair_array[i, 7]),
+        )
+        if abs(probe_p - current_power) <= 1e-9:
+            return 0.0
+
+        q0 = self.multi_stair[i].estimate_flow_for_power(current_power)
+        q1 = self.multi_stair[i].estimate_flow_for_power(probe_p)
+        dq_dp = abs(q1 - q0) / max(abs(probe_p - current_power), 1e-9)
+        if dq_dp <= 1e-9:
+            return max(0.0, p_limit)
+        return max(0.0, min(p_limit, q_limit / dq_dp))
+
+    def _balance_flows_for_targets(self, targets: np.ndarray) -> np.ndarray:
+        return np.array(
+            [self._balance_flow_for_power(i, targets[i]) for i in range(self.num_stairs)],
+            dtype=float,
+        )
+
+    def _targets_for_common_flow(
+        self,
+        common_flow: float,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        targets = np.zeros(self.num_stairs, dtype=float)
+        flow_est = np.zeros(self.num_stairs, dtype=float)
+        for i in range(self.num_stairs):
+            targets[i], flow_est[i] = self._station_power_for_flow(
+                i,
+                common_flow,
+                min_allowed[i],
+                max_allowed[i],
+            )
+        return targets, flow_est
+
+    def _apply_low_stage_flow_relief(
+        self,
+        targets: np.ndarray,
         flow_est: np.ndarray,
         max_allowed: np.ndarray,
-        prev: np.ndarray,
-    ) -> float:
-        sa = self.stair_array
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        low_items = []
+        for i in range(self.num_stairs):
+            hint = self.stage_hints[i] if i < len(self.stage_hints) else {}
+            stage_delta = float(hint.get("delta", 0.0))
+            if stage_delta >= -self.low_stage_relief_deadband_m:
+                continue
+            upstream_inflow = float(hint.get("inflow_m3s", math.inf))
+            if upstream_inflow < flow_est[i] - 1e-6:
+                continue
+            low_penalty = self._stage_penalty_terms(i)[0]
+            if low_penalty > 1e-6 and targets[i] > min_allowed[i] + 1e-6:
+                low_items.append((low_penalty, i))
+        if not low_items:
+            return targets, flow_est
+
+        _, low_idx = max(low_items, key=lambda x: (x[0], x[1]))
+        low_penalty = self._stage_penalty_terms(low_idx)[0]
+        reduce_q = self.station_flow_rebalance_deadband_m3s * _clip(low_penalty, 0.0, 2.0)
+        if reduce_q <= 1e-9:
+            return targets, flow_est
+
+        donor_target_q = max(0.0, flow_est[low_idx] - reduce_q)
+        donor_new_p, donor_new_q = self._station_power_for_flow(
+            low_idx,
+            donor_target_q,
+            min_allowed[low_idx],
+            targets[low_idx],
+        )
+        reduce_p = targets[low_idx] - donor_new_p
+        reduce_p = min(reduce_p, self._slow_rebalance_delta_p_limit(low_idx, targets[low_idx], -1.0))
+        if reduce_p <= 1e-6:
+            return targets, flow_est
+        donor_new_p = targets[low_idx] - reduce_p
+        donor_new_q = self.multi_stair[low_idx].estimate_flow_for_power(donor_new_p)
+        if 1e-9 < donor_new_p < self._station_min_start_power(low_idx) - 1e-9:
+            return targets, flow_est
+
+        receiver, amount = self._choose_low_stage_receiver(
+            low_idx,
+            reduce_p,
+            targets,
+            flow_est,
+            max_allowed,
+        )
+        if receiver < 0 or amount <= 1e-6:
+            return targets, flow_est
+
+        new_targets = targets.copy()
+        new_flow = flow_est.copy()
+        new_targets[low_idx] = targets[low_idx] - amount
+        new_flow[low_idx] = donor_new_q
+        new_flow[low_idx] = self.multi_stair[low_idx].estimate_flow_for_power(new_targets[low_idx])
+        new_targets[receiver] += amount
+        new_flow[receiver] = self.multi_stair[receiver].estimate_flow_for_power(new_targets[receiver])
+
+        return new_targets, new_flow
+
+    def _choose_low_stage_receiver(
+        self,
+        donor: int,
+        requested_amount: float,
+        targets: np.ndarray,
+        flow_est: np.ndarray,
+        max_allowed: np.ndarray,
+    ) -> Tuple[int, float]:
+        preferred = 0
+        choices = []
+        for i in range(self.num_stairs):
+            if i == donor:
+                continue
+            room = max_allowed[i] - targets[i]
+            amount = min(requested_amount, room, self._slow_rebalance_delta_p_limit(i, targets[i], 1.0))
+            if amount <= 1e-9:
+                continue
+            trial_targets = targets.copy()
+            trial_targets[donor] -= amount
+            trial_targets[i] += amount
+            trial_flow = self._balance_flows_for_targets(trial_targets)
+            spread = float(np.max(trial_flow) - np.min(trial_flow))
+            choices.append((spread, 0 if i == preferred else 1, i, amount))
+        if not choices:
+            return -1, 0.0
+
+        best = min(choices, key=lambda x: (x[0], x[1], x[2]))
+        preferred_choices = [c for c in choices if c[2] == preferred]
+        if preferred_choices:
+            preferred_choice = preferred_choices[0]
+            if preferred_choice[0] <= best[0] + self.low_stage_pubugou_priority_spread_tolerance_m3s:
+                return int(preferred_choice[2]), float(preferred_choice[3])
+        return int(best[2]), float(best[3])
+
+    def _equal_flow_targets(
+        self,
+        target: float,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray | None = None,
+    ) -> Tuple[np.ndarray, np.ndarray, float]:
         n = self.num_stairs
-        upstream = self.increment_guard_upstream_idx
-        protected_blocked = any(self._increment_blocked(i) for i in self.increment_guard_protected_idxs)
+        if min_allowed is None:
+            min_allowed = np.zeros(n, dtype=float)
+        min_allowed = np.minimum(np.maximum(min_allowed.astype(float), 0.0), max_allowed.astype(float))
+        target = _clip(float(target), 0.0, float(np.sum(max_allowed)))
+        if float(np.sum(min_allowed)) > target + 1e-6:
+            min_allowed = np.zeros(n, dtype=float)
 
-        while remaining > 1e-6:
-            avail_all = [i for i in range(n) if sa[i, 2] < max_allowed[i] - 1e-6]
-            if not avail_all:
-                break
+        max_flows = np.array(
+            [self._balance_flow_for_power(i, max_allowed[i]) for i in range(n)],
+            dtype=float,
+        )
+        q_lo = 0.0
+        q_hi = max(float(np.max(max_flows)), 1.0)
+        best_targets, best_flows = self._targets_for_common_flow(q_hi, max_allowed, min_allowed)
+        if float(np.sum(best_targets)) < target - 1e-6:
+            return best_targets, best_flows, target - float(np.sum(best_targets))
 
-            if protected_blocked and upstream in avail_all:
-                avail = [upstream]
+        for _ in range(24):
+            q_mid = (q_lo + q_hi) * 0.5
+            targets, flows = self._targets_for_common_flow(q_mid, max_allowed, min_allowed)
+            if float(np.sum(targets)) < target:
+                q_lo = q_mid
             else:
-                avail = avail_all
+                q_hi = q_mid
 
-            idx = min(avail, key=lambda k: (max(0.0, sa[k, 2] - prev[k]), flow_est[k], k))
-            amount = min(max(1.0, float(self.stair_dispatch_min_p[idx])), remaining, max_allowed[idx] - sa[idx, 2])
-            sa[idx, 2] += amount
-            remaining -= amount
-            flow_est[idx] = self.multi_stair[idx].estimate_flow_for_power(sa[idx, 2])
-        return remaining
+        targets, flow_est = self._targets_for_common_flow((q_lo + q_hi) * 0.5, max_allowed, min_allowed)
 
-    def _reduce_power_min_change(self, reduction: float, flow_est: np.ndarray, prev: np.ndarray) -> float:
+        def refresh(i: int) -> None:
+            flow_est[i] = self.multi_stair[i].estimate_flow_for_power(targets[i])
+
+        residual = target - float(np.sum(targets))
+        while residual > 1e-6:
+            candidates = []
+            for i in range(n):
+                room = max_allowed[i] - targets[i]
+                if room <= 1e-9:
+                    continue
+                amount = min(residual, room)
+                balance_flow = self._balance_flows_for_targets(targets)
+                old_flow = balance_flow[i]
+                new_flow = self._balance_flow_for_power(i, targets[i] + amount)
+                old_spread = float(np.max(balance_flow) - np.min(balance_flow))
+                trial = balance_flow.copy()
+                trial[i] = new_flow
+                new_spread = float(np.max(trial) - np.min(trial))
+                unit_water = (new_flow - old_flow) / max(amount, 1e-9)
+                candidates.append((new_spread - old_spread, unit_water, i, amount))
+            if not candidates:
+                break
+            _, _, idx, amount = min(candidates, key=lambda x: (x[0], x[1], x[2]))
+            targets[idx] += amount
+            refresh(idx)
+            residual -= amount
+
+        residual = target - float(np.sum(targets))
+        while residual < -1e-6:
+            excess = -residual
+            candidates = []
+            for i in range(n):
+                removable = targets[i] - min_allowed[i]
+                if removable <= 1e-9:
+                    continue
+                amount = min(excess, removable)
+                new_p = targets[i] - amount
+                balance_flow = self._balance_flows_for_targets(targets)
+                old_flow = balance_flow[i]
+                new_flow = self._balance_flow_for_power(i, new_p)
+                old_spread = float(np.max(balance_flow) - np.min(balance_flow))
+                trial = balance_flow.copy()
+                trial[i] = new_flow
+                new_spread = float(np.max(trial) - np.min(trial))
+                unit_water_saved = (old_flow - new_flow) / max(amount, 1e-9)
+                candidates.append((new_spread - old_spread, -unit_water_saved, i, amount))
+            if not candidates:
+                break
+            _, _, idx, amount = min(candidates, key=lambda x: (x[0], x[1], x[2]))
+            targets[idx] -= amount
+            if targets[idx] <= 1e-9:
+                targets[idx] = 0.0
+            refresh(idx)
+            residual += amount
+
+        return targets, flow_est, abs(target - float(np.sum(targets)))
+
+    def _equal_flow_increment_targets(
+        self,
+        target: float,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray | None = None,
+    ) -> Tuple[np.ndarray, np.ndarray, float]:
+        n = self.num_stairs
+        if min_allowed is None:
+            min_allowed = np.zeros(n, dtype=float)
+        min_allowed = np.minimum(np.maximum(min_allowed.astype(float), 0.0), max_allowed.astype(float))
+        target = _clip(float(target), 0.0, float(np.sum(max_allowed)))
+        if float(np.sum(min_allowed)) > target + 1e-6:
+            min_allowed = np.zeros(n, dtype=float)
+
+        targets = np.array([float(s.current_p) for s in self.multi_stair], dtype=float)
+        targets = np.minimum(np.maximum(targets, min_allowed), max_allowed.astype(float))
+
+        def flows_for(values: np.ndarray) -> np.ndarray:
+            return np.array(
+                [self.multi_stair[i].estimate_flow_for_power(values[i]) for i in range(n)],
+                dtype=float,
+            )
+
+        def balance_flows_for(values: np.ndarray) -> np.ndarray:
+            return np.array(
+                [self._balance_flow_for_power(i, values[i]) for i in range(n)],
+                dtype=float,
+            )
+
+        def refresh_residual(values: np.ndarray) -> float:
+            return target - float(np.sum(values))
+
+        prev_flow = balance_flows_for(targets)
+        residual = refresh_residual(targets)
+
+        if residual > 1e-6:
+            max_flows = np.array(
+                [self._balance_flow_for_power(i, max_allowed[i]) for i in range(n)],
+                dtype=float,
+            )
+            q_lo = float(np.min(prev_flow))
+            q_hi = max(float(np.max(max_flows)), q_lo)
+            for _ in range(24):
+                q_mid = (q_lo + q_hi) * 0.5
+                trial = targets.copy()
+                for i in range(n):
+                    if prev_flow[i] < q_mid - 1e-9:
+                        trial[i], _ = self._station_power_for_flow(i, q_mid, targets[i], max_allowed[i])
+                if float(np.sum(trial)) < target:
+                    q_lo = q_mid
+                else:
+                    q_hi = q_mid
+            q_target = (q_lo + q_hi) * 0.5
+            for i in range(n):
+                if prev_flow[i] < q_target - 1e-9:
+                    targets[i], _ = self._station_power_for_flow(i, q_target, targets[i], max_allowed[i])
+
+            residual = refresh_residual(targets)
+            while residual > 1e-6:
+                flows = balance_flows_for(targets)
+                candidates = [i for i in range(n) if max_allowed[i] - targets[i] > 1e-9]
+                if not candidates:
+                    break
+                idx = min(candidates, key=lambda i: (flows[i], targets[i], i))
+                amount = min(residual, max_allowed[idx] - targets[idx])
+                targets[idx] += amount
+                residual -= amount
+
+        elif residual < -1e-6:
+            q_lo = 0.0
+            q_hi = float(np.max(prev_flow))
+            for _ in range(24):
+                q_mid = (q_lo + q_hi) * 0.5
+                trial = targets.copy()
+                for i in range(n):
+                    if prev_flow[i] > q_mid + 1e-9:
+                        trial[i], _ = self._station_power_for_flow(i, q_mid, min_allowed[i], targets[i])
+                if float(np.sum(trial)) > target:
+                    q_hi = q_mid
+                else:
+                    q_lo = q_mid
+            q_target = (q_lo + q_hi) * 0.5
+            for i in range(n):
+                if prev_flow[i] > q_target + 1e-9:
+                    targets[i], _ = self._station_power_for_flow(i, q_target, min_allowed[i], targets[i])
+
+            residual = refresh_residual(targets)
+            while residual < -1e-6:
+                flows = balance_flows_for(targets)
+                candidates = [i for i in range(n) if targets[i] - min_allowed[i] > 1e-9]
+                if not candidates:
+                    break
+                idx = max(candidates, key=lambda i: (flows[i], targets[i], -i))
+                amount = min(-residual, targets[idx] - min_allowed[idx])
+                targets[idx] -= amount
+                residual += amount
+
+        flow_est = flows_for(targets)
+        return targets, flow_est, abs(target - float(np.sum(targets)))
+
+    def _apply_low_stage_power_correction(
+        self,
+        targets: np.ndarray,
+        flow_est: np.ndarray,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        n = self.num_stairs
+        deltas = np.array(
+            [float(self.stage_hints[i].get("delta", 0.0)) if i < len(self.stage_hints) else 0.0 for i in range(n)],
+            dtype=float,
+        )
+        eligible = []
+        for i in range(n):
+            if deltas[i] >= -self.low_stage_relief_deadband_m:
+                continue
+            hint = self.stage_hints[i] if i < len(self.stage_hints) else {}
+            upstream_inflow = float(hint.get("inflow_m3s", math.inf))
+            if upstream_inflow < flow_est[i] - 1e-6:
+                continue
+            if targets[i] > min_allowed[i] + 1e-6:
+                eligible.append(i)
+        if not eligible:
+            return targets, flow_est
+
+        donor = min(eligible, key=lambda i: (deltas[i], -targets[i], i))
+        correction_q = self.station_flow_rebalance_deadband_m3s * _clip((-deltas[donor]) / max(self.low_stage_relief_deadband_m, 1e-9), 0.0, 3.0)
+        donor_target_q = max(0.0, flow_est[donor] - correction_q)
+        donor_new_p, donor_new_q = self._station_power_for_flow(
+            donor,
+            donor_target_q,
+            min_allowed[donor],
+            targets[donor],
+        )
+        amount = targets[donor] - donor_new_p
+        amount = min(amount, self._slow_rebalance_delta_p_limit(donor, targets[donor], -1.0))
+        receiver, amount = self._choose_low_stage_receiver(
+            donor,
+            amount,
+            targets,
+            flow_est,
+            max_allowed,
+        )
+        if receiver < 0 or amount <= 1e-6:
+            return targets, flow_est
+        if deltas[receiver] - deltas[donor] <= self.low_stage_relief_deadband_m:
+            return targets, flow_est
+
+        new_targets = targets.copy()
+        new_targets[donor] -= amount
+        new_targets[receiver] += amount
+        new_flow = np.array(
+            [self.multi_stair[i].estimate_flow_for_power(new_targets[i]) for i in range(n)],
+            dtype=float,
+        )
+        return new_targets, new_flow
+
+    def _apply_slow_equal_flow_rebalance(
+        self,
+        target: float,
+        targets: np.ndarray,
+        flow_est: np.ndarray,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.num_stairs < 2:
+            return targets, flow_est
+        balance_flow_est = self._balance_flows_for_targets(targets)
+        if float(np.max(balance_flow_est) - np.min(balance_flow_est)) <= self.station_flow_rebalance_deadband_m3s:
+            return targets, flow_est
+
+        ideal_targets, _, diff = self._equal_flow_targets(
+            target,
+            max_allowed,
+            min_allowed=min_allowed,
+        )
+        if diff > 1e-5:
+            return targets, flow_est
+
+        new_targets = targets.copy()
+        remaining_move = np.array(
+            [
+                self._slow_rebalance_delta_p_limit(
+                    i,
+                    new_targets[i],
+                    1.0 if ideal_targets[i] >= new_targets[i] else -1.0,
+                )
+                for i in range(self.num_stairs)
+            ],
+            dtype=float,
+        )
+        for _ in range(self.num_stairs * 2):
+            delta = ideal_targets - new_targets
+            receivers = [
+                i for i in range(self.num_stairs)
+                if delta[i] > 1e-6
+                and new_targets[i] < max_allowed[i] - 1e-6
+                and remaining_move[i] > 1e-9
+            ]
+            donors = [
+                i for i in range(self.num_stairs)
+                if delta[i] < -1e-6
+                and new_targets[i] > min_allowed[i] + 1e-6
+                and remaining_move[i] > 1e-9
+            ]
+            if not donors or not receivers:
+                break
+
+            balance_flow_est = self._balance_flows_for_targets(new_targets)
+            donor = min(donors, key=lambda i: (delta[i], -balance_flow_est[i], i))
+            receiver = max(receivers, key=lambda i: (delta[i], -balance_flow_est[i], -i))
+            amount = min(
+                -delta[donor],
+                delta[receiver],
+                new_targets[donor] - min_allowed[donor],
+                max_allowed[receiver] - new_targets[receiver],
+                remaining_move[donor],
+                remaining_move[receiver],
+            )
+            if amount <= 1e-9:
+                break
+
+            trial = new_targets.copy()
+            trial[donor] -= amount
+            trial[receiver] += amount
+            trial_balance_flow = self._balance_flows_for_targets(trial)
+            if float(np.max(trial_balance_flow) - np.min(trial_balance_flow)) > float(np.max(balance_flow_est) - np.min(balance_flow_est)) + 1e-6:
+                break
+
+            new_targets = trial
+            flow_est = np.array(
+                [self.multi_stair[i].estimate_flow_for_power(new_targets[i]) for i in range(self.num_stairs)],
+                dtype=float,
+            )
+            remaining_move[donor] -= amount
+            remaining_move[receiver] -= amount
+
+        return new_targets, flow_est
+
+    def _apply_stage_pid_power_correction(
+        self,
+        targets: np.ndarray,
+        flow_est: np.ndarray,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if not self.stage_pid_enable:
+            return targets, flow_est
+
+        new_targets = targets.astype(float).copy()
+        released = 0.0
+        donors = []
+        for i in range(self.num_stairs):
+            if i >= len(self.stage_hints):
+                continue
+            if self.stage_pid_max_delta_p[i] <= 1e-9:
+                continue
+
+            hint = self.stage_hints[i]
+            stage_error = float(hint.get("delta", 0.0))
+            low_depth = max(0.0, -stage_error)
+            if low_depth <= self.stage_pid_deadband_m:
+                self.stage_pid_integral[i] = 0.0
+                self.stage_pid_prev_error[i] = stage_error
+                continue
+
+            upstream_inflow = float(hint.get("inflow_m3s", math.inf))
+            if math.isfinite(upstream_inflow) and upstream_inflow < flow_est[i] - 1e-6:
+                self.stage_pid_integral[i] = 0.0
+                self.stage_pid_prev_error[i] = stage_error
+                continue
+
+            active_error = stage_error + self.stage_pid_deadband_m
+            self.stage_pid_integral[i] = _clip(
+                self.stage_pid_integral[i] + active_error,
+                -self.stage_pid_integral_limit_m_step,
+                self.stage_pid_integral_limit_m_step,
+            )
+            derivative = active_error - self.stage_pid_prev_error[i]
+            self.stage_pid_prev_error[i] = active_error
+
+            raw = (
+                self.stage_pid_kp_mw_per_m[i] * active_error
+                + self.stage_pid_ki_mw_per_m_step[i] * self.stage_pid_integral[i]
+                + self.stage_pid_kd_mw_per_m[i] * derivative
+            )
+            raw = _clip(
+                raw,
+                -max(0.0, self.stage_pid_output_limit_p[i]),
+                max(0.0, self.stage_pid_output_limit_p[i]),
+            )
+            upstream_release = float(hint.get("upstream_release_m3s", math.inf))
+            if i > 0 and math.isfinite(upstream_release):
+                forecast_deadband = float(self.inflow_deficit_balance_deadband_m3s[i])
+                future_deficit = flow_est[i] - upstream_release - forecast_deadband
+                full_deficit = max(float(self.stage_pid_forecast_full_deficit_m3s[i]), 1e-6)
+                deficit_ratio = _clip(future_deficit / full_deficit, 0.0, 1.0)
+                forecast_scale = self.stage_pid_forecast_min_scale + (1.0 - self.stage_pid_forecast_min_scale) * deficit_ratio
+                raw *= forecast_scale
+            reduce_p = _clip(-raw, 0.0, self.stage_pid_max_delta_p[i])
+            reduce_p = min(
+                reduce_p,
+                self._slow_rebalance_delta_p_limit(i, new_targets[i], -1.0),
+                new_targets[i] - min_allowed[i],
+            )
+            if reduce_p <= 1e-6:
+                continue
+            new_targets[i] -= reduce_p
+            released += reduce_p
+            donors.append(i)
+
+        if released <= 1e-6:
+            return targets, flow_est
+
+        while released > 1e-6:
+            candidates = []
+            for i in range(self.num_stairs):
+                if i in donors:
+                    continue
+                room = max_allowed[i] - new_targets[i]
+                if room <= 1e-9:
+                    continue
+                hint = self.stage_hints[i] if i < len(self.stage_hints) else {}
+                stage_delta = float(hint.get("delta", 0.0))
+                priority = 0 if i == 0 else 1
+                candidates.append((priority, -stage_delta, self._balance_flow_for_power(i, new_targets[i]), i, room))
+            if not candidates:
+                break
+
+            _, _, _, receiver, room = min(candidates, key=lambda x: (x[0], x[1], x[2], x[3]))
+            add_p = min(
+                released,
+                room,
+                self._slow_rebalance_delta_p_limit(receiver, new_targets[receiver], 1.0),
+            )
+            if add_p <= 1e-9:
+                break
+            new_targets[receiver] += add_p
+            released -= add_p
+
+        residual = float(np.sum(targets)) - float(np.sum(new_targets))
+        if abs(residual) > 1e-6:
+            _, flow_est = self._allocate_toward_optimal(
+                float(np.sum(targets)),
+                optimal_targets=new_targets,
+                max_allowed=max_allowed,
+                min_allowed=min_allowed,
+            )
+            return self.stair_array[:, 2].astype(float).copy(), flow_est
+
+        new_flow = np.array(
+            [self.multi_stair[i].estimate_flow_for_power(new_targets[i]) for i in range(self.num_stairs)],
+            dtype=float,
+        )
+        return new_targets, new_flow
+
+    def _apply_stage_mpc_power_correction(
+        self,
+        targets: np.ndarray,
+        flow_est: np.ndarray,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if not self.stage_mpc_enable:
+            return targets, flow_est
+
+        n = self.num_stairs
+        new_targets = targets.astype(float).copy()
+        base_balance_flows = self._balance_flows_for_targets(new_targets)
+
+        def low_depth(idx: int) -> float:
+            if idx >= len(self.stage_hints):
+                return 0.0
+            return max(0.0, -float(self.stage_hints[idx].get("delta", 0.0)))
+
+        def forecast_deficit(idx: int, values: np.ndarray, balance_flows: np.ndarray) -> float:
+            if idx <= 0 or idx >= len(self.stage_hints):
+                return 0.0
+            upstream_release = float(self.stage_hints[idx].get("upstream_release_m3s", math.inf))
+            if not math.isfinite(upstream_release):
+                return 0.0
+            deadband = float(self.inflow_deficit_balance_deadband_m3s[idx])
+            return max(0.0, balance_flows[idx] - upstream_release - deadband)
+
+        def low_stage_cost(values: np.ndarray, balance_flows: np.ndarray) -> float:
+            cost = 0.0
+            horizon = max(1, self.stage_mpc_horizon_steps)
+            for idx in range(n):
+                depth = low_depth(idx)
+                active_depth = max(0.0, depth - self.stage_pid_deadband_m)
+                if active_depth <= 0.0:
+                    continue
+                max_delta_p = max(float(self.stage_pid_max_delta_p[idx]), 1e-9)
+                normalized_p = max(0.0, values[idx] - min_allowed[idx]) / max_delta_p
+                full_deficit = max(float(self.stage_pid_forecast_full_deficit_m3s[idx]), 1e-6)
+                deficit_ratio = forecast_deficit(idx, values, balance_flows) / full_deficit
+                cost += self.stage_mpc_stage_weight * active_depth * active_depth * normalized_p
+                cost += self.stage_mpc_forecast_weight * horizon * active_depth * deficit_ratio
+            spread = float(np.max(balance_flows) - np.min(balance_flows)) if n > 1 else 0.0
+            cost += self.stage_mpc_flow_spread_weight * spread * spread
+            return float(cost)
+
+        def transfer_score(values: np.ndarray, donor: int, receiver: int, amount: float, base_cost: float) -> Tuple[float, np.ndarray, np.ndarray]:
+            trial = values.copy()
+            trial[donor] -= amount
+            trial[receiver] += amount
+            trial_balance = self._balance_flows_for_targets(trial)
+            trial_cost = low_stage_cost(trial, trial_balance)
+            trial_cost += self.stage_mpc_move_weight * amount * amount
+            return base_cost - trial_cost, trial, trial_balance
+
+        base_cost = low_stage_cost(new_targets, base_balance_flows)
+        if base_cost <= self.stage_mpc_min_improve:
+            return targets, flow_est
+
+        max_rounds = max(1, n * 2)
+        donors_used = set()
+        for _ in range(max_rounds):
+            balance_flows = self._balance_flows_for_targets(new_targets)
+            current_cost = low_stage_cost(new_targets, balance_flows)
+            best_improve = self.stage_mpc_min_improve
+            best_targets = None
+            best_balance_flows = None
+            best_donor = -1
+
+            for donor in range(n):
+                if donor >= len(self.stage_hints):
+                    continue
+                if self.stage_pid_max_delta_p[donor] <= 1e-9:
+                    continue
+                if low_depth(donor) <= self.stage_pid_deadband_m:
+                    continue
+                if new_targets[donor] <= min_allowed[donor] + 1e-6:
+                    continue
+
+                donor_limit = min(
+                    max(0.0, float(self.stage_pid_max_delta_p[donor])),
+                    max(0.0, float(self.stage_pid_output_limit_p[donor])),
+                    self._slow_rebalance_delta_p_limit(donor, new_targets[donor], -1.0),
+                    new_targets[donor] - min_allowed[donor],
+                )
+                if donor_limit <= 1e-6:
+                    continue
+
+                for receiver in range(n):
+                    if receiver == donor:
+                        continue
+                    room = max_allowed[receiver] - new_targets[receiver]
+                    if room <= 1e-6:
+                        continue
+                    receiver_limit = min(
+                        room,
+                        self._slow_rebalance_delta_p_limit(receiver, new_targets[receiver], 1.0),
+                    )
+                    if receiver_limit <= 1e-6:
+                        continue
+                    amount_limit = min(donor_limit, receiver_limit)
+                    for frac in self.stage_mpc_candidate_fracs:
+                        amount = amount_limit * _clip(frac, 0.0, 1.0)
+                        if amount <= 1e-6:
+                            continue
+                        improve, trial, trial_balance = transfer_score(
+                            new_targets,
+                            donor,
+                            receiver,
+                            amount,
+                            current_cost,
+                        )
+                        if receiver == 0:
+                            improve += 0.02 * amount
+                        if improve > best_improve:
+                            best_improve = improve
+                            best_targets = trial
+                            best_balance_flows = trial_balance
+                            best_donor = donor
+
+            if best_targets is None:
+                break
+            new_targets = best_targets
+            donors_used.add(best_donor)
+
+        residual = float(np.sum(targets)) - float(np.sum(new_targets))
+        if abs(residual) > 1e-6:
+            _, flow_est = self._allocate_toward_optimal(
+                float(np.sum(targets)),
+                optimal_targets=new_targets,
+                max_allowed=max_allowed,
+                min_allowed=min_allowed,
+            )
+            return self.stair_array[:, 2].astype(float).copy(), flow_est
+
+        new_flow = np.array(
+            [self.multi_stair[i].estimate_flow_for_power(new_targets[i]) for i in range(n)],
+            dtype=float,
+        )
+        return new_targets, new_flow
+
+    def _allocate_toward_optimal(
+        self,
+        target: float,
+        optimal_targets: np.ndarray,
+        max_allowed: np.ndarray,
+        min_allowed: np.ndarray | None = None,
+    ) -> Tuple[float, np.ndarray]:
         sa = self.stair_array
         n = self.num_stairs
-        while reduction > 1e-6:
-            avail = [i for i in range(n) if sa[i, 2] > 1e-6]
-            if not avail:
-                break
-            idx = min(avail, key=lambda k: (max(0.0, prev[k] - sa[k, 2]), -flow_est[k], k))
-            amount = min(reduction, sa[idx, 2])
-            sa[idx, 2] -= amount
-            reduction -= amount
-            flow_est[idx] = self.multi_stair[idx].estimate_flow_for_power(sa[idx, 2])
-        return reduction
+        if min_allowed is None:
+            min_allowed = np.zeros(n, dtype=float)
+
+        target = _clip(float(target), 0.0, float(np.sum(max_allowed)))
+        min_allowed = np.minimum(np.maximum(min_allowed.astype(float), 0.0), max_allowed.astype(float))
+        if float(np.sum(min_allowed)) > target + 1e-6:
+            min_allowed = np.zeros(n, dtype=float)
+
+        prev = np.array([float(s.current_p) for s in self.multi_stair], dtype=float)
+        ramp = np.array([float(s.station_target_ramp_rate) for s in self.multi_stair], dtype=float)
+        lower = np.maximum(min_allowed, prev - ramp)
+        upper = np.minimum(max_allowed.astype(float), prev + ramp)
+
+        # 爬坡约束可能和“总出力零误差”冲突；此时优先保总出力和红黄区限制，
+        # 只放松造成不可行方向的爬坡边界。
+        if float(np.sum(lower)) > target + 1e-6:
+            lower = min_allowed.copy()
+        if float(np.sum(upper)) < target - 1e-6:
+            upper = max_allowed.astype(float).copy()
+
+        feasible_low = float(np.sum(lower))
+        feasible_high = float(np.sum(upper))
+        target = _clip(target, feasible_low, feasible_high)
+
+        desired = np.minimum(np.maximum(optimal_targets.astype(float), lower), upper)
+        values = desired.copy()
+
+        def add_power(need: float) -> float:
+            while need > 1e-6:
+                candidates = [i for i in range(n) if values[i] < upper[i] - 1e-9]
+                if not candidates:
+                    break
+                idx = max(
+                    candidates,
+                    key=lambda i: (
+                        optimal_targets[i] - values[i],
+                        self.station_flow_power_base[i],
+                        -abs(values[i] - prev[i]),
+                        -i,
+                    ),
+                )
+                amount = min(need, upper[idx] - values[idx])
+                if amount <= 1e-9:
+                    break
+                values[idx] += amount
+                need -= amount
+            return need
+
+        def remove_power(excess: float) -> float:
+            while excess > 1e-6:
+                candidates = [i for i in range(n) if values[i] > lower[i] + 1e-9]
+                if not candidates:
+                    break
+                idx = max(
+                    candidates,
+                    key=lambda i: (
+                        values[i] - optimal_targets[i],
+                        -self.station_flow_power_base[i],
+                        -abs(values[i] - prev[i]),
+                        -i,
+                    ),
+                )
+                amount = min(excess, values[idx] - lower[idx])
+                if amount <= 1e-9:
+                    break
+                values[idx] -= amount
+                if values[idx] <= 1e-9:
+                    values[idx] = 0.0
+                excess -= amount
+            return excess
+
+        residual = target - float(np.sum(values))
+        if residual > 1e-6:
+            residual = add_power(residual)
+        elif residual < -1e-6:
+            residual = -remove_power(-residual)
+
+        # 最后一小段不受步长约束，专门消除浮点尾差，保持总出力零误差。
+        residual = target - float(np.sum(values))
+        if abs(residual) > 1e-6:
+            if residual > 0:
+                residual = add_power(residual)
+            else:
+                residual = -remove_power(-residual)
+
+        sa[:, 2] = values
+        flow_est = np.array(
+            [self.multi_stair[i].estimate_flow_for_power(values[i]) for i in range(n)],
+            dtype=float,
+        )
+        return float(residual), flow_est
 
     def _station_dispatch(self) -> None:
         sa = self.stair_array
         n = self.num_stairs
 
-        max_allowed = self._guarded_station_maxes()
-        max_sum = float(max_allowed.sum())
-        self.total_p_target = _clip(self.total_p_target, 0.0, max_sum)
-        self._update_low_stage_guard_status(max_allowed)
+        requested_target = float(self.total_p_target)
+        physical_max_allowed = np.array([float(sa[i, 7]) for i in range(n)], dtype=float)
+        min_allowed = np.zeros(n, dtype=float)
+        target = _clip(requested_target, 0.0, float(physical_max_allowed.sum()))
 
-        prev = np.array([self.multi_stair[i].current_p for i in range(n)], dtype=float)
-        current_sum = float(prev.sum())
-        if current_sum <= 1e-6:
-            base = np.zeros(n, dtype=float)
+        # 1) 连续分配：以上一时刻出力为基础，把增量/减量分给发电流量需要追平的电站。
+        targets, flow_est, diff = self._equal_flow_increment_targets(
+            target,
+            physical_max_allowed,
+            min_allowed=min_allowed,
+        )
+
+        # 2) 慢重平衡：PID 前先向等 balance_flow 目标靠近，保证水量一致性。
+        targets, flow_est = self._apply_slow_equal_flow_rebalance(
+            target,
+            targets,
+            flow_est,
+            physical_max_allowed,
+            min_allowed,
+        )
+
+        # 3) 轻量 MPC 水位修正层：滚动评估低水位风险、上游下泄缺口和流量一致性。
+        targets, flow_est = self._apply_stage_mpc_power_correction(
+            targets,
+            flow_est,
+            physical_max_allowed,
+            min_allowed,
+        )
+
+        residual = target - float(np.sum(targets))
+        if abs(residual) > 1e-6:
+            diff, _ = self._allocate_toward_optimal(
+                target,
+                optimal_targets=targets,
+                max_allowed=physical_max_allowed,
+                min_allowed=min_allowed,
+            )
         else:
-            base = prev * min(1.0, self.total_p_target / current_sum)
-        for i in range(n):
-            sa[i, 2] = _clip(base[i], 0.0, max_allowed[i])
+            sa[:, 2] = targets
+            diff = 0.0
 
-        diff = float(self.total_p_target - sa[:, 2].sum())
-        flow_est = np.zeros(n, dtype=float)
-        for i in range(n):
-            flow_est[i] = self.multi_stair[i].estimate_flow_for_power(sa[i, 2])
-
-        if diff > 1e-6:
-            diff = self._allocate_increment_min_change(diff, flow_est, max_allowed, prev)
-        elif diff < -1e-6:
-            diff = -self._reduce_power_min_change(-diff, flow_est, prev)
-        self._update_low_stage_guard_status(max_allowed, unserved_mw=abs(diff))
+        self.total_p_target = target
+        self._update_low_stage_guard_status(physical_max_allowed, unserved_mw=abs(diff))
 
         for i in range(n):
             sa[i, 1] = sa[i, 2]
