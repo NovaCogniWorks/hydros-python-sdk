@@ -20,6 +20,7 @@ from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.developer_api import CustomAgent
 from hydros_agent_sdk.factory import CustomAgentFactory, HydroAgentFactory
 from hydros_agent_sdk.logging_config import setup_logging
+from hydros_agent_sdk.observability import configure_opentelemetry
 from hydros_agent_sdk.agent_constants import (
     CENTRAL_SCHEDULING_AGENT_TYPE,
     SYSTEM_CENTRAL_SCHEDULING_AGENT_CODE,
@@ -513,17 +514,26 @@ class LauncherLoggingConfigurator:
         self.log_file = log_file
         self.log_dir = log_dir
 
-    def configure(self, argv: List[str]) -> None:
+    def configure(self, argv: List[str], service_name: str = "hydros-agent") -> None:
         os.makedirs(self.log_dir, exist_ok=True)
         hydros_cluster_id, hydros_node_id = self._resolve_logging_context()
+        format_style = os.getenv("HYDROS_LOG_FORMAT", "").strip().lower()
+        if not format_style:
+            format_style = "full" if "--full-log" in argv else "simple"
+        log_file_enabled = os.getenv(
+            "HYDROS_LOG_FILE_ENABLED",
+            "true",
+        ).strip().lower() in {"1", "true", "yes", "on"}
         setup_logging(
             level=logging.DEBUG if "--debug" in argv else logging.INFO,
             hydros_cluster_id=hydros_cluster_id,
             hydros_node_id=hydros_node_id,
             console=True,
-            log_file=self.log_file,
+            log_file=self.log_file if log_file_enabled else None,
             simple="--full-log" not in argv,
             use_rolling=True,
+            format_style=format_style,
+            service_name=service_name,
         )
 
     def _resolve_logging_context(self) -> Tuple[Optional[str], Optional[str]]:
@@ -1079,11 +1089,12 @@ class MultiAgentLauncherApp:
         self.logger = logger or logging.getLogger(__name__)
 
     def run(self, argv: List[str]) -> int:
+        service_name = self._resolve_service_name()
         LauncherLoggingConfigurator(
             env_file=self.env_file,
             log_file=self.log_file,
             log_dir=self.log_dir,
-        ).configure(argv)
+        ).configure(argv, service_name=service_name)
 
         services = self.service_factory.create()
         cli = LauncherCli(services.discovery_service, default_debug_port=self.default_debug_port)
@@ -1138,4 +1149,29 @@ class MultiAgentLauncherApp:
             logger=self.logger,
         )
         runtime = LauncherRuntime(coordinator, logger=self.logger)
-        return runtime.run(agent_names)
+        hydros_cluster_id, hydros_node_id = LauncherLoggingConfigurator(
+            env_file=self.env_file,
+            log_file=self.log_file,
+            log_dir=self.log_dir,
+        )._resolve_logging_context()
+        observability = configure_opentelemetry(
+            default_service_name=service_name,
+            hydros_cluster_id=hydros_cluster_id,
+            hydros_node_id=hydros_node_id,
+        )
+        try:
+            return runtime.run(agent_names)
+        finally:
+            observability.shutdown()
+
+    def _resolve_service_name(self) -> str:
+        explicit_name = os.getenv("OTEL_SERVICE_NAME")
+        if explicit_name:
+            return explicit_name
+
+        application_name = os.path.basename(os.path.normpath(self.launcher_dir))
+        if application_name.startswith("hydros-"):
+            return application_name
+        if application_name.endswith("-agent"):
+            return f"hydros-{application_name}"
+        return f"hydros-{application_name}-agent"

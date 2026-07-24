@@ -1,0 +1,1348 @@
+{
+	"schema_version": "1.0",
+	"algorithm_type": "pump_station_flow_dmpc",
+	"algorithm_version": "1.0.0",
+	"control_task_type": "STATION_FLOW_ALLOCATION",
+	"context": {
+		"request_id": "d00f0a17-6973-4686-8cbc-67f770bcdc54:72",
+		"context_id": "TASK202607231727YRBQNCH7TWTT",
+		"step_index": 72,
+		"elapsed_seconds": 50.0,
+		"target_object_type": "PumpStation",
+		"target_object_id": 20000,
+		"attributes": {
+			"output_step_seconds": 3600,
+			"previous_iteration_count": 0,
+			"group_id": "pump-station-flow:1"
+		}
+	},
+	"signals": [{
+		"type": "TARGET",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "water_flow",
+		"value": 50.0,
+		"series": [],
+		"attributes": {
+			"main_step_index": 1,
+			"command_id": "AGTCMD202607231729NM4X2UZTNP7P"
+		}
+	}, {
+		"type": "TARGET",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "water_flow",
+		"value": 50.0,
+		"series": [],
+		"attributes": {
+			"main_step_index": 1,
+			"command_id": "AGTCMD202607231729W8EX8VT2GQKX"
+		}
+	}, {
+		"type": "TARGET",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "water_flow",
+		"value": 52.0,
+		"series": [],
+		"attributes": {
+			"main_step_index": 1,
+			"command_id": "AGTCMD202607231729SMN64TEEDK20"
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "station_front_water_level",
+		"series": [13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26, 13.26],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "station_back_water_level",
+		"series": [14.359056240915834, 14.358656959543868, 14.358257678171903, 14.357858396799937, 14.357459115427972, 14.357059834056006, 14.35666055268404, 14.356261271312075, 14.35586198994011, 14.355462708568144, 14.355063427196178, 14.354664145824213, 14.354264864452247, 14.353865583080282, 14.353466301708316, 14.35306702033635, 14.352667738964385, 14.35226845759242, 14.351869176220454, 14.351469894848488, 14.351070613476523, 14.350671332104557, 14.350272050732592, 14.349872769360626, 14.34947348798866, 14.349074206616695, 14.34867492524473, 14.348275643872764, 14.347876362500799, 14.347477081128833, 14.347077799756867, 14.346678518384902, 14.346279237012936, 14.34587995564097, 14.345480674269005, 14.34508139289704, 14.344682111525074, 14.344282830153109, 14.343883548781143, 14.343484267409178, 14.343084986037212, 14.342685704665247, 14.342286423293281, 14.341887141921315, 14.34148786054935, 14.341088579177384, 14.340689297805419, 14.340290016433453, 14.339890735061488, 14.339491453689522, 14.339092172317557, 14.338692890945591, 14.338293609573626, 14.33789432820166, 14.337495046829694, 14.337095765457729, 14.336696484085763, 14.336297202713798, 14.335897921341832, 14.335498639969867, 14.335099358597901, 14.334700077225936, 14.33430079585397, 14.333901514482005, 14.333502233110039, 14.333102951738073, 14.332703670366108, 14.332304388994142, 14.331905107622177, 14.331505826250211, 14.331106544878246, 14.33070726350628],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "station_efficiency",
+		"series": [79.52907407975002, 79.5141475228863, 79.51220032745556, 79.51025313202481, 79.5083059365941, 79.50635874116335, 79.50441154573262, 79.50246435030189, 79.50051715487116, 79.49856995944043, 79.4966227640097, 79.49467556857897, 79.49272837314822, 79.49078117771751, 79.48883398228676, 79.48688678685602, 79.4849395914253, 79.48299239599456, 79.48104520056383, 79.4790980051331, 79.47715080970237, 79.47520361427163, 79.4732564188409, 79.47130922341017, 79.46936202797943, 79.46741483254871, 79.46546763711797, 79.46352044168724, 79.4615732462565, 79.45962605082576, 79.45767885539505, 79.4557316599643, 79.45378446453357, 79.45183726910284, 79.44989007367211, 79.44794287824138, 79.44599568281063, 79.44404848737992, 79.44210129194917, 79.44015409651844, 79.43820690108771, 79.43625970565697, 79.43431251022625, 79.4323653147955, 79.43041811936477, 79.42847092393404, 79.42652372850331, 79.42457653307258, 79.42262933764184, 79.42068214221112, 79.41873494678038, 79.41678775134964, 79.41484055591891, 79.41289336048818, 79.41094616505745, 79.40899896962671, 79.40705177419599, 79.40510457876525, 79.4031573833345, 79.40121018790379, 79.39926299247304, 79.39731579704231, 79.39536860161158, 79.39342140618085, 79.39147421075012, 79.38952701531939, 79.38757981988866, 79.38563262445791, 79.3836854290272, 79.38173823359645, 79.3797910381657, 79.37784384273499],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "station_memory",
+		"series": [],
+		"attributes": {
+			"active_unit_ids": [20004, 20005],
+			"mode": "ODD3",
+			"last_selected_flow": 50.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "lower_feedback",
+		"series": [],
+		"attributes": {
+			"feasible_flow_range": [22.0, 184.0],
+			"current_mode": "ODD3",
+			"plan_execution_error": 0.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "flow_history",
+		"series": [],
+		"attributes": {
+			"history": [50.0]
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20001,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20001,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20002,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20002,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20003,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20003,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 0,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20004,
+		"value_type": "blade_angle",
+		"series": [-1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20004,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 0,
+			"time_since_adjust": 0,
+			"unit_opening": -1.99,
+			"unit_status": 1
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20005,
+		"value_type": "blade_angle",
+		"series": [-1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99, -1.99],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20005,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": -1.99,
+			"unit_status": 1
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "station_front_water_level",
+		"series": [20.111989330296765, 20.11268291160382, 20.113376492910874, 20.114070074217928, 20.114763655524982, 20.115457236832036, 20.11615081813909, 20.116844399446144, 20.117537980753198, 20.118231562060252, 20.118925143367306, 20.11961872467436, 20.120312305981415, 20.12100588728847, 20.121699468595523, 20.122393049902577, 20.12308663120963, 20.123780212516685, 20.12447379382374, 20.125167375130793, 20.125860956437847, 20.1265545377449, 20.127248119051956, 20.12794170035901, 20.128635281666064, 20.129328862973118, 20.130022444280172, 20.130716025587226, 20.13140960689428, 20.132103188201334, 20.13279676950839, 20.133490350815443, 20.134183932122497, 20.13487751342955, 20.135571094736605, 20.13626467604366, 20.136958257350713, 20.137651838657767, 20.13834541996482, 20.139039001271875, 20.13973258257893, 20.140426163885984, 20.141119745193038, 20.141813326500092, 20.142506907807146, 20.1432004891142, 20.143894070421254, 20.14458765172831, 20.145281233035362, 20.145974814342416, 20.14666839564947, 20.147361976956525, 20.14805555826358, 20.148749139570633, 20.149442720877687, 20.15013630218474, 20.150829883491795, 20.15152346479885, 20.152217046105903, 20.152910627412957, 20.15360420872001, 20.154297790027066, 20.15499137133412, 20.155684952641174, 20.156378533948228, 20.157072115255282, 20.157765696562336, 20.15845927786939, 20.159152859176444, 20.1598464404835, 20.160540021790553, 20.161233603097607],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "station_back_water_level",
+		"series": [23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093, 23.093],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "station_efficiency",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "station_memory",
+		"series": [],
+		"attributes": {
+			"active_unit_ids": [20603, 20604],
+			"mode": "ODD3",
+			"last_selected_flow": 50.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "lower_feedback",
+		"series": [],
+		"attributes": {
+			"feasible_flow_range": [24.0, 162.0],
+			"current_mode": "ODD3",
+			"plan_execution_error": 0.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "flow_history",
+		"series": [],
+		"attributes": {
+			"history": [50.0]
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20601,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20601,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20602,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20602,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 0,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20603,
+		"value_type": "blade_angle",
+		"series": [-6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20603,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": -6.97,
+			"unit_status": 1
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20604,
+		"value_type": "blade_angle",
+		"series": [-6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97, -6.97],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20604,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 0,
+			"time_since_adjust": 0,
+			"unit_opening": -6.97,
+			"unit_status": 1
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "station_front_water_level",
+		"series": [14.359056240915834, 14.358656959543868, 14.358257678171903, 14.357858396799937, 14.357459115427972, 14.357059834056006, 14.35666055268404, 14.356261271312075, 14.35586198994011, 14.355462708568144, 14.355063427196178, 14.354664145824213, 14.354264864452247, 14.353865583080282, 14.353466301708316, 14.35306702033635, 14.352667738964385, 14.35226845759242, 14.351869176220454, 14.351469894848488, 14.351070613476523, 14.350671332104557, 14.350272050732592, 14.349872769360626, 14.34947348798866, 14.349074206616695, 14.34867492524473, 14.348275643872764, 14.347876362500799, 14.347477081128833, 14.347077799756867, 14.346678518384902, 14.346279237012936, 14.34587995564097, 14.345480674269005, 14.34508139289704, 14.344682111525074, 14.344282830153109, 14.343883548781143, 14.343484267409178, 14.343084986037212, 14.342685704665247, 14.342286423293281, 14.341887141921315, 14.34148786054935, 14.341088579177384, 14.340689297805419, 14.340290016433453, 14.339890735061488, 14.339491453689522, 14.339092172317557, 14.338692890945591, 14.338293609573626, 14.33789432820166, 14.337495046829694, 14.337095765457729, 14.336696484085763, 14.336297202713798, 14.335897921341832, 14.335498639969867, 14.335099358597901, 14.334700077225936, 14.33430079585397, 14.333901514482005, 14.333502233110039, 14.333102951738073, 14.332703670366108, 14.332304388994142, 14.331905107622177, 14.331505826250211, 14.331106544878246, 14.33070726350628],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "station_back_water_level",
+		"series": [20.111989330296765, 20.11268291160382, 20.113376492910874, 20.114070074217928, 20.114763655524982, 20.115457236832036, 20.11615081813909, 20.116844399446144, 20.117537980753198, 20.118231562060252, 20.118925143367306, 20.11961872467436, 20.120312305981415, 20.12100588728847, 20.121699468595523, 20.122393049902577, 20.12308663120963, 20.123780212516685, 20.12447379382374, 20.125167375130793, 20.125860956437847, 20.1265545377449, 20.127248119051956, 20.12794170035901, 20.128635281666064, 20.129328862973118, 20.130022444280172, 20.130716025587226, 20.13140960689428, 20.132103188201334, 20.13279676950839, 20.133490350815443, 20.134183932122497, 20.13487751342955, 20.135571094736605, 20.13626467604366, 20.136958257350713, 20.137651838657767, 20.13834541996482, 20.139039001271875, 20.13973258257893, 20.140426163885984, 20.141119745193038, 20.141813326500092, 20.142506907807146, 20.1432004891142, 20.143894070421254, 20.14458765172831, 20.145281233035362, 20.145974814342416, 20.14666839564947, 20.147361976956525, 20.14805555826358, 20.148749139570633, 20.149442720877687, 20.15013630218474, 20.150829883491795, 20.15152346479885, 20.152217046105903, 20.152910627412957, 20.15360420872001, 20.154297790027066, 20.15499137133412, 20.155684952641174, 20.156378533948228, 20.157072115255282, 20.157765696562336, 20.15845927786939, 20.159152859176444, 20.1598464404835, 20.160540021790553, 20.161233603097607],
+		"attributes": {}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "station_efficiency",
+		"series": [77.16155503, 77.20880490587348, 77.21370639498889, 77.21860788410429, 77.2235093732197, 77.2284108623351, 77.23331235145051, 77.2382138405659, 77.2431153296813, 77.24801681879671, 77.25291830791213, 77.25781979702752, 77.26272128614292, 77.26762277525833, 77.27252426437373, 77.27742575348913, 77.28232724260454, 77.28722873171995, 77.29213022083533, 77.29703170995074, 77.30193319906616, 77.30683468818154, 77.31173617729695, 77.31663766641236, 77.32153915552776, 77.32644064464316, 77.33134213375857, 77.33624362287397, 77.34114511198936, 77.34604660110477, 77.35094809022019, 77.35584957933558, 77.36075106845098, 77.36565255756639, 77.37055404668179, 77.37545553579719, 77.3803570249126, 77.385258514028, 77.3901600031434, 77.3950614922588, 77.39996298137422, 77.40486447048961, 77.40976595960501, 77.41466744872042, 77.41956893783582, 77.42447042695122, 77.42937191606663, 77.43427340518204, 77.43917489429742, 77.44407638341283, 77.44897787252825, 77.45387936164363, 77.45878085075904, 77.46368233987445, 77.46858382898985, 77.47348531810525, 77.47838680722066, 77.48328829633606, 77.48818978545145, 77.49309127456686, 77.49799276368226, 77.50289425279767, 77.50779574191307, 77.51269723102848, 77.51759872014388, 77.52250020925928, 77.52740169837469, 77.53230318749009, 77.53720467660548, 77.5421061657209, 77.5470076548363, 77.5519091439517],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "station_memory",
+		"series": [],
+		"attributes": {
+			"active_unit_ids": [20303, 20304],
+			"mode": "ODD3",
+			"last_selected_flow": 52.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "lower_feedback",
+		"series": [],
+		"attributes": {
+			"feasible_flow_range": [18.0, 116.0],
+			"current_mode": "ODD3",
+			"plan_execution_error": 0.0
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "flow_history",
+		"series": [],
+		"attributes": {
+			"history": [52.0]
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20301,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20301,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20302,
+		"value_type": "blade_angle",
+		"series": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20302,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": 0.0,
+			"unit_status": 0
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20303,
+		"value_type": "blade_angle",
+		"series": [-0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20303,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": -0.67,
+			"unit_status": 1
+		}
+	}, {
+		"type": "REFERENCE",
+		"object_type": "PUMP",
+		"object_id": 20304,
+		"value_type": "blade_angle",
+		"series": [-0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67, -0.67],
+		"attributes": {}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PUMP",
+		"object_id": 20304,
+		"value_type": "unit_memory",
+		"series": [],
+		"attributes": {
+			"time_since_switch": 1000,
+			"time_since_adjust": 0,
+			"unit_opening": -0.67,
+			"unit_status": 1
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20101,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20101,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20102,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20102,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20103,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20103,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20104,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20104,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20105,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20105,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20106,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20106,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20107,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20107,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20108,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20108,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20109,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20109,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20110,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20110,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20111,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20111,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20112,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20112,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20113,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20113,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20114,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20114,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20115,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20115,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20116,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20116,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20117,
+		"value_type": "water_level",
+		"value": 14.439468899184789,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20117,
+		"value_type": "water_flow",
+		"value": 53.580800961226196,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20501,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20501,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20502,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20502,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20503,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20503,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20504,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20504,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20505,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20505,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20506,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20506,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20507,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20507,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20508,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20508,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20509,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20509,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20510,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20510,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20511,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20511,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20512,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20512,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20513,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "CrossSection",
+		"object_id": 20513,
+		"value_type": "water_flow",
+		"value": 56.876540998798674,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "DisturbanceNode",
+		"object_id": 20200,
+		"value_type": "water_level",
+		"value": 14.144122436345803,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "DisturbanceNode",
+		"object_id": 20200,
+		"value_type": "water_flow",
+		"value": 0.0,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "DisturbanceNode",
+		"object_id": 20400,
+		"value_type": "water_level",
+		"value": 20.291933483846435,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "DisturbanceNode",
+		"object_id": 20400,
+		"value_type": "water_flow",
+		"value": 0.0,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "water_level",
+		"value": 13.26,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20000,
+		"value_type": "water_flow",
+		"value": 50.71881738895172,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "water_level",
+		"value": 14.144122436345803,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20300,
+		"value_type": "water_flow",
+		"value": 55.844195168181365,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "water_level",
+		"value": 19.943129873660023,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}, {
+		"type": "OBSERVATION",
+		"object_type": "PumpStation",
+		"object_id": 20600,
+		"value_type": "water_flow",
+		"value": 49.908396281599636,
+		"series": [],
+		"attributes": {
+			"position_code": "none"
+		}
+	}],
+	"actuators": [{
+		"object_type": "Pump",
+		"object_id": 20001,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20304,
+		"available": true,
+		"values": {
+			"blade_angle": 1.6
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20602,
+		"available": true,
+		"values": {
+			"blade_angle": -5.79
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20603,
+		"available": true,
+		"values": {
+			"blade_angle": -6.1
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20301,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20302,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20604,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20005,
+		"available": true,
+		"values": {
+			"blade_angle": -1.6
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20002,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20303,
+		"available": true,
+		"values": {
+			"blade_angle": 1.2
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20003,
+		"available": true,
+		"values": {
+			"blade_angle": -1.44
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20601,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}, {
+		"object_type": "Pump",
+		"object_id": 20004,
+		"available": true,
+		"values": {
+			"blade_angle": 100.0
+		},
+		"ranges": {
+			"blade_angle": {
+				"min_value": -7.0,
+				"max_value": 5.0
+			}
+		},
+		"attributes": {}
+	}],
+	"state": {},
+	"parameters": {
+		"candidate_angle_step": 0.5,
+		"algorithm_version": "1.0.0",
+		"flow_tolerance": 1.0,
+		"max_solver_iterations": 8,
+		"movement_weight": 0.1,
+		"max_blade_delta_per_step": 2.0
+	}
+}

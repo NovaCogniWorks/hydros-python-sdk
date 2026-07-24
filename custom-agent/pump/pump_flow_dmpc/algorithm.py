@@ -1,8 +1,11 @@
-"""将泵站流量 DMPC solver 适配为 Hydros 标准控制算法。"""
+"""
+Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
+"""
 
 from __future__ import annotations
 
 import math
+from typing import List
 
 from hydros_agent_sdk.control_algorithms import (
     ControlActuatorTarget,
@@ -17,11 +20,11 @@ from hydros_agent_sdk.control_algorithms import (
 from .errors import PumpFlowDmpcError
 from .resolver import PumpFlowDmpcInputResolver
 from .solver import PumpFlowDmpcSolver
-from .types import PumpFlowDmpcArguments, PumpFlowDmpcDecision
+from .types import PumpFlowDmpcArguments
 
 
 class PumpStationFlowDmpcAlgorithm:
-    """只返回泵机组叶片角度候选值的站内流量分配算法。"""
+    """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
 
     algorithm_type = "pump_station_flow_dmpc"
     algorithm_version = "1.0.0"
@@ -43,8 +46,8 @@ class PumpStationFlowDmpcAlgorithm:
             )
         try:
             arguments = self._resolver.resolve(input_data)
-            decision = self._solver.solve(arguments)
-            return self._project(input_data, arguments, decision)
+            action = self._solver.solve(arguments)
+            return self._project(input_data, arguments, action)
         except PumpFlowDmpcError as exc:
             return self._failed(input_data, exc.error_code, str(exc))
 
@@ -52,90 +55,89 @@ class PumpStationFlowDmpcAlgorithm:
         self,
         input_data: ControlAlgorithmInput,
         arguments: PumpFlowDmpcArguments,
-        decision: PumpFlowDmpcDecision,
+        action,  # ControlAction from odd_dmpc.types
     ) -> ControlAlgorithmOutput:
-        if not math.isfinite(decision.predicted_station_flow) or not math.isfinite(decision.objective):
-            return self._failed(
-                input_data,
-                "NON_FINITE_SOLVER_OUTPUT",
-                "solver returned a non-finite flow prediction or objective",
-            )
-        if decision.completed:
-            return ControlAlgorithmOutput(
-                schema_version=input_data.schema_version,
-                request_id=input_data.context.request_id,
-                status=ControlAlgorithmStatus.COMPLETED,
-                reason=decision.reason,
-                results=[self._flow_result(decision)],
-                next_state={
-                    "last_predicted_flow": decision.predicted_station_flow,
-                    "stable_step_count": 1,
-                },
-                evidence=self._evidence(arguments, decision),
-            )
+        station_id = arguments.station_id
 
-        targets = []
-        for unit in arguments.units:
-            blade_angle = decision.blade_angles.get(unit.unit_id)
-            if blade_angle is None or not math.isfinite(blade_angle):
-                return self._failed(
-                    input_data,
-                    "INVALID_SOLVER_OUTPUT",
-                    "solver did not return a finite blade_angle for pump unit %s" % unit.unit_id,
-                )
-            if blade_angle < unit.min_blade_angle or blade_angle > unit.max_blade_angle:
-                return self._failed(
-                    input_data,
-                    "INVALID_SOLVER_OUTPUT",
-                    "solver blade_angle exceeds the declared range for pump unit %s" % unit.unit_id,
-                )
-            targets.append(
+        # Build results
+        results: List[ControlSignal] = [
+            ControlSignal(
+                type=SignalType.RESULT,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="water_flow",
+                value=float(action.selected_flow),
+            ),
+            ControlSignal(
+                type=SignalType.RESULT,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="predicted_flow_error",
+                value=float(getattr(action, "predicted_flow_error", 0.0)),
+            ),
+            ControlSignal(
+                type=SignalType.RESULT,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="predicted_level_error",
+                value=float(getattr(action, "predicted_level_error", 0.0)),
+            ),
+            ControlSignal(
+                type=SignalType.RESULT,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="fit_score",
+                value=float(getattr(action, "fit_score", 0.0)),
+            ),
+            ControlSignal(
+                type=SignalType.RESULT,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="objective",
+                value=float(getattr(action, "objective", 0.0)),
+            ),
+        ]
+
+        # Build actuator targets (blade angles)
+        actuator_targets: List[ControlActuatorTarget] = []
+        for unit_id, opening in action.unit_openings.items():
+            actuator_targets.append(
                 ControlActuatorTarget(
                     object_type="Pump",
-                    object_id=unit.unit_id,
-                    target_values={"blade_angle": blade_angle},
+                    object_id=unit_id,
+                    target_values={"blade_angle": float(opening)},
                 )
             )
+
+        # Build next_state
+        next_state: dict = {
+            "mode": action.mode,
+            "selected_flow": float(action.selected_flow),
+            "predicted_back_level": float(getattr(action, "predicted_back_level", 0.0)),
+            "predicted_front_level": float(getattr(action, "predicted_front_level", 0.0)),
+            "predicted_head": float(getattr(action, "predicted_head", 0.0)),
+            "unit_status": {str(k): int(v) for k, v in action.unit_status.items()},
+            "unit_openings": {str(k): float(v) for k, v in action.unit_openings.items()},
+        }
 
         return ControlAlgorithmOutput(
             schema_version=input_data.schema_version,
             request_id=input_data.context.request_id,
             status=ControlAlgorithmStatus.CONTINUE,
-            reason=decision.reason,
-            actuator_targets=targets,
-            results=[self._flow_result(decision)],
-            next_state={
-                "previous_blade_angles": {
-                    str(unit_id): blade_angle
-                    for unit_id, blade_angle in decision.blade_angles.items()
-                },
-                "last_predicted_flow": decision.predicted_station_flow,
+            reason="FLOW_TRACKING_ACTION",
+            actuator_targets=actuator_targets,
+            results=results,
+            next_state=next_state,
+            evidence={
+                "station_id": station_id,
+                "mode": action.mode,
+                "target_flow": float(arguments.reference_flow[0]) if arguments.reference_flow else 0.0,
+                "selected_flow": float(action.selected_flow),
+                "fit_score": float(getattr(action, "fit_score", 0.0)),
+                "objective": float(getattr(action, "objective", 0.0)),
+                "candidate_plan_count": len(getattr(action, "candidate_plans", [])),
             },
-            evidence=self._evidence(arguments, decision),
         )
-
-    @staticmethod
-    def _flow_result(decision: PumpFlowDmpcDecision) -> ControlSignal:
-        return ControlSignal(
-            type=SignalType.RESULT,
-            object_type="PumpStation",
-            object_id=decision.station_id,
-            value_type="water_flow",
-            value=decision.predicted_station_flow,
-        )
-
-    @staticmethod
-    def _evidence(
-        arguments: PumpFlowDmpcArguments,
-        decision: PumpFlowDmpcDecision,
-    ) -> dict[str, float | int]:
-        return {
-            "target_flow": arguments.target_flow,
-            "current_flow": arguments.current_flow,
-            "predicted_flow": decision.predicted_station_flow,
-            "objective": decision.objective,
-            "active_unit_count": len(arguments.units),
-        }
 
     @staticmethod
     def _failed(

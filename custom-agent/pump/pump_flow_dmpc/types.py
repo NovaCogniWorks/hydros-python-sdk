@@ -1,44 +1,56 @@
-"""泵站流量 DMPC 的私有领域模型。"""
+"""
+Pump flow DMPC domain models.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Mapping, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Mapping, Optional, Tuple
+
+import pandas as pd
 
 
-@dataclass(frozen=True)
-class PumpUnitState:
-    """一次求解中单台可用泵机组的只读输入事实。"""
-
-    unit_id: int
-    current_blade_angle: float
-    min_blade_angle: float
-    max_blade_angle: float
-
-
-@dataclass(frozen=True)
+@dataclass
 class PumpFlowDmpcArguments:
-    """一次泵站流量分配求解所需的完整领域输入。"""
+    """Complete domain input extracted from ControlAlgorithmInput signals."""
 
     station_id: int
-    target_flow: float
-    current_flow: float
-    water_head: float
-    units: Tuple[PumpUnitState, ...]
-    flow_tolerance: float
-    max_blade_delta_per_step: float
-    candidate_angle_step: float
-    max_solver_iterations: int
-    movement_weight: float
+    mode: str
+    config_path: str
 
+    # Station memory
+    active_unit_ids: List[int] = field(default_factory=list)
+    unit_openings: Dict[int, float] = field(default_factory=dict)
+    unit_status: Dict[int, int] = field(default_factory=dict)
+    time_since_adjust: Dict[int, int] = field(default_factory=dict)
+    time_since_switch: Dict[int, int] = field(default_factory=dict)
+    last_selected_flow: float = 0.0
 
-@dataclass(frozen=True)
-class PumpFlowDmpcDecision:
-    """纯 solver 的决策结果，尚不代表任何设备已经执行。"""
+    # Transfer bundle
+    reference_flow: List[float] = field(default_factory=list)
+    reference_front_level: List[float] = field(default_factory=list)
+    reference_back_level: List[float] = field(default_factory=list)
+    reference_head: List[float] = field(default_factory=list)
 
-    station_id: int
-    blade_angles: Mapping[int, float]
-    predicted_station_flow: float
-    objective: float
-    completed: bool
-    reason: str
+    # Available units
+    available_unit_ids: List[int] = field(default_factory=list)
+
+    # Current observation
+    current_front_level: float = 0.0
+    current_back_level: float = 0.0
+    current_head: float = 0.0
+    current_flow: float = 0.0
+
+    # Environment for basin simulation
+    basin_levels: Dict[str, float] = field(default_factory=dict)
+    pool_areas: Dict[int, float] = field(default_factory=dict)
+    anchor_basin_levels: Dict[str, float] = field(default_factory=dict)
+    boundary_level_plan: Optional[pd.DataFrame] = None
+    disturbance_estimate: Dict = field(default_factory=dict)
+    demand_plan: Optional[pd.DataFrame] = None
+    start_time_hours: float = 0.0
+    step_hours: float = 1.0
+
+    # Cross-station
+    upper_flow_refs: Dict[int, List[float]] = field(default_factory=dict)
+    flow_history: List[float] = field(default_factory=list)
