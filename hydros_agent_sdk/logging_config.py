@@ -22,17 +22,32 @@ Hydros Agent SDK 日志配置。
 - 消息正文
 """
 
+import json
 import logging
+import os
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from contextvars import ContextVar
-from typing import Optional
-from datetime import datetime
+from typing import Any, Dict, Optional
+from datetime import datetime, timedelta, timezone
+
+from hydros_agent_sdk.observability import resolve_resource_attributes
+
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # pragma: no cover - Python 3.9+ normally provides zoneinfo
+    ZoneInfo = None
+    ZoneInfoNotFoundError = Exception
 
 # 用于类 MDC 功能的上下文变量（类似 Java MDC）
 _biz_scene_instance_id: ContextVar[Optional[str]] = ContextVar('biz_scene_instance_id', default=None)
 _biz_component: ContextVar[Optional[str]] = ContextVar('biz_component', default=None)
 _hydros_cluster_id: ContextVar[Optional[str]] = ContextVar('hydros_cluster_id', default=None)
 _hydros_node_id: ContextVar[Optional[str]] = ContextVar('hydros_node_id', default=None)
+_LOG_RECORD_BUILTINS = set(logging.makeLogRecord({}).__dict__) | {
+    "asctime",
+    "message",
+}
 
 
 class LogContext:
@@ -230,6 +245,119 @@ class HydrosFormatter(logging.Formatter):
         return '|'.join(parts)
 
 
+def _resolve_timezone(timezone_name: str):
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            pass
+    if timezone_name == "Asia/Shanghai":
+        return timezone(timedelta(hours=8), name="Asia/Shanghai")
+    return timezone.utc
+
+
+def _current_trace_identifiers() -> Dict[str, str]:
+    try:
+        from opentelemetry import trace
+    except ImportError:
+        return {}
+
+    span_context = trace.get_current_span().get_span_context()
+    if not span_context.is_valid:
+        return {}
+    return {
+        "trace_id": format(span_context.trace_id, "032x"),
+        "span_id": format(span_context.span_id, "016x"),
+    }
+
+
+class HydrosJsonFormatter(logging.Formatter):
+    """输出供 K3s filelog receiver 与 Loki 采集的单行 JSON。"""
+
+    def __init__(
+        self,
+        default_service_name: str = "hydros-agent",
+        default_hydros_cluster_id: Optional[str] = None,
+        default_hydros_node_id: Optional[str] = None,
+        timezone_name: Optional[str] = None,
+    ):
+        super().__init__()
+        self._timezone = _resolve_timezone(
+            timezone_name or os.getenv("HYDROS_LOG_TIMEZONE", "Asia/Shanghai")
+        )
+        self._resource_attributes = resolve_resource_attributes(
+            default_service_name=default_service_name,
+            hydros_cluster_id=default_hydros_cluster_id,
+            hydros_node_id=default_hydros_node_id,
+        )
+        self._default_hydros_cluster_id = default_hydros_cluster_id
+        self._default_hydros_node_id = default_hydros_node_id
+
+    def format(self, record: logging.LogRecord) -> str:
+        biz_scene_instance_id = get_biz_scene_instance_id()
+        biz_component = get_biz_component()
+        hydros_cluster_id = (
+            get_hydros_cluster_id()
+            or self._default_hydros_cluster_id
+            or self._resource_attributes.get("k8s.cluster.name")
+        )
+        hydros_node_id = (
+            get_hydros_node_id()
+            or self._default_hydros_node_id
+            or self._resource_attributes.get("k8s.pod.name")
+        )
+
+        payload: Dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(
+                record.created,
+                tz=self._timezone,
+            ).isoformat(timespec="milliseconds"),
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+            **self._resource_attributes,
+            **_current_trace_identifiers(),
+            "source.file": record.filename,
+            "source.function": record.funcName,
+            "source.line": record.lineno,
+        }
+        if hydros_cluster_id:
+            payload["hydros_cluster_id"] = hydros_cluster_id
+        if hydros_node_id:
+            payload["hydros_node_id"] = hydros_node_id
+        if biz_scene_instance_id:
+            payload["biz_scene_instance_id"] = biz_scene_instance_id
+        if biz_component:
+            if biz_scene_instance_id:
+                payload["agent_id"] = biz_component
+            else:
+                payload["biz_component"] = biz_component
+
+        for key, value in record.__dict__.items():
+            if (
+                key not in _LOG_RECORD_BUILTINS
+                and key not in payload
+                and not key.startswith("_")
+            ):
+                payload[key] = value
+
+        if record.exc_info:
+            exception_type = record.exc_info[0]
+            exception_value = record.exc_info[1]
+            payload["exception.type"] = (
+                exception_type.__name__ if exception_type is not None else None
+            )
+            payload["exception.message"] = str(exception_value)
+            payload["exception.stacktrace"] = self.formatException(record.exc_info)
+
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            default=str,
+            separators=(",", ":"),
+        )
+
+
 def setup_logging(
     level: int = logging.INFO,
     hydros_cluster_id: Optional[str] = None,
@@ -238,6 +366,9 @@ def setup_logging(
     console: bool = True,
     simple: bool = True,
     use_rolling: bool = False,
+    format_style: Optional[str] = None,
+    service_name: str = "hydros-agent",
+    replace_handlers: bool = True,
 ):
     """
     使用 Hydros 格式化器配置日志。
@@ -251,26 +382,50 @@ def setup_logging(
         simple: 是否使用本地开发的简化日志格式（默认 True）。
                 设置为 False 时使用完整生产格式。
         use_rolling: 日志文件是否按天滚动（默认 False）。
+        format_style: 显式格式，可选 ``simple``、``full`` 或 ``json``。
+                      未提供时继续兼容 ``simple`` 参数。
+        service_name: 未设置 ``OTEL_SERVICE_NAME`` 时写入 JSON 的应用名。
+        replace_handlers: 是否移除调用方已有的 root handlers。默认保持历史行为。
     """
     # 按模式创建 formatter
-    if simple:
+    resolved_format = (format_style or ("simple" if simple else "full")).strip().lower()
+    if resolved_format == "json":
+        formatter = HydrosJsonFormatter(
+            default_service_name=service_name,
+            default_hydros_cluster_id=hydros_cluster_id,
+            default_hydros_node_id=hydros_node_id,
+        )
+    elif resolved_format == "simple":
         formatter = HydrosSimpleFormatter()
-    else:
+    elif resolved_format == "full":
         formatter = HydrosFormatter(
             default_hydros_cluster_id=hydros_cluster_id,
             default_hydros_node_id=hydros_node_id
+        )
+    else:
+        raise ValueError(
+            "format_style must be one of: simple, full, json; "
+            f"got {resolved_format!r}"
         )
 
     # 获取 root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 移除已有 handler
-    root_logger.handlers.clear()
+    if replace_handlers:
+        root_logger.handlers.clear()
+    else:
+        for handler in list(root_logger.handlers):
+            if getattr(handler, "_hydros_sdk_handler", None):
+                root_logger.removeHandler(handler)
+                handler.close()
 
     # 添加控制台 handler
     if console:
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(
+            sys.stdout if resolved_format == "json" else None
+        )
+        console_handler._hydros_sdk_handler = "console"  # type: ignore[attr-defined]
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 
@@ -291,5 +446,6 @@ def setup_logging(
         else:
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
 
+        file_handler._hydros_sdk_handler = "file"  # type: ignore[attr-defined]
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
