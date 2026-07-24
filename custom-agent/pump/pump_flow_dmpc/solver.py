@@ -1,151 +1,150 @@
-"""不依赖 transport 或设备执行的泵站局部流量分配 solver。"""
+"""
+Call the original ODD-DMPC LocalController from standalone algorithm context.
+"""
 
 from __future__ import annotations
 
-import math
-from typing import Dict, Iterable, Mapping
+import os
+import sys
+from typing import Dict, List
+
+import pandas as pd
+import yaml
+
+# Ensure odd_dmpc is importable
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
+_ODD_DMPC_DIR = os.path.join(_PARENT_DIR, "scheduling", "odd_dmpc")
+if _ODD_DMPC_DIR not in sys.path:
+    sys.path.insert(0, _ODD_DMPC_DIR)
+
+from odd_dmpc.config import load_runtime_context_from_payload
+from odd_dmpc.environment import _boundary_plan_from_snapshot
+from odd_dmpc.flow_service import FlowDepartService
+from odd_dmpc.local_controller import LocalController, StationControlContext
+from odd_dmpc.types import (
+    ControlAction,
+    LowerFeedback,
+    StationMemory,
+    TransferBundle,
+    SystemConfig,
+)
 
 from .errors import PumpFlowDmpcError
-from .performance import PumpPerformanceRepository
-from .types import PumpFlowDmpcArguments, PumpFlowDmpcDecision, PumpUnitState
+from .types import PumpFlowDmpcArguments
 
 
 class PumpFlowDmpcSolver:
-    """以坐标下降搜索分配固定运行机组的下一步叶片角度。
+    """Bridge to original ODD-DMPC LocalController."""
 
-    这是 Python-only MVP 的局部滚动优化器：每次只给出一个可执行控制步，
-    不承担多站协调、机组启停或任何设备写入行为。
-    """
+    def __init__(self) -> None:
+        self._local_controller: LocalController | None = None
+        self._system_config: SystemConfig | None = None
+        self._flow_service: FlowDepartService | None = None
+        self._runtime = None
+        self._lower_feedback: LowerFeedback | None = None
+        self._available_units_map: Dict[int, List[int]] = {}
 
-    def __init__(self, performance: PumpPerformanceRepository) -> None:
-        self._performance = performance
-
-    def solve(self, arguments: PumpFlowDmpcArguments) -> PumpFlowDmpcDecision:
-        if abs(arguments.current_flow - arguments.target_flow) <= arguments.flow_tolerance:
-            return PumpFlowDmpcDecision(
-                station_id=arguments.station_id,
-                blade_angles={},
-                predicted_station_flow=arguments.current_flow,
-                objective=0.0,
-                completed=True,
-                reason="FLOW_TARGET_REACHED",
+    def _ensure_loaded(self, arguments: PumpFlowDmpcArguments) -> None:
+        if self._system_config is not None:
+            return
+        config_path = arguments.config_path
+        if not config_path or not os.path.exists(config_path):
+            raise PumpFlowDmpcError(
+                "CONFIG_NOT_FOUND",
+                "config path not available: %s" % config_path,
             )
-
-        angles = {
-            unit.unit_id: self._bounded_current_angle(unit, arguments)
-            for unit in arguments.units
+        with open(config_path, "r", encoding="utf-8") as f:
+            payload = yaml.safe_load(f)
+        context = load_runtime_context_from_payload(payload)
+        self._system_config = context["system_config"]
+        self._runtime = context["runtime"]
+        self._flow_service = FlowDepartService(self._system_config, config_dict=payload)
+        self._local_controller = LocalController(
+            system_config=self._system_config,
+            runtime=self._runtime,
+            flow_service=self._flow_service,
+        )
+        # Build available_units_map
+        self._available_units_map = {
+            station.id: [unit.id for unit in station.units]
+            for station in self._system_config.stations
         }
-        best_objective = self._objective(arguments, angles)
-        for _ in range(arguments.max_solver_iterations):
-            improved = False
-            for unit in arguments.units:
-                candidate_angles = self._candidate_angles(unit, arguments)
-                selected_angle = angles[unit.unit_id]
-                selected_objective = best_objective
-                for candidate_angle in candidate_angles:
-                    candidate = dict(angles)
-                    candidate[unit.unit_id] = candidate_angle
-                    objective = self._objective(arguments, candidate)
-                    if objective + 1e-12 < selected_objective:
-                        selected_angle = candidate_angle
-                        selected_objective = objective
-                if selected_angle != angles[unit.unit_id]:
-                    angles[unit.unit_id] = selected_angle
-                    best_objective = selected_objective
-                    improved = True
-            if not improved:
-                break
 
-        predicted_flow = self._predicted_station_flow(arguments, angles)
-        return PumpFlowDmpcDecision(
-            station_id=arguments.station_id,
-            blade_angles=angles,
-            predicted_station_flow=predicted_flow,
-            objective=best_objective,
-            completed=False,
-            reason="FLOW_TRACKING_ACTION",
+    def solve(self, arguments: PumpFlowDmpcArguments) -> ControlAction:
+        self._ensure_loaded(arguments)
+
+        station_id = arguments.station_id
+
+        # Build StationMemory
+        station_memory = StationMemory(
+            active_unit_ids=list(arguments.active_unit_ids),
+            unit_openings=dict(arguments.unit_openings),
+            unit_status=dict(arguments.unit_status),
+            time_since_adjust=dict(arguments.time_since_adjust),
+            time_since_switch=dict(arguments.time_since_switch),
+            last_selected_flow=float(arguments.last_selected_flow),
+            mode=arguments.mode,
         )
 
-    def _objective(
-        self,
-        arguments: PumpFlowDmpcArguments,
-        angles: Mapping[int, float],
-    ) -> float:
-        predicted_flow = self._predicted_station_flow(arguments, angles)
-        flow_error = predicted_flow - arguments.target_flow
-        movement_penalty = sum(
-            (angles[unit.unit_id] - unit.current_blade_angle) ** 2
-            for unit in arguments.units
-        )
-        objective = flow_error**2 + arguments.movement_weight * movement_penalty
-        if not math.isfinite(objective):
-            raise PumpFlowDmpcError(
-                "NON_FINITE_SOLVER_OUTPUT",
-                "pump flow objective must be finite",
-            )
-        return objective
+        # Build TransferBundle
+        ref_flow = list(arguments.reference_flow)
+        ref_front = list(arguments.reference_front_level)
+        ref_back = list(arguments.reference_back_level)
+        ref_head = list(arguments.reference_head)
 
-    def _predicted_station_flow(
-        self,
-        arguments: PumpFlowDmpcArguments,
-        angles: Mapping[int, float],
-    ) -> float:
-        predicted = sum(
-            self._performance.predict_unit_flow(
-                station_id=arguments.station_id,
-                unit_id=unit.unit_id,
-                blade_angle=angles[unit.unit_id],
-                water_head=arguments.water_head,
-            )
-            for unit in arguments.units
+        transfer_bundle = TransferBundle(
+            station_id=station_id,
+            reference_flow=ref_flow,
+            reference_back_level=ref_back,
+            reference_front_level=ref_front,
+            reference_head=ref_head,
+            active_unit_ids=list(arguments.active_unit_ids),
+            time_since_adjust=dict(arguments.time_since_adjust),
+            time_since_switch=dict(arguments.time_since_switch),
+            disturbance_estimate=dict(arguments.disturbance_estimate),
         )
-        if not math.isfinite(predicted):
-            raise PumpFlowDmpcError(
-                "NON_FINITE_SOLVER_OUTPUT",
-                "predicted station flow must be finite",
-            )
-        return predicted
 
-    @staticmethod
-    def _bounded_current_angle(
-        unit: PumpUnitState,
-        arguments: PumpFlowDmpcArguments,
-    ) -> float:
-        lower, upper = PumpFlowDmpcSolver._adjustable_range(unit, arguments)
-        return min(max(unit.current_blade_angle, lower), upper)
+        # Build or reuse boundary_level_plan
+        boundary_level_plan = arguments.boundary_level_plan
+        if boundary_level_plan is None and arguments.basin_levels:
+            try:
+                boundary_level_plan = _boundary_plan_from_snapshot(
+                    self._system_config, arguments.basin_levels
+                )
+            except Exception:
+                boundary_level_plan = pd.DataFrame()
 
-    @staticmethod
-    def _candidate_angles(
-        unit: PumpUnitState,
-        arguments: PumpFlowDmpcArguments,
-    ) -> Iterable[float]:
-        lower, upper = PumpFlowDmpcSolver._adjustable_range(unit, arguments)
-        step = arguments.candidate_angle_step
-        count = int(math.floor((upper - lower) / step))
-        candidates = [lower + index * step for index in range(count + 1)]
-        if not candidates or abs(candidates[-1] - upper) > 1e-12:
-            candidates.append(upper)
-        current = min(max(unit.current_blade_angle, lower), upper)
-        if all(abs(value - current) > 1e-12 for value in candidates):
-            candidates.append(current)
-        return tuple(sorted(set(candidates)))
-
-    @staticmethod
-    def _adjustable_range(
-        unit: PumpUnitState,
-        arguments: PumpFlowDmpcArguments,
-    ) -> tuple[float, float]:
-        lower = max(
-            unit.min_blade_angle,
-            unit.current_blade_angle - arguments.max_blade_delta_per_step,
+        # Build StationControlContext
+        station_model = self._flow_service.get_station_model(
+            station_id, arguments.available_unit_ids
         )
-        upper = min(
-            unit.max_blade_angle,
-            unit.current_blade_angle + arguments.max_blade_delta_per_step,
+
+        station_ctx = StationControlContext(
+            station_id=station_id,
+            station_model=station_model,
+            available_unit_ids=list(arguments.available_unit_ids),
+            basin_levels=dict(arguments.basin_levels),
+            basin_profiles=None,
+            pool_areas=dict(arguments.pool_areas),
+            anchor_basin_levels=dict(arguments.anchor_basin_levels),
+            boundary_nominal_flows={},
+            current_back_level=float(arguments.current_back_level),
+            current_front_level=float(arguments.current_front_level),
+            current_head=float(arguments.current_head),
+            upper_flow_refs={k: list(v) for k, v in arguments.upper_flow_refs.items()},
+            flow_history={station_id: list(arguments.flow_history)},
+            boundary_level_plan=boundary_level_plan,
+            start_time_hours=float(arguments.start_time_hours),
+            step_hours=float(arguments.step_hours),
+            demand_plan=arguments.demand_plan,
         )
-        if lower > upper:
-            raise PumpFlowDmpcError(
-                "INVALID_BLADE_ANGLE_RANGE",
-                "pump unit %s has no adjustable blade-angle range" % unit.unit_id,
-            )
-        return lower, upper
+
+        return self._local_controller.solve(
+            mode=arguments.mode,
+            station_ctx=station_ctx,
+            upstream_prediction={},
+            disturbance_forecast={},
+            transfer_bundle=transfer_bundle,
+            station_memory=station_memory,
+        )
