@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import sys
 import threading
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 
 # 直接执行 custom-agent 脚本时需要显式暴露 SDK 项目根与本应用目录。
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,67 +26,22 @@ from pump_flow_dmpc import (  # noqa: E402
     PumpFlowDmpcInputResolver,
     PumpFlowDmpcSolver,
     PumpStationFlowDmpcAlgorithm,
-    TabulatedPumpPerformanceRepository,
 )
-from pump_flow_dmpc.errors import PumpFlowDmpcError  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
 
 
-class DeferredPumpPerformanceRepository:
-    """在实际求解时才解析部署侧泵性能模型。"""
-
-    def __init__(self, model_config: Optional[Union[str, Path]]) -> None:
-        configured_path = str(model_config).strip() if model_config is not None else ""
-        self._model_config = Path(configured_path) if configured_path else None
-        self._repository: Optional[TabulatedPumpPerformanceRepository] = None
-        self._lock = threading.Lock()
-
-    def predict_unit_flow(
-        self,
-        *,
-        station_id: int,
-        unit_id: int,
-        blade_angle: float,
-        water_head: float,
-    ) -> float:
-        repository = self._resolve_repository()
-        return repository.predict_unit_flow(
-            station_id=station_id,
-            unit_id=unit_id,
-            blade_angle=blade_angle,
-            water_head=water_head,
-        )
-
-    def _resolve_repository(self) -> TabulatedPumpPerformanceRepository:
-        if self._repository is not None:
-            return self._repository
-        if self._model_config is None:
-            raise PumpFlowDmpcError(
-                "PERFORMANCE_CONFIG_UNAVAILABLE",
-                "HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG is not configured",
-            )
-        with self._lock:
-            if self._repository is None:
-                self._repository = TabulatedPumpPerformanceRepository.from_yaml(
-                    self._model_config
-                )
-            return self._repository
-
-
 def create_pump_flow_dmpc_server(
-    model_config: Optional[Union[str, Path]] = None,
     host: str = "127.0.0.1",
     port: int = 8080,
 ) -> ThreadingHTTPServer:
     """创建仅注册泵站流量 DMPC 的标准 HTTP 服务。"""
 
-    performance = DeferredPumpPerformanceRepository(model_config)
     runtime = ControlAlgorithmRuntime()
     runtime.register(
         PumpStationFlowDmpcAlgorithm(
-            solver=PumpFlowDmpcSolver(performance),
+            solver=PumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
         )
     )
@@ -98,11 +53,9 @@ class PumpFlowDmpcHttpHost:
 
     def __init__(
         self,
-        model_config: Optional[Union[str, Path]] = None,
         host: str = "0.0.0.0",
         port: int = 8015,
     ) -> None:
-        self._model_config = model_config
         self._host = host
         self._port = port
         self._server: Optional[ThreadingHTTPServer] = None
@@ -123,11 +76,7 @@ class PumpFlowDmpcHttpHost:
         if self._server is not None:
             raise RuntimeError("pump flow DMPC HTTP host is already started")
 
-        server = create_pump_flow_dmpc_server(
-            self._model_config,
-            host=self._host,
-            port=self._port,
-        )
+        server = create_pump_flow_dmpc_server(host=self._host, port=self._port)
         thread = threading.Thread(
             target=server.serve_forever,
             name="pump-flow-dmpc-http-host",
@@ -163,20 +112,15 @@ class PumpFlowDmpcHttpHost:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    """启动独立服务；模型路径由部署侧明确提供。"""
+    """启动独立服务；算法运行配置由每次请求的输入信号提供。"""
 
     parser = argparse.ArgumentParser(description="Hydros pump flow DMPC service")
-    parser.add_argument("--model-config", required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8080, type=int)
     args = parser.parse_args(argv)
 
     setup_logging()
-    server = create_pump_flow_dmpc_server(
-        args.model_config,
-        host=args.host,
-        port=args.port,
-    )
+    server = create_pump_flow_dmpc_server(host=args.host, port=args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

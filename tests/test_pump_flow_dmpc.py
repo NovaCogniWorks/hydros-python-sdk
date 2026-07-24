@@ -28,30 +28,44 @@ from pump_flow_dmpc import (  # noqa: E402
     TabulatedPumpPerformanceRepository,
 )
 from pump_flow_dmpc_service import (  # noqa: E402
-    DeferredPumpPerformanceRepository,
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
 )
+from odd_dmpc.types import ControlAction  # noqa: E402
+
+
+class StubPumpFlowDmpcSolver:
+    """Return a deterministic ODD-DMPC action without loading project data."""
+
+    def solve(self, arguments):
+        selected_flow = min(arguments.reference_flow[0], 30.0)
+        return ControlAction(
+            station_id=arguments.station_id,
+            mode=arguments.mode,
+            selected_flow=selected_flow,
+            unit_status=dict(arguments.unit_status),
+            unit_openings={
+                unit_id: min(opening + 5.0, 40.0)
+                for unit_id, opening in arguments.unit_openings.items()
+            },
+            unit_flows={
+                unit_id: selected_flow / 2
+                for unit_id in arguments.unit_openings
+            },
+            fit_score=0.95,
+            objective=1.0,
+            predicted_flow_error=selected_flow - arguments.reference_flow[0],
+            predicted_level_error=0.0,
+            predicted_back_level=5.0,
+            predicted_front_level=10.0,
+            predicted_head=5.0,
+        )
 
 
 class PumpFlowDmpcTest(unittest.TestCase):
     def setUp(self):
-        performance = TabulatedPumpPerformanceRepository(
-            {
-                (2001, 2101): (
-                    PumpFlowCurvePoint(5.0, 0.0, 0.0),
-                    PumpFlowCurvePoint(5.0, 20.0, 20.0),
-                    PumpFlowCurvePoint(5.0, 40.0, 40.0),
-                ),
-                (2001, 2102): (
-                    PumpFlowCurvePoint(5.0, 0.0, 0.0),
-                    PumpFlowCurvePoint(5.0, 20.0, 20.0),
-                    PumpFlowCurvePoint(5.0, 40.0, 40.0),
-                ),
-            }
-        )
         self.algorithm = PumpStationFlowDmpcAlgorithm(
-            solver=PumpFlowDmpcSolver(performance),
+            solver=StubPumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
         )
 
@@ -69,25 +83,30 @@ class PumpFlowDmpcTest(unittest.TestCase):
         )
         self.assertEqual("water_flow", output.results[0].value_type)
         self.assertLessEqual(output.results[0].value, 30.0)
-        self.assertIn("previous_blade_angles", output.next_state)
+        self.assertIn("unit_openings", output.next_state)
 
-    def test_completes_without_candidates_when_current_flow_is_within_tolerance(self):
+    def test_projects_solver_mode_and_selected_flow_into_next_state(self):
         output = self.algorithm.solve(self._input(target_flow=20.5, current_flow=20.0))
 
-        self.assertEqual(ControlAlgorithmStatus.COMPLETED, output.status)
-        self.assertEqual([], output.actuator_targets)
-        self.assertEqual("FLOW_TARGET_REACHED", output.reason)
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
+        self.assertEqual("ODD2", output.next_state["mode"])
+        self.assertEqual(20.5, output.next_state["selected_flow"])
 
-    def test_fails_when_required_head_signal_is_missing(self):
+    def test_fails_when_target_flow_is_missing(self):
         input_data = self._input(target_flow=30.0, current_flow=20.0)
         input_data.signals = [
-            signal for signal in input_data.signals if signal.value_type != "water_head"
+            signal
+            for signal in input_data.signals
+            if not (
+                signal.type == SignalType.TARGET
+                and signal.value_type == "water_flow"
+            )
         ]
 
         output = self.algorithm.solve(input_data)
 
         self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
-        self.assertEqual("MISSING_OR_AMBIGUOUS_SIGNAL", output.error_code)
+        self.assertEqual("MISSING_TARGET_FLOW", output.error_code)
         self.assertEqual([], output.actuator_targets)
 
     def test_loads_and_interpolates_tabulated_performance_from_yaml(self):
@@ -118,79 +137,39 @@ class PumpFlowDmpcTest(unittest.TestCase):
             ),
         )
 
-    def test_service_factory_registers_algorithm_from_yaml_config(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            config_path = os.path.join(temporary_directory, "pump-performance.yaml")
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                config_file.write(
-                    "stations:\n"
-                    "  '2001':\n"
-                    "    units:\n"
-                    "      '2101':\n"
-                    "        curve:\n"
-                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
-                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
-                    "      '2102':\n"
-                    "        curve:\n"
-                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
-                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
-                )
-            server = create_pump_flow_dmpc_server(config_path, port=0)
-            try:
-                self.assertGreater(server.server_address[1], 0)
-            finally:
-                server.server_close()
+    def test_service_factory_registers_algorithm_without_eager_config_loading(self):
+        server = create_pump_flow_dmpc_server(port=0)
+        try:
+            self.assertGreater(server.server_address[1], 0)
+        finally:
+            server.server_close()
 
-    def test_deferred_performance_repository_loads_model_on_first_prediction(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            config_path = os.path.join(temporary_directory, "pump-performance.yaml")
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                config_file.write(
-                    "stations:\n"
-                    "  '2001':\n"
-                    "    units:\n"
-                    "      '2101':\n"
-                    "        curve:\n"
-                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
-                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
-                )
-            repository = DeferredPumpPerformanceRepository(config_path)
+    def test_solver_reports_missing_runtime_config_deterministically(self):
+        algorithm = PumpStationFlowDmpcAlgorithm(
+            solver=PumpFlowDmpcSolver(),
+            resolver=PumpFlowDmpcInputResolver(),
+        )
 
-            predicted = repository.predict_unit_flow(
-                station_id=2001,
-                unit_id=2101,
-                blade_angle=10.0,
-                water_head=5.0,
-            )
+        output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
 
-            self.assertEqual(10.0, predicted)
+        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
+        self.assertEqual("CONFIG_NOT_FOUND", output.error_code)
+        self.assertEqual([], output.actuator_targets)
 
     def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            config_path = os.path.join(temporary_directory, "pump-performance.yaml")
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                config_file.write(
-                    "stations:\n"
-                    "  '2001':\n"
-                    "    units:\n"
-                    "      '2101':\n"
-                    "        curve:\n"
-                    "          - {water_head: 5.0, blade_angle: 0.0, water_flow: 0.0}\n"
-                    "          - {water_head: 5.0, blade_angle: 20.0, water_flow: 20.0}\n"
-                )
-            host = PumpFlowDmpcHttpHost(config_path, host="127.0.0.1", port=0)
+        host = PumpFlowDmpcHttpHost(host="127.0.0.1", port=0)
 
-            host.start()
-            try:
-                self.assertIsNotNone(host.server_address)
-                self.assertGreater(host.server_address[1], 0)
-            finally:
-                host.stop()
+        host.start()
+        try:
+            self.assertIsNotNone(host.server_address)
+            self.assertGreater(host.server_address[1], 0)
+        finally:
+            host.stop()
 
-            self.assertIsNone(host.server_address)
+        self.assertIsNone(host.server_address)
 
-    def test_managed_http_host_without_model_returns_dependency_failure(self):
-        host = PumpFlowDmpcHttpHost("", host="127.0.0.1", port=0)
+    def test_managed_http_host_returns_missing_request_config_failure(self):
+        host = PumpFlowDmpcHttpHost(host="127.0.0.1", port=0)
         host.start()
         try:
             endpoint = (
@@ -208,7 +187,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
             self.assertEqual(200, response.status)
             self.assertEqual("FAILED", payload["status"])
-            self.assertEqual("PERFORMANCE_CONFIG_UNAVAILABLE", payload["error_code"])
+            self.assertEqual("CONFIG_NOT_FOUND", payload["error_code"])
             self.assertEqual([], payload["actuator_targets"])
         finally:
             host.stop()
@@ -275,8 +254,26 @@ class PumpFlowDmpcTest(unittest.TestCase):
                     type=SignalType.OBSERVATION,
                     object_type="PumpStation",
                     object_id=2001,
-                    value_type="water_head",
-                    value=5.0,
+                    value_type="station_memory",
+                    attributes={
+                        "mode": "ODD2",
+                        "last_selected_flow": current_flow,
+                        "active_unit_ids": [2101, 2102],
+                    },
+                ),
+                ControlSignal(
+                    type=SignalType.REFERENCE,
+                    object_type="PumpStation",
+                    object_id=2001,
+                    value_type="station_front_water_level",
+                    series=[10.0],
+                ),
+                ControlSignal(
+                    type=SignalType.REFERENCE,
+                    object_type="PumpStation",
+                    object_id=2001,
+                    value_type="station_back_water_level",
+                    series=[5.0],
                 ),
             ],
             actuators=[

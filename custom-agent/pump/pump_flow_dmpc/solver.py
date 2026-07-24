@@ -11,12 +11,13 @@ from typing import Dict, List
 import pandas as pd
 import yaml
 
-# Ensure odd_dmpc is importable
+# ``odd_dmpc`` is a package below ``scheduling``. Python needs the package's
+# parent directory on ``sys.path`` when this standalone application is loaded.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-_ODD_DMPC_DIR = os.path.join(_PARENT_DIR, "scheduling", "odd_dmpc")
-if _ODD_DMPC_DIR not in sys.path:
-    sys.path.insert(0, _ODD_DMPC_DIR)
+_SCHEDULING_DIR = os.path.join(_PARENT_DIR, "scheduling")
+if _SCHEDULING_DIR not in sys.path:
+    sys.path.insert(0, _SCHEDULING_DIR)
 
 from odd_dmpc.config import load_runtime_context_from_payload
 from odd_dmpc.environment import _boundary_plan_from_snapshot

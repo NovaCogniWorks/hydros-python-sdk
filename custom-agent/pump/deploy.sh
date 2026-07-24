@@ -70,12 +70,11 @@ ${APP_NAME} Python 部署脚本
   --debug-port <port>  额外暴露调试端口
   --log-volume <name>  覆盖日志 volume，默认: ${LOG_VOLUME}
   --start-args <args>  覆盖容器启动 agent 参数，默认: ${DEFAULT_AGENT_START_ARGS}
-  KEY=VALUE            追加传入容器的环境变量；可选提供算法模型：
-                       HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=<容器内模型路径>
+  KEY=VALUE            追加传入容器的环境变量
 
 示例:
   $0 deploy --target-host 192.168.20.51 --target-port 2375
-  $0 deploy --target-host 192.168.20.51 --tag v1.0.1 --start-args "outflowplan scheduling" HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG=/opt/hydros/custom-agent/pump/data/pump-performance.yaml
+  $0 deploy --target-host 192.168.20.51 --tag v1.0.1 --start-args "outflowplan scheduling"
   $0 build-image --tag v1.0.1
 USAGE
     exit "${exit_code}"
@@ -271,8 +270,7 @@ add_default_runtime_env() {
         MQTT_BROKER_PORT \
         MQTT_TOPIC \
         MQTT_USERNAME \
-        MQTT_PASSWORD \
-        HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG; do
+        MQTT_PASSWORD; do
         if [ -n "${!name:-}" ]; then
             RUNTIME_ENV_OVERRIDES+=("${name}=${!name}")
         fi
