@@ -56,17 +56,26 @@ class PumpFlowDmpcInputResolver:
         last_selected_flow = float(st_mem_attr.get("last_selected_flow", 0.0))
         active_unit_ids = list(st_mem_attr.get("active_unit_ids", []))
 
-        # ---- available units (from actuators inside range) ----
+        # ---- available units: include ALL station units, let LocalController decide start/stop ----
+        # Determine which unit IDs belong to this station
+        station_unit_ids: List[int] = list(active_unit_ids)  # from station_memory
+        if not station_unit_ids:
+            # fallback: derive from unit ID pattern (station_id + 1 .. station_id + 99)
+            lo = station_id + 1
+            hi = station_id + 99
+            station_unit_ids = [uid for uid in [a.object_id for a in input_data.actuators if a.object_type == "Pump"] if lo <= uid <= hi]
+
         available_unit_ids: List[int] = []
         unit_openings: Dict[int, float] = {}
         unit_status: Dict[int, int] = {}
         time_since_adjust: Dict[int, int] = {}
         time_since_switch: Dict[int, int] = {}
 
-        for actuator in input_data.actuators:
-            if actuator.object_type != "Pump" or not actuator.available:
+        actuator_by_id = {a.object_id: a for a in input_data.actuators if a.object_type == "Pump"}
+        for uid in station_unit_ids:
+            actuator = actuator_by_id.get(uid)
+            if actuator is None or not actuator.available:
                 continue
-            uid = actuator.object_id
             blade = actuator.values.get("blade_angle")
             blade_range = actuator.ranges.get("blade_angle") if actuator.ranges else None
             if blade is None or blade_range is None:
@@ -75,14 +84,13 @@ class PumpFlowDmpcInputResolver:
             min_val = float(blade_range.min_value) if blade_range.min_value is not None else -7.0
             max_val = float(blade_range.max_value) if blade_range.max_value is not None else 5.0
             # blade_angle=100 means stopped
-            in_range = min_val <= blade_val <= max_val
-            if in_range:
-                available_unit_ids.append(uid)
-                unit_openings[uid] = blade_val
-                unit_status[uid] = 1
+            running = min_val <= blade_val <= max_val
+            available_unit_ids.append(uid)
+            unit_openings[uid] = blade_val if running else 0.0
+            unit_status[uid] = 1 if running else 0
 
         # ---- per-unit memory from unit_memory signals ----
-        for uid in list(available_unit_ids):
+        for uid in list(station_unit_ids):
             um = _get_attr("OBSERVATION", "Pump", uid, "unit_memory")
             if um:
                 unit_status[uid] = int(um.get("unit_status", unit_status.get(uid, 1)))
