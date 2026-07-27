@@ -96,7 +96,7 @@ class HydroSimInputFileResolver:
         return str(target_path.resolve())
 
 
-class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
+class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
     电站 HydroSim 集中调度智能体。
 

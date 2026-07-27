@@ -48,7 +48,7 @@ def _build_agent(module, scene_id: str):
         enqueue=enqueued.append,
     )
     context = SimulationContext(biz_scene_instance_id=scene_id)
-    agent = module.PumpCentralSchedulingAgent(
+    agent = module.PowerCentralSchedulingAgent(
         sim_coordination_client=client,
         agent_id=f"{scene_id}-agent",
         agent_code="CENTRAL_SCHEDULING_AGENT_POWER",
