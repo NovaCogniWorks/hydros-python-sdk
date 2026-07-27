@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
+STATION_DIVERSION_FLOW_SERIES_KEY = "diversion_flow_time_series"
 
 
 class HydroSimInputFileResolver:
@@ -501,6 +502,12 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                 metrics_code=DeviceValueTypeEnum.WATER_FLOW.code,
                 step=step,
             )
+            station_diversion_flow = self._resolve_station_diversion_flow(
+                station_series=station_series,
+                station_id=station_id,
+                step=step,
+                gate_flow=station_diversion_flow,
+            )
             station_efficiency = self._sum_device_metric_for_station_step(
                 device_series=device_series,
                 station_id=station_id,
@@ -552,6 +559,24 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
                     )
                 )
         return predicted_results
+
+    def _resolve_station_diversion_flow(
+        self,
+        station_series: List[Dict[str, Any]],
+        station_id: int,
+        step: int,
+        gate_flow: Optional[float],
+    ) -> Optional[float]:
+        for station in station_series:
+            if int(station.get("node_id", -1)) != int(station_id):
+                continue
+            row = self._get_series_row_for_step(
+                station.get(STATION_DIVERSION_FLOW_SERIES_KEY, []),
+                step,
+            )
+            if row is not None:
+                return float(row["value"])
+        return gate_flow
 
     def _build_station_device_results(
         self,

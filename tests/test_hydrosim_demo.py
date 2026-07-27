@@ -281,6 +281,7 @@ class HydroSimDemoTest(unittest.TestCase):
         self.assertIn("station_power_series", planning_result)
         self.assertEqual(len(planning_result["station_power_series"]), 4)
         self.assertEqual(planning_result["station_power_series"][0]["time_series"][0]["step"], 0)
+        self.assertTrue(planning_result["station_power_series"][0]["diversion_flow_time_series"])
 
         first_step = api.execute_step(
             current_step_power_planning_values=[
@@ -296,6 +297,7 @@ class HydroSimDemoTest(unittest.TestCase):
         self.assertEqual(first_step["current_step_power_planning_values"][0]["value"], 88.0)
         self.assertEqual(first_step["current_step_power_planning_values"][0]["object_id"], 20100)
         self.assertIsInstance(first_step["station_step_outputs"][0]["power"], float)
+        self.assertIsInstance(first_step["station_step_outputs"][0]["diversion_flow"], float)
 
         second_step = api.execute_step()
         self.assertEqual(second_step["current_step_index"], 1)

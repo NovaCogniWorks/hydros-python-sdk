@@ -395,9 +395,19 @@ class HydroSimulationApi:
                     "station": station["station"],
                     "step": int(row["step"]),
                     "power": self._normalize_output_value(row["value"]),
+                    "diversion_flow": self._series_value_for_step(
+                        station.get("diversion_flow_time_series", []),
+                        int(row["step"]),
+                    ),
                 }
             )
         return station_step_outputs
+
+    def _series_value_for_step(self, series: List[Dict[str, Any]], step: int) -> float | None:
+        for row in series:
+            if int(row.get("step", -1)) == step:
+                return self._normalize_output_value(row["value"])
+        return None
 
     def _normalize_current_step_power_planning_values(
         self,
@@ -556,7 +566,11 @@ class HydroSimulationApi:
             multi_stair=multi_stair,
         )
 
-        station_power_series = self._build_station_power_series_from_runtime(steps, multi_stair)
+        station_power_series = self._build_station_power_series_from_runtime(
+            steps,
+            multi_stair,
+            multi_reservoir,
+        )
         generated_event = self._merge_event_with_power_plan(
             merged_event,
             {"object_time_series": self._station_power_series_to_event_items(station_power_series)},
@@ -584,12 +598,18 @@ class HydroSimulationApi:
         power_cmd = np.clip(flows * power_per_flow, 0.0, max_total_power)
         return np.where(power_cmd > 1e-6, np.maximum(power_cmd, min_positive_power), 0.0)
 
-    def _build_station_power_series_from_runtime(self, steps: Any, multi_stair: Any) -> List[Dict[str, Any]]:
+    def _build_station_power_series_from_runtime(
+        self,
+        steps: Any,
+        multi_stair: Any,
+        multi_reservoir: Any,
+    ) -> List[Dict[str, Any]]:
         station_names = hydrosim_config.build_station_name_map()
         result: List[Dict[str, Any]] = []
         for node_id in hydrosim_config.STATION_NODE_IDS:
             station_idx = hydrosim_config.NODE_TO_INDEX[node_id]
             station = multi_stair.multi_stair[station_idx]
+            reservoir = multi_reservoir.Capacity_Stairs[station_idx]
             result.append(
                 {
                     "node_id": int(node_id),
@@ -597,6 +617,10 @@ class HydroSimulationApi:
                     "time_series": [
                         {"step": int(step), "value": self._normalize_output_value(value)}
                         for step, value in zip(steps, station.history["current_power"])
+                    ],
+                    "diversion_flow_time_series": [
+                        {"step": int(step), "value": self._normalize_output_value(value)}
+                        for step, value in zip(steps, reservoir.history["current_outflow_discharge"])
                     ],
                 }
             )
@@ -758,12 +782,16 @@ class HydroSimulationApi:
         for node_id in hydrosim_config.STATION_NODE_IDS:
             station_idx = hydrosim_config.NODE_TO_INDEX[node_id]
             station = step_runtime.multi_stair.multi_stair[station_idx]
+            reservoir = step_runtime.multi_reservoir.Capacity_Stairs[station_idx]
             outputs.append(
                 {
                     "node_id": int(node_id),
                     "station": str(station.name),
                     "step": int(target_step),
                     "power": self._normalize_output_value(station.history["current_power"][-1]),
+                    "diversion_flow": self._normalize_output_value(
+                        reservoir.history["current_outflow_discharge"][-1]
+                    ),
                 }
             )
         return outputs
@@ -1138,6 +1166,10 @@ class HydroSimulationApi:
         with open(yaml_path, "r", encoding="utf-8") as handle:
             payload = yaml.safe_load(handle) or {}
 
+        diversion_series_by_node = self._extract_station_metric_series(
+            payload,
+            self.service.core.result_factory.STATION_DIVERSION_FLOW_METRIC,
+        )
         station_power_plan_used = payload.get("station_power_plan_used") or []
         if station_power_plan_used:
             return [
@@ -1148,6 +1180,7 @@ class HydroSimulationApi:
                         {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
                         for row in item.get("time_series", [])
                     ],
+                    "diversion_flow_time_series": diversion_series_by_node.get(int(item["node_id"]), []),
                 }
                 for item in station_power_plan_used
             ]
@@ -1171,8 +1204,27 @@ class HydroSimulationApi:
                         {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
                         for row in item.get("time_series", [])
                     ],
+                    "diversion_flow_time_series": diversion_series_by_node.get(node_id, []),
                 }
             )
+        return result
+
+    def _extract_station_metric_series(
+        self,
+        payload: Dict[str, Any],
+        metrics_code: str,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        result: Dict[int, List[Dict[str, Any]]] = {}
+        for item in payload.get("object_time_series", []) or []:
+            if item.get("object_type") != "Station" or item.get("metrics_code") != metrics_code:
+                continue
+            object_ids = self._extract_identity_object_ids(item)
+            if len(object_ids) != 1:
+                continue
+            result[object_ids[0]] = [
+                {"step": int(row["step"]), "value": self._normalize_output_value(row["value"])}
+                for row in item.get("time_series", [])
+            ]
         return result
 
     def _extract_device_output_series_from_yaml(self, yaml_path: str) -> List[Dict[str, Any]]:

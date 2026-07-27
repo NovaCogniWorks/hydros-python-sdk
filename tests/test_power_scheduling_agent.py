@@ -775,6 +775,39 @@ def test_power_scheduling_report_includes_station_predicted_aggregates():
     assert gate_attributes["efficiency"] is None
 
 
+def test_power_scheduling_report_uses_station_diversion_flow_without_gate_devices():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-station-spill-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        step_runtime=SimpleNamespace(
+            merged_event={"object_time_series": []},
+            target_stage_by_node={20300: [658.0, 658.0, 658.0]},
+        )
+    )
+
+    predicted_results = agent._build_station_predicted_results(
+        device_series=[],
+        station_series=[
+            {
+                "node_id": 20300,
+                "station": "Station-20300",
+                "time_series": [{"step": 2, "value": 262.0}],
+                "diversion_flow_time_series": [{"step": 2, "value": 31.5}],
+            }
+        ],
+        step=2,
+    )
+
+    gate_result = next(
+        item for item in predicted_results if item.object_type == POWER_STATION_GATE
+    )
+    predicted_values = {
+        item.value_type: item.value for item in gate_result.predicted_value_list
+    }
+    assert gate_result.target_value.value == 31.5
+    assert predicted_values["diversion_flow"] == 31.5
+
+
 def test_power_scheduling_optimization_falls_back_to_station_series_when_turbine_series_missing():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-station-fallback-001")
@@ -978,6 +1011,10 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
         SimpleNamespace(name="Station-20500", history={"current_power": []}),
         SimpleNamespace(name="Station-20700", history={"current_power": []}),
     ]
+    reservoirs = [
+        SimpleNamespace(history={"current_outflow_discharge": []})
+        for _ in stations
+    ]
     step_runtime = hydrosim_api.HydroSimulationStepRuntime(
         merged_event={"object_time_series": []},
         initial_states={},
@@ -998,7 +1035,7 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
         ],
         device_names={20304: "Turbine-20304", 20101: "Gate-20101"},
         multi_river=SimpleNamespace(),
-        multi_reservoir=SimpleNamespace(),
+        multi_reservoir=SimpleNamespace(Capacity_Stairs=reservoirs),
         multi_stair=SimpleNamespace(multi_stair=stations),
     )
     api._session = hydrosim_api.HydroSimulationSession(
@@ -1032,12 +1069,15 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
         stations[1].history["current_power"].append(180.0)
         stations[2].history["current_power"].append(210.0)
         stations[3].history["current_power"].append(90.0)
+        for reservoir, spill_flow in zip(reservoirs, (12.0, 8.0, 4.0, 2.0)):
+            reservoir.history["current_outflow_discharge"].append(spill_flow)
 
     api._execute_runtime_step = Mock(side_effect=_fake_execute_runtime_step)
 
     result = api.execute_step(step_index=0)
 
     assert result["station_step_outputs"][0]["power"] == 1160.0
+    assert result["station_step_outputs"][0]["diversion_flow"] == 12.0
     device_metrics = {
         (item["object_id"], item["metrics_code"]): item["value"]
         for item in result["device_step_outputs"]
@@ -1056,6 +1096,10 @@ def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
         SimpleNamespace(name="Station-20300", history={"current_power": []}),
         SimpleNamespace(name="Station-20500", history={"current_power": []}),
         SimpleNamespace(name="Station-20700", history={"current_power": []}),
+    ]
+    reservoirs = [
+        SimpleNamespace(history={"current_outflow_discharge": []})
+        for _ in stations
     ]
     step_runtime = hydrosim_api.HydroSimulationStepRuntime(
         merged_event={"object_time_series": []},
@@ -1077,7 +1121,7 @@ def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
         ],
         device_names={20304: "Turbine-20304", 20101: "Gate-20101"},
         multi_river=SimpleNamespace(),
-        multi_reservoir=SimpleNamespace(),
+        multi_reservoir=SimpleNamespace(Capacity_Stairs=reservoirs),
         multi_stair=SimpleNamespace(multi_stair=stations),
     )
     api._session = hydrosim_api.HydroSimulationSession(
@@ -1110,6 +1154,11 @@ def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
         stations[1].history["current_power"].append(180.987654321)
         stations[2].history["current_power"].append(210.222222222)
         stations[3].history["current_power"].append(90.333333333)
+        for reservoir, spill_flow in zip(
+            reservoirs,
+            (12.123456789, 8.987654321, 4.222222222, 2.333333333),
+        ):
+            reservoir.history["current_outflow_discharge"].append(spill_flow)
 
     api._execute_runtime_step = Mock(side_effect=_fake_execute_runtime_step)
 
@@ -1123,12 +1172,18 @@ def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():
         item["node_id"]: item["power"]
         for item in result["station_step_outputs"]
     }
+    station_spill_metrics = {
+        item["node_id"]: item["diversion_flow"]
+        for item in result["station_step_outputs"]
+    }
     planning_values = {
         item["object_id"]: item["value"]
         for item in result["current_step_power_planning_values"]
     }
     assert station_metrics[20100] == 1160.123457
     assert station_metrics[20300] == 180.987654
+    assert station_spill_metrics[20100] == 12.123457
+    assert station_spill_metrics[20300] == 8.987654
     assert planning_values[20100] == 1160.123457
     assert planning_values[20300] == 180.987654
     assert device_metrics[(20304, "output_power")] == 87.123457

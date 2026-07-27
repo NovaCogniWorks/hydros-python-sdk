@@ -21,6 +21,8 @@ from .types import (
 class HydroSimulationResultFactory:
     """负责仿真结果的导出、汇总与结果对象构造。"""
 
+    STATION_DIVERSION_FLOW_METRIC = "diversion_flow"
+
     def __init__(self, runtime: Any | None = None) -> None:
         self.runtime = runtime or default_runtime
         self.version = self.runtime.__version__
@@ -232,7 +234,12 @@ class HydroSimulationResultFactory:
             )
 
         for node_id in self.runtime.STATION_NODE_IDS:
-            for metric in ("water_level", "water_flow", "output_power"):
+            for metric in (
+                "water_level",
+                "water_flow",
+                "output_power",
+                self.STATION_DIVERSION_FLOW_METRIC,
+            ):
                 key = ((node_id,), metric)
                 if key in seen_station_keys:
                     continue
@@ -578,6 +585,8 @@ class HydroSimulationResultFactory:
             return multi_stair.multi_stair[idx].history["current_power"]
         if metric == "outflow":
             return multi_reservoir.Capacity_Stairs[idx].history["current_outflow"]
+        if metric == self.STATION_DIVERSION_FLOW_METRIC:
+            return multi_reservoir.Capacity_Stairs[idx].history["current_outflow_discharge"]
         raise ValueError(f"不支持的 Station 指标: {metric}")
 
     def _control_domain_device_series(
