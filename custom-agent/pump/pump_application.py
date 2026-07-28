@@ -38,10 +38,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type=int,
         default=int(os.getenv("HYDROS_CONTROL_ALGORITHM_HTTP_PORT", "8015")),
     )
-    parser.add_argument(
-        "--pump-flow-model-config",
-        default=os.getenv("HYDROS_PUMP_FLOW_DMPC_MODEL_CONFIG", ""),
-    )
     parser.add_argument("launcher_args", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
 
@@ -52,7 +48,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     launcher_dir = os.path.abspath(options.launcher_dir)
     log_dir = os.path.join(launcher_dir, "logs")
     algorithm_host = PumpFlowDmpcHttpHost(
-        model_config=options.pump_flow_model_config,
         host=options.control_algorithm_host,
         port=options.control_algorithm_port,
     )

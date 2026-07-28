@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import pandas as pd
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Mapping
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
@@ -976,7 +976,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 object_type=HydroObjectType.PUMP_STATION.value,
                 object_id=sid,
                 value_type='disturbance_estimate',
-                attributes=dict(_shared_observer_est) if isinstance(_shared_observer_est, dict) else {},
+                attributes=self._serialize_disturbance_estimate(_shared_observer_est),
             ))
             algo_inputs.append(ControlSignal(
                 type=SignalType.OBSERVATION,
@@ -1095,6 +1095,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.info(f"停机总次数: {self.total_shutdown_count}")
 
         return commands
+
+    @staticmethod
+    def _serialize_disturbance_estimate(
+        estimates: Mapping[int, float],
+    ) -> Dict[str, float]:
+        """将内部 pool ID 映射转换为 ControlSignal 可序列化的 attributes。"""
+        return {
+            str(pool_id): float(value)
+            for pool_id, value in estimates.items()
+        }
 
     @staticmethod
     def _build_station_flow_control_commands(

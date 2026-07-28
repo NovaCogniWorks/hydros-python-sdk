@@ -48,7 +48,7 @@ def _build_agent(module, scene_id: str):
         enqueue=enqueued.append,
     )
     context = SimulationContext(biz_scene_instance_id=scene_id)
-    agent = module.PumpCentralSchedulingAgent(
+    agent = module.PowerCentralSchedulingAgent(
         sim_coordination_client=client,
         agent_id=f"{scene_id}-agent",
         agent_code="CENTRAL_SCHEDULING_AGENT_POWER",
@@ -350,8 +350,19 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     agent.on_tick_simulation(TickCmdRequest(command_id="tick-001", context=context, step=1, broadcast=False))
     assert len(enqueued) == 1
     first_report = enqueued[0]
+    assert len(first_report.mpc_prediction_results) == 1
     assert first_report.mpc_prediction_results[0].step == 1
-    assert {detail.horizon_step for detail in first_report.mpc_prediction_results[0].details} == set(range(1, 11))
+    first_details = first_report.mpc_prediction_results[0].details
+    assert {detail.horizon_step for detail in first_details} == set(range(1, 11))
+    first_details_by_object = {}
+    for detail in first_details:
+        key = (detail.object_id, detail.command_type)
+        first_details_by_object.setdefault(key, []).append(detail.horizon_step)
+    assert first_details_by_object
+    assert all(
+        sorted(horizon_steps) == list(range(1, 11))
+        for horizon_steps in first_details_by_object.values()
+    )
     assert agent._rolling_window_start_step == 1
     assert agent._rolling_window_end_step == 10
 
@@ -363,11 +374,71 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     agent.on_tick_simulation(TickCmdRequest(command_id="tick-011", context=context, step=11, broadcast=False))
     assert len(enqueued) == 2
     second_report = enqueued[1]
+    assert len(second_report.mpc_prediction_results) == 1
     assert second_report.mpc_prediction_results[0].step == 11
     assert {detail.horizon_step for detail in second_report.mpc_prediction_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
     assert agent._control_command_dispatcher.dispatch.call_count == 2
+
+
+def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-96-steps")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=10,
+        start_step=0,
+        current_step=0,
+        total_steps=96,
+    )
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(return_value=task_state),
+        get_roll_steps=lambda: 10,
+    )
+    agent._hydrosim_api._session = _build_session(96)
+    agent._hydrosim_api.execute_step = Mock(side_effect=lambda step_index: _build_step_result(step_index))
+
+    for step in range(96):
+        agent.on_tick_simulation(
+            TickCmdRequest(command_id=f"tick-{step:03d}", context=context, step=step, broadcast=False)
+        )
+
+    assert len(enqueued) == 10
+    assert [report.mpc_prediction_results[0].step for report in enqueued] == list(range(0, 96, 10))
+
+    details_per_object = {}
+    detail_counts_per_batch = []
+    for report in enqueued:
+        assert len(report.mpc_prediction_results) == 1
+        result = report.mpc_prediction_results[0]
+        detail_counts_per_batch.append(len(result.details))
+        for detail in result.details:
+            key = (detail.object_id, detail.command_type)
+            absolute_step = result.step + detail.horizon_step - 1
+            details_per_object.setdefault(key, []).append(absolute_step)
+
+    assert detail_counts_per_batch == ([40] * 9) + [24]
+    assert details_per_object
+    assert all(steps == list(range(96)) for steps in details_per_object.values())
+
+
+def test_power_scheduling_total_steps_uses_runtime_axis_instead_of_sampled_output_rows():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-runtime-axis")
+    agent._hydrosim_api._session = SimpleNamespace(
+        step_runtime=SimpleNamespace(steps=list(range(96))),
+        latest_station_power_series=[
+            {
+                "time_series": [
+                    {"step": step, "value": 100.0}
+                    for step in (0, 15, 30, 45, 60, 75, 90, 95)
+                ]
+            }
+        ],
+    )
+
+    assert agent._resolve_total_steps() == 96
 
 
 def test_power_scheduling_time_series_update_activates_window_anchor():
@@ -411,6 +482,88 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 1
     assert kwargs["current_step_metrics"] == []
+
+
+def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-weather-rolling")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=10,
+        start_step=1,
+        current_step=21,
+        total_steps=96,
+    )
+    agent._local_mpc_task_state = task_state
+    agent._mpc_rolling_runtime = SimpleNamespace(
+        require_mpc_task_state=Mock(side_effect=RuntimeError("local task state")),
+        get_roll_steps=lambda: 10,
+        configured_mpc_config_url="mpc.yaml",
+        configured_target_and_constrain_config_url="control.yaml",
+    )
+    agent._hydrosim_api._session = _build_session(96)
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+    agent._rolling_window_start_step = 21
+    agent._rolling_window_end_step = 30
+    agent._rolling_window_dataset = [Mock()]
+
+    agent.on_time_series_data_update(
+        TimeSeriesDataUpdateRequest(
+            command_id="weather-update-001",
+            context=context,
+            time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WEATHER_FORECAST",
+                auto_schedule_at_step=0,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20000,
+                        object_type="UnifiedCanal",
+                        object_name="sm-pbg",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=0, value=2534.0)],
+                    )
+                ],
+            ),
+            broadcast=False,
+        )
+    )
+
+    assert task_state.start_step == 21
+    assert task_state.current_step == 21
+    _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
+    assert kwargs["current_step"] == 21
+    assert agent._rolling_window_start_step == 21
+    assert agent._rolling_window_end_step == 30
+    assert len(enqueued) == 1
+    assert len(enqueued[0].mpc_prediction_results) == 1
+    assert enqueued[0].mpc_prediction_results[0].step == 21
+    assert {detail.horizon_step for detail in enqueued[0].mpc_prediction_results[0].details} == set(range(1, 11))
+
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(21))
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-after-weather-021", context=context, step=21, broadcast=False)
+    )
+
+    assert agent._rolling_window_start_step == 21
+    assert agent._rolling_window_end_step == 30
+    assert len(enqueued) == 1
+
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(31))
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-after-weather-031", context=context, step=31, broadcast=False)
+    )
+
+    assert agent._rolling_window_start_step == 31
+    assert agent._rolling_window_end_step == 40
+    assert len(enqueued) == 2
+    assert len(enqueued[1].mpc_prediction_results) == 1
+    assert enqueued[1].mpc_prediction_results[0].step == 31
 
 
 def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimization():

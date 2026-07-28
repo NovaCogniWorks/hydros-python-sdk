@@ -15,9 +15,105 @@ if POWER_MPC_DIR not in sys.path:
 
 from hydrosim_api import HydroSimulationApi
 from hydrosim.input_resolver import HydroSimulationInputResolver
+from hydrosim.runtime import _upstream_inflow_series
 
 
 class TestPowerHydroSimInflowPlanning(unittest.TestCase):
+    def test_weather_forecast_unified_canal_overrides_station_inflow(self):
+        base_event = {
+            "object_time_series": [
+                {
+                    "object_id": 20100,
+                    "object_type": "Station",
+                    "metrics_code": "water_flow",
+                    "time_series": [
+                        {"step": 0, "value": 1200.0},
+                        {"step": 1, "value": 1210.0},
+                    ],
+                }
+            ]
+        }
+        weather_event = {
+            "object_time_series": [
+                {
+                    "object_id": 20000,
+                    "object_type": "UnifiedCanal",
+                    "metrics_code": "water_flow",
+                    "time_series": [
+                        {"step": 0, "value": 2534.0},
+                        {"step": 1, "value": 2451.0},
+                    ],
+                },
+            ]
+        }
+        merged_event = HydroSimulationApi()._merge_event_with_updates(base_event, weather_event)
+
+        inflow = _upstream_inflow_series(merged_event, steps=[0, 1], initial_states={})
+
+        self.assertEqual(inflow.tolist(), [2534.0, 2451.0])
+        self.assertFalse(
+            any(item.get("object_type") == "UnifiedCanal" for item in merged_event["object_time_series"])
+        )
+
+    def test_current_station_measurement_overrides_weather_value_for_current_step(self):
+        api = HydroSimulationApi()
+        base_event = {
+            "object_time_series": [
+                {
+                    "object_id": 20100,
+                    "object_type": "Station",
+                    "metrics_code": "water_flow",
+                    "time_series": [{"step": 0, "value": 1200.0}, {"step": 1, "value": 1210.0}],
+                }
+            ]
+        }
+        weather_event = {
+            "object_time_series": [
+                {
+                    "object_id": 20000,
+                    "object_type": "UnifiedCanal",
+                    "metrics_code": "water_flow",
+                    "time_series": [{"step": 0, "value": 2534.0}, {"step": 1, "value": 2451.0}],
+                }
+            ]
+        }
+        merged_event = api._merge_event_with_updates(base_event, weather_event)
+        merged_event = api._overlay_current_step_metrics(
+            merged_event,
+            current_step=0,
+            current_step_metrics=[
+                {
+                    "object_id": 20100,
+                    "object_type": "Station",
+                    "metrics_code": "water_flow",
+                    "value": 1300.0,
+                }
+            ],
+        )
+
+        inflow = _upstream_inflow_series(merged_event, steps=[0, 1], initial_states={})
+
+        self.assertEqual(inflow.tolist(), [1300.0, 2451.0])
+
+    def test_station_inflow_remains_supported_without_weather_forecast(self):
+        event = {
+            "object_time_series": [
+                {
+                    "object_id": 20100,
+                    "object_type": "Station",
+                    "metrics_code": "water_flow",
+                    "time_series": [
+                        {"step": 0, "value": 1200.0},
+                        {"step": 1, "value": 1210.0},
+                    ],
+                }
+            ]
+        }
+
+        inflow = _upstream_inflow_series(event, steps=[0, 1], initial_states={})
+
+        self.assertEqual(inflow.tolist(), [1200.0, 1210.0])
+
     def test_inflow_planning_generates_station_power_and_device_outputs(self):
         api = HydroSimulationApi()
         resolver = HydroSimulationInputResolver()

@@ -97,7 +97,7 @@ class HydroSimInputFileResolver:
         return str(target_path.resolve())
 
 
-class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
+class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
     """
     电站 HydroSim 集中调度智能体。
 
@@ -301,19 +301,29 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         return task_state
 
     def _activate_mpc_task_state_from_event(self, event: Any, step: Optional[int] = None) -> MpcTaskState:
+        existing_task_state = self._peek_mpc_task_state()
         current_step = step
+        if existing_task_state is not None and int(existing_task_state.current_step) >= 0:
+            current_step = max(int(existing_task_state.current_step), int(step) if step is not None else 0)
         event_step = getattr(event, "auto_schedule_at_step", None)
         if event_step is not None and int(event_step) >= 0:
-            current_step = int(event_step)
+            current_step = max(int(event_step), int(current_step) if current_step is not None else 0)
         if current_step is None:
             current_step = 0
 
+        creates_local_task_state = existing_task_state is None and self._local_mpc_task_state is None
         task_state = self._ensure_mpc_task_state(current_step)
-        if self._local_mpc_task_state is task_state:
+        if creates_local_task_state and self._local_mpc_task_state is task_state:
             task_state.start_step = current_step
         if event is not None:
             task_state.register_hydro_event(event)
         return task_state
+
+    def _peek_mpc_task_state(self) -> Optional[MpcTaskState]:
+        try:
+            return self._mpc_rolling_runtime.require_mpc_task_state()
+        except Exception:
+            return self._local_mpc_task_state
 
     def _resolve_roll_steps(self) -> int:
         runtime = getattr(self, "_mpc_rolling_runtime", None)
@@ -332,6 +342,10 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
         session = getattr(self._hydrosim_api, "_session", None)
         if session is None:
             return 0
+        step_runtime = getattr(session, "step_runtime", None)
+        runtime_steps = getattr(step_runtime, "steps", None)
+        if runtime_steps is not None:
+            return len(runtime_steps)
         return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
 
     def _resolve_window_range(self, step: int, task_state: MpcTaskState) -> Tuple[int, int]:
@@ -359,6 +373,14 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     def _refresh_rolling_window_dataset(self, step: int, task_state: MpcTaskState) -> None:
         window_start, window_end = self._resolve_window_range(step, task_state)
         horizon_steps = self._build_window_horizon_steps(window_start, window_end)
+        if not horizon_steps:
+            logger.warning(
+                "Skip empty MPC rolling report: triggerStep=%s, window=%s-%s, totalSteps=%s",
+                step,
+                window_start,
+                window_end,
+                task_state.total_steps,
+            )
         self._rolling_window_start_step = window_start
         self._rolling_window_end_step = window_end
         self._rolling_window_dataset = horizon_steps
@@ -854,8 +876,9 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
         logger.info("Time series update received: commandId=%s", request.command_id)
         event = request.time_series_data_changed_event
-        self._activate_mpc_task_state_from_event(event)
+        task_state = self._activate_mpc_task_state_from_event(event)
         self._refresh_hydrosim_session_from_event(event)
+        self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
 
         return TimeSeriesDataUpdateResponse(
             context=self.context,
@@ -872,8 +895,9 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
     ) -> OutflowTimeSeriesDataUpdateResponse:
         logger.info("Outflow time series update received: commandId=%s", request.command_id)
         event = request.outflow_time_series_data_changed_event
-        self._activate_mpc_task_state_from_event(event)
+        task_state = self._activate_mpc_task_state_from_event(event)
         self._refresh_hydrosim_session_from_event(event)
+        self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
 
         return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
@@ -906,14 +930,26 @@ class PumpCentralSchedulingAgent(MpcCentralSchedulingAgent):
             len(refresh_result.get("device_output_series", []) or []),
         )
 
+    def _refresh_rolling_window_for_boundary_change(
+        self,
+        current_step: int,
+        task_state: MpcTaskState,
+    ) -> None:
+        task_state.start_step = int(current_step)
+        commands = self.on_optimization(current_step)
+        if commands:
+            self._control_command_dispatcher.dispatch(commands)
+        self._refresh_rolling_window_dataset(current_step, task_state)
+
     def _resolve_event_current_step(self, event: Any) -> int:
+        task_state = self._peek_mpc_task_state()
+        active_step = None
+        if task_state is not None and getattr(task_state, "current_step", None) is not None:
+            active_step = int(task_state.current_step)
         event_step = getattr(event, "auto_schedule_at_step", None)
         if event_step is not None and int(event_step) >= 0:
-            return int(event_step)
-        task_state = getattr(self, "_local_mpc_task_state", None)
-        if task_state is not None and getattr(task_state, "current_step", None) is not None:
-            return int(task_state.current_step)
-        return 0
+            return max(int(event_step), active_step if active_step is not None else 0)
+        return active_step if active_step is not None else 0
 
     def _build_current_step_metrics_for_hydrosim(self, current_step: int) -> List[Dict[str, Any]]:
         metrics_at_step = self._metrics_data_cache.by_step(current_step)

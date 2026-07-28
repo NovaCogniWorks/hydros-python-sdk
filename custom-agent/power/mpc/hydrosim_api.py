@@ -890,6 +890,7 @@ class HydroSimulationApi:
                         output_dir=temp_dir,
                         make_plots=False,
                         progress_interval=0,
+                        output_sample_interval=1,
                     ),
                     input_bundle=bundle,
                     output_mode="mixed",
@@ -939,6 +940,7 @@ class HydroSimulationApi:
             normalized_item = copy.deepcopy(raw_item)
             if event_object_type and not normalized_item.get("object_type"):
                 normalized_item["object_type"] = event_object_type
+            normalized_item = self._normalize_upstream_inflow_item(normalized_item)
             if replace_matching_time_series:
                 existing_items = self._replace_matching_time_series_items(existing_items, normalized_item)
                 index_by_key = {
@@ -959,6 +961,22 @@ class HydroSimulationApi:
 
         merged_event["object_time_series"] = existing_items
         return merged_event
+
+    def _normalize_upstream_inflow_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """将上游渠道天气入流适配为 HydroSim 既有的首站入流契约。"""
+
+        if item.get("object_type") != "UnifiedCanal" or item.get("metrics_code") != "water_flow":
+            return item
+        object_ids = self._extract_identity_object_ids(item)
+        upstream_canal_id = int(hydrosim_config.STATION_CANAL_IDS[0])
+        if upstream_canal_id not in object_ids:
+            return item
+
+        normalized_item = copy.deepcopy(item)
+        normalized_item["object_type"] = "Station"
+        normalized_item["object_id"] = int(hydrosim_config.STATION_NODE_IDS[0])
+        normalized_item.pop("object_ids", None)
+        return normalized_item
 
     def _get_object_time_series_items(self, payload: Any) -> List[Dict[str, Any]]:
         if payload is None:
