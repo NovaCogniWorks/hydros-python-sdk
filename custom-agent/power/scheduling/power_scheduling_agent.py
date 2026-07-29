@@ -16,7 +16,6 @@ CURRENT_DIR = Path(__file__).resolve().parent
 HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
 DATA_DIR = CURRENT_DIR.parent / "data"
 RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "scheduling"
-POWER_PLANNING_RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "outflowplan"
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
@@ -49,6 +48,7 @@ from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -74,7 +74,19 @@ class HydroSimInputFileResolver:
             return str(Path(default_path).resolve())
         if self._is_remote_url(source):
             return self._download_to_runtime_dir(source, local_filename)
-        return str(Path(source).resolve())
+        configured_path = Path(source).expanduser()
+        if configured_path.is_file():
+            return str(configured_path.resolve())
+
+        fallback_path = Path(default_path).expanduser()
+        if fallback_path.is_file():
+            logger.warning(
+                "Configured HydroSim input path is unavailable; using bundled fallback: configured=%s, fallback=%s",
+                source,
+                fallback_path,
+            )
+            return str(fallback_path.resolve())
+        return str(configured_path.resolve())
 
     def _get_first_configured_value(self, property_names: List[str]) -> Optional[str]:
         for property_name in property_names:
@@ -163,6 +175,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._rolling_window_start_step: Optional[int] = None
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
+        self._pending_boundary_control_commands: List[Dict[str, Any]] = []
         self._runtime_lock = RLock()
         self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
@@ -180,7 +193,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             properties=self.properties,
             runtime_dir=self._hydrosim_runtime_dir,
         )
-        logger.info("Power central scheduling agent created: %s", agent_id)
+        logger.info(
+            "Power central scheduling agent created: %s, runtime_revision=%s",
+            agent_id,
+            POWER_SCHEDULING_RUNTIME_REVISION,
+        )
 
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
@@ -190,7 +207,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self.load_agent_configuration(request)
             self._initialize_optimization_model()
             self._initialize_hydrosim_session()
-            self._ensure_hydrosim_power_plan_loaded()
+            # Power planning conversion may take several minutes. The task-init
+            # request is broadcast at cluster scope, so finish lightweight
+            # registration first and load the plan under the runtime lock on the
+            # first Tick/event. This lets the coordinator establish the accepted
+            # agentId before a stale SDK can claim the same agentCode.
+            logger.info(
+                "HydroSim power planning load deferred until first Tick/event: runtime_revision=%s",
+                POWER_SCHEDULING_RUNTIME_REVISION,
+            )
 
             self.subscribe_field_metrics()
             self._agent_command_gateway.start()
@@ -218,6 +243,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._ensure_hydrosim_initialized()
             self._ensure_hydrosim_power_plan_loaded()
             task_state = self._ensure_mpc_task_state(request.step)
+
+            if self._pending_boundary_control_commands:
+                pending_commands = self._pending_boundary_control_commands
+                self._pending_boundary_control_commands = []
+                self.dispatch_control_commands_and_await_execution(pending_commands)
 
             if self._should_refresh_rolling_window(request.step, task_state):
                 logger.info("Refreshing rolling scheduling window at step=%s", request.step)
@@ -798,7 +828,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             time_series_file=self._resolve_hydrosim_input_file(
                 url_property_names=["hydrosim_time_series_url"],
                 path_property_names=["hydrosim_time_series_file"],
-                default_path=str(POWER_PLANNING_RUNTIME_DIR / "time_series_power_planning.json"),
+                default_path=str(DATA_DIR / "time_series_power_planning.json"),
                 local_filename="time_series_power_planning.json",
             ),
             mpc_config_file=self._resolve_hydrosim_input_file(
@@ -881,7 +911,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         planning_file = self._resolve_hydrosim_input_file(
             url_property_names=["hydrosim_power_planning_url"],
             path_property_names=["hydrosim_power_planning_file"],
-            default_path=str(POWER_PLANNING_RUNTIME_DIR / "time_series_power_planning.json"),
+            default_path=str(DATA_DIR / "time_series_power_planning.json"),
             local_filename="time_series_power_planning.json",
         )
         return planning_file, None
@@ -952,8 +982,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         task_state: MpcTaskState,
     ) -> None:
         commands = self.on_optimization(current_step)
-        if commands:
-            self.dispatch_control_commands_and_await_execution(commands)
+        self._pending_boundary_control_commands = list(commands or [])
         self._refresh_rolling_window_dataset(
             current_step,
             task_state,
@@ -1007,6 +1036,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._rolling_window_start_step = None
             self._rolling_window_end_step = None
             self._rolling_window_dataset = []
+            self._pending_boundary_control_commands = []
             self.discard_control_execution_waiters()
             self._mpc_task_state_lifecycle.clear()
             self._agent_command_gateway.shutdown()

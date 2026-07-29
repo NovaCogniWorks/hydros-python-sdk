@@ -117,6 +117,12 @@ docker build \
     -t "${IMAGE_NAME}:${VERSION}" \
     "${REPO_ROOT}"
 
+if ! docker run --rm --entrypoint /bin/bash "${IMAGE_NAME}:${VERSION}" -c \
+    'test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
+    echo "Built image is missing required sources, bundled HydroSim inputs, or the expected power scheduling runtime revision; deployment aborted." >&2
+    exit 1
+fi
+
 docker tag "${IMAGE_NAME}:${VERSION}" "${IMAGE_NAME}:latest"
 
 docker rm -f "${CONTAINER_NAME}" || true

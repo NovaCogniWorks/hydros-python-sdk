@@ -161,6 +161,35 @@ start_control_algorithm_service() {
     return 0
 }
 
+validate_agent_sources() {
+    local argument
+    local agent_dir
+    local source_file
+
+    for argument in "$@"; do
+        case "${argument}" in
+            -*|edge_control)
+                continue
+                ;;
+        esac
+
+        agent_dir="${SCRIPT_DIR}/${argument}"
+        if [ ! -d "${agent_dir}" ] || [ ! -f "${agent_dir}/agent.properties" ]; then
+            continue
+        fi
+
+        source_file="$(find "${agent_dir}" -maxdepth 1 -type f -name '*.py' ! -name '__*' ! -name 'test_*' -print -quit)"
+        if [ -z "${source_file}" ]; then
+            echo -e "${RED}错误: Agent 目录缺少 Python 实现文件${NC}" >&2
+            echo -e "${RED}路径: ${agent_dir}${NC}" >&2
+            echo -e "${YELLOW}当前目录内容:${NC}" >&2
+            find "${agent_dir}" -maxdepth 1 -mindepth 1 -printf '  %f\n' >&2 || true
+            echo -e "${YELLOW}请确认镜像由包含该 Agent 源码的最新构建上下文生成。${NC}" >&2
+            return 1
+        fi
+    done
+}
+
 main() {
     if [ $# -eq 0 ] && [ -n "${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}" ]; then
         DEFAULT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-}}"
@@ -226,6 +255,10 @@ main() {
                 ;;
         esac
     done
+
+    if ! validate_agent_sources "${PYTHON_ARGS[@]}"; then
+        exit 1
+    fi
 
     if [ "$SKIP_CONFIG_CHECK" != "1" ]; then
         if ! check_config; then

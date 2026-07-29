@@ -10,6 +10,7 @@ from unittest.mock import Mock
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
+    SimTaskInitRequest,
     SimTaskTerminateRequest,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
@@ -21,6 +22,7 @@ from hydros_agent_sdk.protocol.events import (
 )
 from hydros_agent_sdk.protocol.models import (
     AgentStatus,
+    HydroAgent,
     ObjectTimeSeries,
     SimulationContext,
     TimeSeriesValue,
@@ -104,6 +106,38 @@ def test_power_scheduling_agent_uses_generic_central_base():
     agent, _, _ = _build_agent(module, "power-generic-central-base")
     assert not hasattr(agent, "_mpc_rolling_runtime")
     assert not hasattr(agent, "_mpc_optimization_service")
+
+
+def test_power_scheduling_init_defers_expensive_power_plan_load():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-init-lazy-plan")
+    agent._hydrosim_initialized = False
+    agent._hydrosim_power_plan_loaded = False
+    agent.load_agent_configuration = Mock()
+    agent._initialize_optimization_model = Mock()
+    agent._initialize_hydrosim_session = Mock()
+    agent._ensure_hydrosim_power_plan_loaded = Mock()
+    agent.subscribe_field_metrics = Mock()
+    agent._agent_command_gateway.start = Mock()
+
+    request = SimTaskInitRequest(
+        command_id="init-lazy-plan",
+        context=context,
+        agent_list=[
+            HydroAgent(
+                agent_code="CENTRAL_SCHEDULING_AGENT_POWER",
+                agent_type="CENTRAL_SCHEDULING_AGENT",
+                agent_name="Power Scheduling Agent",
+            )
+        ],
+    )
+
+    response = agent.on_init(request)
+
+    assert response.command_status == "SUCCEED"
+    agent._initialize_hydrosim_session.assert_called_once_with()
+    agent._ensure_hydrosim_power_plan_loaded.assert_not_called()
+    agent._agent_command_gateway.start.assert_called_once_with()
 
 
 def test_power_scheduling_termination_clears_explicit_task_state():
@@ -359,29 +393,62 @@ def test_power_scheduling_uses_objects_time_series_url_for_power_planning_file()
         module.urlopen = original_urlopen
 
 
-def test_power_scheduling_uses_outflowplan_runtime_default_planning_file():
+def test_power_scheduling_uses_bundled_data_default_planning_file():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-default-001")
+    agent.properties["hydrosim_time_series_file"] = (
+        "/mnt/e/Hydros/hydros-python-sdk/custom-agent/power/.runtime/"
+        "outflowplan/time_series_power_planning.json"
+    )
     agent._hydrosim_api.initialize = Mock(return_value={"session": {"session_id": "session-default-runtime-002"}})
 
-    original_resolve = agent._hydrosim_input_resolver.resolve
-    try:
-        agent._hydrosim_input_resolver.resolve = Mock(side_effect=lambda **kwargs: kwargs["default_path"])
-        agent._initialize_hydrosim_session()
+    agent._initialize_hydrosim_session()
 
-        init_kwargs = agent._hydrosim_api.initialize.call_args.kwargs
-        expected_path = os.path.abspath(
-            os.path.join(
-                "custom-agent",
-                "power",
-                ".runtime",
-                "outflowplan",
-                "time_series_power_planning.json",
-            )
-        )
-        assert os.path.abspath(init_kwargs["time_series_file"]) == expected_path
-    finally:
-        agent._hydrosim_input_resolver.resolve = original_resolve
+    init_kwargs = agent._hydrosim_api.initialize.call_args.kwargs
+    expected_path = os.path.abspath(
+        os.path.join("custom-agent", "power", "data", "time_series_power_planning.json")
+    )
+    assert os.path.abspath(init_kwargs["time_series_file"]) == expected_path
+    assert os.path.isfile(init_kwargs["time_series_file"])
+    assert ".runtime" not in Path(init_kwargs["time_series_file"]).parts
+
+
+def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-scene-step-21-recovery")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=20,
+        start_step=1,
+        current_step=20,
+        total_steps=60,
+    )
+    _configure_mpc_task_state(agent, roll_steps=20, task_state=task_state)
+    agent._hydrosim_initialized = False
+    agent._hydrosim_power_plan_loaded = True
+    agent._hydrosim_api._session = _build_session(60)
+    agent._hydrosim_api.initialize = Mock(
+        return_value={"session": {"session_id": "session-step-21-recovery"}}
+    )
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(21))
+    agent._rolling_window_start_step = 1
+    agent._rolling_window_end_step = 20
+    agent._rolling_window_dataset = [Mock()]
+    agent.on_optimization = Mock(return_value=[])
+    agent._refresh_rolling_window_dataset = Mock()
+
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-step-21-recovery", context=context, step=21)
+    )
+
+    init_kwargs = agent._hydrosim_api.initialize.call_args.kwargs
+    expected_path = os.path.abspath(
+        os.path.join("custom-agent", "power", "data", "time_series_power_planning.json")
+    )
+    assert os.path.abspath(init_kwargs["time_series_file"]) == expected_path
+    assert ".runtime" not in Path(init_kwargs["time_series_file"]).parts
+    agent.on_optimization.assert_called_once_with(21)
+    agent._hydrosim_api.execute_step.assert_called_once_with(step_index=21)
 
 
 def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
@@ -556,6 +623,56 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 1
     assert kwargs["current_step_metrics"] == []
+    agent.dispatch_control_commands_and_await_execution.assert_not_called()
+    assert agent._pending_boundary_control_commands
+
+
+def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-event-ack")
+    _configure_mpc_task_state(agent, roll_steps=10)
+    agent._hydrosim_api._session = _build_session(30)
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+
+    response = agent.on_time_series_data_update(
+        TimeSeriesDataUpdateRequest(
+            command_id="event-ack-001",
+            context=context,
+            time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WATER_USE",
+                auto_schedule_at_step=1,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20100,
+                        object_type="GateStation",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=1, value=600.0)],
+                    )
+                ],
+            ),
+        )
+    )
+
+    assert response.command_status == "SUCCEED"
+    agent.dispatch_control_commands_and_await_execution.assert_not_called()
+    pending_commands = list(agent._pending_boundary_control_commands)
+    assert pending_commands
+
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(1))
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-after-event-001", context=context, step=1)
+    )
+
+    agent.dispatch_control_commands_and_await_execution.assert_called_once_with(
+        pending_commands
+    )
+    assert agent._pending_boundary_control_commands == []
 
 
 def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():

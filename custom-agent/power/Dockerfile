@@ -41,6 +41,19 @@ RUN EXTRA_INDEX_ARGS=""; \
 COPY hydros_agent_sdk /opt/hydros/hydros_agent_sdk
 COPY custom-agent/power /opt/hydros/custom-agent/power
 
+# Agent 源文件属于镜像运行契约。构建产物不完整时在 build 阶段直接失败，
+# 避免容器启动后才由 launcher 报告目录中没有 Python 实现。
+RUN test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py \
+    && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
+    && grep -q 'POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"' \
+        /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
+    && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json \
+    && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml \
+    && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml \
+    && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml \
+    && test -s /opt/hydros/custom-agent/power/outflowplan/agent.properties \
+    && test -s /opt/hydros/custom-agent/power/scheduling/agent.properties
+
 WORKDIR /opt/hydros/custom-agent/power
 
 RUN sed -i 's/\r$//' /opt/hydros/custom-agent/power/start_agents.sh \

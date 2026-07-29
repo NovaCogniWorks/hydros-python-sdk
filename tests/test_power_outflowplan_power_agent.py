@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from hydros_agent_sdk.protocol.commands import OutflowTimeSeriesRequest, SimTaskTerminateRequest
@@ -302,25 +304,24 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.assertTrue(os.path.exists(init_kwargs["constraints_file"]))
         self.assertGreaterEqual(mock_urlopen.call_count, 4)
 
-    def test_initialize_hydrosim_session_uses_outflowplan_runtime_default_planning_file(self):
+    def test_initialize_hydrosim_session_uses_bundled_data_default_planning_file(self):
+        self.agent.properties["hydrosim_time_series_file"] = (
+            "/mnt/e/Hydros/hydros-python-sdk/custom-agent/power/.runtime/"
+            "outflowplan/time_series_power_planning.json"
+        )
         self.agent._hydrosim_api.initialize = MagicMock(
             return_value={"session": {"session_id": "session-default-runtime-001"}}
         )
 
-        with patch.object(self.agent._hydrosim_input_resolver, "resolve", side_effect=lambda **kwargs: kwargs["default_path"]):
-            self.agent._initialize_hydrosim_session()
+        self.agent._initialize_hydrosim_session()
 
         init_kwargs = self.agent._hydrosim_api.initialize.call_args.kwargs
         expected_path = os.path.abspath(
-            os.path.join(
-                POWER_OUTFLOWPLAN_DIR,
-                "..",
-                ".runtime",
-                "outflowplan",
-                "time_series_power_planning.json",
-            )
+            os.path.join(POWER_OUTFLOWPLAN_DIR, "..", "data", "time_series_power_planning.json")
         )
         self.assertEqual(os.path.abspath(init_kwargs["time_series_file"]), expected_path)
+        self.assertTrue(os.path.isfile(init_kwargs["time_series_file"]))
+        self.assertNotIn(".runtime", Path(init_kwargs["time_series_file"]).parts)
 
     def test_on_terminate_returns_protocol_command_status_enum(self):
         request = SimTaskTerminateRequest(
@@ -337,21 +338,22 @@ class TestPowerOutflowPlanAgent(unittest.TestCase):
         self.agent.state_manager.terminate_task.assert_not_called()
 
     def test_on_terminate_cleans_hydrosim_runtime_dir(self):
-        runtime_marker = self.agent._hydrosim_runtime_dir / "marker.txt"
-        self.agent._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
-        runtime_marker.write_text("ok", encoding="utf-8")
+        with tempfile.TemporaryDirectory(prefix="power_outflowplan_test_") as runtime_dir:
+            self.agent._hydrosim_runtime_dir = Path(runtime_dir)
+            runtime_marker = self.agent._hydrosim_runtime_dir / "marker.txt"
+            runtime_marker.write_text("ok", encoding="utf-8")
 
-        request = SimTaskTerminateRequest(
-            command_id="term-002",
-            context=self.context,
-        )
-        self.agent._hydrosim_initialized = False
+            request = SimTaskTerminateRequest(
+                command_id="term-002",
+                context=self.context,
+            )
+            self.agent._hydrosim_initialized = False
 
-        response = self.agent.on_terminate(request)
+            response = self.agent.on_terminate(request)
 
-        self.assertEqual(response.command_status, "SUCCEED")
-        self.assertTrue(self.agent._hydrosim_runtime_dir.exists())
-        self.assertTrue(runtime_marker.exists())
+            self.assertEqual(response.command_status, "SUCCEED")
+            self.assertTrue(self.agent._hydrosim_runtime_dir.exists())
+            self.assertTrue(runtime_marker.exists())
 
 
 if __name__ == "__main__":

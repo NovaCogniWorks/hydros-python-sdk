@@ -71,7 +71,19 @@ class HydroSimInputFileResolver:
             return str(Path(default_path).resolve())
         if self._is_remote_url(source):
             return self._download_to_runtime_dir(source, local_filename)
-        return str(Path(source).resolve())
+        configured_path = Path(source).expanduser()
+        if configured_path.is_file():
+            return str(configured_path.resolve())
+
+        fallback_path = Path(default_path).expanduser()
+        if fallback_path.is_file():
+            logger.warning(
+                "Configured HydroSim input path is unavailable; using bundled fallback: configured=%s, fallback=%s",
+                source,
+                fallback_path,
+            )
+            return str(fallback_path.resolve())
+        return str(configured_path.resolve())
 
     def _get_first_configured_value(self, property_names: List[str]) -> Optional[str]:
         for property_name in property_names:
@@ -530,7 +542,7 @@ class PowerOutflowPlanAgent(OutflowPlanAgent):
         time_series_file = self._resolve_hydrosim_input_file(
             url_property_names=["hydrosim_time_series_url", "objects_time_series_url"],
             path_property_names=["hydrosim_time_series_file", "hydrosim_power_planning_file"],
-            default_path=str(RUNTIME_DIR / "time_series_power_planning.json"),
+            default_path=str(DATA_DIR / "time_series_power_planning.json"),
             local_filename="time_series_power_planning.json",
         )
         mpc_config_file = self._resolve_hydrosim_input_file(
