@@ -9,8 +9,11 @@ from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 
 
-SUPPORTED_STATION_OBJECT_TYPES = frozenset({"GateStation", "PumpStation"})
-SUPPORTED_TARGET_VALUE_TYPE = "water_level"
+SUPPORTED_STATION_OBJECT_TYPES = frozenset({
+    "GateStation",
+    "PumpStation",
+    "PowerStation",
+})
 
 
 @dataclass(frozen=True)
@@ -41,7 +44,7 @@ class MpcControlExecutionPlan:
         responses: Iterable[MpcOptimizeResponse],
     ) -> "MpcControlExecutionPlan":
         plan = cls(optimize_step=optimize_step)
-        target_keys: Set[Tuple[int, int, str]] = set()
+        target_keys: Set[Tuple[int, str, int, str]] = set()
 
         for response in responses:
             if (response.plan_type or "").upper() != "OPTIMAL":
@@ -59,16 +62,14 @@ class MpcControlExecutionPlan:
                         continue
                     for target_value in control_object.target_value_list or []:
                         numeric_value = target_value.numeric_value()
-                        if (
-                            numeric_value is None
-                            or target_value.value_type.lower()
-                            != SUPPORTED_TARGET_VALUE_TYPE
-                        ):
+                        target_value_type = (target_value.value_type or "").strip()
+                        if numeric_value is None or not target_value_type:
                             continue
                         target_key = (
                             horizon.horizon_step,
+                            control_object.object_type,
                             control_object.object_id,
-                            target_value.value_type.lower(),
+                            target_value_type.lower(),
                         )
                         if target_key in target_keys:
                             continue
@@ -79,7 +80,7 @@ class MpcControlExecutionPlan:
                                 object_id=control_object.object_id,
                                 object_type=control_object.object_type,
                                 target_value=numeric_value,
-                                target_value_type=target_value.value_type,
+                                target_value_type=target_value_type,
                                 algo_required_inputs=list(control_object.algo_required_inputs),
                             )
                         )

@@ -106,12 +106,63 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
         self.assertEqual(commands[0].target_value, 3.5)
         self.assertEqual(commands[0].group_size, 1)
         self.assertEqual(commands[0].main_step_index, 4)
-        self.assertTrue(commands[0].group_id.startswith("MPC_CTRL_GROUP:scene-structured-control:4:4:1:"))
+        self.assertTrue(commands[0].group_id.startswith("MPC_CTRL_GROUP:scene-structured-control:4:4:1:water_level:"))
         self.assertEqual(len(commands[0].algo_required_inputs), 1)
         planning_signal = commands[0].algo_required_inputs[0]
         self.assertEqual(planning_signal.value_type, "front_water_level")
         self.assertEqual(planning_signal.series, [3.3, 3.7])
         self.assertEqual(planning_signal.attributes, {"source": "mpc"})
+
+    def test_accepts_power_station_numeric_target_and_groups_by_target_value_type(self):
+        context = SimulationContext(biz_scene_instance_id="scene-mixed-control")
+        source = build_agent("source-agent", context)
+        target = build_agent("target-agent", context)
+        builder = MpcControlCommandBuilder(
+            source_agent=source,
+            get_sibling_agent_instance=lambda _agent_code: target,
+            resolve_target_agent_for_object=lambda _object_id, _object_type: target,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        ControlObjectResult(
+                            object_type="GateStation",
+                            object_id=1001,
+                            target_value_list=[ValueItem(value_type="water_level", value=12.5)],
+                        ),
+                        ControlObjectResult(
+                            object_type="PowerStation",
+                            object_id=2001,
+                            target_value_list=[ValueItem(value_type="water_flow", value=8.0)],
+                        ),
+                        ControlObjectResult(
+                            object_type="PumpStation",
+                            object_id=3001,
+                            target_value_list=[ValueItem(value_type="WATER_FLOW", value=6.0)],
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        plan = MpcControlExecutionPlan.from_responses(4, [response])
+        commands = builder.build_from_control_plan(plan, horizon_step=1, current_step=4)
+
+        self.assertEqual(3, len(commands))
+        commands_by_object_id = {command.object_id: command for command in commands}
+        self.assertEqual("PowerStation", commands_by_object_id[2001].object_type)
+        self.assertEqual(1, commands_by_object_id[1001].group_size)
+        self.assertEqual(2, commands_by_object_id[2001].group_size)
+        self.assertEqual(2, commands_by_object_id[3001].group_size)
+        self.assertIn(":water_level:", commands_by_object_id[1001].group_id)
+        self.assertIn(":water_flow:", commands_by_object_id[2001].group_id)
+        self.assertEqual(
+            commands_by_object_id[2001].group_id,
+            commands_by_object_id[3001].group_id,
+        )
 
 
 if __name__ == "__main__":
