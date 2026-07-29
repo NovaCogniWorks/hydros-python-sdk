@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from hydros_agent_sdk.protocol.agent_commands import (
     HydroStationTargetValueRequest,
@@ -47,30 +47,35 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                 continue
             resolved_targets.append((control_target, target_agent))
 
-        group_id = (
-            "MPC_CTRL_GROUP:"
-            f"{self.source_agent.context.biz_scene_instance_id}:"
-            f"{current_step}:{plan.optimize_step}:{horizon_step}:{uuid.uuid4()}"
-        )
-        group_size = len(resolved_targets)
-        for control_target, target_agent in resolved_targets:
-            control_commands.append(
-                HydroStationTargetValueRequest(
-                    command_id=generate_agent_command_id(),
-                    context=self.source_agent.context,
-                    source=self.source_agent,
-                    target=target_agent,
-                    object_id=control_target.object_id,
-                    object_type=control_target.object_type,
-                    target_value=control_target.target_value,
-                    target_value_type=control_target.target_value_type,
-                    group_id=group_id,
-                    group_size=group_size,
-                    main_step_index=current_step,
-                    algo_required_inputs=control_target.algo_required_inputs,
-                    need_ack_reply=True,
-                )
+        targets_by_value_type: Dict[str, List[Tuple[MpcControlExecutionTarget, HydroAgentInstance]]] = {}
+        for resolved_target in resolved_targets:
+            target_value_type = self._group_key(resolved_target[0])
+            targets_by_value_type.setdefault(target_value_type, []).append(resolved_target)
+
+        for target_value_type, grouped_targets in targets_by_value_type.items():
+            group_id = (
+                "MPC_CTRL_GROUP:"
+                f"{self.source_agent.context.biz_scene_instance_id}:"
+                f"{current_step}:{plan.optimize_step}:{horizon_step}:{target_value_type}:{uuid.uuid4()}"
             )
+            for control_target, target_agent in grouped_targets:
+                control_commands.append(
+                    HydroStationTargetValueRequest(
+                        command_id=generate_agent_command_id(),
+                        context=self.source_agent.context,
+                        source=self.source_agent,
+                        target=target_agent,
+                        object_id=control_target.object_id,
+                        object_type=control_target.object_type,
+                        target_value=control_target.target_value,
+                        target_value_type=control_target.target_value_type,
+                        group_id=group_id,
+                        group_size=len(grouped_targets),
+                        main_step_index=current_step,
+                        algo_required_inputs=control_target.algo_required_inputs,
+                        need_ack_reply=True,
+                    )
+                )
 
         logger.info(
             "Built %s control commands from MPC execution plan at horizon %s",
@@ -78,3 +83,7 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
             horizon_step,
         )
         return control_commands
+
+    @staticmethod
+    def _group_key(control_target: MpcControlExecutionTarget) -> str:
+        return control_target.target_value_type.strip().lower()
