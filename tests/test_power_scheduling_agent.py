@@ -441,6 +441,35 @@ def test_power_scheduling_total_steps_uses_runtime_axis_instead_of_sampled_outpu
     assert agent._resolve_total_steps() == 96
 
 
+def test_hydrosim_event_update_keeps_initialized_96_step_axis():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    session = hydrosim_api.HydroSimulationSession(
+        session_id="session-fixed-96-steps",
+        total_steps=96,
+    )
+    updated_event = {
+        "object_time_series": [
+            {
+                "object_id": 20000,
+                "object_type": "UnifiedCanal",
+                "metrics_code": "water_flow",
+                "time_series": [
+                    {"step": 0, "value": 2534.0},
+                    {"step": 96, "value": 2451.0},
+                ],
+            }
+        ]
+    }
+
+    steps = api._build_session_time_axis(session, updated_event)
+
+    assert len(steps) == 96
+    assert steps[0] == 0
+    assert steps[-1] == 95
+    assert session.total_steps == 96
+
+
 def test_power_scheduling_time_series_update_activates_window_anchor():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-003")

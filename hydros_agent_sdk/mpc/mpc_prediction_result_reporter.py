@@ -190,6 +190,12 @@ class MpcPredictionResultReporter:
         device_details: List[MpcPredictionResultDetail] = []
         optimize_step = mpc_task_state.current_step if mpc_task_state else 0
         for control in horizon_step or []:
+            if not cls._is_horizon_within_total_steps(
+                control.horizon_step,
+                optimize_step,
+                mpc_task_state.total_steps if mpc_task_state else None,
+            ):
+                continue
             station_water_level_targets = cls._collect_station_water_level_targets(control)
             predicted_station_ids: Set[int] = set()
             for predicted_result in control.predicted_result_list or []:
@@ -271,6 +277,18 @@ class MpcPredictionResultReporter:
             gate_operations=gate_operations,
             gate_amplitude=gate_amplitude,
         )
+
+    @staticmethod
+    def _is_horizon_within_total_steps(
+        horizon_step: Optional[int],
+        optimize_step: int,
+        total_steps: Optional[int],
+    ) -> bool:
+        """Keep only predictions whose zero-based absolute step belongs to the task."""
+        if horizon_step is None or total_steps is None or total_steps <= 0:
+            return True
+        absolute_step = optimize_step + horizon_step - 1
+        return 0 <= absolute_step < total_steps
 
     @staticmethod
     def _collect_station_water_level_targets(

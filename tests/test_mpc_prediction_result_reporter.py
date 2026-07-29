@@ -16,6 +16,75 @@ from hydros_agent_sdk.protocol.models import SimulationContext
 
 
 class MpcPredictionResultReporterTest(unittest.TestCase):
+    def test_truncates_horizon_at_zero_based_total_steps_boundary(self):
+        state = SimpleNamespace(
+            context=SimulationContext(biz_scene_instance_id="scene-96-steps"),
+            current_step=0,
+            total_steps=96,
+            rolling_interval_steps=10,
+        )
+        horizons = [
+            HorizonStep(
+                horizon_step=step,
+                control_object_list=[
+                    ControlObjectResult(
+                        object_type="GateStation",
+                        object_id=101,
+                        target_value_list=[
+                            ValueItem(value_type="water_level", value=3.5),
+                        ],
+                    )
+                ],
+            )
+            for step in range(1, 98)
+        ]
+
+        result = MpcPredictionResultReporter.build_prediction_result(
+            mpc_task_state=state,
+            horizon_step=horizons,
+            plan_type="OPTIMAL",
+        )
+
+        self.assertEqual(len(result.details), 96)
+        self.assertEqual(
+            [detail.horizon_step for detail in result.details],
+            list(range(1, 97)),
+        )
+
+    def test_truncates_rolling_horizon_near_task_end(self):
+        state = SimpleNamespace(
+            context=SimulationContext(biz_scene_instance_id="scene-last-window"),
+            current_step=90,
+            total_steps=96,
+            rolling_interval_steps=10,
+        )
+        horizons = [
+            HorizonStep(
+                horizon_step=step,
+                control_object_list=[
+                    ControlObjectResult(
+                        object_type="GateStation",
+                        object_id=101,
+                        target_value_list=[
+                            ValueItem(value_type="water_level", value=3.5),
+                        ],
+                    )
+                ],
+            )
+            for step in range(1, 11)
+        ]
+
+        result = MpcPredictionResultReporter.build_prediction_result(
+            mpc_task_state=state,
+            horizon_step=horizons,
+            plan_type="OPTIMAL",
+        )
+
+        self.assertEqual(
+            [detail.horizon_step for detail in result.details],
+            list(range(1, 7)),
+        )
+
     def test_projects_structured_station_and_device_predictions(self):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-structured-report"),

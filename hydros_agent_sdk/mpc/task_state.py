@@ -35,9 +35,10 @@ class MpcTaskState:
     def should_start_new_rolling(self, current_step: int) -> bool:
         if self.rolling_interval_steps <= 0:
             return False
+        if self.total_steps > 0 and current_step >= self.total_steps:
+            return False
         step_delta = current_step - self.start_step
         return (
             step_delta % self.rolling_interval_steps == 0
             and step_delta != 0
-            and current_step - self.total_steps != 0
         )

@@ -64,6 +64,7 @@ class HydroSimulationSession:
     latest_station_power_series: List[Dict[str, Any]] = field(default_factory=list)
     latest_device_output_series: List[Dict[str, Any]] = field(default_factory=list)
     step_runtime: "HydroSimulationStepRuntime | None" = None
+    total_steps: int | None = None
     current_step_index: int = 0
     cancelled: bool = False
 
@@ -72,6 +73,7 @@ class HydroSimulationSession:
             "session_id": self.session_id,
             "input_summary": self._build_input_summary(),
             "latest_power_planning_file": self.latest_power_planning_file,
+            "total_steps": self.total_steps,
             "current_step_index": self.current_step_index,
             "cancelled": self.cancelled,
         }
@@ -174,6 +176,7 @@ class HydroSimulationApi:
         self._session = HydroSimulationSession(
             session_id=uuid.uuid4().hex,
             inputs=bundle,
+            total_steps=int(len(steps)),
         )
         return {
             "message": "HydroSim 算法初始化成功。",
@@ -448,7 +451,7 @@ class HydroSimulationApi:
             raise RuntimeError("当前会话缺少输入快照。")
         initial_states = session.inputs.initial_states.model_dump(mode="json", by_alias=True, exclude_none=True)
         constraints = session.inputs.constraints.model_dump(mode="json", by_alias=True, exclude_none=True)
-        steps = runtime._time_axis_from_event(merged_event)
+        steps = self._build_session_time_axis(session, merged_event)
         flow_configs, default_target_stage_by_node = runtime._apply_yaml_basic_parameters(
             list(self.service.core.flow_configs),
             constraints,
@@ -510,7 +513,7 @@ class HydroSimulationApi:
             raise RuntimeError("current session is missing inputs snapshot")
         initial_states = session.inputs.initial_states.model_dump(mode="json", by_alias=True, exclude_none=True)
         constraints = session.inputs.constraints.model_dump(mode="json", by_alias=True, exclude_none=True)
-        steps = runtime._time_axis_from_event(merged_event)
+        steps = self._build_session_time_axis(session, merged_event)
         if len(steps) <= 0:
             raise ValueError("inflow time series has no steps")
 
@@ -887,6 +890,7 @@ class HydroSimulationApi:
                 )
                 result = self.run_configured(
                     request=HydroConfiguredSimulationRequest(
+                        sim_steps=session.total_steps,
                         output_dir=temp_dir,
                         make_plots=False,
                         progress_interval=0,
@@ -901,6 +905,21 @@ class HydroSimulationApi:
             station_power_series = self._extract_station_power_series_from_yaml(files["configured_outputs_yaml"])
             device_output_series = self._extract_device_output_series_from_yaml(files["configured_outputs_yaml"])
             return run_summary, station_power_series, device_output_series
+
+    def _build_session_time_axis(
+        self,
+        session: HydroSimulationSession,
+        event: Dict[str, Any],
+    ) -> Any:
+        """Build an event axis without allowing updates to change task length."""
+        runtime = self.service.core.runtime
+        steps = runtime._time_axis_from_event(
+            event,
+            sim_steps=session.total_steps,
+        )
+        if session.total_steps is None:
+            session.total_steps = int(len(steps))
+        return steps
 
     def _resolve_active_merged_event(self, session: HydroSimulationSession) -> Dict[str, Any]:
         step_runtime = getattr(session, "step_runtime", None)
