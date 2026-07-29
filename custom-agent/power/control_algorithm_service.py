@@ -32,7 +32,7 @@ def main() -> None:
     runtime = build_runtime()
     server = create_control_algorithm_http_server(runtime, host=host, port=port)
     logger.info(
-        "Starting power control algorithm service on %s:%s, endpoint=/control-algorithms/{algorithm_type}/solve",
+        "Starting power control algorithm service on %s:%s, endpoint=/engine/v1/api/control-algorithms/{algorithm_type}/solve",
         host,
         port,
     )

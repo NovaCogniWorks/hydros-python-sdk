@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from .models import (
+from hydros_agent_sdk.control_algorithms import (
     ControlActuator,
     ControlActuatorTarget,
     ControlAlgorithmInput,
@@ -27,6 +27,7 @@ class PowerControlConfig:
     algorithm_type: str = "power_station_edge_control"
     algorithm_version: str = "1.0.0"
     default_output_power_delta: float = 20.0
+    default_water_flow_delta: float = 200.0
     default_gate_opening_delta: float = 0.2
 
 
@@ -66,6 +67,8 @@ class PowerControlAlgorithm:
 
         if target_signal.value_type == OUTPUT_POWER_VALUE_TYPE and turbines:
             return self._solve_turbine_output_power(input_data, target_signal, turbines)
+        if target_signal.value_type == WATER_FLOW_VALUE_TYPE and turbines:
+            return self._solve_turbine_water_flow(input_data, target_signal, turbines)
         if target_signal.value_type == WATER_FLOW_VALUE_TYPE and gates:
             return self._solve_gate_opening(input_data, target_signal, gates)
 
@@ -76,6 +79,64 @@ class PowerControlAlgorithm:
                 f"No supported actuators found for station={station_id}, "
                 f"target_value_type={target_signal.value_type}."
             ),
+        )
+
+    def _solve_turbine_water_flow(
+        self,
+        input_data: ControlAlgorithmInput,
+        target_signal: ControlSignal,
+        turbines: List[ControlActuator],
+    ) -> ControlAlgorithmOutput:
+        target_flow = float(target_signal.value or 0.0)
+        current_total_flow = sum(
+            float(actuator.values.get(WATER_FLOW_VALUE_TYPE, 0.0))
+            for actuator in turbines
+        )
+        target_map = self._allocate_target_values(
+            actuators=turbines,
+            value_type=WATER_FLOW_VALUE_TYPE,
+            target_total=target_flow,
+            default_delta=float(
+                input_data.parameters.get(
+                    "default_water_flow_delta",
+                    self._config.default_water_flow_delta,
+                )
+            ),
+        )
+        allocated_flow = sum(target_map.values())
+        return ControlAlgorithmOutput(
+            schema_version=input_data.schema_version,
+            request_id=input_data.context.request_id,
+            status=ControlAlgorithmStatus.CONTINUE,
+            reason="TURBINE_FLOW_TARGET_ALLOCATED",
+            actuator_targets=[
+                ControlActuatorTarget(
+                    object_type=TURBINE_OBJECT_TYPE,
+                    object_id=actuator.object_id,
+                    target_values={WATER_FLOW_VALUE_TYPE: target_map[actuator.object_id]},
+                )
+                for actuator in turbines
+            ],
+            results=[
+                ControlSignal(
+                    type=SignalType.RESULT,
+                    object_type=target_signal.object_type,
+                    object_id=target_signal.object_id,
+                    value_type=WATER_FLOW_VALUE_TYPE,
+                    value=allocated_flow,
+                )
+            ],
+            next_state={
+                "last_station_target_type": target_signal.value_type,
+                "last_station_target_value": target_flow,
+                "last_station_turbine_flow": allocated_flow,
+            },
+            evidence={
+                "station_id": target_signal.object_id,
+                "target_water_flow": target_flow,
+                "current_turbine_water_flow": current_total_flow,
+                "available_turbine_count": len(turbines),
+            },
         )
 
     def _solve_turbine_output_power(

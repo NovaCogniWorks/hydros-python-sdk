@@ -3,11 +3,14 @@ import importlib
 import os
 import sys
 from pathlib import Path
+from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
+    SimTaskTerminateRequest,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
 )
@@ -16,7 +19,12 @@ from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
     TimeSeriesDataChangedEvent,
 )
-from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext, TimeSeriesValue
+from hydros_agent_sdk.protocol.models import (
+    AgentStatus,
+    ObjectTimeSeries,
+    SimulationContext,
+    TimeSeriesValue,
+)
 from hydros_agent_sdk.mpc.task_state import MpcTaskState as SchedulingTaskState
 
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
@@ -60,13 +68,61 @@ def _build_agent(module, scene_id: str):
     )
     agent._hydrosim_initialized = True
     agent._hydrosim_power_plan_loaded = True
-    agent._control_command_dispatcher.dispatch = Mock()
+    agent.dispatch_control_commands_and_await_execution = Mock()
     agent._target_agent_resolver.resolve_target_agent_for_object = Mock(
         side_effect=lambda object_id, device_type=None: SimpleNamespace(
             agent_code=f"TARGET_AGENT_{object_id}"
         )
     )
     return agent, context, enqueued
+
+
+def _configure_mpc_task_state(
+    agent,
+    *,
+    roll_steps: int,
+    task_state=None,
+    algorithm_config_url: str = "mpc.yaml",
+    control_config_url: str = "control.yaml",
+):
+    agent.properties["roll_steps"] = roll_steps
+    object.__setattr__(agent, "_configured_mpc_config_url", algorithm_config_url)
+    object.__setattr__(
+        agent,
+        "_configured_target_and_constrain_config_url",
+        control_config_url,
+    )
+    agent._mpc_task_state_lifecycle._task_state = task_state
+
+
+def test_power_scheduling_agent_uses_generic_central_base():
+    module = _load_power_scheduling_module()
+
+    assert issubclass(module.PowerCentralSchedulingAgent, CentralSchedulingAgent)
+    assert not hasattr(module, "MpcCentralSchedulingAgent")
+
+    agent, _, _ = _build_agent(module, "power-generic-central-base")
+    assert not hasattr(agent, "_mpc_rolling_runtime")
+    assert not hasattr(agent, "_mpc_optimization_service")
+
+
+def test_power_scheduling_termination_clears_explicit_task_state():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-terminate")
+    agent._mpc_task_state_lifecycle.ensure_task_state(3)
+    agent._hydrosim_api.cancel = Mock()
+    agent.discard_control_execution_waiters = Mock()
+    agent._agent_command_gateway.shutdown = Mock()
+
+    response = agent.on_terminate(
+        SimTaskTerminateRequest(command_id="terminate-power", context=context)
+    )
+
+    assert response.command_status == "SUCCEED"
+    assert agent.agent_status == AgentStatus.TERMINATED
+    assert agent._mpc_task_state_lifecycle.task_state is None
+    agent.discard_control_execution_waiters.assert_called_once_with()
+    agent._agent_command_gateway.shutdown.assert_called_once_with()
 
 
 def _build_session(step_count: int):
@@ -132,17 +188,16 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-001")
 
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(
-            return_value=SchedulingTaskState(
-                context=context,
-                rolling_interval_steps=1,
-                start_step=3,
-                current_step=3,
-                total_steps=12,
-            )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        task_state=SchedulingTaskState(
+            context=context,
+            rolling_interval_steps=1,
+            start_step=3,
+            current_step=3,
+            total_steps=12,
         ),
-        get_roll_steps=lambda: 1,
     )
     agent._hydrosim_api._session = _build_session(12)
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(3))
@@ -185,8 +240,8 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     assert turbine_station_detail.command_type is None
     assert turbine_station_detail.value is None
     assert turbine_station_detail.target_value is None
-    agent._control_command_dispatcher.dispatch.assert_called_once()
-    dispatched_commands = agent._control_command_dispatcher.dispatch.call_args.args[0]
+    agent.dispatch_control_commands_and_await_execution.assert_called_once()
+    dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
     assert dispatched_commands == [
         {
             "target_agent_code": "TARGET_AGENT_20304",
@@ -340,10 +395,7 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
         current_step=1,
         total_steps=30,
     )
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(return_value=task_state),
-        get_roll_steps=lambda: 10,
-    )
+    _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(30)
     agent._hydrosim_api.execute_step = Mock(side_effect=lambda step_index: _build_step_result(step_index))
 
@@ -379,7 +431,7 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert {detail.horizon_step for detail in second_report.mpc_prediction_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
-    assert agent._control_command_dispatcher.dispatch.call_count == 2
+    assert agent.dispatch_control_commands_and_await_execution.call_count == 2
 
 
 def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
@@ -392,10 +444,7 @@ def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
         current_step=0,
         total_steps=96,
     )
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(return_value=task_state),
-        get_roll_steps=lambda: 10,
-    )
+    _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(96)
     agent._hydrosim_api.execute_step = Mock(side_effect=lambda step_index: _build_step_result(step_index))
 
@@ -474,12 +523,7 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-003")
 
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
-        get_roll_steps=lambda: 10,
-        configured_mpc_config_url="mpc.yaml",
-        configured_target_and_constrain_config_url="control.yaml",
-    )
+    _configure_mpc_task_state(agent, roll_steps=10)
     agent._hydrosim_api._session = _build_session(30)
     agent._hydrosim_api.apply_time_series_event_update = Mock(
         return_value={
@@ -503,11 +547,12 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     )
 
     assert response.command_status == "SUCCEED"
-    assert agent._local_mpc_task_state is not None
-    assert agent._local_mpc_task_state.start_step == 1
-    assert agent._local_mpc_task_state.current_step == 1
-    assert agent._local_mpc_task_state.rolling_interval_steps == 10
-    assert agent._local_mpc_task_state.hydro_events
+    task_state = agent._mpc_task_state_lifecycle.task_state
+    assert task_state is not None
+    assert task_state.start_step == 1
+    assert task_state.current_step == 1
+    assert task_state.rolling_interval_steps == 10
+    assert task_state.hydro_events
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 1
     assert kwargs["current_step_metrics"] == []
@@ -523,13 +568,7 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
         current_step=21,
         total_steps=96,
     )
-    agent._local_mpc_task_state = task_state
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(side_effect=RuntimeError("local task state")),
-        get_roll_steps=lambda: 10,
-        configured_mpc_config_url="mpc.yaml",
-        configured_target_and_constrain_config_url="control.yaml",
-    )
+    _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(96)
     agent._hydrosim_api.apply_time_series_event_update = Mock(
         return_value={
@@ -563,7 +602,7 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
         )
     )
 
-    assert task_state.start_step == 21
+    assert task_state.start_step == 1
     assert task_state.current_step == 21
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 21
@@ -595,16 +634,141 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
     assert enqueued[1].mpc_prediction_results[0].step == 31
 
 
+def test_power_scheduling_mid_cycle_event_keeps_original_rolling_anchor():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-mid-cycle-event")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=10,
+        start_step=1,
+        current_step=21,
+        total_steps=96,
+    )
+    _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
+    agent._hydrosim_api._session = _build_session(96)
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+
+    agent.on_time_series_data_update(
+        TimeSeriesDataUpdateRequest(
+            command_id="mid-cycle-event-025",
+            context=context,
+            time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                hydro_event_source_type="WEATHER_FORECAST",
+                auto_schedule_at_step=25,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20000,
+                        object_type="UnifiedCanal",
+                        object_name="sm-pbg",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=25, value=2500.0)],
+                    )
+                ],
+            ),
+            broadcast=False,
+        )
+    )
+
+    assert task_state.start_step == 1
+    assert task_state.current_step == 25
+    assert agent._rolling_window_start_step == 25
+    assert agent._rolling_window_end_step == 34
+    assert len(enqueued) == 1
+
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(25))
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-mid-cycle-025", context=context, step=25)
+    )
+    assert len(enqueued) == 1
+
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(31))
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-next-boundary-031", context=context, step=31)
+    )
+    assert len(enqueued) == 2
+    assert agent._rolling_window_start_step == 31
+    assert agent._rolling_window_end_step == 40
+
+
+def test_power_scheduling_serializes_tick_and_time_series_update():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-runtime-lock")
+    _configure_mpc_task_state(agent, roll_steps=10)
+    agent._hydrosim_api._session = _build_session(30)
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(1))
+    agent._hydrosim_api.apply_time_series_event_update = Mock(
+        return_value={
+            "station_power_series": agent._hydrosim_api._session.latest_station_power_series,
+            "device_output_series": agent._hydrosim_api._session.latest_device_output_series,
+            "updated_time_series_count": 1,
+        }
+    )
+    tick_entered = Event()
+    release_tick = Event()
+
+    def blocking_optimization(step):
+        tick_entered.set()
+        assert release_tick.wait(1)
+        return []
+
+    agent.on_optimization = Mock(side_effect=blocking_optimization)
+    tick_worker = Thread(
+        target=lambda: agent.on_tick_simulation(
+            TickCmdRequest(command_id="tick-lock-001", context=context, step=1)
+        )
+    )
+    tick_worker.start()
+    assert tick_entered.wait(0.2)
+
+    event_attempted = Event()
+
+    def update_time_series():
+        event_attempted.set()
+        agent.on_time_series_data_update(
+            TimeSeriesDataUpdateRequest(
+                command_id="event-lock-002",
+                context=context,
+                time_series_data_changed_event=TimeSeriesDataChangedEvent(
+                    hydro_event_source_type="WEATHER_FORECAST",
+                    auto_schedule_at_step=2,
+                    object_time_series=[
+                        ObjectTimeSeries(
+                            object_id=20000,
+                            object_type="UnifiedCanal",
+                            metrics_code="water_flow",
+                            time_series=[TimeSeriesValue(step=2, value=2500.0)],
+                        )
+                    ],
+                ),
+            )
+        )
+
+    event_worker = Thread(target=update_time_series)
+    event_worker.start()
+    assert event_attempted.wait(0.2)
+    event_worker.join(timeout=0.05)
+    assert event_worker.is_alive()
+    agent._hydrosim_api.apply_time_series_event_update.assert_not_called()
+
+    release_tick.set()
+    tick_worker.join(timeout=0.5)
+    event_worker.join(timeout=0.5)
+    assert not tick_worker.is_alive()
+    assert not event_worker.is_alive()
+    agent._hydrosim_api.apply_time_series_event_update.assert_called_once()
+
+
 def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimization():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-004")
 
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
-        get_roll_steps=lambda: 10,
-        configured_mpc_config_url="mpc.yaml",
-        configured_target_and_constrain_config_url="control.yaml",
-    )
+    _configure_mpc_task_state(agent, roll_steps=10)
     agent._hydrosim_api._session = _build_session(5)
 
     def _refresh_plan(event, current_step=None, current_step_metrics=None):
@@ -665,17 +829,16 @@ def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimiz
 def test_power_scheduling_report_only_contains_control_metrics():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-report-001")
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(
-            return_value=SchedulingTaskState(
-                context=context,
-                rolling_interval_steps=1,
-                start_step=2,
-                current_step=2,
-                total_steps=4,
-            )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        task_state=SchedulingTaskState(
+            context=context,
+            rolling_interval_steps=1,
+            start_step=2,
+            current_step=2,
+            total_steps=4,
         ),
-        get_roll_steps=lambda: 1,
     )
     agent._hydrosim_api._session = SimpleNamespace(
         latest_station_power_series=[],
@@ -792,17 +955,16 @@ def test_power_scheduling_report_only_contains_control_metrics():
 def test_power_scheduling_report_includes_station_predicted_aggregates():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-station-predict-001")
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(
-            return_value=SchedulingTaskState(
-                context=context,
-                rolling_interval_steps=1,
-                start_step=2,
-                current_step=2,
-                total_steps=4,
-            )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        task_state=SchedulingTaskState(
+            context=context,
+            rolling_interval_steps=1,
+            start_step=2,
+            current_step=2,
+            total_steps=4,
         ),
-        get_roll_steps=lambda: 1,
     )
     agent._hydrosim_api._session = SimpleNamespace(
         latest_station_power_series=[
@@ -1082,12 +1244,7 @@ def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-005")
 
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
-        get_roll_steps=lambda: 10,
-        configured_mpc_config_url="mpc.yaml",
-        configured_target_and_constrain_config_url="control.yaml",
-    )
+    _configure_mpc_task_state(agent, roll_steps=10)
     agent._hydrosim_api._session = _build_session(5)
     agent._hydrosim_api.apply_time_series_event_update = Mock(
         return_value={
@@ -1125,12 +1282,7 @@ def test_power_scheduling_time_series_update_passes_current_step_cache_to_hydros
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-006")
 
-    agent._mpc_rolling_runtime = SimpleNamespace(
-        require_mpc_task_state=Mock(side_effect=RuntimeError("not initialized")),
-        get_roll_steps=lambda: 10,
-        configured_mpc_config_url="mpc.yaml",
-        configured_target_and_constrain_config_url="control.yaml",
-    )
+    _configure_mpc_task_state(agent, roll_steps=10)
     agent._hydrosim_api._session = _build_session(5)
     agent._metrics_data_cache.update(
         {

@@ -16,10 +16,7 @@ def _load_power_control_module():
 
 
 def _load_power_control_models():
-    power_dir = os.path.abspath("custom-agent/power")
-    if power_dir not in sys.path:
-        sys.path.insert(0, power_dir)
-    return importlib.import_module("edge_control.models")
+    return importlib.import_module("hydros_agent_sdk.control_algorithms")
 
 
 class PowerControlAlgorithmServiceTest(unittest.TestCase):
@@ -101,7 +98,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             request = Request(
                 url=(
                     f"http://127.0.0.1:{server.server_address[1]}"
-                    "/control-algorithms/power_station_edge_control/solve"
+                    "/engine/v1/api/control-algorithms/power_station_edge_control/solve"
                 ),
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
@@ -113,6 +110,56 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_runtime_allocates_station_water_flow_to_turbines(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_edge_control",
+            "control_task_type": "STATION_FLOW_ALLOCATION",
+            "context": {
+                "request_id": "request-flow-001",
+                "target_object_type": "GateStation",
+                "target_object_id": 20100,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "GateStation",
+                "object_id": 20100,
+                "value_type": "water_flow",
+                "value": 600.0,
+            }],
+            "actuators": [
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20104,
+                    "available": True,
+                    "values": {"water_flow": 200.0},
+                    "ranges": {"water_flow": {"min_value": 0.0, "max_value": 600.0}},
+                    "attributes": {"station_object_id": 20100},
+                },
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20105,
+                    "available": True,
+                    "values": {"water_flow": 100.0},
+                    "ranges": {"water_flow": {"min_value": 0.0, "max_value": 600.0}},
+                    "attributes": {"station_object_id": 20100},
+                },
+            ],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        self.assertEqual("TURBINE_FLOW_TARGET_ALLOCATED", output.reason)
+        targets = {
+            item.object_id: item.target_values["water_flow"]
+            for item in output.actuator_targets
+        }
+        self.assertAlmostEqual(400.0, targets[20104])
+        self.assertAlmostEqual(200.0, targets[20105])
 
 
 if __name__ == "__main__":

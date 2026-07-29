@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -26,11 +27,12 @@ from hydros_agent_sdk import (
 )
 from hydros_agent_sdk.utils import HydroObjectType
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
-from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcCentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import DeviceResult, HorizonStep, PredictedResult, ValueItem
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
@@ -97,7 +99,7 @@ class HydroSimInputFileResolver:
         return str(target_path.resolve())
 
 
-class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
+class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     """
     电站 HydroSim 集中调度智能体。
 
@@ -118,6 +120,22 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         hydros_node_id: str,
         **kwargs,
     ):
+        configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
+        configured_target_and_constrain_config_url = kwargs.pop(
+            "target_and_constrain_config_url",
+            None,
+        )
+        mpc_prediction_result_reporter = kwargs.pop(
+            "mpc_prediction_result_reporter",
+            None,
+        )
+        # 这些参数原本由 SDK 默认 MPC runtime 消费。迁移后继续接收它们以保持
+        # 构造兼容，但电站 Agent 显式拥有自己的 HydroSim 优化链路。
+        kwargs.pop("mpc_service_base_url", None)
+        kwargs.pop("mpc_request_timeout_seconds", None)
+        kwargs.pop("mpc_control_execution_timeout_seconds", None)
+        kwargs.pop("mpc_planning_client", None)
+        kwargs.pop("mpc_sensor_provider", None)
         super().__init__(
             sim_coordination_client=sim_coordination_client,
             agent_id=agent_id,
@@ -129,13 +147,33 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
             hydros_node_id=hydros_node_id,
             **kwargs,
         )
+        object.__setattr__(self, "_configured_mpc_config_url", configured_mpc_config_url)
+        object.__setattr__(
+            self,
+            "_configured_target_and_constrain_config_url",
+            configured_target_and_constrain_config_url,
+        )
+        self._mpc_result_reporter = (
+            mpc_prediction_result_reporter
+            or MpcPredictionResultReporter(sim_coordination_client=sim_coordination_client)
+        )
         self._hydrosim_api = HydroSimulationApi()
         self._hydrosim_initialized = False
         self._hydrosim_power_plan_loaded = False
         self._rolling_window_start_step: Optional[int] = None
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
-        self._local_mpc_task_state: Optional[MpcTaskState] = None
+        self._runtime_lock = RLock()
+        self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
+            context=context,
+            get_current_step=lambda: self._current_step,
+            get_rolling_interval_steps=self._resolve_roll_steps,
+            get_total_steps=self._resolve_total_steps,
+            get_algorithm_config_url=lambda: self._configured_mpc_config_url,
+            get_control_config_url=(
+                lambda: self._configured_target_and_constrain_config_url
+            ),
+        )
         self._hydrosim_runtime_dir = RUNTIME_DIR
         self._hydrosim_runtime_dir.mkdir(parents=True, exist_ok=True)
         self._hydrosim_input_resolver = HydroSimInputFileResolver(
@@ -176,20 +214,21 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
-        self._ensure_hydrosim_initialized()
-        self._ensure_hydrosim_power_plan_loaded()
-        task_state = self._ensure_mpc_task_state(request.step)
+        with self._runtime_lock:
+            self._ensure_hydrosim_initialized()
+            self._ensure_hydrosim_power_plan_loaded()
+            task_state = self._ensure_mpc_task_state(request.step)
 
-        if self._should_refresh_rolling_window(request.step, task_state):
-            logger.info("Refreshing rolling scheduling window at step=%s", request.step)
-            commands = self.on_optimization(request.step)
-            if commands:
-                self._control_command_dispatcher.dispatch(commands)
-            self._refresh_rolling_window_dataset(request.step, task_state)
+            if self._should_refresh_rolling_window(request.step, task_state):
+                logger.info("Refreshing rolling scheduling window at step=%s", request.step)
+                commands = self.on_optimization(request.step)
+                if commands:
+                    self.dispatch_control_commands_and_await_execution(commands)
+                self._refresh_rolling_window_dataset(request.step, task_state)
 
-        step_result = self._hydrosim_api.execute_step(step_index=request.step)
-        metrics_list = self._build_metrics_from_step_result(step_result)
-        return metrics_list
+            step_result = self._hydrosim_api.execute_step(step_index=request.step)
+            metrics_list = self._build_metrics_from_step_result(step_result)
+            return metrics_list
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -273,32 +312,7 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         return commands
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
-        return self._resolve_mpc_task_state(step)
-
-    def _resolve_mpc_task_state(self, step: int) -> MpcTaskState:
-        try:
-            task_state = self._mpc_rolling_runtime.require_mpc_task_state()
-        except Exception:
-            if self._local_mpc_task_state is None:
-                self._local_mpc_task_state = MpcTaskState(
-                    context=self.context,
-                    rolling_interval_steps=self._resolve_roll_steps(),
-                    start_step=step,
-                    current_step=step,
-                    total_steps=self._resolve_total_steps(),
-                    algorithm_config_url=getattr(self._mpc_rolling_runtime, "configured_mpc_config_url", None),
-                    control_config_url=getattr(
-                        self._mpc_rolling_runtime,
-                        "configured_target_and_constrain_config_url",
-                        None,
-                    ),
-                )
-            task_state = self._local_mpc_task_state
-
-        task_state.current_step = step
-        task_state.total_steps = self._resolve_total_steps()
-        task_state.rolling_interval_steps = self._resolve_roll_steps()
-        return task_state
+        return self._mpc_task_state_lifecycle.ensure_task_state(step)
 
     def _activate_mpc_task_state_from_event(self, event: Any, step: Optional[int] = None) -> MpcTaskState:
         existing_task_state = self._peek_mpc_task_state()
@@ -311,28 +325,15 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         if current_step is None:
             current_step = 0
 
-        creates_local_task_state = existing_task_state is None and self._local_mpc_task_state is None
         task_state = self._ensure_mpc_task_state(current_step)
-        if creates_local_task_state and self._local_mpc_task_state is task_state:
-            task_state.start_step = current_step
         if event is not None:
             task_state.register_hydro_event(event)
         return task_state
 
     def _peek_mpc_task_state(self) -> Optional[MpcTaskState]:
-        try:
-            return self._mpc_rolling_runtime.require_mpc_task_state()
-        except Exception:
-            return self._local_mpc_task_state
+        return self._mpc_task_state_lifecycle.task_state
 
     def _resolve_roll_steps(self) -> int:
-        runtime = getattr(self, "_mpc_rolling_runtime", None)
-        if runtime is not None:
-            get_roll_steps = getattr(runtime, "get_roll_steps", None)
-            if callable(get_roll_steps):
-                roll_steps = int(get_roll_steps())
-                if roll_steps > 0:
-                    return roll_steps
         value = self.properties.get_property("roll_steps", None)
         if value is None:
             return 1
@@ -348,11 +349,18 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
             return len(runtime_steps)
         return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
 
-    def _resolve_window_range(self, step: int, task_state: MpcTaskState) -> Tuple[int, int]:
+    def _resolve_window_range(
+        self,
+        step: int,
+        task_state: MpcTaskState,
+        window_start_override: Optional[int] = None,
+    ) -> Tuple[int, int]:
         roll_steps = max(int(task_state.rolling_interval_steps), 1)
         start_step = int(task_state.start_step)
         total_steps = int(task_state.total_steps)
-        if step < start_step:
+        if window_start_override is not None:
+            window_start = int(window_start_override)
+        elif step < start_step:
             window_start = start_step
         else:
             window_index = (step - start_step) // roll_steps
@@ -363,15 +371,24 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         return window_start, window_end
 
     def _should_refresh_rolling_window(self, step: int, task_state: MpcTaskState) -> bool:
-        window_start, window_end = self._resolve_window_range(step, task_state)
+        if not self._rolling_window_dataset:
+            return True
         return (
-            self._rolling_window_start_step != window_start
-            or self._rolling_window_end_step != window_end
-            or not self._rolling_window_dataset
+            task_state.should_start_new_rolling(step)
+            and self._rolling_window_start_step != step
         )
 
-    def _refresh_rolling_window_dataset(self, step: int, task_state: MpcTaskState) -> None:
-        window_start, window_end = self._resolve_window_range(step, task_state)
+    def _refresh_rolling_window_dataset(
+        self,
+        step: int,
+        task_state: MpcTaskState,
+        window_start_override: Optional[int] = None,
+    ) -> None:
+        window_start, window_end = self._resolve_window_range(
+            step,
+            task_state,
+            window_start_override=window_start_override,
+        )
         horizon_steps = self._build_window_horizon_steps(window_start, window_end)
         if not horizon_steps:
             logger.warning(
@@ -395,10 +412,7 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         if not horizon_steps:
             return
 
-        reporter = getattr(self, "_mpc_result_reporter", None) or MpcPredictionResultReporter(
-            sim_coordination_client=self.sim_coordination_client
-        )
-        reporter.publish_customize_report(
+        self._mpc_result_reporter.publish_customize_report(
             source_agent_instance=self,
             mpc_task_state=task_state,
             horizon_step=horizon_steps,
@@ -874,11 +888,12 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
-        logger.info("Time series update received: commandId=%s", request.command_id)
-        event = request.time_series_data_changed_event
-        task_state = self._activate_mpc_task_state_from_event(event)
-        self._refresh_hydrosim_session_from_event(event)
-        self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
+        with self._runtime_lock:
+            logger.info("Time series update received: commandId=%s", request.command_id)
+            event = request.time_series_data_changed_event
+            task_state = self._activate_mpc_task_state_from_event(event)
+            self._refresh_hydrosim_session_from_event(event)
+            self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
 
         return TimeSeriesDataUpdateResponse(
             context=self.context,
@@ -893,11 +908,12 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         self,
         request: OutflowTimeSeriesDataUpdateRequest,
     ) -> OutflowTimeSeriesDataUpdateResponse:
-        logger.info("Outflow time series update received: commandId=%s", request.command_id)
-        event = request.outflow_time_series_data_changed_event
-        task_state = self._activate_mpc_task_state_from_event(event)
-        self._refresh_hydrosim_session_from_event(event)
-        self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
+        with self._runtime_lock:
+            logger.info("Outflow time series update received: commandId=%s", request.command_id)
+            event = request.outflow_time_series_data_changed_event
+            task_state = self._activate_mpc_task_state_from_event(event)
+            self._refresh_hydrosim_session_from_event(event)
+            self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
 
         return OutflowTimeSeriesDataUpdateResponse(
             context=self.context,
@@ -935,11 +951,14 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
         current_step: int,
         task_state: MpcTaskState,
     ) -> None:
-        task_state.start_step = int(current_step)
         commands = self.on_optimization(current_step)
         if commands:
-            self._control_command_dispatcher.dispatch(commands)
-        self._refresh_rolling_window_dataset(current_step, task_state)
+            self.dispatch_control_commands_and_await_execution(commands)
+        self._refresh_rolling_window_dataset(
+            current_step,
+            task_state,
+            window_start_override=current_step,
+        )
 
     def _resolve_event_current_step(self, event: Any) -> int:
         task_state = self._peek_mpc_task_state()
@@ -974,18 +993,28 @@ class PowerCentralSchedulingAgent(MpcCentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.AGENT_TERMINATE_FAILURE)
     def on_terminate(self, request: SimTaskTerminateRequest) -> SimTaskTerminateResponse:
-        logger.info("Stopping power scheduling agent: %s", self.agent_id)
-        self._optimization_model = None
+        with self._runtime_lock:
+            logger.info("Stopping power scheduling agent: %s", self.agent_id)
+            self._optimization_model = None
 
-        if self._hydrosim_initialized:
-            try:
-                self._hydrosim_api.cancel()
-            except Exception:
-                logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
-        self._hydrosim_initialized = False
-        self._hydrosim_power_plan_loaded = False
-        self._rolling_window_start_step = None
-        self._rolling_window_end_step = None
-        self._rolling_window_dataset = []
-        self._local_mpc_task_state = None
-        return super().on_terminate(request)
+            if self._hydrosim_initialized:
+                try:
+                    self._hydrosim_api.cancel()
+                except Exception:
+                    logger.warning("Failed to cancel HydroSim session during terminate.", exc_info=True)
+            self._hydrosim_initialized = False
+            self._hydrosim_power_plan_loaded = False
+            self._rolling_window_start_step = None
+            self._rolling_window_end_step = None
+            self._rolling_window_dataset = []
+            self.discard_control_execution_waiters()
+            self._mpc_task_state_lifecycle.clear()
+            self._agent_command_gateway.shutdown()
+            object.__setattr__(self, "agent_status", AgentStatus.TERMINATED)
+        return SimTaskTerminateResponse(
+            context=self.context,
+            command_id=request.command_id,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=self,
+            broadcast=False,
+        )
