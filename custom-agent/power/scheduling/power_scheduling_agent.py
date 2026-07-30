@@ -6,6 +6,7 @@ import logging
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
@@ -48,7 +49,7 @@ from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-30-station-out-flow-control-v8"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -267,78 +268,57 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
             return []
 
-        device_commands = self._build_device_control_commands(session, step)
-        if device_commands:
-            return device_commands
-        return self._build_station_output_power_commands(session, step)
+        return self._build_station_turbine_out_flow_commands(session, step)
 
-    def _build_device_control_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
-        commands: List[Dict[str, Any]] = []
+    def _build_station_turbine_out_flow_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+        station_out_flows: Dict[int, float] = {}
         for device in getattr(session, "latest_device_output_series", []) or []:
-            if not self._is_reportable_control_metric(device):
+            if (
+                str(device.get("object_type")) != HydroObjectType.TURBINE.value
+                or str(device.get("metrics_code")) != DeviceValueTypeEnum.WATER_FLOW.code
+                or device.get("node_id") is None
+            ):
                 continue
-
-            device_row = self._get_series_row_for_step(device.get("time_series", []), step)
-            if device_row is None:
+            row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if row is None:
                 continue
+            station_id = int(device["node_id"])
+            station_out_flows[station_id] = station_out_flows.get(station_id, 0.0) + float(row["value"])
 
-            object_id = int(device["object_id"])
-            object_type = str(device["object_type"])
-            metrics_code = str(device["metrics_code"])
+        commands_by_agent: Dict[str, List[Dict[str, Any]]] = {}
+        for station_id, out_flow in station_out_flows.items():
             target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
-                object_id=object_id,
-                device_type=object_type,
+                object_id=station_id,
+                device_type=HydroObjectType.POWER_STATION.value,
             )
             if target_agent is None:
                 logger.warning(
-                    "Skip device control command because target agent is unavailable: objectId=%s, objectType=%s, metric=%s, step=%s",
-                    object_id,
-                    object_type,
-                    metrics_code,
+                    "Skip station turbine out-flow control because target agent is unavailable: stationId=%s, step=%s",
+                    station_id,
                     step,
                 )
                 continue
-
-            commands.append(
+            commands_by_agent.setdefault(target_agent.agent_code, []).append(
                 {
                     "target_agent_code": target_agent.agent_code,
-                    "target_command_type": metrics_code,
-                    "target_value": float(device_row["value"]),
-                    "object_id": object_id,
-                    "object_type": object_type,
+                    "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
+                    "target_value": out_flow,
+                    "object_id": station_id,
+                    "object_type": HydroObjectType.POWER_STATION.value,
+                    "main_step_index": step,
                 }
             )
-        return commands
 
-    def _build_station_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
         commands: List[Dict[str, Any]] = []
-        for station in getattr(session, "latest_station_power_series", []) or []:
-            station_row = self._get_series_row_for_step(station.get("time_series", []), step)
-            if station_row is None:
-                continue
-
-            object_id = int(station["node_id"])
-            target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
-                object_id=object_id,
-                device_type=HydroObjectType.STATION.value,
+        for target_agent_code, grouped_commands in commands_by_agent.items():
+            group_id = (
+                f"POWER_STATION_OUT_FLOW:{self.context.biz_scene_instance_id}:"
+                f"{step}:{target_agent_code}:{uuid.uuid4()}"
             )
-            if target_agent is None:
-                logger.warning(
-                    "Skip station output-power fallback command because target agent is unavailable: objectId=%s, step=%s",
-                    object_id,
-                    step,
-                )
-                continue
-
-            commands.append(
-                {
-                    "target_agent_code": target_agent.agent_code,
-                    "target_command_type": DeviceValueTypeEnum.OUTPUT_POWER.code,
-                    "target_value": float(station_row["value"]),
-                    "object_id": object_id,
-                    "object_type": HydroObjectType.STATION.value,
-                }
-            )
+            for command in grouped_commands:
+                command["group_id"] = group_id
+                command["group_size"] = len(grouped_commands)
+                commands.append(command)
         return commands
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
@@ -860,7 +840,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _ensure_hydrosim_power_plan_loaded(self) -> None:
         if self._hydrosim_power_plan_loaded:
             return
+        started_at = time.monotonic()
         planning_file, cleanup_path = self._resolve_power_planning_file_for_load()
+        logger.info(
+            "HydroSim power planning load started: file=%s, runtime_revision=%s",
+            planning_file,
+            POWER_SCHEDULING_RUNTIME_REVISION,
+        )
         try:
             try:
                 result = self._hydrosim_api.get_station_power_planning_series(planning_file)
@@ -874,7 +860,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             if cleanup_path is not None and cleanup_path.exists():
                 cleanup_path.unlink(missing_ok=True)
         self._hydrosim_power_plan_loaded = True
-        logger.info("HydroSim power planning loaded, stations=%s", len(result.get("station_power_series", [])))
+        logger.info(
+            "HydroSim power planning loaded: stations=%s, elapsed_seconds=%.3f",
+            len(result.get("station_power_series", [])),
+            time.monotonic() - started_at,
+        )
 
     def _resolve_hydrosim_input_file(
         self,

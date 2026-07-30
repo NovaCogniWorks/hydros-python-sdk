@@ -2,7 +2,7 @@ import os
 import socket
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from paho.mqtt.reasoncodes import ReasonCode
 
@@ -54,6 +54,34 @@ class HydrosTopicsTest(unittest.TestCase):
 
         self.assertTrue(transport.connected.is_set())
         self.assertEqual(subscriptions, [("/hydros/commands/coordination/demo_cluster", 1)])
+
+    def test_coordination_transport_uses_long_compute_keepalive(self):
+        with patch("hydros_agent_sdk.transport.mqtt_coordination.mqtt.Client") as client_factory:
+            mqtt_client = client_factory.return_value
+            transport = MqttCoordinationTransport(
+                broker_url="tcp://127.0.0.1",
+                broker_port=1883,
+                client_id="test-client",
+                topic="/hydros/commands/coordination/demo_cluster",
+                handler=lambda _topic, _payload: None,
+            )
+            transport.connected.set()
+
+            transport.start()
+
+        mqtt_client.connect.assert_called_once_with("127.0.0.1", 1883, keepalive=600)
+        mqtt_client.loop_start.assert_called_once_with()
+
+    def test_coordination_transport_rejects_non_positive_keepalive(self):
+        with self.assertRaisesRegex(ValueError, "keepalive_seconds must be positive"):
+            MqttCoordinationTransport(
+                broker_url="tcp://127.0.0.1",
+                broker_port=1883,
+                client_id="test-client",
+                topic="/hydros/commands/coordination/demo_cluster",
+                handler=lambda _topic, _payload: None,
+                keepalive_seconds=0,
+            )
 
     def test_agent_command_client_subscribes_through_shared_transport(self):
         transport = Mock()

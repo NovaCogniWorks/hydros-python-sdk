@@ -106,6 +106,13 @@ class HydroAgentInstance(HydroAgent):
             "hydrosNodeId",
         )
     )
+    edge_node_code: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "edge_node_code",
+            "edgeNodeCode",
+        ),
+    )
     context: SimulationContext
     agent_status: AgentStatus = Field(
         default=AgentStatus.INIT,

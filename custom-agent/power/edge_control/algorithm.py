@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
     ControlActuator,
@@ -14,21 +14,16 @@ from hydros_agent_sdk.control_algorithms import (
     SignalType,
 )
 
-STATION_OBJECT_TYPE = "Station"
+STATION_OBJECT_TYPE = "PowerStation"
 TURBINE_OBJECT_TYPE = "Turbine"
-GATE_OBJECT_TYPE = "Gate"
-OUTPUT_POWER_VALUE_TYPE = "output_power"
 WATER_FLOW_VALUE_TYPE = "water_flow"
-GATE_OPENING_VALUE_TYPE = "gate_opening"
 
 
 @dataclass(frozen=True)
 class PowerControlConfig:
     algorithm_type: str = "power_station_edge_control"
     algorithm_version: str = "1.0.0"
-    default_output_power_delta: float = 20.0
     default_water_flow_delta: float = 200.0
-    default_gate_opening_delta: float = 0.2
 
 
 class PowerControlAlgorithm:
@@ -45,79 +40,60 @@ class PowerControlAlgorithm:
                 error_message="Power control only supports STATION_FLOW_ALLOCATION for the first version.",
             )
 
-        target_signal = self._select_station_target_signal(input_data)
-        if target_signal is None:
+        target_signals = self._select_station_target_signals(input_data)
+        if not target_signals:
             return self._failed(
                 input_data,
                 error_code="MISSING_TARGET_SIGNAL",
-                error_message="Missing Station target signal for output_power or water_flow.",
+                error_message="Missing PowerStation target signal for water_flow.",
             )
 
-        station_id = target_signal.object_id
-        turbines = self._select_station_actuators(
-            input_data.actuators,
-            station_id=station_id,
-            object_type=TURBINE_OBJECT_TYPE,
-        )
-        gates = self._select_station_actuators(
-            input_data.actuators,
-            station_id=station_id,
-            object_type=GATE_OBJECT_TYPE,
-        )
-
-        if target_signal.value_type == OUTPUT_POWER_VALUE_TYPE and turbines:
-            return self._solve_turbine_output_power(input_data, target_signal, turbines)
-        if target_signal.value_type == WATER_FLOW_VALUE_TYPE and turbines:
-            return self._solve_turbine_water_flow(input_data, target_signal, turbines)
-        if target_signal.value_type == WATER_FLOW_VALUE_TYPE and gates:
-            return self._solve_gate_opening(input_data, target_signal, gates)
-
-        return self._failed(
-            input_data,
-            error_code="NO_SUPPORTED_ACTUATORS",
-            error_message=(
-                f"No supported actuators found for station={station_id}, "
-                f"target_value_type={target_signal.value_type}."
-            ),
-        )
-
-    def _solve_turbine_water_flow(
-        self,
-        input_data: ControlAlgorithmInput,
-        target_signal: ControlSignal,
-        turbines: List[ControlActuator],
-    ) -> ControlAlgorithmOutput:
-        target_flow = float(target_signal.value or 0.0)
-        current_total_flow = sum(
-            float(actuator.values.get(WATER_FLOW_VALUE_TYPE, 0.0))
-            for actuator in turbines
-        )
-        target_map = self._allocate_target_values(
-            actuators=turbines,
-            value_type=WATER_FLOW_VALUE_TYPE,
-            target_total=target_flow,
-            default_delta=float(
-                input_data.parameters.get(
-                    "default_water_flow_delta",
-                    self._config.default_water_flow_delta,
+        actuator_targets: List[ControlActuatorTarget] = []
+        results: List[ControlSignal] = []
+        station_states: Dict[str, Any] = {}
+        station_evidence: List[Dict[str, Any]] = []
+        for target_signal in target_signals:
+            station_id = target_signal.object_id
+            turbines = self._select_station_actuators(
+                input_data.actuators,
+                station_id=station_id,
+                object_type=TURBINE_OBJECT_TYPE,
+            )
+            if not turbines:
+                return self._failed(
+                    input_data,
+                    error_code="NO_SUPPORTED_ACTUATORS",
+                    error_message=f"No turbine water-flow actuators found for station={station_id}.",
                 )
-            ),
-        )
-        allocated_flow = sum(target_map.values())
-        return ControlAlgorithmOutput(
-            schema_version=input_data.schema_version,
-            request_id=input_data.context.request_id,
-            status=ControlAlgorithmStatus.CONTINUE,
-            reason="TURBINE_FLOW_TARGET_ALLOCATED",
-            actuator_targets=[
+            target_flow = float(target_signal.value or 0.0)
+            current_total_flow = sum(
+                float(actuator.values.get(WATER_FLOW_VALUE_TYPE, 0.0))
+                for actuator in turbines
+            )
+            target_map = self._allocate_target_values(
+                actuators=turbines,
+                value_type=WATER_FLOW_VALUE_TYPE,
+                target_total=target_flow,
+                default_delta=float(
+                    input_data.parameters.get(
+                        "max_adjustment_delta",
+                        input_data.parameters.get(
+                            "default_water_flow_delta",
+                            self._config.default_water_flow_delta,
+                        ),
+                    )
+                ),
+            )
+            allocated_flow = sum(target_map.values())
+            actuator_targets.extend(
                 ControlActuatorTarget(
                     object_type=TURBINE_OBJECT_TYPE,
                     object_id=actuator.object_id,
                     target_values={WATER_FLOW_VALUE_TYPE: target_map[actuator.object_id]},
                 )
                 for actuator in turbines
-            ],
-            results=[
+            )
+            results.append(
                 ControlSignal(
                     type=SignalType.RESULT,
                     object_type=target_signal.object_type,
@@ -125,131 +101,40 @@ class PowerControlAlgorithm:
                     value_type=WATER_FLOW_VALUE_TYPE,
                     value=allocated_flow,
                 )
-            ],
-            next_state={
-                "last_station_target_type": target_signal.value_type,
-                "last_station_target_value": target_flow,
-                "last_station_turbine_flow": allocated_flow,
-            },
-            evidence={
-                "station_id": target_signal.object_id,
-                "target_water_flow": target_flow,
-                "current_turbine_water_flow": current_total_flow,
-                "available_turbine_count": len(turbines),
-            },
-        )
-
-    def _solve_turbine_output_power(
-        self,
-        input_data: ControlAlgorithmInput,
-        target_signal: ControlSignal,
-        turbines: List[ControlActuator],
-    ) -> ControlAlgorithmOutput:
-        target_power = float(target_signal.value or 0.0)
-        current_total_power = sum(float(actuator.values.get(OUTPUT_POWER_VALUE_TYPE, 0.0)) for actuator in turbines)
-        target_map = self._allocate_target_values(
-            actuators=turbines,
-            value_type=OUTPUT_POWER_VALUE_TYPE,
-            target_total=target_power,
-            default_delta=float(input_data.parameters.get("default_output_power_delta", self._config.default_output_power_delta)),
-        )
-        results = [
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type=STATION_OBJECT_TYPE,
-                object_id=target_signal.object_id,
-                value_type=OUTPUT_POWER_VALUE_TYPE,
-                value=sum(target_map.values()),
             )
-        ]
-        return ControlAlgorithmOutput(
-            schema_version=input_data.schema_version,
-            request_id=input_data.context.request_id,
-            status=ControlAlgorithmStatus.CONTINUE,
-            reason="POWER_TARGET_ALLOCATED",
-            actuator_targets=[
-                ControlActuatorTarget(
-                    object_type=TURBINE_OBJECT_TYPE,
-                    object_id=actuator.object_id,
-                    target_values={OUTPUT_POWER_VALUE_TYPE: target_map[actuator.object_id]},
-                )
-                for actuator in turbines
-            ],
-            results=results,
-            next_state={
-                "last_station_target_type": target_signal.value_type,
-                "last_station_target_value": target_power,
-                "last_station_output_power": sum(target_map.values()),
-            },
-            evidence={
-                "station_id": target_signal.object_id,
-                "target_output_power": target_power,
-                "current_output_power": current_total_power,
-                "available_turbine_count": len(turbines),
-            },
-        )
-
-    def _solve_gate_opening(
-        self,
-        input_data: ControlAlgorithmInput,
-        target_signal: ControlSignal,
-        gates: List[ControlActuator],
-    ) -> ControlAlgorithmOutput:
-        target_flow = float(target_signal.value or 0.0)
-        target_map = self._allocate_target_values(
-            actuators=gates,
-            value_type=GATE_OPENING_VALUE_TYPE,
-            target_total=target_flow,
-            default_delta=float(input_data.parameters.get("default_gate_opening_delta", self._config.default_gate_opening_delta)),
-        )
-        return ControlAlgorithmOutput(
-            schema_version=input_data.schema_version,
-            request_id=input_data.context.request_id,
-            status=ControlAlgorithmStatus.CONTINUE,
-            reason="GATE_TARGET_ALLOCATED",
-            actuator_targets=[
-                ControlActuatorTarget(
-                    object_type=GATE_OBJECT_TYPE,
-                    object_id=actuator.object_id,
-                    target_values={GATE_OPENING_VALUE_TYPE: target_map[actuator.object_id]},
-                )
-                for actuator in gates
-            ],
-            results=[
-                ControlSignal(
-                    type=SignalType.RESULT,
-                    object_type=STATION_OBJECT_TYPE,
-                    object_id=target_signal.object_id,
-                    value_type=WATER_FLOW_VALUE_TYPE,
-                    value=target_flow,
-                )
-            ],
-            next_state={
-                "last_station_target_type": target_signal.value_type,
-                "last_station_target_value": target_flow,
-            },
-            evidence={
-                "station_id": target_signal.object_id,
+            station_states[str(station_id)] = {
                 "target_water_flow": target_flow,
-                "available_gate_count": len(gates),
-            },
+                "allocated_turbine_water_flow": allocated_flow,
+            }
+            station_evidence.append(
+                {
+                    "station_id": station_id,
+                    "target_water_flow": target_flow,
+                    "current_turbine_water_flow": current_total_flow,
+                    "available_turbine_count": len(turbines),
+                }
+            )
+
+        return ControlAlgorithmOutput(
+            schema_version=input_data.schema_version,
+            request_id=input_data.context.request_id,
+            status=ControlAlgorithmStatus.CONTINUE,
+            reason="TURBINE_FLOW_TARGET_ALLOCATED",
+            actuator_targets=actuator_targets,
+            results=results,
+            next_state={"stations": station_states},
+            evidence={"stations": station_evidence},
         )
 
-    def _select_station_target_signal(self, input_data: ControlAlgorithmInput) -> Optional[ControlSignal]:
-        station_id = input_data.context.target_object_id
-        station_type = input_data.context.target_object_type or STATION_OBJECT_TYPE
-        candidates = [
+    def _select_station_target_signals(self, input_data: ControlAlgorithmInput) -> List[ControlSignal]:
+        return [
             signal
             for signal in input_data.signals
             if signal.type == SignalType.TARGET
-            and signal.object_type == station_type
-            and (station_id is None or signal.object_id == station_id)
+            and signal.object_type == STATION_OBJECT_TYPE
             and signal.value is not None
-            and signal.value_type in {OUTPUT_POWER_VALUE_TYPE, WATER_FLOW_VALUE_TYPE}
+            and signal.value_type == WATER_FLOW_VALUE_TYPE
         ]
-        if not candidates:
-            return None
-        return candidates[0]
 
     def _select_station_actuators(
         self,

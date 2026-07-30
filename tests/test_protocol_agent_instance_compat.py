@@ -92,6 +92,7 @@ def test_agent_instance_accepts_java_camel_case_status_names():
             "biz_scene_instance_id": context.biz_scene_instance_id,
             "clusterId": "cluster-a",
             "nodeId": "node-a",
+            "edgeNodeCode": "edge-001",
             "context": context.model_dump(mode="json"),
             "agentStatus": "IDLE",
             "agentInstanceStatus": "WAITING",
@@ -101,8 +102,10 @@ def test_agent_instance_accepts_java_camel_case_status_names():
 
     assert agent.cluster_id == "cluster-a"
     assert agent.node_id == "node-a"
+    assert agent.edge_node_code == "edge-001"
     assert agent.agent_status == AgentStatus.IDLE
     assert agent.agent_instance_status == AgentInstanceStatus.WAITING
+    assert agent.model_dump(mode="json", by_alias=True)["edge_node_code"] == "edge-001"
 
 
 def test_agent_instance_status_report_uses_agent_instance_status_field():

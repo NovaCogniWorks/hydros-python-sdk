@@ -64,8 +64,9 @@ MQTT_USERNAME="${MQTT_USERNAME:-hydros_agent_user}"
 MQTT_PASSWORD="${MQTT_PASSWORD:-HbGcDx125a}"
 DEFAULT_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS:-${START_ARGS:-outflowplan scheduling}}"
 HYDROS_AGENT_START_ARGS="${DEFAULT_AGENT_START_ARGS}"
-PORT="${PORT:-8025}"
-HYDROS_CONTROL_ALGORITHM_PORT="${HYDROS_CONTROL_ALGORITHM_PORT:-8066}"
+PORT="${PORT:-8015}"
+HYDROS_CONTROL_ALGORITHM_HOST="${HYDROS_CONTROL_ALGORITHM_HOST:-0.0.0.0}"
+HYDROS_CONTROL_ALGORITHM_PORT="${HYDROS_CONTROL_ALGORITHM_PORT:-8015}"
 DEBUG_PORT="${DEBUG_PORT:-}"
 LOG_VOLUME="${LOG_VOLUME:-${CONTAINER_NAME}-logs}"
 
@@ -118,7 +119,7 @@ docker build \
     "${REPO_ROOT}"
 
 if ! docker run --rm --entrypoint /bin/bash "${IMAGE_NAME}:${VERSION}" -c \
-    'test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
+    'test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-30-station-out-flow-control-v8"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
     echo "Built image is missing required sources, bundled HydroSim inputs, or the expected power scheduling runtime revision; deployment aborted." >&2
     exit 1
 fi
@@ -149,6 +150,7 @@ if ! CONTAINER_ID="$(
         -e MQTT_USERNAME="${MQTT_USERNAME}" \
         -e MQTT_PASSWORD="${MQTT_PASSWORD}" \
         -e HYDROS_AGENT_START_ARGS="${HYDROS_AGENT_START_ARGS}" \
+        -e HYDROS_CONTROL_ALGORITHM_HOST="${HYDROS_CONTROL_ALGORITHM_HOST}" \
         -e HYDROS_CONTROL_ALGORITHM_PORT="${HYDROS_CONTROL_ALGORITHM_PORT}" \
         -v "${LOG_VOLUME}:/opt/hydros/custom-agent/power/logs" \
         "${IMAGE_NAME}:${VERSION}" \

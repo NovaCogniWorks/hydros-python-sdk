@@ -21,6 +21,7 @@ class HydroObjectType(str, Enum):
     """水利对象类型枚举。"""
     GATE_STATION = "GateStation"
     PUMP_STATION = "PumpStation"
+    POWER_STATION = "PowerStation"
     DIVERSION_POINT = "DiversionPoint"
     CROSS_SECTION = "CrossSection"
     STATION = "Station"

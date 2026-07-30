@@ -86,7 +86,7 @@ bash custom-agent/power/start_agents.sh --check
 python custom-agent/power/control_algorithm_service.py
 ```
 
-默认监听 `127.0.0.1:8066`，标准接口为：
+默认监听 `0.0.0.0:8015`，标准接口为：
 
 ```text
 POST /engine/v1/api/control-algorithms/power_station_edge_control/solve
@@ -94,7 +94,8 @@ POST /engine/v1/api/control-algorithms/power_station_edge_control/solve
 
 可通过 `HYDROS_CONTROL_ALGORITHM_HOST`、`HYDROS_CONTROL_ALGORITHM_PORT` 调整监听地址。edge 侧的
 `hydros.edge.control-algorithm.python-http.endpoint` 应配置为该服务的基址，例如
-`http://127.0.0.1:8066`。电站站级 `water_flow` 输入会分配为站内可用水轮机的 `water_flow` 候选目标，
+`http://192.168.20.51:8015`。该接口只接受 `POST` JSON 请求，浏览器直接访问产生的 `GET` 会返回 405。
+`PowerStation/water_flow` 电站站级输入会分配为站内可用水轮机的 `water_flow` 候选目标，
 最终范围校验与设备写入仍由 edge 负责。
 
 ### 查看日志

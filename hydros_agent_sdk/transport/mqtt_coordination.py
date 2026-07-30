@@ -13,6 +13,7 @@ from .base import MessageHandler
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_MQTT_KEEPALIVE_SECONDS = 600
 
 
 class MqttCoordinationTransport:
@@ -28,12 +29,16 @@ class MqttCoordinationTransport:
         qos: int = 1,
         mqtt_username: Optional[str] = None,
         mqtt_password: Optional[str] = None,
+        keepalive_seconds: int = DEFAULT_MQTT_KEEPALIVE_SECONDS,
     ) -> None:
+        if keepalive_seconds <= 0:
+            raise ValueError("keepalive_seconds must be positive")
         self.broker_url = broker_url.replace("tcp://", "")
         self.broker_port = broker_port
         self.client_id = client_id
         self.topic = topic
         self.qos = qos
+        self.keepalive_seconds = keepalive_seconds
         self._subscriptions: Dict[str, Tuple[MessageHandler, int]] = {}
         self.connected = Event()
         self._intentional_disconnect = False
@@ -53,7 +58,11 @@ class MqttCoordinationTransport:
     def start(self) -> None:
         self._intentional_disconnect = False
         try:
-            self.mqtt_client.connect(self.broker_url, self.broker_port, keepalive=60)
+            self.mqtt_client.connect(
+                self.broker_url,
+                self.broker_port,
+                keepalive=self.keepalive_seconds,
+            )
             self.mqtt_client.loop_start()
         except (OSError, socket.gaierror) as error:
             raise RuntimeError(self.connection_failure_message(error)) from error

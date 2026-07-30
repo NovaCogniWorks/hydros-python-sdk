@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -20,7 +21,16 @@ def _load_power_control_models():
 
 
 class PowerControlAlgorithmServiceTest(unittest.TestCase):
-    def test_runtime_allocates_station_output_power_to_turbines(self):
+    def test_power_service_defaults_to_remotely_reachable_address(self):
+        module = _load_power_control_module()
+
+        with patch.dict(os.environ, {}, clear=True):
+            host, port = module.resolve_server_address()
+
+        self.assertEqual("0.0.0.0", host)
+        self.assertEqual(8015, port)
+
+    def test_runtime_rejects_station_output_power_target(self):
         module = _load_power_control_module()
         models = _load_power_control_models()
         runtime = module.build_runtime()
@@ -32,13 +42,13 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             "control_task_type": "STATION_FLOW_ALLOCATION",
             "context": {
                 "request_id": "request-001",
-                "target_object_type": "Station",
+                "target_object_type": "PowerStation",
                 "target_object_id": 20300,
             },
             "signals": [
                 {
                     "type": "TARGET",
-                    "object_type": "Station",
+                    "object_type": "PowerStation",
                     "object_id": 20300,
                     "value_type": "output_power",
                     "value": 90.0,
@@ -64,13 +74,9 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             ],
         }))
 
-        self.assertEqual("CONTINUE", output.status.value)
-        target_map = {
-            item.object_id: item.target_values["output_power"]
-            for item in output.actuator_targets
-        }
-        self.assertAlmostEqual(60.0, target_map[20301])
-        self.assertAlmostEqual(30.0, target_map[20302])
+        self.assertEqual("FAILED", output.status.value)
+        self.assertEqual("MISSING_TARGET_SIGNAL", output.error_code)
+        self.assertEqual([], output.actuator_targets)
 
     def test_http_service_rejects_algorithm_type_mismatch(self):
         module = _load_power_control_module()
@@ -122,12 +128,12 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             "control_task_type": "STATION_FLOW_ALLOCATION",
             "context": {
                 "request_id": "request-flow-001",
-                "target_object_type": "GateStation",
+                "target_object_type": "PowerStation",
                 "target_object_id": 20100,
             },
             "signals": [{
                 "type": "TARGET",
-                "object_type": "GateStation",
+                "object_type": "PowerStation",
                 "object_id": 20100,
                 "value_type": "water_flow",
                 "value": 600.0,
@@ -160,6 +166,68 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
         }
         self.assertAlmostEqual(400.0, targets[20104])
         self.assertAlmostEqual(200.0, targets[20105])
+
+    def test_runtime_honors_edge_max_adjustment_delta(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_edge_control",
+            "control_task_type": "STATION_FLOW_ALLOCATION",
+            "context": {
+                "request_id": "request-flow-safety-001",
+                "target_object_type": "PowerStation",
+                "target_object_id": 20100,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20100,
+                "value_type": "water_flow",
+                "value": 600.0,
+            }],
+            "actuators": [{
+                "object_type": "Turbine",
+                "object_id": 20104,
+                "available": True,
+                "values": {"water_flow": 0.0},
+                "ranges": {"water_flow": {"min_value": 0.0, "max_value": 600.0}},
+                "attributes": {"station_object_id": 20100},
+            }],
+            "parameters": {"max_adjustment_delta": 25.0},
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        self.assertAlmostEqual(25.0, output.actuator_targets[0].target_values["water_flow"])
+
+    def test_runtime_rejects_legacy_station_water_flow_target(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_edge_control",
+            "control_task_type": "STATION_FLOW_ALLOCATION",
+            "context": {
+                "request_id": "request-legacy-station-001",
+                "target_object_type": "Station",
+                "target_object_id": 20100,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "Station",
+                "object_id": 20100,
+                "value_type": "water_flow",
+                "value": 600.0,
+            }],
+            "actuators": [],
+        }))
+
+        self.assertEqual("FAILED", output.status.value)
+        self.assertEqual("MISSING_TARGET_SIGNAL", output.error_code)
 
 
 if __name__ == "__main__":

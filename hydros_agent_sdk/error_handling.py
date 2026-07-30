@@ -98,6 +98,8 @@ def handle_agent_errors(
                     if func.__name__ == "on_init" or response_class.__name__ == "SimTaskInitResponse":
                         extra_fields["created_agent_instances"] = []
                         extra_fields["managed_top_objects"] = {}
+                    if response_class.__name__ == "TickCmdResponse":
+                        extra_fields["completed_step"] = getattr(request, "step", 0)
 
                     response = response_class(
                         command_id=getattr(request, "command_id", "UNKNOWN"),

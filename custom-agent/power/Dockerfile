@@ -45,7 +45,7 @@ COPY custom-agent/power /opt/hydros/custom-agent/power
 # 避免容器启动后才由 launcher 报告目录中没有 Python 实现。
 RUN test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py \
     && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
-    && grep -q 'POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-29-provider-isolation-v5"' \
+    && grep -q 'POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-30-station-out-flow-control-v8"' \
         /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
     && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json \
     && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml \
@@ -60,6 +60,6 @@ RUN sed -i 's/\r$//' /opt/hydros/custom-agent/power/start_agents.sh \
     && chmod +x /opt/hydros/custom-agent/power/start_agents.sh \
     && mkdir -p /opt/hydros/custom-agent/power/logs
 
-EXPOSE 8066
+EXPOSE 8015
 
 CMD ["bash", "./start_agents.sh"]
