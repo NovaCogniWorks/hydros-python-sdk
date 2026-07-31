@@ -423,6 +423,23 @@ class MultiAgentCallback(SimCoordinationCallback):
         context_id = request.context.biz_scene_instance_id
         context_agents = self._task_agents(context_id)
 
+        accepted_agent_ids = request.accepted_agent_instance_ids
+        if accepted_agent_ids:
+            context_agents = {
+                agent_code: agent
+                for agent_code, agent in context_agents.items()
+                if agent.agent_id in accepted_agent_ids
+            }
+            if not context_agents:
+                logger.warning(
+                    "Ignoring tick because this runtime has no coordinator-accepted agent: "
+                    "context=%s, step=%s, accepted_agent_instance_ids=%s",
+                    context_id,
+                    request.step,
+                    sorted(accepted_agent_ids),
+                )
+                return []
+
         if not context_agents:
             logger.error(f"No agents found for context: {context_id}")
             return None

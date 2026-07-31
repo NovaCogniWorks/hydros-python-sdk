@@ -1,9 +1,12 @@
+import unittest
 from unittest.mock import Mock
 
 from hydros_agent_sdk.agent_commands.dispatching import ControlCommandDispatcher
 from hydros_agent_sdk.agent_commands.target_value_builder import StationTargetValueCommandBuilder
+from hydros_agent_sdk.agent_commands.transport.client import AgentCommandClient
 from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest
 from hydros_agent_sdk.protocol.models import AgentDriveMode, HydroAgentInstance, SimulationContext
 
 
@@ -69,3 +72,30 @@ def test_station_flow_command_preserves_group_fields_through_builder_and_dispatc
     assert request.group_size == 1
     assert request.main_step_index == 8
     assert request.algo_required_inputs == [planning_signal]
+
+
+def test_station_target_request_rejects_output_power_before_mqtt_dispatch():
+    context = SimulationContext(biz_scene_instance_id="scene-output-power")
+    source = build_agent("source-agent", context)
+    target = build_agent("target-agent", context)
+
+    request = HydroStationTargetValueRequest(
+        command_id="AGTCMD-output-power-rejected",
+        source=source,
+        target=target,
+        context=context,
+        object_id=20509,
+        object_type="Turbine",
+        target_value_type="output_power",
+        target_value=200.0,
+    )
+    transport = Mock()
+    client = AgentCommandClient(transport=transport, topic="/hydros/commands/agent/test")
+
+    with unittest.TestCase().assertRaisesRegex(
+        ValueError,
+        "output_power is a prediction/report metric",
+    ):
+        client.publish_command(request)
+
+    transport.publish.assert_not_called()

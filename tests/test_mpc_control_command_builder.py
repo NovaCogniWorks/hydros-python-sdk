@@ -113,7 +113,7 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
         self.assertEqual(planning_signal.series, [3.3, 3.7])
         self.assertEqual(planning_signal.attributes, {"source": "mpc"})
 
-    def test_accepts_power_station_numeric_target_and_groups_by_target_value_type(self):
+    def test_accepts_only_edge_executable_station_targets_and_groups_by_target_value_type(self):
         context = SimulationContext(biz_scene_instance_id="scene-mixed-control")
         source = build_agent("source-agent", context)
         target = build_agent("target-agent", context)
@@ -136,12 +136,20 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
                         ControlObjectResult(
                             object_type="PowerStation",
                             object_id=2001,
-                            target_value_list=[ValueItem(value_type="water_flow", value=8.0)],
+                            target_value_list=[
+                                ValueItem(value_type="output_power", value=88.0),
+                                ValueItem(value_type="water_flow", value=8.0),
+                            ],
                         ),
                         ControlObjectResult(
                             object_type="PumpStation",
                             object_id=3001,
                             target_value_list=[ValueItem(value_type="WATER_FLOW", value=6.0)],
+                        ),
+                        ControlObjectResult(
+                            object_type="Turbine",
+                            object_id=4001,
+                            target_value_list=[ValueItem(value_type="output_power", value=54.25614)],
                         ),
                     ],
                 )
@@ -154,6 +162,7 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
         self.assertEqual(3, len(commands))
         commands_by_object_id = {command.object_id: command for command in commands}
         self.assertEqual("PowerStation", commands_by_object_id[2001].object_type)
+        self.assertEqual("water_flow", commands_by_object_id[2001].target_value_type)
         self.assertEqual(1, commands_by_object_id[1001].group_size)
         self.assertEqual(2, commands_by_object_id[2001].group_size)
         self.assertEqual(2, commands_by_object_id[3001].group_size)
@@ -163,6 +172,7 @@ class MpcControlCommandBuilderTest(unittest.TestCase):
             commands_by_object_id[2001].group_id,
             commands_by_object_id[3001].group_id,
         )
+        self.assertNotIn(4001, commands_by_object_id)
 
 
 if __name__ == "__main__":

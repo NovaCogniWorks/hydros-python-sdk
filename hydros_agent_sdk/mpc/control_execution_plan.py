@@ -9,10 +9,11 @@ from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 
 
-SUPPORTED_STATION_OBJECT_TYPES = frozenset({
-    "GateStation",
-    "PumpStation",
-    "PowerStation",
+EXECUTABLE_CONTROL_TARGETS = frozenset({
+    ("GateStation", "water_level"),
+    ("PumpStation", "water_level"),
+    ("PumpStation", "water_flow"),
+    ("PowerStation", "water_flow"),
 })
 
 
@@ -55,15 +56,19 @@ class MpcControlExecutionPlan:
 
                 targets: List[MpcControlExecutionTarget] = []
                 for control_object in horizon.control_object_list or []:
-                    if (
-                        control_object.object_id is None
-                        or control_object.object_type not in SUPPORTED_STATION_OBJECT_TYPES
-                    ):
+                    if control_object.object_id is None:
                         continue
                     for target_value in control_object.target_value_list or []:
                         numeric_value = target_value.numeric_value()
                         target_value_type = (target_value.value_type or "").strip()
-                        if numeric_value is None or not target_value_type:
+                        if (
+                            numeric_value is None
+                            or not target_value_type
+                            or not is_executable_control_target(
+                                control_object.object_type,
+                                target_value_type,
+                            )
+                        ):
                             continue
                         target_key = (
                             horizon.horizon_step,
@@ -96,3 +101,7 @@ class MpcControlExecutionPlan:
         horizon_step: int,
     ) -> List[MpcControlExecutionTarget]:
         return list(self.control_targets_by_horizon.get(horizon_step, []))
+
+
+def is_executable_control_target(object_type: str, target_value_type: str) -> bool:
+    return (object_type, target_value_type.strip().lower()) in EXECUTABLE_CONTROL_TARGETS

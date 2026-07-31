@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Callable, Optional, TYPE_CHECKING
 
+from hydros_agent_sdk.protocol.agent_commands import HydroStationTargetValueRequest
 from hydros_agent_sdk.protocol.agent_commands.base import AgentCommand
 from hydros_agent_sdk.topics import HydrosTopics
 from hydros_agent_sdk.transport.base import Transport
@@ -78,6 +79,14 @@ class AgentCommandClient:
 
     def publish_command(self, command: AgentCommand) -> None:
         """通过共享传输序列化并发布一条 Agent 指令。"""
+        if (
+            isinstance(command, HydroStationTargetValueRequest)
+            and command.target_value_type.strip().lower() == "output_power"
+        ):
+            raise ValueError(
+                "output_power is a prediction/report metric and cannot be sent as "
+                "an update_station_target_value_request"
+            )
         attempt = 0
         while attempt <= self.max_retry_count:
             try:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import Enum
-from typing import List, Optional, Dict, Any, Union, Literal
+from typing import List, Optional, Dict, Any, Union, Literal, Set
 from pydantic import ConfigDict, Field, AliasChoices
 from .models import (
     AgentInstanceStatus,
@@ -110,6 +110,7 @@ class SimTaskTerminateResponse(SimCoordinationResponse):
 class TickCmdRequest(SimCoordinationRequest):
     command_type: Literal["tick_cmd_request"] = SIMCMD_TICK_CMD_REQUEST
     step: int
+    accepted_agent_instance_ids: Optional[Set[str]] = None
 
 class TickCmdResponse(SimCoordinationResponse):
     command_type: Literal["tick_cmd_response"] = SIMCMD_TICK_CMD_RESPONSE

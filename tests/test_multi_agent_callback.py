@@ -475,6 +475,46 @@ def test_multi_agent_tick_skips_agents_without_tick_capability():
     assert event_agent.tick_count == 0
 
 
+def test_multi_agent_tick_runs_only_coordinator_accepted_instance():
+    context = make_context()
+    accepted_agent = FakeAgent(make_instance(context, "ACCEPTED_AGENT"))
+    duplicate_agent = FakeAgent(make_instance(context, "DUPLICATE_AGENT"))
+    callback = MultiAgentCallback()
+    activate_callback_task(callback, context, [accepted_agent, duplicate_agent])
+
+    responses = callback.on_tick(
+        TickCmdRequest(
+            command_id="CMD_TARGETED_TICK",
+            context=context,
+            step=1,
+            accepted_agent_instance_ids={accepted_agent.agent_id},
+        )
+    )
+
+    assert len(responses) == 1
+    assert accepted_agent.tick_count == 1
+    assert duplicate_agent.tick_count == 0
+
+
+def test_multi_agent_tick_is_ignored_when_runtime_has_no_accepted_instance():
+    context = make_context()
+    duplicate_agent = FakeAgent(make_instance(context, "DUPLICATE_AGENT"))
+    callback = MultiAgentCallback()
+    activate_callback_task(callback, context, [duplicate_agent])
+
+    responses = callback.on_tick(
+        TickCmdRequest(
+            command_id="CMD_REJECTED_TICK",
+            context=context,
+            step=1,
+            accepted_agent_instance_ids={"AGT_ACCEPTED_ELSEWHERE"},
+        )
+    )
+
+    assert responses == []
+    assert duplicate_agent.tick_count == 0
+
+
 def test_multi_agent_tick_sets_logging_context_for_target_agent():
     context = make_context()
     agent = FakeAgent(make_instance(context))
