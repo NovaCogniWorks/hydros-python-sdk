@@ -57,6 +57,7 @@ class MqttMetricsPublisherTest(unittest.TestCase):
             step_index=2,
             source_timestamp_ms=123,
             metrics_code="water_level",
+            metrics_name="Water level",
             value=73.2,
             status="ON",
         )
@@ -72,6 +73,7 @@ class MqttMetricsPublisherTest(unittest.TestCase):
         self.assertIn('"job_instance_id":"task-a"', payload)
         self.assertIn('"edge_node_code":"node-a"', payload)
         self.assertIn('"metrics_code":"water_level"', payload)
+        self.assertIn('"metrics_name":"Water level"', payload)
         self.assertIn('"status":"ON"', payload)
         self.assertNotIn('"attributes":null', payload)
 

@@ -42,6 +42,7 @@ class FieldMetricsCache:
         biz_scene_instance_id = self._resolve_biz_scene_instance_id(payload)
         object_id = payload.get("object_id")
         metrics_code = payload.get("metrics_code")
+        metrics_name = payload.get("metrics_name")
         value = payload.get("value")
         step_index = payload.get("step_index")
         object_type = payload.get("object_type")
@@ -58,6 +59,7 @@ class FieldMetricsCache:
             "object_id": object_id,
             "object_type": object_type,
             "metrics_code": metrics_code,
+            "metrics_name": metrics_name,
             "position_code": position_code,
             "value": value,
             "status": status,

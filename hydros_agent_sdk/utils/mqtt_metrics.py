@@ -34,6 +34,7 @@ class MqttMetrics(BaseModel):
                 "step_index": 10,
                 "source_timestamp_ms": 1706601234567,
                 "metrics_code": "gate_opening",
+                "metrics_name": "Gate opening",
                 "position_code": "none",
                 "value": 0.75,
                 "status": "ON",
@@ -52,6 +53,7 @@ class MqttMetrics(BaseModel):
     source_timestamp_ms: int = Field(default_factory=lambda: int(time.time() * 1000),
                                      description="Source timestamp in milliseconds")
     metrics_code: Optional[str] = Field(default=None, description="Metrics code (e.g., water_level, water_flow)")
+    metrics_name: Optional[str] = Field(default=None, description="Metrics display name")
     position_code: str = Field(default="none", description="Metrics position code")
     value: Optional[float] = Field(default=None, description="Metrics value")
     status: Optional[str] = Field(default=None, description="Device power status: ON or OFF")
