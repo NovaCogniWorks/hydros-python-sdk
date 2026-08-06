@@ -170,6 +170,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"解析得到的 mpc_config 对象内容: {mpc_config}")
         
         mpc_config_url = mpc_config.mpc_config_url
+        config_source = str(mpc_config_url or "未配置")
         payload = {}
 
         if mpc_config_url:
@@ -185,6 +186,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         if not payload or 'project' not in payload:
             logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'custom-agent/pump/data/config_xhh.yaml'。")
             fallback_path = self._resolve_config_path()
+            config_source = fallback_path
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
         context = load_runtime_context_from_payload(payload)
@@ -239,6 +241,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             self.flow_service,
             pd.DataFrame() # 后续会在 on_optimization 中更新
         )
+        self._log_odd_mpc_configuration(config_source)
         
         # 预先计算所有泵站的流量分配表，避免在首次 rolling optimization 时产生卡顿
         logger.info("========== 开始初始化所有泵站机组的离线流量分配表 ==========")
@@ -248,6 +251,71 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 logger.info(f"正在初始化 Station ID: {station.id} 的流量分配组合 ...")
                 self.flow_service.get_optimal_table(station.id, available_ids)
         logger.info("========== 所有泵站流量分配表初始化完成 ==========")
+
+    def _log_odd_mpc_configuration(self, config_source: str) -> None:
+        """集中记录实际生效的 ODD-MPC 初始化参数。"""
+        system = self.system_config
+        runtime = self.runtime
+        station_lines = []
+        for station in system.stations:
+            units = ", ".join(
+                f"{unit.id}:{unit.name}"
+                + (
+                    f"(Q={unit.q_min}~{unit.q_max})"
+                    if unit.q_min is not None or unit.q_max is not None
+                    else ""
+                )
+                for unit in station.units
+            )
+            station_lines.append(
+                f"  S{station.id}({station.name}): "
+                f"前池范围={station.level_front_min}~{station.level_front_max}, "
+                f"后池范围={station.level_back_min}~{station.level_back_max}, "
+                f"机组=[{units}]"
+            )
+
+        logger.info(
+            "\n".join(
+                [
+                    "========== ODD-MPC 生效配置 ==========",
+                    f"配置来源: {config_source}",
+                    f"系统: project={system.project}, horizon_hours={system.horizon_hours}, "
+                    f"dt_hours={system.dt_hours}, target_avg_flow_last_station={system.target_avg_flow_last_station}, "
+                    f"rho={system.rho}, g={system.g}",
+                    f"离线流量表: step_q={system.flow_depart_step_q}, step_h={system.flow_depart_step_h}, "
+                    f"data_dir={system.flow_depart_data_dir}, output_dir={system.flow_depart_output_dir}",
+                    f"ODD1域: flow_tolerance={runtime.odd1_flow_tolerance}, "
+                    f"level_tolerance={runtime.odd1_level_tolerance}",
+                    f"ODD2域: fit_threshold={runtime.odd2_fit_threshold}",
+                    f"ODD3域: flow_tolerance={runtime.odd3_flow_tolerance}, "
+                    f"level_tolerance={runtime.odd3_level_tolerance}",
+                    f"搜索与时域: head_search_tolerance={runtime.head_search_tolerance}, "
+                    f"flow_search_tolerance={runtime.flow_search_tolerance}, "
+                    f"candidate_pool_limit={runtime.candidate_pool_limit}, "
+                    f"control_horizon_lower={runtime.control_horizon_lower}",
+                    f"上层MPC: method={runtime.upper_mpc_optimization_method}, "
+                    f"level_correction_gain={runtime.upper_level_correction_gain}, "
+                    f"flow_bias_correction_gain={runtime.upper_flow_bias_correction_gain}",
+                    f"下层权重: flow={runtime.lower_flow_weight}, level={runtime.lower_level_weight}, "
+                    f"switch={runtime.lower_switch_weight}, adjust_count={runtime.lower_adjust_count_weight}",
+                    f"控制记忆: opening_change_threshold={runtime.opening_change_threshold}, "
+                    f"station_memory_init_age={runtime.station_memory_init_age}",
+                    f"扰动观察器: gain={runtime.observer_gain}, smoothing={runtime.observer_smoothing}, "
+                    f"forecast_window_hours={runtime.disturbance_forecast_window_hours}, "
+                    f"forecast_method={runtime.disturbance_forecast_method}",
+                    f"隐藏扰动: enabled={runtime.hidden_disturbance_enabled}, "
+                    f"scenario={runtime.hidden_disturbance_active_scenario}",
+                    f"机组可用性: enabled={runtime.unit_availability_enabled}, "
+                    f"scenario={runtime.unit_availability_active_scenario}, "
+                    f"available_units={self.available_units_map}",
+                    f"仿真: env_substeps={runtime.env_substeps}, sim_sync_dt_seconds={runtime.sim_sync_dt_seconds}, "
+                    f"auto_identify_pool_areas={runtime.auto_identify_pool_areas}",
+                    "泵站配置:",
+                    *station_lines,
+                    "======================================",
+                ]
+            )
+        )
 
     def _init_dynamic_demand_plan(self, build_zero_demand_plan, payload):
         """
@@ -579,6 +647,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             available_units_map=self.available_units_map,
             disturbance_forecast=disturbance_forecast,
             lower_feedback=self.lower_feedback,
+        )
+
+        self._log_upper_mpc_flow_sequences(
+            current_step=step,
+            flow_refs=upper_plan.flow_refs,
         )
         
         q_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.flow_refs.items() if refs}
@@ -1015,6 +1088,35 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.info(f"停机总次数: {self.total_shutdown_count}")
 
         return commands
+
+    @staticmethod
+    def _log_upper_mpc_flow_sequences(
+        current_step: int,
+        flow_refs: Mapping[int, List[float]],
+    ) -> None:
+        """按调度步打印上层 MPC 为各泵站生成的完整流量序列。"""
+        horizon_length = max((len(series) for series in flow_refs.values()), default=0)
+        if horizon_length <= 0:
+            logger.info("上层 MPC 流量序列为空: currentStep=%s", current_step)
+            return
+
+        sequence_lines = []
+        for horizon_index in range(horizon_length):
+            station_flows = {
+                int(station_id): round(float(series[horizon_index]), 3)
+                for station_id, series in sorted(flow_refs.items())
+                if horizon_index < len(series)
+            }
+            sequence_lines.append(
+                f"  step={current_step + horizon_index}: {station_flows}"
+            )
+
+        logger.info(
+            "上层 MPC 流量序列 (currentStep=%s, horizon=%s):\n%s",
+            current_step,
+            horizon_length,
+            "\n".join(sequence_lines),
+        )
 
     @staticmethod
     def _serialize_disturbance_estimate(

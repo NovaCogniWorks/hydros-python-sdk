@@ -4,6 +4,7 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import List
 
@@ -22,6 +23,8 @@ from .resolver import PumpFlowDmpcInputResolver
 from .solver import PumpFlowDmpcSolver
 from .types import PumpFlowDmpcArguments
 
+logger = logging.getLogger(__name__)
+
 
 class PumpStationFlowDmpcAlgorithm:
     """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
@@ -39,17 +42,30 @@ class PumpStationFlowDmpcAlgorithm:
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         if input_data.control_task_type != ControlTaskType.STATION_FLOW_ALLOCATION:
-            return self._failed(
-                input_data,
-                "UNSUPPORTED_CONTROL_TASK",
-                "pump_station_flow_dmpc only supports STATION_FLOW_ALLOCATION",
+            return self._log_output(
+                self._failed(
+                    input_data,
+                    "UNSUPPORTED_CONTROL_TASK",
+                    "pump_station_flow_dmpc only supports STATION_FLOW_ALLOCATION",
+                )
             )
         try:
             arguments = self._resolver.resolve(input_data)
             action = self._solver.solve(arguments)
-            return self._project(input_data, arguments, action)
+            return self._log_output(self._project(input_data, arguments, action))
         except PumpFlowDmpcError as exc:
-            return self._failed(input_data, exc.error_code, str(exc))
+            return self._log_output(
+                self._failed(input_data, exc.error_code, str(exc))
+            )
+
+    @staticmethod
+    def _log_output(output: ControlAlgorithmOutput) -> ControlAlgorithmOutput:
+        logger.info(
+            "下层泵站流量控制算法返回输出: requestId=%s, output=%s",
+            output.request_id,
+            output.model_dump_json(),
+        )
+        return output
 
     def _project(
         self,
