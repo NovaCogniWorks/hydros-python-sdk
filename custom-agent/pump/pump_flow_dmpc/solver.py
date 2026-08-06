@@ -1,29 +1,18 @@
 """
-Call the original ODD-DMPC LocalController from standalone algorithm context.
+Call the service-private ODD-DMPC LocalController from standalone algorithm context.
 """
 
 from __future__ import annotations
 
 import os
-import sys
 from typing import Dict, List
 
-import pandas as pd
 import yaml
 
-# ``odd_dmpc`` is a package below ``scheduling``. Python needs the package's
-# parent directory on ``sys.path`` when this standalone application is loaded.
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-_SCHEDULING_DIR = os.path.join(_PARENT_DIR, "scheduling")
-if _SCHEDULING_DIR not in sys.path:
-    sys.path.insert(0, _SCHEDULING_DIR)
-
-from odd_dmpc.config import load_runtime_context_from_payload
-from odd_dmpc.environment import _boundary_plan_from_snapshot
-from odd_dmpc.flow_service import FlowDepartService
-from odd_dmpc.local_controller import LocalController, StationControlContext
-from odd_dmpc.types import (
+from .odd_dmpc.config import load_runtime_context_from_payload
+from .odd_dmpc.flow_service import FlowDepartService
+from .odd_dmpc.local_controller import LocalController, StationControlContext
+from .odd_dmpc.types import (
     ControlAction,
     LowerFeedback,
     StationMemory,
@@ -103,18 +92,8 @@ class PumpFlowDmpcSolver:
             active_unit_ids=list(arguments.active_unit_ids),
             time_since_adjust=dict(arguments.time_since_adjust),
             time_since_switch=dict(arguments.time_since_switch),
-            disturbance_estimate=dict(arguments.disturbance_estimate),
+            disturbance_estimate={},
         )
-
-        # Build or reuse boundary_level_plan
-        boundary_level_plan = arguments.boundary_level_plan
-        if boundary_level_plan is None and arguments.basin_levels:
-            try:
-                boundary_level_plan = _boundary_plan_from_snapshot(
-                    self._system_config, arguments.basin_levels
-                )
-            except Exception:
-                boundary_level_plan = pd.DataFrame()
 
         # Build StationControlContext
         station_model = self._flow_service.get_station_model(
@@ -125,20 +104,20 @@ class PumpFlowDmpcSolver:
             station_id=station_id,
             station_model=station_model,
             available_unit_ids=list(arguments.available_unit_ids),
-            basin_levels=dict(arguments.basin_levels),
+            basin_levels={},
             basin_profiles=None,
-            pool_areas=dict(arguments.pool_areas),
-            anchor_basin_levels=dict(arguments.anchor_basin_levels),
+            pool_areas={},
+            anchor_basin_levels={},
             boundary_nominal_flows={},
             current_back_level=float(arguments.current_back_level),
             current_front_level=float(arguments.current_front_level),
             current_head=float(arguments.current_head),
-            upper_flow_refs={k: list(v) for k, v in arguments.upper_flow_refs.items()},
-            flow_history={station_id: list(arguments.flow_history)},
-            boundary_level_plan=boundary_level_plan,
-            start_time_hours=float(arguments.start_time_hours),
-            step_hours=float(arguments.step_hours),
-            demand_plan=arguments.demand_plan,
+            upper_flow_refs={},
+            flow_history={},
+            boundary_level_plan=None,
+            start_time_hours=0.0,
+            step_hours=1.0,
+            demand_plan=None,
         )
 
         return self._local_controller.solve(

@@ -27,7 +27,7 @@ class PumpStationFlowDmpcAlgorithm:
     """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
 
     algorithm_type = "pump_station_flow_dmpc"
-    algorithm_version = "1.0.0"
+    algorithm_version = "1.1.0"
 
     def __init__(
         self,
@@ -55,7 +55,7 @@ class PumpStationFlowDmpcAlgorithm:
         self,
         input_data: ControlAlgorithmInput,
         arguments: PumpFlowDmpcArguments,
-        action,  # ControlAction from odd_dmpc.types
+        action,  # ControlAction from the service-private odd_dmpc package
     ) -> ControlAlgorithmOutput:
         station_id = arguments.station_id
 
@@ -74,13 +74,6 @@ class PumpStationFlowDmpcAlgorithm:
                 object_id=station_id,
                 value_type="predicted_flow_error",
                 value=float(getattr(action, "predicted_flow_error", 0.0)),
-            ),
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type="PumpStation",
-                object_id=station_id,
-                value_type="predicted_level_error",
-                value=float(getattr(action, "predicted_level_error", 0.0)),
             ),
             ControlSignal(
                 type=SignalType.RESULT,
@@ -113,9 +106,6 @@ class PumpStationFlowDmpcAlgorithm:
         next_state: dict = {
             "mode": action.mode,
             "selected_flow": float(action.selected_flow),
-            "predicted_back_level": float(getattr(action, "predicted_back_level", 0.0)),
-            "predicted_front_level": float(getattr(action, "predicted_front_level", 0.0)),
-            "predicted_head": float(getattr(action, "predicted_head", 0.0)),
             "unit_status": {str(k): int(v) for k, v in action.unit_status.items()},
             "unit_openings": {str(k): float(v) for k, v in action.unit_openings.items()},
         }

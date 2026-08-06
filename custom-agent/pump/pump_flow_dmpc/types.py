@@ -5,9 +5,7 @@ Pump flow DMPC domain models.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Optional, Tuple
-
-import pandas as pd
+from typing import Dict, List
 
 
 @dataclass
@@ -40,17 +38,3 @@ class PumpFlowDmpcArguments:
     current_back_level: float = 0.0
     current_head: float = 0.0
     current_flow: float = 0.0
-
-    # Environment for basin simulation
-    basin_levels: Dict[str, float] = field(default_factory=dict)
-    pool_areas: Dict[int, float] = field(default_factory=dict)
-    anchor_basin_levels: Dict[str, float] = field(default_factory=dict)
-    boundary_level_plan: Optional[pd.DataFrame] = None
-    disturbance_estimate: Dict = field(default_factory=dict)
-    demand_plan: Optional[pd.DataFrame] = None
-    start_time_hours: float = 0.0
-    step_hours: float = 1.0
-
-    # Cross-station
-    upper_flow_refs: Dict[int, List[float]] = field(default_factory=dict)
-    flow_history: List[float] = field(default_factory=list)

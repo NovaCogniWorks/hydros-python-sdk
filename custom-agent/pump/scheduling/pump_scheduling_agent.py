@@ -680,11 +680,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 station_memory=station_memory,
             )
             
-            pf = round(action.predicted_front_level, 2) if action.predicted_front_level is not None else None
-            pb = round(action.predicted_back_level, 2) if action.predicted_back_level is not None else None
-            ph = round(action.predicted_head, 2) if action.predicted_head is not None else None
             logger.info(
-                f"下层 S{station_id} 预测(首步): 流量={action.selected_flow:.2f}, 预测前池={pf}, 预测后池={pb}, 预测扬程={ph}, "
+                f"下层 S{station_id} 预测(首步): 流量={action.selected_flow:.2f}, "
                 f"叶片角={action.unit_openings}, 状态={action.unit_status}, 模式={action.mode}"
             )
             
@@ -809,27 +806,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
         from hydros_agent_sdk.control_algorithms.models import ControlSignal, SignalType
         # horizon_step_list 长度 = 72 - step；下层预测不够则 None 补全
-        
-        # ---- 环境数据（所有站共享，用于 basin 模拟）----
-        _shared_basin_levels = observation.basin_levels.copy()
-        _shared_pool_areas = observation.pool_areas.copy()
-        _shared_anchor_basin_levels = observation.anchor_basin_levels.copy()
-        _shared_observer_est = self.observers.get_estimate() if hasattr(self, 'observers') else {}
-        _shared_start_time_hours = float(observation.time_hours)
-        _shared_step_hours = float(self.system_config.dt_hours)
         _shared_config_path = self._resolve_config_path()
-        
-        # 序列化 demand_plan
-        _demand_plan_attr = {}
-        if hasattr(self, 'odd_demand_plan') and self.odd_demand_plan is not None:
-            dp = self.odd_demand_plan
-            _demand_plan_attr = {'columns': list(dp.columns), 'data': dp.values.tolist(), 'index': [str(i) for i in dp.index]}
-        
-        # 序列化 boundary_level_plan
-        _boundary_plan_attr = {}
-        if boundary_level_plan is not None:
-            blp = boundary_level_plan
-            _boundary_plan_attr = {'columns': list(blp.columns), 'data': blp.values.tolist(), 'index': [str(i) for i in blp.index]}
         
         total_steps = self._get_total_scheduling_steps()
         plan_len = max(1, total_steps - step)
@@ -942,63 +919,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     ))
             
             
-            # --- 环境信号 (basin 模拟用) ---
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='basin_levels',
-                attributes=dict(_shared_basin_levels),
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='pool_areas',
-                attributes={str(k): float(v) for k, v in _shared_pool_areas.items()},
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='anchor_basin_levels',
-                attributes=dict(_shared_anchor_basin_levels),
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.REFERENCE,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='boundary_level_plan',
-                attributes=_boundary_plan_attr,
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='disturbance_estimate',
-                attributes=self._serialize_disturbance_estimate(_shared_observer_est),
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='demand_plan',
-                attributes=_demand_plan_attr,
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='start_time_hours',
-                value=_shared_start_time_hours,
-            ))
-            algo_inputs.append(ControlSignal(
-                type=SignalType.OBSERVATION,
-                object_type=HydroObjectType.PUMP_STATION.value,
-                object_id=sid,
-                value_type='step_hours',
-                value=_shared_step_hours,
-            ))
             algo_inputs.append(ControlSignal(
                 type=SignalType.OBSERVATION,
                 object_type=HydroObjectType.PUMP_STATION.value,
@@ -1218,7 +1138,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         输出符合 MpcResultContractModel 结构：
         - predicted_value_list：front_water_level、back_water_level、out_flow、efficiency
         - target_value：water_flow 表示站点目标流量
-        - device_result_list：各泵组的 blade_angle、flow、efficiency
+        - device_result_list：各泵组的 blade_angle
         """
         from hydros_agent_sdk.mpc.models import ValueItem, DeviceResult
 

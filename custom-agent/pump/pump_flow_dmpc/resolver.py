@@ -7,8 +7,6 @@ from __future__ import annotations
 import math
 from typing import Dict, List
 
-import pandas as pd
-
 from hydros_agent_sdk.control_algorithms import (
     ControlAlgorithmInput,
     SignalType,
@@ -101,7 +99,28 @@ class PumpFlowDmpcInputResolver:
         # ---- transfer bundle from REFERENCE series ----
         reference_front_level = _get_series("REFERENCE", "PumpStation", station_id, "station_front_water_level")
         reference_back_level = _get_series("REFERENCE", "PumpStation", station_id, "station_back_water_level")
-        reference_head = [f - b for f, b in zip(reference_front_level, reference_back_level)] if reference_front_level and reference_back_level else []
+        if not reference_front_level or not reference_back_level:
+            raise PumpFlowDmpcError(
+                "MISSING_REFERENCE_WATER_LEVEL",
+                "upper-model front/back water-level references are required for station %s" % station_id,
+            )
+        if len(reference_front_level) != len(reference_back_level):
+            raise PumpFlowDmpcError(
+                "INVALID_REFERENCE_WATER_LEVEL_HORIZON",
+                "front/back water-level reference lengths differ for station %s" % station_id,
+            )
+        if not all(
+            math.isfinite(float(value))
+            for value in reference_front_level + reference_back_level
+        ):
+            raise PumpFlowDmpcError(
+                "INVALID_REFERENCE_WATER_LEVEL",
+                "upper-model water-level references must be finite for station %s" % station_id,
+            )
+        reference_head = [
+            float(back) - float(front)
+            for front, back in zip(reference_front_level, reference_back_level)
+        ]
 
         # target_flow from TARGET signal
         target_flow = _get_value("TARGET", "PumpStation", station_id, "water_flow")
@@ -116,70 +135,14 @@ class PumpFlowDmpcInputResolver:
         # back level: from REFERENCE series[0]
         current_back_level = reference_back_level[0] if reference_back_level else 0.0
 
-        # head = front - back (positive if front is upstream)
-        current_head = abs(current_front_level - current_back_level) if current_front_level and current_back_level else 0.0
+        # Lower control uses the upper model's first-step head directly.
+        current_head = reference_head[0]
 
         current_flow_val = _get_value("OBSERVATION", "PumpStation", station_id, "water_flow")
         current_flow = float(current_flow_val) if current_flow_val is not None else last_selected_flow
 
-        # ---- environment from env signals ----
-        basin_levels = _get_attr("OBSERVATION", "PumpStation", station_id, "basin_levels")
-        pool_areas_raw = _get_attr("OBSERVATION", "PumpStation", station_id, "pool_areas")
-        pool_areas: Dict[int, float] = {}
-        for k, v in pool_areas_raw.items():
-            try:
-                pool_areas[int(k)] = float(v)
-            except (ValueError, TypeError):
-                pass
-        anchor_basin_levels = _get_attr("OBSERVATION", "PumpStation", station_id, "anchor_basin_levels")
-
-        # boundary_level_plan
-        blp_attr = _get_attr("REFERENCE", "PumpStation", station_id, "boundary_level_plan")
-        boundary_level_plan = None
-        if blp_attr and "columns" in blp_attr and "data" in blp_attr:
-            try:
-                boundary_level_plan = pd.DataFrame(
-                    blp_attr["data"],
-                    columns=blp_attr["columns"],
-                    index=blp_attr.get("index"),
-                )
-            except Exception:
-                pass
-
-        disturbance_estimate = _get_attr("OBSERVATION", "PumpStation", station_id, "disturbance_estimate")
-
-        # demand_plan
-        dp_attr = _get_attr("OBSERVATION", "PumpStation", station_id, "demand_plan")
-        demand_plan = None
-        if dp_attr and "columns" in dp_attr and "data" in dp_attr:
-            try:
-                demand_plan = pd.DataFrame(
-                    dp_attr["data"],
-                    columns=dp_attr["columns"],
-                    index=dp_attr.get("index"),
-                )
-            except Exception:
-                pass
-
-        start_time_hours_val = _get_value("OBSERVATION", "PumpStation", station_id, "start_time_hours")
-        start_time_hours = float(start_time_hours_val) if start_time_hours_val is not None else 0.0
-
-        step_hours_val = _get_value("OBSERVATION", "PumpStation", station_id, "step_hours")
-        step_hours = float(step_hours_val) if step_hours_val is not None else 1.0
-
         config_path_attr = _get_attr("OBSERVATION", "PumpStation", station_id, "config_path")
         config_path = config_path_attr.get("path", "") if config_path_attr else ""
-
-        # ---- upper_flow_refs (other stations) ----
-        upper_flow_refs: Dict[int, List[float]] = {}
-        for sig in input_data.signals:
-            if (sig.type.value if hasattr(sig.type, "value") else sig.type) == "TARGET":
-                if sig.object_type == "PumpStation" and sig.object_id != station_id:
-                    upper_flow_refs[sig.object_id] = [float(sig.value)] if sig.value is not None else []
-
-        # ---- flow_history ----
-        fh_attr = _get_attr("OBSERVATION", "PumpStation", station_id, "flow_history")
-        flow_history = [float(v) for v in fh_attr.get("history", [])]
 
         if not available_unit_ids:
             raise PumpFlowDmpcError(
@@ -206,16 +169,6 @@ class PumpFlowDmpcInputResolver:
             current_back_level=current_back_level,
             current_head=current_head,
             current_flow=current_flow,
-            basin_levels=basin_levels,
-            pool_areas=pool_areas,
-            anchor_basin_levels=anchor_basin_levels,
-            boundary_level_plan=boundary_level_plan,
-            disturbance_estimate=disturbance_estimate,
-            demand_plan=demand_plan,
-            start_time_hours=start_time_hours,
-            step_hours=step_hours,
-            upper_flow_refs=upper_flow_refs,
-            flow_history=flow_history,
         )
 
     @staticmethod
