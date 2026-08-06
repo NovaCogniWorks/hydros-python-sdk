@@ -594,9 +594,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.last_opt_step = step
 
         # 上层调度器
-        logger.info(f"完整的需水计划表 (step={step}):\n{self.odd_demand_plan.to_string()}")
-        demand_row = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
-        logger.info(f"误差观察器扰动计算时用到的需水计划值 (step={step}):\n{demand_row}")
+        logger.info(f"完整的需水计划表 (task_step={current_step}, outer_step={step}):\n{self.odd_demand_plan.to_string()}")
+        demand_row = self.odd_demand_plan.iloc[min(max(current_step, 0), len(self.odd_demand_plan) - 1)]
+        logger.info(f"误差观察器扰动计算时用到的需水计划值 (task_step={current_step}):\n{demand_row}")
         self.observers.update(
             prev_basin_levels=basin_levels,
             next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
@@ -628,7 +628,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         boundary_level_plan = _boundary_plan_from_snapshot(self.system_config, boundary_levels_dict)
         self.upper_scheduler.boundary_level_plan = boundary_level_plan
         
-        horizon = max(int(self.system_config.horizon_hours - step), 1)
+        horizon = max(int(self.system_config.horizon_hours - current_step), 1)
         disturbance_forecast = self.observers.get_forecast(horizon=horizon, step_hours=float(self.system_config.dt_hours))
         
         observer_est = self.observers.get_estimate()
@@ -636,12 +636,16 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             f"准备调用 Upper Scheduler (step={step}):\n"
             f"  各个渠道的误差观察器估计值: {observer_est}"
         )
-        upper_plan_range = self.odd_demand_plan.iloc[step: step + horizon] if step < len(self.odd_demand_plan) else self.odd_demand_plan.iloc[-1:]
-        logger.info(f"上层规划计算时用的需水计划值 (step={step} to {step+horizon-1}):\n{upper_plan_range.to_string()}")
+        upper_plan_range = self.odd_demand_plan.iloc[current_step: current_step + horizon]
+        logger.info(
+            f"上层规划计算时用的需水计划值 "
+            f"(task_step={current_step} to {current_step+horizon-1}):\n{upper_plan_range.to_string()}"
+        )
         
         upper_plan = self.upper_scheduler.solve(
-            now=0,
-            # now=step,  #不要删，之前是step，不确定是否demand plan已经按step到72截好了
+            # odd_demand_plan 是任务起点对齐的 72-step 局部计划；求解器必须使用
+            # 任务内步号，使预测时域和剩余目标分母同步收缩为 72-current_step。
+            now=current_step,
             env_snapshot=observation,
             demand_state={"delivered_last_station_total": float(self.cumulative_last_station_flow)},
             available_units_map=self.available_units_map,
@@ -649,24 +653,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             lower_feedback=self.lower_feedback,
         )
 
-        self._log_upper_mpc_flow_sequences(
-            current_step=step,
-            flow_refs=upper_plan.flow_refs,
-        )
-        
-        q_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.flow_refs.items() if refs}
-        z_f_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_front_levels.items() if refs}
-        z_b_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_back_levels.items() if refs}
-        h_next = {sid: round(refs[0], 2) for sid, refs in upper_plan.station_heads.items() if refs}
-        
-        total_target_volume = self.system_config.target_avg_flow_last_station * self.system_config.horizon_hours
-        remaining_target = max(total_target_volume - float(self.cumulative_last_station_flow), 0.0)
-        
-        logger.info(
-            f"目标={total_target_volume:.2f}, 剩余目标={remaining_target:.2f}\n"
-            f"上层预测(首步): 流量={q_next}, 预测前池={z_f_next}, 预测后池={z_b_next}, 预测扬程={h_next}"
-        )
-        
         # 下层控制器
         actions = {}
         decisions = {}
@@ -703,9 +689,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             reference_flow = transfer_bundle.reference_flow
             reference_back_level = transfer_bundle.reference_back_level
             reference_front_level = transfer_bundle.reference_front_level
-            reference_head = transfer_bundle.reference_head
-            
-            logger.info(f"开始执行下层 Lower Controller 优化: 泵站 S{station_id}, 参考目标流量={reference_flow[0]:.2f}, 参考目标后池水位={reference_back_level[0]:.2f}")
             
             decision = self.supervisor.select_mode(
                 station_id=station_id,
@@ -720,9 +703,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 reference_front=reference_front_level[0],
             )
             decisions[station_id] = decision
-            
-            lower_plan_range = self.odd_demand_plan.iloc[min(max(step, 0), len(self.odd_demand_plan) - 1)]
-            logger.info(f"下层计算时用的需水计划值 S{station_id} (step={step}):\n{lower_plan_range}")
             
             ctx = StationControlContext(
                 station_id=station_id,
@@ -751,11 +731,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 disturbance_forecast=disturbance_forecast,
                 transfer_bundle=transfer_bundle,
                 station_memory=station_memory,
-            )
-            
-            logger.info(
-                f"下层 S{station_id} 预测(首步): 流量={action.selected_flow:.2f}, "
-                f"叶片角={action.unit_openings}, 状态={action.unit_status}, 模式={action.mode}"
             )
             
             actions[station_id] = action
@@ -878,11 +853,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
         from hydros_agent_sdk.control_algorithms.models import ControlSignal, SignalType
-        # horizon_step_list 长度 = 72 - step；下层预测不够则 None 补全
+        # 对外报告必须与上层求解器的实际剩余时域完全一致。
         _shared_config_path = self._resolve_config_path()
         
-        total_steps = self._get_total_scheduling_steps()
-        plan_len = max(1, total_steps - step)
+        plan_len = int(upper_plan.horizon)
         
         # ---- 预构建每个站点的 algo_required_inputs (72步序列 + 机组记忆) ----
         station_algo_inputs: Dict[int, List[ControlSignal]] = {}
@@ -1088,35 +1062,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             logger.info(f"停机总次数: {self.total_shutdown_count}")
 
         return commands
-
-    @staticmethod
-    def _log_upper_mpc_flow_sequences(
-        current_step: int,
-        flow_refs: Mapping[int, List[float]],
-    ) -> None:
-        """按调度步打印上层 MPC 为各泵站生成的完整流量序列。"""
-        horizon_length = max((len(series) for series in flow_refs.values()), default=0)
-        if horizon_length <= 0:
-            logger.info("上层 MPC 流量序列为空: currentStep=%s", current_step)
-            return
-
-        sequence_lines = []
-        for horizon_index in range(horizon_length):
-            station_flows = {
-                int(station_id): round(float(series[horizon_index]), 3)
-                for station_id, series in sorted(flow_refs.items())
-                if horizon_index < len(series)
-            }
-            sequence_lines.append(
-                f"  step={current_step + horizon_index}: {station_flows}"
-            )
-
-        logger.info(
-            "上层 MPC 流量序列 (currentStep=%s, horizon=%s):\n%s",
-            current_step,
-            horizon_length,
-            "\n".join(sequence_lines),
-        )
 
     @staticmethod
     def _serialize_disturbance_estimate(

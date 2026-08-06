@@ -4,9 +4,7 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 
 from __future__ import annotations
 
-import logging
-import math
-from typing import List
+from typing import List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
     ControlActuatorTarget,
@@ -19,11 +17,10 @@ from hydros_agent_sdk.control_algorithms import (
 )
 
 from .errors import PumpFlowDmpcError
+from .console_reporter import PumpFlowDmpcConsoleReporter
 from .resolver import PumpFlowDmpcInputResolver
 from .solver import PumpFlowDmpcSolver
 from .types import PumpFlowDmpcArguments
-
-logger = logging.getLogger(__name__)
 
 
 class PumpStationFlowDmpcAlgorithm:
@@ -36,36 +33,36 @@ class PumpStationFlowDmpcAlgorithm:
         self,
         solver: PumpFlowDmpcSolver,
         resolver: PumpFlowDmpcInputResolver,
+        console_reporter: Optional[PumpFlowDmpcConsoleReporter] = None,
     ) -> None:
         self._solver = solver
         self._resolver = resolver
+        self._console_reporter = console_reporter or PumpFlowDmpcConsoleReporter()
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         if input_data.control_task_type != ControlTaskType.STATION_FLOW_ALLOCATION:
-            return self._log_output(
-                self._failed(
-                    input_data,
-                    "UNSUPPORTED_CONTROL_TASK",
-                    "pump_station_flow_dmpc only supports STATION_FLOW_ALLOCATION",
-                )
+            output = self._failed(
+                input_data,
+                "UNSUPPORTED_CONTROL_TASK",
+                "pump_station_flow_dmpc only supports STATION_FLOW_ALLOCATION",
             )
+            self._console_reporter.report_failure(input_data, output)
+            return output
         try:
             arguments = self._resolver.resolve(input_data)
             action = self._solver.solve(arguments)
-            return self._log_output(self._project(input_data, arguments, action))
-        except PumpFlowDmpcError as exc:
-            return self._log_output(
-                self._failed(input_data, exc.error_code, str(exc))
+            output = self._project(input_data, arguments, action)
+            self._console_reporter.report_success(
+                input_data=input_data,
+                arguments=arguments,
+                action=action,
+                output=output,
             )
-
-    @staticmethod
-    def _log_output(output: ControlAlgorithmOutput) -> ControlAlgorithmOutput:
-        logger.info(
-            "下层泵站流量控制算法返回输出: requestId=%s, output=%s",
-            output.request_id,
-            output.model_dump_json(),
-        )
-        return output
+            return output
+        except PumpFlowDmpcError as exc:
+            output = self._failed(input_data, exc.error_code, str(exc))
+            self._console_reporter.report_failure(input_data, output)
+            return output
 
     def _project(
         self,

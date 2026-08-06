@@ -81,12 +81,31 @@ class TestPumpSchedulingAgent(unittest.TestCase):
 
         for t in range(steps):
             print(f"\nStep {t}:")
+            delivered_before_step = self.agent.cumulative_last_station_flow
             commands = self.agent.on_optimization(t)
             self.assertIsInstance(commands, list)
             self.assertEqual(len(self.client.enqueued), t + 1)
             agent_res = self.agent.mpc_output
             lower_res = agent_res['lower']
             upper_res = agent_res['upper']
+
+            expected_horizon = self.agent.system_config.horizon_hours - t
+            self.assertTrue(upper_res['q_planned'])
+            for flow_series in upper_res['q_planned'].values():
+                self.assertEqual(len(flow_series), expected_horizon)
+
+            upper_plan = self._plot_tracker.update_and_plot.call_args.kwargs['upper_plan']
+            expected_remaining_average = max(
+                self.agent.system_config.target_avg_flow_last_station
+                * self.agent.system_config.horizon_hours
+                - delivered_before_step,
+                0.0,
+            ) / expected_horizon
+            self.assertEqual(upper_plan.horizon, expected_horizon)
+            self.assertAlmostEqual(
+                upper_plan.metadata['remaining_target_avg_flow'],
+                expected_remaining_average,
+            )
             
             # 打印上层 MPC 结果
             print("  Upper MPC Predicted Flow:")
@@ -117,6 +136,17 @@ class TestPumpSchedulingAgent(unittest.TestCase):
                 self.agent._metrics_data_cache.update({"object_id": u, "metrics_code": "down_water_level", "value": z3, "position_code": "none"})
             
         self.assertTrue(True)
+
+    def test_remaining_target_average_uses_remaining_horizon(self):
+        remaining_horizon = 48
+        delivered_flow_hours = 50.0 * 24
+
+        remaining_average = self.agent.upper_scheduler._target_remaining_flow(
+            {"delivered_last_station_total": delivered_flow_hours},
+            remaining_horizon,
+        )
+
+        self.assertAlmostEqual(remaining_average, 50.0)
 
 if __name__ == '__main__':
     unittest.main()
