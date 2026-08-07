@@ -52,6 +52,11 @@ class TestPumpSchedulingAgent(unittest.TestCase):
         self.agent._target_agent_resolver.resolve_target_agent_for_object = Mock(return_value=mock_agent)
         self.agent._lazy_init_odd_mpc()
 
+        self.assertEqual(
+            os.path.abspath("custom-agent/pump/data/config_xhh.yaml"),
+            self.agent._edge_mpc_config_source,
+        )
+
     def _restore_plot_tracker_module(self):
         if self._original_plot_tracker_module is None:
             sys.modules.pop("plot_tracker", None)

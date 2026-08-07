@@ -171,6 +171,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         mpc_config_url = mpc_config.mpc_config_url
         config_source = str(mpc_config_url or "未配置")
+        edge_config_source = ""
         payload = {}
 
         if mpc_config_url:
@@ -178,8 +179,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             try:
                 if mpc_config_url.startswith("http://") or mpc_config_url.startswith("https://"):
                     payload = YamlLoader.from_url(mpc_config_url)
+                    edge_config_source = mpc_config_url
                 else:
                     payload = YamlLoader.from_file(mpc_config_url)
+                    edge_config_source = os.path.abspath(mpc_config_url)
             except Exception as e:
                 logger.error(f"无法从 mpc_config_url 加载配置: {e}")
 
@@ -189,7 +192,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             config_source = fallback_path
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
+            edge_config_source = os.path.abspath(fallback_path)
         context = load_runtime_context_from_payload(payload)
+        self._edge_mpc_config_source = edge_config_source
         self.response_metadata = payload.get("service_mapping", {}).get("response_metadata", {})
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
@@ -854,7 +859,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         from hydros_agent_sdk.mpc.models import HorizonStep, ValueItem, DeviceResult
         from hydros_agent_sdk.control_algorithms.models import ControlSignal, SignalType
         # 对外报告必须与上层求解器的实际剩余时域完全一致。
-        _shared_config_path = self._resolve_config_path()
+        _shared_config_path = self._edge_mpc_config_source
         
         plan_len = int(upper_plan.horizon)
         

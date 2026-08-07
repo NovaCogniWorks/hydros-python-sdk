@@ -5,9 +5,10 @@ Call the service-private ODD-DMPC LocalController from standalone algorithm cont
 from __future__ import annotations
 
 import os
+from threading import RLock
 from typing import Dict, List
 
-import yaml
+from hydros_agent_sdk.utils.yaml_loader import YamlLoader
 
 from .odd_dmpc.config import load_runtime_context_from_payload
 from .odd_dmpc.flow_service import FlowDepartService
@@ -34,37 +35,94 @@ class PumpFlowDmpcSolver:
         self._runtime = None
         self._lower_feedback: LowerFeedback | None = None
         self._available_units_map: Dict[int, List[int]] = {}
+        self._loaded_config_source = ""
+        self._config_lock = RLock()
 
     def _ensure_loaded(self, arguments: PumpFlowDmpcArguments) -> None:
-        if self._system_config is not None:
-            return
-        config_path = arguments.config_path
-        if not config_path or not os.path.exists(config_path):
+        config_source = str(arguments.config_path or "").strip()
+        with self._config_lock:
+            if (
+                self._system_config is not None
+                and self._loaded_config_source == config_source
+            ):
+                return
+            payload = self._load_config_payload(config_source)
+            try:
+                context = load_runtime_context_from_payload(payload)
+            except Exception as exc:
+                raise PumpFlowDmpcError(
+                    "INVALID_RUNTIME_CONFIG",
+                    "cannot build pump DMPC runtime from config source %s: %s"
+                    % (config_source, exc),
+                ) from exc
+            self._system_config = context["system_config"]
+            self._runtime = context["runtime"]
+            flow_service_config_path = (
+                config_source
+                if config_source and not self._is_remote_config(config_source)
+                else None
+            )
+            self._flow_service = FlowDepartService(
+                self._system_config,
+                config_dict=payload,
+                config_path=flow_service_config_path,
+            )
+            self._local_controller = LocalController(
+                system_config=self._system_config,
+                runtime=self._runtime,
+                flow_service=self._flow_service,
+            )
+            self._available_units_map = {
+                station.id: [unit.id for unit in station.units]
+                for station in self._system_config.stations
+            }
+            self._loaded_config_source = config_source
+
+    @staticmethod
+    def _is_remote_config(config_source: str) -> bool:
+        return config_source.startswith("http://") or config_source.startswith("https://")
+
+    def _load_config_payload(self, config_source: str) -> dict:
+        if not config_source:
             raise PumpFlowDmpcError(
                 "CONFIG_NOT_FOUND",
-                "config path not available: %s" % config_path,
+                "pump DMPC config source is required",
             )
-        with open(config_path, "r", encoding="utf-8") as f:
-            payload = yaml.safe_load(f)
-        context = load_runtime_context_from_payload(payload)
-        self._system_config = context["system_config"]
-        self._runtime = context["runtime"]
-        self._flow_service = FlowDepartService(self._system_config, config_dict=payload)
-        self._local_controller = LocalController(
-            system_config=self._system_config,
-            runtime=self._runtime,
-            flow_service=self._flow_service,
-        )
-        # Build available_units_map
-        self._available_units_map = {
-            station.id: [unit.id for unit in station.units]
-            for station in self._system_config.stations
-        }
+        try:
+            if self._is_remote_config(config_source):
+                payload = YamlLoader.from_url(config_source)
+            else:
+                if not os.path.exists(config_source):
+                    raise PumpFlowDmpcError(
+                        "CONFIG_NOT_FOUND",
+                        "config path not available: %s" % config_source,
+                    )
+                payload = YamlLoader.from_file(config_source)
+        except PumpFlowDmpcError:
+            raise
+        except Exception as exc:
+            raise PumpFlowDmpcError(
+                "CONFIG_LOAD_FAILED",
+                "cannot load pump DMPC config from %s: %s" % (config_source, exc),
+            ) from exc
+        if not isinstance(payload, dict) or not payload.get("stations"):
+            raise PumpFlowDmpcError(
+                "INVALID_RUNTIME_CONFIG",
+                "pump DMPC config has no stations: %s" % config_source,
+            )
+        return payload
 
     def solve(self, arguments: PumpFlowDmpcArguments) -> ControlAction:
         self._ensure_loaded(arguments)
 
         station_id = arguments.station_id
+        configured_station_ids = sorted(self._system_config.station_by_id)
+        if station_id not in self._system_config.station_by_id:
+            raise PumpFlowDmpcError(
+                "TARGET_STATION_NOT_CONFIGURED",
+                "target station %s is absent from config %s; configured station ids=%s"
+                % (station_id, self._loaded_config_source, configured_station_ids),
+            )
 
         # Build StationMemory
         station_memory = StationMemory(

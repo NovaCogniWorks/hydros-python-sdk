@@ -4,6 +4,8 @@ import sys
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, os.path.abspath("custom-agent/pump"))
@@ -27,6 +29,7 @@ from pump_flow_dmpc import (  # noqa: E402
     PumpStationFlowDmpcAlgorithm,
     TabulatedPumpPerformanceRepository,
 )
+from pump_flow_dmpc.types import PumpFlowDmpcArguments  # noqa: E402
 from pump_flow_dmpc_service import (  # noqa: E402
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
@@ -155,6 +158,52 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
         self.assertEqual("CONFIG_NOT_FOUND", output.error_code)
         self.assertEqual([], output.actuator_targets)
+
+    def test_solver_reports_target_station_missing_from_loaded_config(self):
+        solver = PumpFlowDmpcSolver()
+        solver._system_config = SimpleNamespace(station_by_id={1: object()})
+        solver._loaded_config_source = ""
+        solver._flow_service = Mock()
+        solver._local_controller = Mock()
+        algorithm = PumpStationFlowDmpcAlgorithm(
+            solver=solver,
+            resolver=PumpFlowDmpcInputResolver(),
+        )
+
+        output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+
+        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
+        self.assertEqual("TARGET_STATION_NOT_CONFIGURED", output.error_code)
+        self.assertIn("target station 2001", output.error_message)
+        solver._flow_service.get_station_model.assert_not_called()
+
+    def test_solver_loads_remote_runtime_config_from_url(self):
+        solver = PumpFlowDmpcSolver()
+        expected_payload = {"stations": [{"id": 20000}]}
+
+        with patch(
+            "pump_flow_dmpc.solver.YamlLoader.from_url",
+            return_value=expected_payload,
+        ) as load_from_url:
+            payload = solver._load_config_payload("https://config.example/mpc.yaml")
+
+        self.assertIs(expected_payload, payload)
+        load_from_url.assert_called_once_with("https://config.example/mpc.yaml")
+
+    def test_solver_local_runtime_config_contains_deployed_station_id(self):
+        solver = PumpFlowDmpcSolver()
+        config_path = os.path.abspath("custom-agent/pump/data/mpc_config.yaml")
+
+        solver._ensure_loaded(
+            PumpFlowDmpcArguments(
+                station_id=20000,
+                mode="ODD2",
+                config_path=config_path,
+            )
+        )
+
+        self.assertIn(20000, solver._system_config.station_by_id)
+        self.assertEqual(config_path, solver._loaded_config_source)
 
     def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
         host = PumpFlowDmpcHttpHost(host="127.0.0.1", port=0)
