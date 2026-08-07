@@ -88,7 +88,19 @@ class ControlAlgorithmHttpService:
                     return
 
                 output = runtime.solve(input_data)
-                self._write_json(HTTPStatus.OK, output.model_dump(mode="json"))
+                output_payload = output.model_dump(mode="json")
+                logger.info(
+                    "Control algorithm HTTP response produced: path=%s, "
+                    "pathAlgorithmType=%s, payload=%s",
+                    self.path,
+                    algorithm_type,
+                    json.dumps(
+                        output_payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+                self._write_json(HTTPStatus.OK, output_payload)
 
             def do_GET(self) -> None:  # noqa: N802
                 self._write_json(

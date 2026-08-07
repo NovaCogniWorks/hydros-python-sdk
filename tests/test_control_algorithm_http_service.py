@@ -83,6 +83,29 @@ class ControlAlgorithmHttpServiceTest(unittest.TestCase):
         self.assertIn('"request_id":"scene-001:12:2001:hold_algorithm"', log_output)
         self.assertIn('"algorithm_type":"hold_algorithm"', log_output)
 
+    def test_logs_produced_control_algorithm_response_payload(self):
+        with self.assertLogs(
+            "hydros_agent_sdk.control_algorithms.http_service", level="INFO"
+        ) as captured_logs:
+            status, payload = self._post(
+                self.endpoint,
+                self._input().model_dump(mode="json"),
+            )
+
+        self.assertEqual(status, 200)
+        log_output = "\n".join(captured_logs.output)
+        self.assertIn("Control algorithm HTTP response produced", log_output)
+        self.assertIn('"status":"HOLD"', log_output)
+        self.assertIn('"reason":"NO_CHANGE_REQUIRED"', log_output)
+        self.assertIn(
+            '"request_id":"scene-001:12:2001:hold_algorithm"',
+            log_output,
+        )
+        self.assertIn(
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            log_output,
+        )
+
     def test_runtime_returns_standard_failure_for_unknown_algorithm(self):
         input_data = self._input(algorithm_type="missing")
         endpoint = self.endpoint.replace("hold_algorithm", "missing")
