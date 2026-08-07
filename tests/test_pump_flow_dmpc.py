@@ -389,6 +389,57 @@ class PumpFlowDmpcTest(unittest.TestCase):
         pd.testing.assert_frame_equal(expected, actual)
         generate.assert_not_called()
 
+    def test_edge_flow_service_reuses_smallest_cached_superset_table(self):
+        full_station_table = pd.DataFrame({"table": ["all-five-units"]})
+        smaller_superset_table = pd.DataFrame({"table": ["three-units"]})
+        cache = {
+            (20000, (20001, 20002, 20003, 20004, 20005)): full_station_table,
+            (20000, (20003, 20004, 20005)): smaller_superset_table,
+            (20300, (20301, 20302)): pd.DataFrame({"table": ["other-station"]}),
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            cache_path = Path(temporary_directory) / "flow_depart_cache.pkl"
+            with cache_path.open("wb") as cache_file:
+                pickle.dump(cache, cache_file)
+            service = FlowDepartService(
+                system_config=SimpleNamespace(source_config_path="unused.yaml"),
+                cache_dir=temporary_directory,
+                generation_enabled=False,
+            )
+
+            with patch(
+                "pump_flow_dmpc.odd_dmpc.flow_service.generate_flow_depart"
+            ) as generate:
+                service.load_flow_depart_cache()
+                actual = service.get_optimal_table(20000, [20003, 20005])
+
+        pd.testing.assert_frame_equal(smaller_superset_table, actual)
+        generate.assert_not_called()
+
+    def test_station_model_is_built_from_cached_superset_table(self):
+        superset_table = pd.DataFrame({"table": ["all-units"]})
+        station = SimpleNamespace(id=20000)
+        service = FlowDepartService(
+            system_config=SimpleNamespace(
+                source_config_path="unused.yaml",
+                station_by_id={20000: station},
+            ),
+            generation_enabled=False,
+            _cache={(20000, (20001, 20002, 20003, 20004, 20005)): superset_table},
+        )
+        expected_model = object()
+
+        with patch(
+            "pump_flow_dmpc.odd_dmpc.flow_service.PumpStationModel",
+            return_value=expected_model,
+        ) as station_model:
+            actual = service.get_station_model(20000, [20003, 20005])
+
+        self.assertIs(expected_model, actual)
+        station_model.assert_called_once()
+        self.assertIs(station, station_model.call_args.args[0])
+        pd.testing.assert_frame_equal(superset_table, station_model.call_args.args[1])
+
     def test_solver_reports_missing_offline_flow_depart_table(self):
         solver = PumpFlowDmpcSolver()
         solver._system_config = SimpleNamespace(station_by_id={2001: object()})
