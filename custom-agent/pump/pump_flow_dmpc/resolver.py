@@ -52,16 +52,24 @@ class PumpFlowDmpcInputResolver:
         st_mem_attr = _get_attr("OBSERVATION", "PumpStation", station_id, "station_memory")
         mode = str(st_mem_attr.get("mode", "ODD2"))
         last_selected_flow = float(st_mem_attr.get("last_selected_flow", 0.0))
-        active_unit_ids = list(st_mem_attr.get("active_unit_ids", []))
+        # station_memory is algorithm history. Current actuator facts from edge
+        # remain authoritative for availability, running state and blade angle.
+        active_unit_ids: List[int] = []
 
-        # ---- available units: include ALL station units, let LocalController decide start/stop ----
-        # Determine which unit IDs belong to this station
-        station_unit_ids: List[int] = list(active_unit_ids)  # from station_memory
-        if not station_unit_ids:
-            # fallback: derive from unit ID pattern (station_id + 1 .. station_id + 99)
-            lo = station_id + 1
-            hi = station_id + 99
-            station_unit_ids = [uid for uid in [a.object_id for a in input_data.actuators if a.object_type == "Pump"] if lo <= uid <= hi]
+        # ---- available units: include every station actuator supplied by edge ----
+        lo = station_id + 1
+        hi = station_id + 99
+        station_actuators = [
+            actuator
+            for actuator in input_data.actuators
+            if actuator.object_type == "Pump"
+            and (
+                int(actuator.attributes.get("station_object_id", station_id)) == station_id
+                if actuator.attributes.get("station_object_id") is not None
+                else lo <= actuator.object_id <= hi
+            )
+        ]
+        station_unit_ids = sorted({actuator.object_id for actuator in station_actuators})
 
         available_unit_ids: List[int] = []
         unit_openings: Dict[int, float] = {}
@@ -69,7 +77,7 @@ class PumpFlowDmpcInputResolver:
         time_since_adjust: Dict[int, int] = {}
         time_since_switch: Dict[int, int] = {}
 
-        actuator_by_id = {a.object_id: a for a in input_data.actuators if a.object_type == "Pump"}
+        actuator_by_id = {actuator.object_id: actuator for actuator in station_actuators}
         for uid in station_unit_ids:
             actuator = actuator_by_id.get(uid)
             if actuator is None or not actuator.available:
@@ -86,13 +94,16 @@ class PumpFlowDmpcInputResolver:
             available_unit_ids.append(uid)
             unit_openings[uid] = blade_val if running else 0.0
             unit_status[uid] = 1 if running else 0
+            if running:
+                active_unit_ids.append(uid)
 
-        # ---- per-unit memory from unit_memory signals ----
+        # ---- per-unit history from unit_memory signals ----
+        # Never let stale algorithm memory overwrite edge actuator facts.
         for uid in list(station_unit_ids):
             um = _get_attr("OBSERVATION", "Pump", uid, "unit_memory")
+            if not um:
+                um = _get_attr("OBSERVATION", "PUMP", uid, "unit_memory")
             if um:
-                unit_status[uid] = int(um.get("unit_status", unit_status.get(uid, 1)))
-                unit_openings[uid] = float(um.get("unit_opening", unit_openings.get(uid, 0.0)))
                 time_since_adjust[uid] = int(um.get("time_since_adjust", 999))
                 time_since_switch[uid] = int(um.get("time_since_switch", 999))
 
@@ -141,13 +152,30 @@ class PumpFlowDmpcInputResolver:
         current_flow_val = _get_value("OBSERVATION", "PumpStation", station_id, "water_flow")
         current_flow = float(current_flow_val) if current_flow_val is not None else last_selected_flow
 
+        raw_max_delta = input_data.parameters.get(
+            "max_blade_delta_per_step",
+            input_data.parameters.get("max_adjustment_delta", 2.0),
+        )
+        try:
+            max_blade_delta_per_step = float(raw_max_delta)
+        except (TypeError, ValueError) as exc:
+            raise PumpFlowDmpcError(
+                "INVALID_MAX_BLADE_DELTA_PER_STEP",
+                "max_blade_delta_per_step must be a positive finite number",
+            ) from exc
+        if not math.isfinite(max_blade_delta_per_step) or max_blade_delta_per_step <= 0.0:
+            raise PumpFlowDmpcError(
+                "INVALID_MAX_BLADE_DELTA_PER_STEP",
+                "max_blade_delta_per_step must be a positive finite number",
+            )
+
         config_path_attr = _get_attr("OBSERVATION", "PumpStation", station_id, "config_path")
         config_path = config_path_attr.get("path", "") if config_path_attr else ""
 
         if not available_unit_ids:
             raise PumpFlowDmpcError(
                 "NO_AVAILABLE_PUMP_UNIT",
-                "no available running pump unit for station %s" % station_id,
+                "no available pump actuator for station %s" % station_id,
             )
 
         return PumpFlowDmpcArguments(
@@ -169,6 +197,7 @@ class PumpFlowDmpcInputResolver:
             current_back_level=current_back_level,
             current_head=current_head,
             current_flow=current_flow,
+            max_blade_delta_per_step=max_blade_delta_per_step,
         )
 
     @staticmethod

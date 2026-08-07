@@ -38,3 +38,6 @@ class PumpFlowDmpcArguments:
     current_back_level: float = 0.0
     current_head: float = 0.0
     current_flow: float = 0.0
+
+    # Edge-provided safety constraint for one control step.
+    max_blade_delta_per_step: float = 2.0

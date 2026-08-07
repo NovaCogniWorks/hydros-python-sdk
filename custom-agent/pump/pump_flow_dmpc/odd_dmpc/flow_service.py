@@ -28,6 +28,7 @@ class FlowDepartService:
     _model_cache: Dict[Tuple[int, Tuple[int, ...]], PumpStationModel] = field(default_factory=dict)
     _unit_model_cache: Dict[int, Dict[int, PumpUnit]] = field(default_factory=dict)
     cache_dir: Optional[str] = None
+    generation_enabled: bool = True
 
     def _available_key(self, station_id: int, available_unit_ids: Iterable[int]) -> Tuple[int, Tuple[int, ...]]:
         return station_id, tuple(sorted(available_unit_ids))
@@ -145,6 +146,19 @@ class FlowDepartService:
         key = self._available_key(station_id, available_unit_ids)
         if key in self._cache:
             return self._cache[key].copy()
+
+        if not self.generation_enabled:
+            # The edge controller consumes an offline artifact. Reload once so a
+            # cache produced after service startup can still become visible, but
+            # never fall through to the expensive offline calculation.
+            self.load_flow_depart_cache()
+            if key in self._cache:
+                return self._cache[key].copy()
+            raise FileNotFoundError(
+                "Precomputed flow depart table is missing for station %s and "
+                "available units %s in %s"
+                % (station_id, key[1], self._resolve_cache_path())
+            )
 
         station = self.system_config.station_by_id[station_id]
         

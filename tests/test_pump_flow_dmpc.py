@@ -1,5 +1,7 @@
 import json
 import os
+from pathlib import Path
+import pickle
 import sys
 import tempfile
 import threading
@@ -7,6 +9,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.request import Request, urlopen
+
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath("custom-agent/pump"))
 
@@ -30,6 +34,9 @@ from pump_flow_dmpc import (  # noqa: E402
     TabulatedPumpPerformanceRepository,
 )
 from pump_flow_dmpc.types import PumpFlowDmpcArguments  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.flow_service import FlowDepartService  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.local_controller import LocalController  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.station_model import CandidateRow  # noqa: E402
 from pump_flow_dmpc_service import (  # noqa: E402
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
@@ -94,6 +101,136 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
         self.assertEqual("ODD2", output.next_state["mode"])
         self.assertEqual(20.5, output.next_state["selected_flow"])
+
+    def test_resolver_uses_all_edge_actuators_and_edge_current_facts(self):
+        input_data = self._input(target_flow=64.0, current_flow=32.0)
+        station_memory = next(
+            signal
+            for signal in input_data.signals
+            if signal.value_type == "station_memory"
+        )
+        station_memory.attributes["active_unit_ids"] = [2101]
+        input_data.signals.append(
+            ControlSignal(
+                type=SignalType.OBSERVATION,
+                object_type="PUMP",
+                object_id=2102,
+                value_type="unit_memory",
+                attributes={
+                    "unit_status": 0,
+                    "unit_opening": 100.0,
+                    "time_since_adjust": 7,
+                    "time_since_switch": 8,
+                },
+            )
+        )
+
+        arguments = PumpFlowDmpcInputResolver().resolve(input_data)
+
+        self.assertEqual([2101, 2102], arguments.available_unit_ids)
+        self.assertEqual([2101, 2102], arguments.active_unit_ids)
+        self.assertEqual(1, arguments.unit_status[2102])
+        self.assertEqual(10.0, arguments.unit_openings[2102])
+        self.assertEqual(7, arguments.time_since_adjust[2102])
+        self.assertEqual(5.0, arguments.max_blade_delta_per_step)
+
+    def test_projects_no_blade_target_for_stopped_unit(self):
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.actuators[1].values["blade_angle"] = 100.0
+
+        output = self.algorithm.solve(input_data)
+
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
+        self.assertEqual([2101], [target.object_id for target in output.actuator_targets])
+
+    def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
+        input_data = self._input(target_flow=64.0, current_flow=32.0)
+        input_data.actuators[1].values["blade_angle"] = 100.0
+        input_data.signals.append(
+            ControlSignal(
+                type=SignalType.OBSERVATION,
+                object_type="PUMP",
+                object_id=2102,
+                value_type="unit_memory",
+                attributes={
+                    "unit_status": 1,
+                    "unit_opening": -1.99,
+                    "time_since_adjust": 0,
+                    "time_since_switch": 999,
+                },
+            )
+        )
+
+        arguments = PumpFlowDmpcInputResolver().resolve(input_data)
+
+        self.assertEqual([2101], arguments.active_unit_ids)
+        self.assertEqual(0, arguments.unit_status[2102])
+        self.assertEqual(0.0, arguments.unit_openings[2102])
+
+    def test_single_step_optimizer_honors_maximum_blade_delta(self):
+        unit_model = SimpleNamespace(
+            angle_min=0.0,
+            angle_max=40.0,
+            predict_flow=lambda head, opening: opening,
+            predict_efficiency=lambda flow, head: 80.0,
+        )
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(),
+            flow_service=Mock(),
+        )
+
+        result = controller._optimize_single_step(
+            active_unit_ids=[2101],
+            unit_models={2101: unit_model},
+            head=5.0,
+            target_flow=30.0,
+            initial_openings={2101: 10.0},
+            max_opening_delta=2.0,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertLessEqual(abs(result["openings"][2101] - 10.0), 2.0 + 1.0e-9)
+
+    def test_odd3_cache_candidates_honor_active_set_and_blade_delta(self):
+        unsafe = CandidateRow(
+            flow=64.0,
+            head=5.0,
+            efficiency=82.0,
+            unit_status={2101: 1, 2102: 0},
+            unit_openings={2101: 14.0, 2102: 0.0},
+            unit_flows={2101: 64.0, 2102: 0.0},
+            unit_names={2101: "Pump1", 2102: "Pump2"},
+        )
+        safe = CandidateRow(
+            flow=48.0,
+            head=5.0,
+            efficiency=80.0,
+            unit_status={2101: 1, 2102: 0},
+            unit_openings={2101: 11.5, 2102: 0.0},
+            unit_flows={2101: 48.0, 2102: 0.0},
+            unit_names={2101: "Pump1", 2102: "Pump2"},
+        )
+        station_model = Mock()
+        station_model.candidate_rows.return_value = [unsafe, safe]
+
+        candidates = LocalController._safe_cached_candidates(
+            station_model=station_model,
+            head=5.0,
+            available_unit_ids=[2101, 2102],
+            required_active_ids=[2101],
+            previous_openings={2101: 10.0},
+            max_opening_delta=2.0,
+            tolerance=0.35,
+        )
+
+        self.assertEqual([safe], candidates)
+        station_model.candidate_rows.assert_called_once_with(
+            head=5.0,
+            required_active_ids=[2101],
+            available_unit_ids=[2101, 2102],
+            tolerance=0.35,
+        )
 
     def test_fails_when_target_flow_is_missing(self):
         input_data = self._input(target_flow=30.0, current_flow=20.0)
@@ -194,16 +331,84 @@ class PumpFlowDmpcTest(unittest.TestCase):
         solver = PumpFlowDmpcSolver()
         config_path = os.path.abspath("custom-agent/pump/data/mpc_config.yaml")
 
-        solver._ensure_loaded(
-            PumpFlowDmpcArguments(
-                station_id=20000,
-                mode="ODD2",
-                config_path=config_path,
+        with tempfile.TemporaryDirectory() as temporary_directory, patch.object(
+            solver,
+            "_resolve_flow_depart_cache_dir",
+            return_value=Path(temporary_directory),
+        ):
+            solver._ensure_loaded(
+                PumpFlowDmpcArguments(
+                    station_id=20000,
+                    mode="ODD2",
+                    config_path=config_path,
+                )
             )
-        )
 
         self.assertIn(20000, solver._system_config.station_by_id)
         self.assertEqual(config_path, solver._loaded_config_source)
+        self.assertFalse(solver._flow_service.generation_enabled)
+
+    def test_edge_flow_service_never_generates_missing_offline_table(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service = FlowDepartService(
+                system_config=SimpleNamespace(source_config_path="unused.yaml"),
+                cache_dir=temporary_directory,
+                generation_enabled=False,
+            )
+            with patch(
+                "pump_flow_dmpc.odd_dmpc.flow_service.generate_flow_depart"
+            ) as generate:
+                with self.assertRaisesRegex(
+                    FileNotFoundError,
+                    r"station 20000.*available units \(20005,\)",
+                ):
+                    service.get_optimal_table(20000, [20005])
+
+        generate.assert_not_called()
+
+    def test_edge_flow_service_reads_precomputed_table_from_file(self):
+        expected = pd.DataFrame({"total_flow": [20.0], "head": [3.0]})
+        cache_key = (20000, (20005,))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            cache_path = Path(temporary_directory) / "flow_depart_cache.pkl"
+            with cache_path.open("wb") as cache_file:
+                pickle.dump({cache_key: expected}, cache_file)
+            service = FlowDepartService(
+                system_config=SimpleNamespace(source_config_path="unused.yaml"),
+                cache_dir=temporary_directory,
+                generation_enabled=False,
+            )
+
+            with patch(
+                "pump_flow_dmpc.odd_dmpc.flow_service.generate_flow_depart"
+            ) as generate:
+                loaded_count = service.load_flow_depart_cache()
+                actual = service.get_optimal_table(20000, [20005])
+
+        self.assertEqual(1, loaded_count)
+        pd.testing.assert_frame_equal(expected, actual)
+        generate.assert_not_called()
+
+    def test_solver_reports_missing_offline_flow_depart_table(self):
+        solver = PumpFlowDmpcSolver()
+        solver._system_config = SimpleNamespace(station_by_id={2001: object()})
+        solver._loaded_config_source = ""
+        solver._flow_service = Mock()
+        solver._flow_service.get_station_model.side_effect = FileNotFoundError(
+            "offline table missing"
+        )
+        solver._local_controller = Mock()
+        algorithm = PumpStationFlowDmpcAlgorithm(
+            solver=solver,
+            resolver=PumpFlowDmpcInputResolver(),
+        )
+
+        output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+
+        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
+        self.assertEqual("FLOW_DEPART_TABLE_NOT_FOUND", output.error_code)
+        self.assertIn("offline table missing", output.error_message)
+        solver._local_controller.solve.assert_not_called()
 
     def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
         host = PumpFlowDmpcHttpHost(host="127.0.0.1", port=0)

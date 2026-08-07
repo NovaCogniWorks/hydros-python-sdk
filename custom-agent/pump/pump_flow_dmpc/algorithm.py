@@ -27,7 +27,7 @@ class PumpStationFlowDmpcAlgorithm:
     """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
 
     algorithm_type = "pump_station_flow_dmpc"
-    algorithm_version = "1.2.0"
+    algorithm_version = "1.4.0"
 
     def __init__(
         self,
@@ -107,6 +107,8 @@ class PumpStationFlowDmpcAlgorithm:
         # Build actuator targets (blade angles)
         actuator_targets: List[ControlActuatorTarget] = []
         for unit_id, opening in action.unit_openings.items():
+            if int(action.unit_status.get(unit_id, 0)) != 1:
+                continue
             actuator_targets.append(
                 ControlActuatorTarget(
                     object_type="Pump",

@@ -5,6 +5,7 @@ Call the service-private ODD-DMPC LocalController from standalone algorithm cont
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from threading import RLock
 from typing import Dict, List
 
@@ -66,7 +67,10 @@ class PumpFlowDmpcSolver:
                 self._system_config,
                 config_dict=payload,
                 config_path=flow_service_config_path,
+                cache_dir=str(self._resolve_flow_depart_cache_dir()),
+                generation_enabled=False,
             )
+            self._flow_service.load_flow_depart_cache()
             self._local_controller = LocalController(
                 system_config=self._system_config,
                 runtime=self._runtime,
@@ -81,6 +85,11 @@ class PumpFlowDmpcSolver:
     @staticmethod
     def _is_remote_config(config_source: str) -> bool:
         return config_source.startswith("http://") or config_source.startswith("https://")
+
+    @staticmethod
+    def _resolve_flow_depart_cache_dir() -> Path:
+        """Return the application-level offline artifact directory."""
+        return Path(__file__).resolve().parents[1] / ".cache"
 
     def _load_config_payload(self, config_source: str) -> dict:
         if not config_source:
@@ -154,9 +163,15 @@ class PumpFlowDmpcSolver:
         )
 
         # Build StationControlContext
-        station_model = self._flow_service.get_station_model(
-            station_id, arguments.available_unit_ids
-        )
+        try:
+            station_model = self._flow_service.get_station_model(
+                station_id, arguments.available_unit_ids
+            )
+        except FileNotFoundError as exc:
+            raise PumpFlowDmpcError(
+                "FLOW_DEPART_TABLE_NOT_FOUND",
+                str(exc),
+            ) from exc
 
         station_ctx = StationControlContext(
             station_id=station_id,
@@ -176,6 +191,7 @@ class PumpFlowDmpcSolver:
             start_time_hours=0.0,
             step_hours=1.0,
             demand_plan=None,
+            max_blade_delta_per_step=float(arguments.max_blade_delta_per_step),
         )
 
         return self._local_controller.solve(

@@ -102,6 +102,9 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             os.path.join(_SCRIPT_DIR, "..", "data", "config_xhh.yaml")
         )
 
+    def _resolve_flow_depart_cache_dir(self) -> str:
+        return os.path.abspath(os.path.join(_SCRIPT_DIR, "..", ".cache"))
+
     @handle_agent_errors(ErrorCodes.AGENT_INIT_FAILURE)
     def on_init(self, request: SimTaskInitRequest) -> SimTaskInitResponse:
         """
@@ -201,7 +204,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         self._init_dynamic_demand_plan(build_zero_demand_plan, payload)
         
-        cache_dir = os.path.join(os.path.dirname(self._resolve_config_path()), ".cache")
+        cache_dir = self._resolve_flow_depart_cache_dir()
         self.flow_service = FlowDepartService(
             self.system_config, config_dict=payload, cache_dir=cache_dir,
         )
