@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from .api import ControlAlgorithm
 from .models import (
     ControlAlgorithmInput,
     ControlAlgorithmOutput,
     ControlAlgorithmStatus,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ControlAlgorithmRuntime:
@@ -38,6 +43,20 @@ class ControlAlgorithmRuntime:
         try:
             output = algorithm.solve(input_data)
         except Exception as exc:
+            logger.exception(
+                "Control algorithm execution failed: requestId=%s, "
+                "algorithmType=%s, algorithmVersion=%s, controlTaskType=%s, "
+                "targetObjectType=%s, targetObjectId=%s, exceptionType=%s, "
+                "exceptionMessage=%s",
+                input_data.context.request_id,
+                input_data.algorithm_type,
+                input_data.algorithm_version,
+                input_data.control_task_type.value,
+                input_data.context.target_object_type,
+                input_data.context.target_object_id,
+                type(exc).__name__,
+                exc,
+            )
             return self._failed_output(
                 input_data,
                 error_code="ALGORITHM_EXECUTION_FAILED",

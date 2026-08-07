@@ -78,9 +78,23 @@ class ControlAlgorithmsTest(unittest.TestCase):
         self.assertEqual(unsupported.status, ControlAlgorithmStatus.FAILED)
         self.assertEqual(unsupported.error_code, "UNSUPPORTED_ALGORITHM")
 
-        broken = runtime.solve(self._input(algorithm_type="broken_algorithm"))
+        with self.assertLogs(
+            "hydros_agent_sdk.control_algorithms.runtime",
+            level="ERROR",
+        ) as captured_logs:
+            broken = runtime.solve(self._input(algorithm_type="broken_algorithm"))
         self.assertEqual(broken.status, ControlAlgorithmStatus.FAILED)
         self.assertEqual(broken.error_code, "ALGORITHM_EXECUTION_FAILED")
+        self.assertEqual(broken.error_message, "solver unavailable")
+        self.assertEqual(len(captured_logs.records), 1)
+        self.assertIsNotNone(captured_logs.records[0].exc_info)
+        failure_log = captured_logs.records[0].getMessage()
+        self.assertIn("requestId=scene-001:12:2001:odd_dmpc", failure_log)
+        self.assertIn("algorithmType=broken_algorithm", failure_log)
+        self.assertIn("controlTaskType=STATION_FLOW_ALLOCATION", failure_log)
+        self.assertIn("targetObjectId=2001", failure_log)
+        self.assertIn("exceptionType=RuntimeError", failure_log)
+        self.assertIn("exceptionMessage=solver unavailable", failure_log)
 
     def test_runtime_rejects_duplicate_algorithm_type(self):
         runtime = ControlAlgorithmRuntime()
