@@ -50,6 +50,34 @@ class PumpStationModel:
         available_key = tuple(sorted(available_unit_ids or self.unit_name_by_id.keys()))
         return (round(float(head), 4), required_key, available_key, round(float(tolerance), 4))
 
+    def _row_unit_status(self, row: pd.Series) -> Dict[int, int]:
+        return {
+            unit_id: int(row[f"泵_{unit_name}_状态"])
+            for unit_id, unit_name in self.unit_name_by_id.items()
+        }
+
+    def _row_unit_values(self, row: pd.Series, suffix: str) -> Dict[int, float]:
+        values: Dict[int, float] = {}
+        for unit_id, unit_name in self.unit_name_by_id.items():
+            value = row[f"泵_{unit_name}_{suffix}"]
+            values[unit_id] = 0.0 if pd.isna(value) else float(value)
+        return values
+
+    def _has_consistent_flow_allocation(
+        self,
+        total_flow: float,
+        active_unit_ids: Iterable[int],
+        unit_flows: Dict[int, float],
+    ) -> bool:
+        active_ids = list(active_unit_ids)
+        if not active_ids:
+            return False
+        active_flows = [float(unit_flows.get(unit_id, 0.0)) for unit_id in active_ids]
+        if any(not np.isfinite(flow) or flow <= 0.0 for flow in active_flows):
+            return False
+        tolerance = max(1.0e-3, self.flow_step * 1.0e-3)
+        return abs(sum(active_flows) - float(total_flow)) <= tolerance
+
     def _normalize_table(self, df: pd.DataFrame) -> pd.DataFrame:
         normalized = df.copy()
         normalized["总流量(m³/s)"] = pd.to_numeric(normalized["总流量(m³/s)"], errors="coerce")
@@ -332,13 +360,20 @@ class PumpStationModel:
         for _, row in self._normalized.iterrows():
             if pd.isna(row["平均效率(%)"]) or pd.isna(row["总流量(m³/s)"]):
                 continue
-            active_ids = {
-                unit_id
-                for unit_id, unit_name in self.unit_name_by_id.items()
-                if int(row[f"泵_{unit_name}_状态"]) == 1
-            }
-            if active_ids and active_ids.issubset(available_set):
-                feasible_flows.append(float(row["总流量(m³/s)"]))
+            all_status = self._row_unit_status(row)
+            active_ids = {unit_id for unit_id, status in all_status.items() if status == 1}
+            total_flow = float(row["总流量(m³/s)"])
+            all_unit_flows = self._row_unit_values(row, "流量")
+            if (
+                active_ids
+                and active_ids.issubset(available_set)
+                and self._has_consistent_flow_allocation(
+                    total_flow=total_flow,
+                    active_unit_ids=active_ids,
+                    unit_flows=all_unit_flows,
+                )
+            ):
+                feasible_flows.append(total_flow)
         if not feasible_flows:
             return 0.0, 0.0
         return float(min(feasible_flows)), float(max(feasible_flows))
@@ -368,19 +403,24 @@ class PumpStationModel:
         ]
         rows: List[CandidateRow] = []
         for _, row in filtered.iterrows():
-            status_map = {
-                unit_id: int(row[f"泵_{unit_name}_状态"])
-                for unit_id, unit_name in self.unit_name_by_id.items()
-                if unit_id in available_set
-            }
-            active_ids = {unit_id for unit_id, status in status_map.items() if status == 1}
+            all_status = self._row_unit_status(row)
+            active_ids = {unit_id for unit_id, status in all_status.items() if status == 1}
+            if not active_ids or not active_ids.issubset(available_set):
+                continue
             if required_set and active_ids != required_set:
                 continue
-            if not active_ids.issubset(available_set):
+            total_flow = float(row["总流量(m³/s)"])
+            all_unit_flows = self._row_unit_values(row, "流量")
+            if not self._has_consistent_flow_allocation(
+                total_flow=total_flow,
+                active_unit_ids=active_ids,
+                unit_flows=all_unit_flows,
+            ):
                 continue
+            status_map = {unit_id: all_status[unit_id] for unit_id in available_set}
             rows.append(
                 CandidateRow(
-                    flow=float(row["总流量(m³/s)"]),
+                    flow=total_flow,
                     head=float(row["扬程(m)"]),
                     efficiency=float(row["平均效率(%)"]),
                     unit_status=status_map,
@@ -390,12 +430,7 @@ class PumpStationModel:
                         else 0.0
                         for unit_id in available_set
                     },
-                    unit_flows={
-                        unit_id: float(row[f"泵_{self.unit_name_by_id[unit_id]}_流量"])
-                        if not np.isnan(row[f"泵_{self.unit_name_by_id[unit_id]}_流量"])
-                        else 0.0
-                        for unit_id in available_set
-                    },
+                    unit_flows={unit_id: all_unit_flows[unit_id] for unit_id in available_set},
                     unit_names={unit_id: self.unit_name_by_id[unit_id] for unit_id in available_set},
                 )
             )

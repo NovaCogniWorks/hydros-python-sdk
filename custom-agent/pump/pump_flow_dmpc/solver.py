@@ -70,7 +70,6 @@ class PumpFlowDmpcSolver:
                 cache_dir=str(self._resolve_flow_depart_cache_dir()),
                 generation_enabled=False,
             )
-            self._flow_service.load_flow_depart_cache()
             self._local_controller = LocalController(
                 system_config=self._system_config,
                 runtime=self._runtime,
@@ -162,20 +161,11 @@ class PumpFlowDmpcSolver:
             disturbance_estimate={},
         )
 
-        # Build StationControlContext
-        try:
-            station_model = self._flow_service.get_station_model(
-                station_id, arguments.available_unit_ids
-            )
-        except FileNotFoundError as exc:
-            raise PumpFlowDmpcError(
-                "FLOW_DEPART_TABLE_NOT_FOUND",
-                str(exc),
-            ) from exc
-
+        # Online ODD control uses per-unit performance models directly. Station
+        # flow-depart tables are offline planning artifacts, not a solve input.
         station_ctx = StationControlContext(
             station_id=station_id,
-            station_model=station_model,
+            station_model=None,
             available_unit_ids=list(arguments.available_unit_ids),
             basin_levels={},
             basin_profiles=None,

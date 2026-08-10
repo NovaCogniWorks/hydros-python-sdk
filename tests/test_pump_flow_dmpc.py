@@ -36,7 +36,7 @@ from pump_flow_dmpc import (  # noqa: E402
 from pump_flow_dmpc.types import PumpFlowDmpcArguments  # noqa: E402
 from pump_flow_dmpc.odd_dmpc.flow_service import FlowDepartService  # noqa: E402
 from pump_flow_dmpc.odd_dmpc.local_controller import LocalController  # noqa: E402
-from pump_flow_dmpc.odd_dmpc.station_model import CandidateRow  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.station_model import PumpStationModel  # noqa: E402
 from pump_flow_dmpc_service import (  # noqa: E402
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
@@ -78,6 +78,33 @@ class PumpFlowDmpcTest(unittest.TestCase):
             solver=StubPumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
         )
+
+    @staticmethod
+    def _three_unit_station():
+        return SimpleNamespace(
+            id=2001,
+            name="Station1",
+            unit_name_by_id={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
+        )
+
+    @staticmethod
+    def _flow_depart_table(specifications):
+        unit_names = {2101: "Pump1", 2102: "Pump2", 2103: "Pump3"}
+        rows = []
+        for specification in specifications:
+            row = {
+                "总流量(m³/s)": specification["total_flow"],
+                "扬程(m)": 5.0,
+                "平均效率(%)": specification["efficiency"],
+            }
+            for unit_id, unit_name in unit_names.items():
+                running = int(specification["statuses"].get(unit_id, 0)) == 1
+                prefix = f"泵_{unit_name}"
+                row[f"{prefix}_状态"] = "true" if running else "false"
+                row[f"{prefix}_流量"] = specification["flows"].get(unit_id, 0.0)
+                row[f"{prefix}_开度"] = -0.3 if running else 0.0
+            rows.append(row)
+        return pd.DataFrame(rows)
 
     def test_projects_available_and_running_blade_angle_candidates(self):
         output = self.algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
@@ -198,81 +225,125 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertLessEqual(abs(result["openings"][2101] - 10.0), 2.0 + 1.0e-9)
 
-    def test_odd3_cache_candidates_allow_active_set_reconfiguration(self):
-        current_combo = CandidateRow(
-            flow=74.0,
-            head=5.0,
-            efficiency=78.0,
-            unit_status={2101: 1, 2102: 1, 2103: 0},
-            unit_openings={2101: -2.0, 2102: -2.0, 2103: 0.0},
-            unit_flows={2101: 37.0, 2102: 37.0, 2103: 0.0},
-            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
-        )
-        reconfigured_combo = CandidateRow(
-            flow=64.0,
-            head=5.0,
-            efficiency=82.0,
-            unit_status={2101: 1, 2102: 0, 2103: 1},
-            unit_openings={2101: -1.0, 2102: 0.0, 2103: -1.0},
-            unit_flows={2101: 32.0, 2102: 0.0, 2103: 32.0},
-            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
-        )
-        station_model = Mock()
-        station_model.candidate_rows.return_value = [current_combo, reconfigured_combo]
+    def test_odd3_enumerates_all_available_unit_combinations(self):
         controller = LocalController(
             system_config=SimpleNamespace(),
-            runtime=SimpleNamespace(head_search_tolerance=0.35),
+            runtime=SimpleNamespace(),
             flow_service=Mock(),
         )
 
-        candidates = controller._odd3_candidate_plans(
-            station_model=station_model,
+        self.assertEqual(
+            [[2101], [2102], [2101, 2102]],
+            controller._candidate_active_sets(
+                mode="ODD3",
+                available_unit_ids=[2101, 2102],
+                current_active_unit_ids=[2102],
+            ),
+        )
+
+    def test_odd3_uses_online_nlp_and_selects_two_units_for_target_64(self):
+        unit_model = SimpleNamespace(
+            angle_min=-7.0,
+            angle_max=5.0,
+            predict_flow=lambda head, opening: 32.0 + float(opening),
+            predict_efficiency=lambda flow, head: 80.0,
+        )
+        flow_service = Mock()
+        flow_service.get_unit_model.return_value = unit_model
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(
+                control_horizon_lower=1,
+                opening_change_threshold=0.0,
+                lower_flow_weight=3.0,
+                lower_adjust_count_weight=0.0,
+                lower_switch_weight=0.0,
+            ),
+            flow_service=flow_service,
+        )
+        station_ctx = SimpleNamespace(
+            station_id=2001,
+            station_model=Mock(),
+            available_unit_ids=[2101, 2102],
+            max_blade_delta_per_step=float("inf"),
+        )
+        transfer_bundle = SimpleNamespace(
+            reference_flow=[64.0],
+            reference_head=[5.0],
+            reference_back_level=[10.0],
+            reference_front_level=[5.0],
+        )
+        station_memory = SimpleNamespace(
+            active_unit_ids=[2102],
+            unit_openings={2101: 0.0, 2102: 0.0},
+            unit_status={2101: 0, 2102: 1},
+            time_since_switch={2101: 999, 2102: 999},
+        )
+
+        action = controller.solve(
+            mode="ODD3",
+            station_ctx=station_ctx,
+            upstream_prediction={},
+            disturbance_forecast={},
+            transfer_bundle=transfer_bundle,
+            station_memory=station_memory,
+        )
+
+        self.assertEqual({2101: 1, 2102: 1}, action.unit_status)
+        self.assertAlmostEqual(64.0, action.selected_flow, places=6)
+        self.assertAlmostEqual(64.0, sum(action.unit_flows.values()), places=6)
+        self.assertEqual(3, len(action.candidate_plans))
+
+    def test_station_model_rejects_superset_row_with_unavailable_active_unit(self):
+        table = self._flow_depart_table(
+            [
+                {
+                    "total_flow": 64.0,
+                    "efficiency": 90.0,
+                    "statuses": {2101: 1, 2102: 0, 2103: 1},
+                    "flows": {2101: 32.0, 2102: 0.0, 2103: 32.0},
+                },
+                {
+                    "total_flow": 64.0,
+                    "efficiency": 80.0,
+                    "statuses": {2101: 1, 2102: 1, 2103: 0},
+                    "flows": {2101: 32.0, 2102: 32.0, 2103: 0.0},
+                },
+            ]
+        )
+        model = PumpStationModel(self._three_unit_station(), table)
+
+        selected = model.best_row_for_target(
             target_flow=64.0,
             head=5.0,
-            available_unit_ids=[2101, 2102, 2103],
+            available_unit_ids=[2101, 2102],
         )
 
-        self.assertEqual([2101, 2103], candidates[0]["active_unit_ids"])
-        self.assertEqual([2101, 2102], candidates[1]["active_unit_ids"])
-        station_model.candidate_rows.assert_called_once_with(
-            head=5.0,
-            available_unit_ids=[2101, 2102, 2103],
-            tolerance=0.35,
-        )
+        self.assertIsNotNone(selected)
+        self.assertEqual({2101: 1, 2102: 1}, selected.unit_status)
+        self.assertEqual(64.0, sum(selected.unit_flows.values()))
 
-    def test_odd3_selects_best_cached_row_without_current_active_set_filter(self):
-        reconfigured_combo = CandidateRow(
-            flow=60.0,
-            head=5.0,
-            efficiency=82.0,
-            unit_status={2101: 1, 2102: 0, 2103: 1},
-            unit_openings={2101: -1.0, 2102: 0.0, 2103: -1.0},
-            unit_flows={2101: 30.0, 2102: 0.0, 2103: 30.0},
-            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
+    def test_station_model_rejects_row_with_inconsistent_total_flow(self):
+        table = self._flow_depart_table(
+            [
+                {
+                    "total_flow": 64.0,
+                    "efficiency": 90.0,
+                    "statuses": {2101: 1, 2102: 1, 2103: 0},
+                    "flows": {2101: 16.0, 2102: 16.0, 2103: 0.0},
+                }
+            ]
         )
-        station_model = Mock()
-        station_model.best_row_for_target.return_value = reconfigured_combo
-        controller = LocalController(
-            system_config=SimpleNamespace(),
-            runtime=SimpleNamespace(head_search_tolerance=0.35),
-            flow_service=Mock(),
-        )
+        model = PumpStationModel(self._three_unit_station(), table)
 
-        selected = controller._best_cached_row(
-            station_model=station_model,
-            target_flow=60.0,
-            head=5.0,
-            available_unit_ids=[2101, 2102, 2103],
+        self.assertEqual(
+            [],
+            model.candidate_rows(
+                head=5.0,
+                available_unit_ids=[2101, 2102],
+            ),
         )
-
-        self.assertIs(reconfigured_combo, selected)
-        station_model.best_row_for_target.assert_called_once_with(
-            target_flow=60.0,
-            head=5.0,
-            available_unit_ids=[2101, 2102, 2103],
-            tolerance=0.35,
-        )
-        station_model.candidate_rows.assert_not_called()
+        self.assertEqual((0.0, 0.0), model.global_feasible_flow_range([2101, 2102]))
 
     def test_fails_when_target_flow_is_missing(self):
         input_data = self._input(target_flow=30.0, current_flow=20.0)
@@ -431,7 +502,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
         pd.testing.assert_frame_equal(expected, actual)
         generate.assert_not_called()
 
-    def test_edge_flow_service_reuses_smallest_cached_superset_table(self):
+    def test_edge_flow_service_rejects_cached_superset_for_exact_unit_set(self):
         full_station_table = pd.DataFrame({"table": ["all-five-units"]})
         smaller_superset_table = pd.DataFrame({"table": ["three-units"]})
         cache = {
@@ -453,13 +524,17 @@ class PumpFlowDmpcTest(unittest.TestCase):
                 "pump_flow_dmpc.odd_dmpc.flow_service.generate_flow_depart"
             ) as generate:
                 service.load_flow_depart_cache()
-                actual = service.get_optimal_table(20000, [20003, 20005])
+                with self.assertRaisesRegex(
+                    FileNotFoundError,
+                    r"station 20000.*available units \(20003, 20005\)",
+                ):
+                    service.get_optimal_table(20000, [20003, 20005])
 
-        pd.testing.assert_frame_equal(smaller_superset_table, actual)
         generate.assert_not_called()
 
-    def test_station_model_is_built_from_cached_superset_table(self):
-        superset_table = pd.DataFrame({"table": ["all-units"]})
+    def test_station_model_is_built_from_exact_cached_table(self):
+        exact_table = pd.DataFrame({"table": ["two-units"]})
+        superset_table = pd.DataFrame({"table": ["all-five-units"]})
         station = SimpleNamespace(id=20000)
         service = FlowDepartService(
             system_config=SimpleNamespace(
@@ -467,7 +542,10 @@ class PumpFlowDmpcTest(unittest.TestCase):
                 station_by_id={20000: station},
             ),
             generation_enabled=False,
-            _cache={(20000, (20001, 20002, 20003, 20004, 20005)): superset_table},
+            _cache={
+                (20000, (20003, 20005)): exact_table,
+                (20000, (20001, 20002, 20003, 20004, 20005)): superset_table,
+            },
         )
         expected_model = object()
 
@@ -480,28 +558,27 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertIs(expected_model, actual)
         station_model.assert_called_once()
         self.assertIs(station, station_model.call_args.args[0])
-        pd.testing.assert_frame_equal(superset_table, station_model.call_args.args[1])
+        pd.testing.assert_frame_equal(exact_table, station_model.call_args.args[1])
 
-    def test_solver_reports_missing_offline_flow_depart_table(self):
+    def test_solver_does_not_query_offline_flow_depart_table(self):
         solver = PumpFlowDmpcSolver()
         solver._system_config = SimpleNamespace(station_by_id={2001: object()})
         solver._loaded_config_source = ""
         solver._flow_service = Mock()
-        solver._flow_service.get_station_model.side_effect = FileNotFoundError(
-            "offline table missing"
-        )
         solver._local_controller = Mock()
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        arguments = PumpFlowDmpcInputResolver().resolve(input_data)
+        solver._local_controller.solve.return_value = StubPumpFlowDmpcSolver().solve(arguments)
         algorithm = PumpStationFlowDmpcAlgorithm(
             solver=solver,
             resolver=PumpFlowDmpcInputResolver(),
         )
 
-        output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        output = algorithm.solve(input_data)
 
-        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
-        self.assertEqual("FLOW_DEPART_TABLE_NOT_FOUND", output.error_code)
-        self.assertIn("offline table missing", output.error_message)
-        solver._local_controller.solve.assert_not_called()
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
+        solver._flow_service.get_station_model.assert_not_called()
+        solver._local_controller.solve.assert_called_once()
 
     def test_managed_http_host_starts_and_stops_on_dynamic_port(self):
         host = PumpFlowDmpcHttpHost(host="127.0.0.1", port=0)

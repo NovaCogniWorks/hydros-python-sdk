@@ -33,26 +33,6 @@ class FlowDepartService:
     def _available_key(self, station_id: int, available_unit_ids: Iterable[int]) -> Tuple[int, Tuple[int, ...]]:
         return station_id, tuple(sorted(available_unit_ids))
 
-    def _cached_table_key(
-        self,
-        station_id: int,
-        available_unit_ids: Iterable[int],
-    ) -> Optional[Tuple[int, Tuple[int, ...]]]:
-        requested_key = self._available_key(station_id, available_unit_ids)
-        if requested_key in self._cache:
-            return requested_key
-
-        requested_units = set(requested_key[1])
-        supersets = [
-            cache_key
-            for cache_key in self._cache
-            if cache_key[0] == station_id
-            and requested_units.issubset(set(cache_key[1]))
-        ]
-        if not supersets:
-            return None
-        return min(supersets, key=lambda cache_key: (len(cache_key[1]), cache_key[1]))
-
     def _unit_names(self, station: StationConfig, available_unit_ids: Iterable[int]) -> List[str]:
         id_set = set(available_unit_ids)
         names = [
@@ -164,32 +144,16 @@ class FlowDepartService:
 
     def get_optimal_table(self, station_id: int, available_unit_ids: Iterable[int]) -> pd.DataFrame:
         key = self._available_key(station_id, available_unit_ids)
-        cached_key = self._cached_table_key(station_id, key[1])
-        if cached_key is not None:
-            if cached_key != key:
-                logger.info(
-                    "using flow depart superset table for station %s: requested=%s cached=%s",
-                    station_id,
-                    key[1],
-                    cached_key[1],
-                )
-            return self._cache[cached_key].copy()
+        if key in self._cache:
+            return self._cache[key].copy()
 
         if not self.generation_enabled:
             # The edge controller consumes an offline artifact. Reload once so a
             # cache produced after service startup can still become visible, but
             # never fall through to the expensive offline calculation.
             self.load_flow_depart_cache()
-            cached_key = self._cached_table_key(station_id, key[1])
-            if cached_key is not None:
-                if cached_key != key:
-                    logger.info(
-                        "using flow depart superset table for station %s: requested=%s cached=%s",
-                        station_id,
-                        key[1],
-                        cached_key[1],
-                    )
-                return self._cache[cached_key].copy()
+            if key in self._cache:
+                return self._cache[key].copy()
             raise FileNotFoundError(
                 "Precomputed flow depart table is missing for station %s and "
                 "available units %s in %s; cached station combinations=%s"
