@@ -127,7 +127,6 @@ class LocalController:
             plan = self._solve_odd3_from_cache(
                 station_ctx=station_ctx,
                 transfer_bundle=transfer_bundle,
-                station_memory=station_memory,
             )
             if plan is None:
                 action = self.hold_action(station_ctx, transfer_bundle, station_memory, mode="ODD3")
@@ -258,25 +257,12 @@ class LocalController:
         self,
         station_ctx: StationControlContext,
         transfer_bundle: TransferBundle,
-        station_memory: StationMemory,
     ) -> Optional[Dict[str, object]]:
         horizon = min(self.runtime.control_horizon_lower, len(transfer_bundle.reference_flow))
         available_ids = [int(unit_id) for unit_id in station_ctx.available_unit_ids]
         if horizon <= 0 or not available_ids:
             return None
 
-        required_active_ids = [
-            unit_id
-            for unit_id in available_ids
-            if int(station_memory.unit_status.get(unit_id, 0)) == 1
-        ]
-        if not required_active_ids:
-            return None
-        previous_openings = {
-            unit_id: float(station_memory.unit_openings[unit_id])
-            for unit_id in required_active_ids
-        }
-        max_delta = float(station_ctx.max_blade_delta_per_step)
         selected_rows = []
         for step in range(horizon):
             target_flow = float(transfer_bundle.reference_flow[step])
@@ -286,17 +272,10 @@ class LocalController:
                 target_flow=target_flow,
                 head=head,
                 available_unit_ids=available_ids,
-                required_active_ids=required_active_ids,
-                previous_openings=previous_openings,
-                max_opening_delta=max_delta,
             )
             if row is None:
                 return None
             selected_rows.append(row)
-            previous_openings = {
-                unit_id: float(row.unit_openings.get(unit_id, previous_openings[unit_id]))
-                for unit_id in required_active_ids
-            }
 
         step0_row = selected_rows[0]
         step0_status = {unit_id: int(step0_row.unit_status.get(unit_id, 0)) for unit_id in available_ids}
@@ -337,12 +316,6 @@ class LocalController:
             target_flow=float(transfer_bundle.reference_flow[0]),
             head=float(transfer_bundle.reference_head[0]),
             available_unit_ids=available_ids,
-            required_active_ids=required_active_ids,
-            previous_openings={
-                unit_id: float(station_memory.unit_openings[unit_id])
-                for unit_id in required_active_ids
-            },
-            max_opening_delta=max_delta,
         )
 
         return {
@@ -383,64 +356,26 @@ class LocalController:
         target_flow: float,
         head: float,
         available_unit_ids: List[int],
-        required_active_ids: List[int],
-        previous_openings: Mapping[int, float],
-        max_opening_delta: float,
     ):
-        candidates = self._safe_cached_candidates(
-            station_model=station_model,
+        row = station_model.best_row_for_target(
+            target_flow=target_flow,
             head=head,
             available_unit_ids=available_unit_ids,
-            required_active_ids=required_active_ids,
-            previous_openings=previous_openings,
-            max_opening_delta=max_opening_delta,
             tolerance=self.runtime.head_search_tolerance,
         )
-        if not candidates:
-            candidates = self._safe_cached_candidates(
-                station_model=station_model,
-                head=head,
-                available_unit_ids=available_unit_ids,
-                required_active_ids=required_active_ids,
-                previous_openings=previous_openings,
-                max_opening_delta=max_opening_delta,
-                tolerance=1.0e9,
-            )
-        if not candidates:
+        if row is not None:
+            return row
+        fallback_candidates = station_model.candidate_rows(
+            head=head,
+            available_unit_ids=available_unit_ids,
+            tolerance=1.0e9,
+        )
+        if not fallback_candidates:
             return None
         return min(
-            candidates,
+            fallback_candidates,
             key=lambda item: (abs(item.flow - target_flow), abs(item.head - head), -item.efficiency),
         )
-
-    @staticmethod
-    def _safe_cached_candidates(
-        station_model: PumpStationModel,
-        head: float,
-        available_unit_ids: List[int],
-        required_active_ids: List[int],
-        previous_openings: Mapping[int, float],
-        max_opening_delta: float,
-        tolerance: float,
-    ) -> List[object]:
-        candidates = station_model.candidate_rows(
-            head=head,
-            required_active_ids=required_active_ids,
-            available_unit_ids=available_unit_ids,
-            tolerance=tolerance,
-        )
-        return [
-            row
-            for row in candidates
-            if all(
-                abs(
-                    float(row.unit_openings.get(unit_id, previous_openings[unit_id]))
-                    - float(previous_openings[unit_id])
-                )
-                <= max_opening_delta + 1.0e-9
-                for unit_id in required_active_ids
-            )
-        ]
 
     def _odd3_candidate_plans(
         self,
@@ -448,27 +383,16 @@ class LocalController:
         target_flow: float,
         head: float,
         available_unit_ids: List[int],
-        required_active_ids: List[int],
-        previous_openings: Mapping[int, float],
-        max_opening_delta: float,
     ) -> List[Dict[str, object]]:
-        candidates = self._safe_cached_candidates(
-            station_model=station_model,
+        candidates = station_model.candidate_rows(
             head=head,
             available_unit_ids=available_unit_ids,
-            required_active_ids=required_active_ids,
-            previous_openings=previous_openings,
-            max_opening_delta=max_opening_delta,
             tolerance=self.runtime.head_search_tolerance,
         )
         if not candidates:
-            candidates = self._safe_cached_candidates(
-                station_model=station_model,
+            candidates = station_model.candidate_rows(
                 head=head,
                 available_unit_ids=available_unit_ids,
-                required_active_ids=required_active_ids,
-                previous_openings=previous_openings,
-                max_opening_delta=max_opening_delta,
                 tolerance=1.0e9,
             )
         ordered_candidates = sorted(

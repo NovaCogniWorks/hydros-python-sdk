@@ -79,7 +79,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
             resolver=PumpFlowDmpcInputResolver(),
         )
 
-    def test_projects_only_blade_angle_candidates_and_flow_result(self):
+    def test_projects_unit_status_and_running_blade_angle_candidates(self):
         output = self.algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
 
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
@@ -87,9 +87,12 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(2, len(output.actuator_targets))
         self.assertTrue(
             all(
-                set(target.target_values) == {"blade_angle"}
+                set(target.target_values) == {"unit_status", "blade_angle"}
                 for target in output.actuator_targets
             )
+        )
+        self.assertTrue(
+            all(target.target_values["unit_status"] == 1.0 for target in output.actuator_targets)
         )
         self.assertEqual("water_flow", output.results[0].value_type)
         self.assertLessEqual(output.results[0].value, 30.0)
@@ -134,18 +137,23 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(7, arguments.time_since_adjust[2102])
         self.assertEqual(5.0, arguments.max_blade_delta_per_step)
 
-    def test_projects_no_blade_target_for_stopped_unit(self):
+    def test_projects_explicit_unit_status_without_blade_angle_for_stopped_unit(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.actuators[1].values["blade_angle"] = 100.0
+        input_data.actuators[1].values["unit_status"] = 0.0
 
         output = self.algorithm.solve(input_data)
 
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
-        self.assertEqual([2101], [target.object_id for target in output.actuator_targets])
+        targets_by_unit = {target.object_id: target.target_values for target in output.actuator_targets}
+        self.assertEqual({2101, 2102}, set(targets_by_unit))
+        self.assertEqual({"unit_status": 0.0}, targets_by_unit[2102])
+        self.assertEqual(1.0, targets_by_unit[2101]["unit_status"])
+        self.assertIn("blade_angle", targets_by_unit[2101])
 
-    def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
+    def test_resolver_uses_explicit_unit_status_instead_of_blade_angle_sentinel(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
-        input_data.actuators[1].values["blade_angle"] = 100.0
+        input_data.actuators[1].values["unit_status"] = 0.0
+        input_data.actuators[1].values["blade_angle"] = 10.0
         input_data.signals.append(
             ControlSignal(
                 type=SignalType.OBSERVATION,
@@ -166,6 +174,16 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual([2101], arguments.active_unit_ids)
         self.assertEqual(0, arguments.unit_status[2102])
         self.assertEqual(0.0, arguments.unit_openings[2102])
+
+    def test_resolver_requires_explicit_unit_status(self):
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.actuators[1].values.pop("unit_status")
+
+        output = self.algorithm.solve(input_data)
+
+        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
+        self.assertEqual("MISSING_UNIT_STATUS", output.error_code)
+        self.assertEqual([], output.actuator_targets)
 
     def test_single_step_optimizer_honors_maximum_blade_delta(self):
         unit_model = SimpleNamespace(
@@ -192,45 +210,81 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertLessEqual(abs(result["openings"][2101] - 10.0), 2.0 + 1.0e-9)
 
-    def test_odd3_cache_candidates_honor_active_set_and_blade_delta(self):
-        unsafe = CandidateRow(
+    def test_odd3_cache_candidates_allow_active_set_reconfiguration(self):
+        current_combo = CandidateRow(
+            flow=74.0,
+            head=5.0,
+            efficiency=78.0,
+            unit_status={2101: 1, 2102: 1, 2103: 0},
+            unit_openings={2101: -2.0, 2102: -2.0, 2103: 0.0},
+            unit_flows={2101: 37.0, 2102: 37.0, 2103: 0.0},
+            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
+        )
+        reconfigured_combo = CandidateRow(
             flow=64.0,
             head=5.0,
             efficiency=82.0,
-            unit_status={2101: 1, 2102: 0},
-            unit_openings={2101: 14.0, 2102: 0.0},
-            unit_flows={2101: 64.0, 2102: 0.0},
-            unit_names={2101: "Pump1", 2102: "Pump2"},
-        )
-        safe = CandidateRow(
-            flow=48.0,
-            head=5.0,
-            efficiency=80.0,
-            unit_status={2101: 1, 2102: 0},
-            unit_openings={2101: 11.5, 2102: 0.0},
-            unit_flows={2101: 48.0, 2102: 0.0},
-            unit_names={2101: "Pump1", 2102: "Pump2"},
+            unit_status={2101: 1, 2102: 0, 2103: 1},
+            unit_openings={2101: -1.0, 2102: 0.0, 2103: -1.0},
+            unit_flows={2101: 32.0, 2102: 0.0, 2103: 32.0},
+            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
         )
         station_model = Mock()
-        station_model.candidate_rows.return_value = [unsafe, safe]
-
-        candidates = LocalController._safe_cached_candidates(
-            station_model=station_model,
-            head=5.0,
-            available_unit_ids=[2101, 2102],
-            required_active_ids=[2101],
-            previous_openings={2101: 10.0},
-            max_opening_delta=2.0,
-            tolerance=0.35,
+        station_model.candidate_rows.return_value = [current_combo, reconfigured_combo]
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(head_search_tolerance=0.35),
+            flow_service=Mock(),
         )
 
-        self.assertEqual([safe], candidates)
+        candidates = controller._odd3_candidate_plans(
+            station_model=station_model,
+            target_flow=64.0,
+            head=5.0,
+            available_unit_ids=[2101, 2102, 2103],
+        )
+
+        self.assertEqual([2101, 2103], candidates[0]["active_unit_ids"])
+        self.assertEqual([2101, 2102], candidates[1]["active_unit_ids"])
         station_model.candidate_rows.assert_called_once_with(
             head=5.0,
-            required_active_ids=[2101],
-            available_unit_ids=[2101, 2102],
+            available_unit_ids=[2101, 2102, 2103],
             tolerance=0.35,
         )
+
+    def test_odd3_selects_best_cached_row_without_current_active_set_filter(self):
+        reconfigured_combo = CandidateRow(
+            flow=60.0,
+            head=5.0,
+            efficiency=82.0,
+            unit_status={2101: 1, 2102: 0, 2103: 1},
+            unit_openings={2101: -1.0, 2102: 0.0, 2103: -1.0},
+            unit_flows={2101: 30.0, 2102: 0.0, 2103: 30.0},
+            unit_names={2101: "Pump1", 2102: "Pump2", 2103: "Pump3"},
+        )
+        station_model = Mock()
+        station_model.best_row_for_target.return_value = reconfigured_combo
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(head_search_tolerance=0.35),
+            flow_service=Mock(),
+        )
+
+        selected = controller._best_cached_row(
+            station_model=station_model,
+            target_flow=60.0,
+            head=5.0,
+            available_unit_ids=[2101, 2102, 2103],
+        )
+
+        self.assertIs(reconfigured_combo, selected)
+        station_model.best_row_for_target.assert_called_once_with(
+            target_flow=60.0,
+            head=5.0,
+            available_unit_ids=[2101, 2102, 2103],
+            tolerance=0.35,
+        )
+        station_model.candidate_rows.assert_not_called()
 
     def test_fails_when_target_flow_is_missing(self):
         input_data = self._input(target_flow=30.0, current_flow=20.0)
@@ -520,7 +574,10 @@ class PumpFlowDmpcTest(unittest.TestCase):
             self.assertEqual(200, response.status)
             self.assertEqual("CONTINUE", payload["status"])
             self.assertEqual("request-001", payload["request_id"])
-            self.assertEqual({"blade_angle"}, set(payload["actuator_targets"][0]["target_values"]))
+            self.assertEqual(
+                {"unit_status", "blade_angle"},
+                set(payload["actuator_targets"][0]["target_values"]),
+            )
         finally:
             server.shutdown()
             server.server_close()

@@ -82,15 +82,31 @@ class PumpFlowDmpcInputResolver:
             actuator = actuator_by_id.get(uid)
             if actuator is None or not actuator.available:
                 continue
+            raw_unit_status = actuator.values.get("unit_status")
+            if raw_unit_status is None:
+                raise PumpFlowDmpcError(
+                    "MISSING_UNIT_STATUS",
+                    "available pump actuator %s is missing current unit_status" % uid,
+                )
+            try:
+                status_value = float(raw_unit_status)
+            except (TypeError, ValueError) as exc:
+                raise PumpFlowDmpcError(
+                    "INVALID_UNIT_STATUS",
+                    "pump actuator %s unit_status must be 0 or 1" % uid,
+                ) from exc
+            if not math.isfinite(status_value) or status_value not in (0.0, 1.0):
+                raise PumpFlowDmpcError(
+                    "INVALID_UNIT_STATUS",
+                    "pump actuator %s unit_status must be 0 or 1" % uid,
+                )
+
+            running = status_value == 1.0
             blade = actuator.values.get("blade_angle")
             blade_range = actuator.ranges.get("blade_angle") if actuator.ranges else None
-            if blade is None or blade_range is None:
+            if running and (blade is None or blade_range is None):
                 continue
-            blade_val = float(blade)
-            min_val = float(blade_range.min_value) if blade_range.min_value is not None else -7.0
-            max_val = float(blade_range.max_value) if blade_range.max_value is not None else 5.0
-            # blade_angle=100 means stopped
-            running = min_val <= blade_val <= max_val
+            blade_val = float(blade) if blade is not None else 0.0
             available_unit_ids.append(uid)
             unit_openings[uid] = blade_val if running else 0.0
             unit_status[uid] = 1 if running else 0
