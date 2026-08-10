@@ -277,7 +277,7 @@ class HydroSimulationResultFactory:
                     multi_reservoir,
                 )
                 if not values:
-                    continue
+                    values = [0.0] * len(formal_steps)
                 series_items.append(
                     {
                         "time_series_name": f"device_{device_id}_{metric}_simulation_result",

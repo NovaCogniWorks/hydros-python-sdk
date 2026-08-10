@@ -443,7 +443,8 @@ def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
     )
     assert os.path.abspath(init_kwargs["time_series_file"]) == expected_path
     assert ".runtime" not in Path(init_kwargs["time_series_file"]).parts
-    agent.on_optimization.assert_called_once_with(21)
+    agent.on_optimization.assert_not_called()
+    agent._refresh_rolling_window_dataset.assert_called_once_with(21, task_state)
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=21)
 
 
@@ -486,7 +487,7 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert agent._rolling_window_start_step == 1
     assert agent._rolling_window_end_step == 10
 
-    agent.on_tick_simulation(TickCmdRequest(command_id="tick-011", context=context, step=11, broadcast=False))
+    agent.on_tick_simulation(TickCmdRequest(command_id="tick-010", context=context, step=10, broadcast=False))
     assert len(enqueued) == 2
     second_report = enqueued[1]
     assert len(second_report.mpc_prediction_results) == 1
@@ -495,6 +496,8 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
     assert agent.dispatch_control_commands_and_await_execution.call_count == 2
+    dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
+    assert dispatched_commands[0]["main_step_index"] == 11
 
 
 def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
@@ -621,6 +624,7 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     assert kwargs["current_step_metrics"] == []
     agent.dispatch_control_commands_and_await_execution.assert_not_called()
     assert agent._pending_boundary_control_commands
+    assert agent._pending_boundary_control_target_step == 2
 
 
 def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
@@ -659,6 +663,7 @@ def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
     agent.dispatch_control_commands_and_await_execution.assert_not_called()
     pending_commands = list(agent._pending_boundary_control_commands)
     assert pending_commands
+    assert pending_commands[0]["main_step_index"] == 2
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(1))
     agent.on_tick_simulation(
@@ -669,6 +674,7 @@ def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
         pending_commands
     )
     assert agent._pending_boundary_control_commands == []
+    assert agent._pending_boundary_control_target_step is None
 
 
 def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
@@ -719,11 +725,11 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
     assert task_state.current_step == 21
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 21
-    assert agent._rolling_window_start_step == 21
-    assert agent._rolling_window_end_step == 30
+    assert agent._rolling_window_start_step == 22
+    assert agent._rolling_window_end_step == 31
     assert len(enqueued) == 1
     assert len(enqueued[0].mpc_prediction_results) == 1
-    assert enqueued[0].mpc_prediction_results[0].step == 21
+    assert enqueued[0].mpc_prediction_results[0].step == 22
     assert {detail.horizon_step for detail in enqueued[0].mpc_prediction_results[0].details} == set(range(1, 11))
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(21))
@@ -731,8 +737,8 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
         TickCmdRequest(command_id="tick-after-weather-021", context=context, step=21, broadcast=False)
     )
 
-    assert agent._rolling_window_start_step == 21
-    assert agent._rolling_window_end_step == 30
+    assert agent._rolling_window_start_step == 22
+    assert agent._rolling_window_end_step == 31
     assert len(enqueued) == 1
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(31))
@@ -790,8 +796,8 @@ def test_power_scheduling_mid_cycle_event_keeps_original_rolling_anchor():
 
     assert task_state.start_step == 1
     assert task_state.current_step == 25
-    assert agent._rolling_window_start_step == 25
-    assert agent._rolling_window_end_step == 34
+    assert agent._rolling_window_start_step == 26
+    assert agent._rolling_window_end_step == 35
     assert len(enqueued) == 1
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(25))
@@ -799,6 +805,9 @@ def test_power_scheduling_mid_cycle_event_keeps_original_rolling_anchor():
         TickCmdRequest(command_id="tick-mid-cycle-025", context=context, step=25)
     )
     assert len(enqueued) == 1
+    assert agent.dispatch_control_commands_and_await_execution.call_count == 1
+    dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
+    assert dispatched_commands[0]["main_step_index"] == 26
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(31))
     agent.on_tick_simulation(

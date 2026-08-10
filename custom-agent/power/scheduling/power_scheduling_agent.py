@@ -49,7 +49,7 @@ from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-07-30-station-out-flow-control-v8"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-04-station-out-flow-control-v10"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -177,6 +177,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
         self._pending_boundary_control_commands: List[Dict[str, Any]] = []
+        self._pending_boundary_control_target_step: Optional[int] = None
+        self._dispatched_control_target_steps: set[int] = set()
         self._runtime_lock = RLock()
         self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
@@ -246,15 +248,36 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             task_state = self._ensure_mpc_task_state(request.step)
 
             if self._pending_boundary_control_commands:
-                pending_commands = self._pending_boundary_control_commands
-                self._pending_boundary_control_commands = []
-                self.dispatch_control_commands_and_await_execution(pending_commands)
+                target_step = self._pending_boundary_control_target_step
+                if self._can_dispatch_control_for_target_step(request.step, target_step):
+                    pending_commands = self._pending_boundary_control_commands
+                    self._pending_boundary_control_commands = []
+                    self._pending_boundary_control_target_step = None
+                    if target_step is None or not self._has_dispatched_control_target_step(target_step):
+                        self.dispatch_control_commands_and_await_execution(pending_commands)
+                        self._mark_control_target_step_dispatched(target_step)
+                else:
+                    logger.info(
+                        "Deferring pending boundary control commands until target step: currentStep=%s, targetStep=%s, commandCount=%s",
+                        request.step,
+                        target_step,
+                        len(self._pending_boundary_control_commands),
+                    )
 
-            if self._should_refresh_rolling_window(request.step, task_state):
-                logger.info("Refreshing rolling scheduling window at step=%s", request.step)
-                commands = self.on_optimization(request.step)
-                if commands:
+            control_target_step = self._resolve_next_control_target_step(request.step, task_state)
+            if control_target_step is not None:
+                logger.info(
+                    "Refreshing rolling scheduling window at step=%s for controlTargetStep=%s",
+                    request.step,
+                    control_target_step,
+                )
+                commands = self.on_optimization(control_target_step)
+                if commands and not self._has_dispatched_control_target_step(control_target_step):
                     self.dispatch_control_commands_and_await_execution(commands)
+                    self._mark_control_target_step_dispatched(control_target_step)
+                self._refresh_rolling_window_dataset(control_target_step, task_state)
+            elif self._should_refresh_rolling_window_report(request.step, task_state):
+                logger.info("Refreshing rolling scheduling report at step=%s", request.step)
                 self._refresh_rolling_window_dataset(request.step, task_state)
 
             step_result = self._hydrosim_api.execute_step(step_index=request.step)
@@ -387,6 +410,41 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             task_state.should_start_new_rolling(step)
             and self._rolling_window_start_step != step
         )
+
+    def _should_refresh_rolling_window_report(self, step: int, task_state: MpcTaskState) -> bool:
+        return self._should_refresh_rolling_window(step, task_state)
+
+    def _resolve_next_control_target_step(self, step: int, task_state: MpcTaskState) -> Optional[int]:
+        if not self._rolling_window_dataset:
+            return int(step)
+        target_step = int(step) + 1
+        if self._is_control_target_step(target_step, task_state):
+            return target_step
+        return None
+
+    def _is_control_target_step(self, target_step: int, task_state: MpcTaskState) -> bool:
+        if int(task_state.total_steps) > 0 and int(target_step) >= int(task_state.total_steps):
+            return False
+        return task_state.should_start_new_rolling(int(target_step))
+
+    def _can_dispatch_control_for_target_step(
+        self,
+        current_step: int,
+        target_step: Optional[int],
+    ) -> bool:
+        if target_step is None:
+            return True
+        return int(current_step) >= self._edge_entry_step_for_control_target(int(target_step))
+
+    def _edge_entry_step_for_control_target(self, target_step: int) -> int:
+        return max(0, int(target_step) - 1)
+
+    def _has_dispatched_control_target_step(self, target_step: Optional[int]) -> bool:
+        return target_step is not None and int(target_step) in self._dispatched_control_target_steps
+
+    def _mark_control_target_step_dispatched(self, target_step: Optional[int]) -> None:
+        if target_step is not None:
+            self._dispatched_control_target_steps.add(int(target_step))
 
     def _refresh_rolling_window_dataset(
         self,
@@ -971,13 +1029,24 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         current_step: int,
         task_state: MpcTaskState,
     ) -> None:
-        commands = self.on_optimization(current_step)
+        effective_control_step = self._resolve_effective_control_step(current_step)
+        commands = self.on_optimization(effective_control_step)
         self._pending_boundary_control_commands = list(commands or [])
-        self._refresh_rolling_window_dataset(
-            current_step,
-            task_state,
-            window_start_override=current_step,
+        self._pending_boundary_control_target_step = (
+            int(effective_control_step) if self._pending_boundary_control_commands else None
         )
+        self._refresh_rolling_window_dataset(
+            effective_control_step,
+            task_state,
+            window_start_override=effective_control_step,
+        )
+
+    def _resolve_effective_control_step(self, current_step: int) -> int:
+        total_steps = self._resolve_total_steps()
+        effective_step = max(0, int(current_step) + 1)
+        if total_steps > 0:
+            effective_step = min(effective_step, max(0, int(total_steps) - 1))
+        return effective_step
 
     def _resolve_event_current_step(self, event: Any) -> int:
         task_state = self._peek_mpc_task_state()
@@ -1027,6 +1096,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._rolling_window_end_step = None
             self._rolling_window_dataset = []
             self._pending_boundary_control_commands = []
+            self._pending_boundary_control_target_step = None
+            self._dispatched_control_target_steps.clear()
             self.discard_control_execution_waiters()
             self._mpc_task_state_lifecycle.clear()
             self._agent_command_gateway.shutdown()
