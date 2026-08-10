@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -32,6 +32,7 @@ class StationControlContext:
     start_time_hours: float
     step_hours: float
     demand_plan: pd.DataFrame
+    unit_blade_bounds: Dict[int, Tuple[float, float]] = field(default_factory=dict)
     max_blade_delta_per_step: float = float("inf")
 
 
@@ -266,6 +267,7 @@ class LocalController:
                 head=head,
                 target_flow=target_flow,
                 initial_openings=previous_openings,
+                blade_angle_bounds=getattr(station_ctx, "unit_blade_bounds", {}),
                 max_opening_delta=float(station_ctx.max_blade_delta_per_step),
             )
             if optimized is None:
@@ -380,6 +382,7 @@ class LocalController:
         head: float,
         target_flow: float,
         initial_openings: Mapping[int, float],
+        blade_angle_bounds: Optional[Mapping[int, Tuple[float, float]]] = None,
         max_opening_delta: float = float("inf"),
     ) -> Optional[Dict[str, object]]:
         if not active_unit_ids:
@@ -390,9 +393,21 @@ class LocalController:
         r0 = []
         for unit_id in active_unit_ids:
             unit = unit_models[unit_id]
+            if not np.isfinite(head) or not (float(unit.h_min) <= head <= float(unit.h_max)):
+                return None
+            actuator_min, actuator_max = (blade_angle_bounds or {}).get(
+                unit_id,
+                (float(unit.angle_min), float(unit.angle_max)),
+            )
+            if (
+                not np.isfinite(actuator_min)
+                or not np.isfinite(actuator_max)
+                or float(actuator_min) > float(actuator_max)
+            ):
+                return None
             guess = float(initial_openings.get(unit_id, 0.5 * (unit.angle_min + unit.angle_max)))
-            lower_bound = max(float(unit.angle_min), guess - max_opening_delta)
-            upper_bound = min(float(unit.angle_max), guess + max_opening_delta)
+            lower_bound = max(float(unit.angle_min), float(actuator_min), guess - max_opening_delta)
+            upper_bound = min(float(unit.angle_max), float(actuator_max), guess + max_opening_delta)
             if lower_bound > upper_bound:
                 return None
             bounds_min.append(lower_bound)
@@ -402,8 +417,16 @@ class LocalController:
         def residual(r_array):
             total_flow = 0.0
             for unit_id, opening in zip(active_unit_ids, r_array):
-                predicted_flow = unit_models[unit_id].predict_flow(head, float(opening))
-                if np.isnan(predicted_flow):
+                unit = unit_models[unit_id]
+                predicted_flow = unit.predict_flow(
+                    blade_angle=float(opening),
+                    water_head=head,
+                )
+                if (
+                    not np.isfinite(predicted_flow)
+                    or not (float(unit.q_min) <= float(predicted_flow) <= float(unit.q_max))
+                    or not unit.is_feasible(float(predicted_flow), head)
+                ):
                     return np.asarray([1.0e6], dtype=float)
                 total_flow += float(predicted_flow)
             return np.asarray([total_flow - target_flow], dtype=float)
@@ -414,7 +437,7 @@ class LocalController:
             bounds=(np.asarray(bounds_min, dtype=float), np.asarray(bounds_max, dtype=float)),
             method="trf",
         )
-        if result.x is None or len(result.x) != len(active_unit_ids):
+        if not result.success or result.x is None or len(result.x) != len(active_unit_ids):
             return None
 
         openings: Dict[int, float] = {}
@@ -424,13 +447,23 @@ class LocalController:
         total_flow = 0.0
         for unit_id, opening in zip(active_unit_ids, result.x):
             opening_value = float(opening)
-            predicted_flow = unit_models[unit_id].predict_flow(head, opening_value)
-            if np.isnan(predicted_flow):
+            unit = unit_models[unit_id]
+            predicted_flow = unit.predict_flow(
+                blade_angle=opening_value,
+                water_head=head,
+            )
+            if (
+                not np.isfinite(predicted_flow)
+                or not (float(unit.q_min) <= float(predicted_flow) <= float(unit.q_max))
+                or not unit.is_feasible(float(predicted_flow), head)
+            ):
                 return None
             flow_value = float(predicted_flow)
             openings[unit_id] = opening_value
             unit_flows[unit_id] = flow_value
-            eff = float(unit_models[unit_id].predict_efficiency(flow_value, head))
+            eff = float(unit.predict_efficiency(flow_value, head))
+            if not np.isfinite(eff):
+                return None
             efficiencies.append(eff)
             unit_efficiencies[unit_id] = eff
             total_flow += flow_value

@@ -181,6 +181,7 @@ class PumpFlowDmpcSolver:
             start_time_hours=0.0,
             step_hours=1.0,
             demand_plan=None,
+            unit_blade_bounds=dict(arguments.unit_blade_bounds),
             max_blade_delta_per_step=float(arguments.max_blade_delta_per_step),
         )
 

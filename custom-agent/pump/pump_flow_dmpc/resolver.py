@@ -5,7 +5,7 @@ Resolve Hydros standard ControlAlgorithmInput into PumpFlowDmpcArguments.
 from __future__ import annotations
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from hydros_agent_sdk.control_algorithms import (
     ControlAlgorithmInput,
@@ -74,6 +74,7 @@ class PumpFlowDmpcInputResolver:
         available_unit_ids: List[int] = []
         unit_openings: Dict[int, float] = {}
         unit_status: Dict[int, int] = {}
+        unit_blade_bounds: Dict[int, Tuple[float, float]] = {}
         time_since_adjust: Dict[int, int] = {}
         time_since_switch: Dict[int, int] = {}
 
@@ -89,9 +90,20 @@ class PumpFlowDmpcInputResolver:
             blade_val = float(blade)
             min_val = float(blade_range.min_value) if blade_range.min_value is not None else -7.0
             max_val = float(blade_range.max_value) if blade_range.max_value is not None else 5.0
+            if (
+                not math.isfinite(min_val)
+                or not math.isfinite(max_val)
+                or min_val > max_val
+            ):
+                raise PumpFlowDmpcError(
+                    "INVALID_ACTUATOR_BLADE_RANGE",
+                    "invalid blade_angle range [%s, %s] for pump %s"
+                    % (min_val, max_val, uid),
+                )
             # blade_angle=100 means stopped
             running = min_val <= blade_val <= max_val
             available_unit_ids.append(uid)
+            unit_blade_bounds[uid] = (min_val, max_val)
             unit_openings[uid] = blade_val if running else 0.0
             unit_status[uid] = 1 if running else 0
             if running:
@@ -193,6 +205,7 @@ class PumpFlowDmpcInputResolver:
             reference_back_level=reference_back_level,
             reference_head=reference_head,
             available_unit_ids=available_unit_ids,
+            unit_blade_bounds=unit_blade_bounds,
             current_front_level=current_front_level,
             current_back_level=current_back_level,
             current_head=current_head,

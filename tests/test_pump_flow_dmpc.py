@@ -36,6 +36,7 @@ from pump_flow_dmpc import (  # noqa: E402
 from pump_flow_dmpc.types import PumpFlowDmpcArguments  # noqa: E402
 from pump_flow_dmpc.odd_dmpc.flow_service import FlowDepartService  # noqa: E402
 from pump_flow_dmpc.odd_dmpc.local_controller import LocalController  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.pump_unit import PumpUnit  # noqa: E402
 from pump_flow_dmpc.odd_dmpc.station_model import PumpStationModel  # noqa: E402
 from pump_flow_dmpc_service import (  # noqa: E402
     PumpFlowDmpcHttpHost,
@@ -159,6 +160,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual([2101, 2102], arguments.active_unit_ids)
         self.assertEqual(1, arguments.unit_status[2102])
         self.assertEqual(10.0, arguments.unit_openings[2102])
+        self.assertEqual((0.0, 40.0), arguments.unit_blade_bounds[2102])
         self.assertEqual(7, arguments.time_since_adjust[2102])
         self.assertEqual(5.0, arguments.max_blade_delta_per_step)
 
@@ -204,8 +206,13 @@ class PumpFlowDmpcTest(unittest.TestCase):
         unit_model = SimpleNamespace(
             angle_min=0.0,
             angle_max=40.0,
-            predict_flow=lambda head, opening: opening,
+            h_min=1.0,
+            h_max=10.0,
+            q_min=0.0,
+            q_max=40.0,
+            predict_flow=lambda *, blade_angle, water_head: blade_angle,
             predict_efficiency=lambda flow, head: 80.0,
+            is_feasible=lambda flow, head: True,
         )
         controller = LocalController(
             system_config=SimpleNamespace(),
@@ -224,6 +231,90 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertLessEqual(abs(result["openings"][2101] - 10.0), 2.0 + 1.0e-9)
+
+    def test_single_step_optimizer_intersects_model_and_actuator_blade_bounds(self):
+        unit_model = SimpleNamespace(
+            angle_min=0.0,
+            angle_max=40.0,
+            h_min=1.0,
+            h_max=10.0,
+            q_min=0.0,
+            q_max=40.0,
+            predict_flow=lambda *, blade_angle, water_head: blade_angle,
+            predict_efficiency=lambda flow, head: 80.0,
+            is_feasible=lambda flow, head: True,
+        )
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(),
+            flow_service=Mock(),
+        )
+
+        result = controller._optimize_single_step(
+            active_unit_ids=[2101],
+            unit_models={2101: unit_model},
+            head=5.0,
+            target_flow=30.0,
+            initial_openings={2101: 10.0},
+            blade_angle_bounds={2101: (0.0, 11.0)},
+        )
+
+        self.assertIsNotNone(result)
+        self.assertLessEqual(result["openings"][2101], 11.0)
+
+    def test_single_step_optimizer_rejects_head_outside_unit_model(self):
+        unit_model = SimpleNamespace(
+            angle_min=-7.0,
+            angle_max=5.0,
+            h_min=0.5,
+            h_max=5.1,
+            q_min=14.0,
+            q_max=39.0,
+            predict_flow=Mock(),
+            predict_efficiency=Mock(),
+            is_feasible=Mock(),
+        )
+        controller = LocalController(
+            system_config=SimpleNamespace(),
+            runtime=SimpleNamespace(),
+            flow_service=Mock(),
+        )
+
+        result = controller._optimize_single_step(
+            active_unit_ids=[2101],
+            unit_models={2101: unit_model},
+            head=6.0,
+            target_flow=30.0,
+            initial_openings={2101: 0.0},
+        )
+
+        self.assertIsNone(result)
+        unit_model.predict_flow.assert_not_called()
+
+    def test_pump_unit_inverts_blade_angle_and_head_to_constrained_flow(self):
+        efficiency = pd.DataFrame(
+            [
+                [10.0, 1.0, 80.0],
+                [20.0, 1.0, 80.0],
+                [10.0, 2.0, 80.0],
+                [20.0, 2.0, 80.0],
+            ],
+            columns=["Q", "H", "E"],
+        )
+        opening = pd.DataFrame(
+            [
+                [10.0, 1.0, -5.0],
+                [20.0, 1.0, 5.0],
+                [10.0, 2.0, -5.0],
+                [20.0, 2.0, 5.0],
+            ],
+            columns=["Q", "H", "R"],
+        )
+        unit = PumpUnit("Pump1", efficiency, opening)
+
+        flow = unit.predict_flow(blade_angle=0.0, water_head=1.5)
+
+        self.assertAlmostEqual(15.0, flow, places=3)
 
     def test_odd3_enumerates_all_available_unit_combinations(self):
         controller = LocalController(
@@ -245,8 +336,13 @@ class PumpFlowDmpcTest(unittest.TestCase):
         unit_model = SimpleNamespace(
             angle_min=-7.0,
             angle_max=5.0,
-            predict_flow=lambda head, opening: 32.0 + float(opening),
+            h_min=0.5,
+            h_max=5.1,
+            q_min=14.0,
+            q_max=39.0,
+            predict_flow=lambda *, blade_angle, water_head: 32.0 + float(blade_angle),
             predict_efficiency=lambda flow, head: 80.0,
+            is_feasible=lambda flow, head: True,
         )
         flow_service = Mock()
         flow_service.get_unit_model.return_value = unit_model

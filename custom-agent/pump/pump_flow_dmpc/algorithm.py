@@ -27,7 +27,7 @@ class PumpStationFlowDmpcAlgorithm:
     """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
 
     algorithm_type = "pump_station_flow_dmpc"
-    algorithm_version = "1.8.0"
+    algorithm_version = "1.8.1"
 
     def __init__(
         self,

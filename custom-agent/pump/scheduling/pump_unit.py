@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np
 from scipy.spatial import Delaunay
 from scipy.interpolate import LinearNDInterpolator
@@ -53,19 +55,40 @@ class PumpUnit:
         val = self.interp_r(Q, H)
         return float(val) if not np.isnan(val) else np.nan
 
-    def predict_flow(self, target_angle, H):
-        if target_angle == "-":
+    def predict_flow(
+        self,
+        *,
+        blade_angle: Union[float, str],
+        water_head: float,
+    ) -> float:
+        """Invert blade angle and head to flow within the model domain."""
+        if blade_angle == "-":
             return 0.0
-        target_angle = float(target_angle)
+        target_angle = float(blade_angle)
+        head = float(water_head)
+        if not np.isfinite(target_angle) or not np.isfinite(head):
+            return np.nan
+        if not (self.angle_min <= target_angle <= self.angle_max):
+            return np.nan
+        if not (self.h_min <= head <= self.h_max):
+            return np.nan
+
         def obj(q):
-            pred_angle = self.predict_opening(q, H)
+            pred_angle = self.predict_opening(q, head)
             if np.isnan(pred_angle):
                 return 1e6
             return (pred_angle - target_angle)**2
+
         res = minimize_scalar(obj, bounds=(self.q_min, self.q_max), method='bounded')
-        if res.success and res.fun < 1e5:
-            return res.x
-        return 0.0
+        if not res.success or not np.isfinite(res.x) or not np.isfinite(res.fun):
+            return np.nan
+        predicted_flow = float(res.x)
+        if not self.is_feasible(predicted_flow, head):
+            return np.nan
+        predicted_angle = self.predict_opening(predicted_flow, head)
+        if not np.isfinite(predicted_angle) or abs(predicted_angle - target_angle) > 1.0e-3:
+            return np.nan
+        return predicted_flow
 
     def is_feasible(self, Q, H):
         if not (self.q_min <= Q <= self.q_max and self.h_min <= H <= self.h_max):
