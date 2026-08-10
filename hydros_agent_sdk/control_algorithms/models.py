@@ -99,6 +99,7 @@ class ControlActuatorTarget(ControlAlgorithmModel):
 
     object_type: str
     object_id: int
+    available: bool = True
     target_values: Dict[str, float] = Field(default_factory=dict)
 
 

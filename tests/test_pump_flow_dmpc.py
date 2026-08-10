@@ -41,7 +41,7 @@ from pump_flow_dmpc_service import (  # noqa: E402
     PumpFlowDmpcHttpHost,
     create_pump_flow_dmpc_server,
 )
-from odd_dmpc.types import ControlAction  # noqa: E402
+from pump_flow_dmpc.odd_dmpc.types import ControlAction  # noqa: E402
 
 
 class StubPumpFlowDmpcSolver:
@@ -79,7 +79,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
             resolver=PumpFlowDmpcInputResolver(),
         )
 
-    def test_projects_unit_status_and_running_blade_angle_candidates(self):
+    def test_projects_available_and_running_blade_angle_candidates(self):
         output = self.algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
 
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
@@ -87,13 +87,11 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(2, len(output.actuator_targets))
         self.assertTrue(
             all(
-                set(target.target_values) == {"unit_status", "blade_angle"}
+                set(target.target_values) == {"blade_angle"}
                 for target in output.actuator_targets
             )
         )
-        self.assertTrue(
-            all(target.target_values["unit_status"] == 1.0 for target in output.actuator_targets)
-        )
+        self.assertTrue(all(target.available for target in output.actuator_targets))
         self.assertEqual("water_flow", output.results[0].value_type)
         self.assertLessEqual(output.results[0].value, 30.0)
         self.assertIn("unit_openings", output.next_state)
@@ -137,18 +135,19 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(7, arguments.time_since_adjust[2102])
         self.assertEqual(5.0, arguments.max_blade_delta_per_step)
 
-    def test_projects_explicit_unit_status_without_blade_angle_for_stopped_unit(self):
+    def test_projects_stopped_unit_as_unavailable_without_blade_angle(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
         input_data.actuators[1].values["blade_angle"] = 100.0
 
         output = self.algorithm.solve(input_data)
 
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
-        targets_by_unit = {target.object_id: target.target_values for target in output.actuator_targets}
+        targets_by_unit = {target.object_id: target for target in output.actuator_targets}
         self.assertEqual({2101, 2102}, set(targets_by_unit))
-        self.assertEqual({"unit_status": 0.0}, targets_by_unit[2102])
-        self.assertEqual(1.0, targets_by_unit[2101]["unit_status"])
-        self.assertIn("blade_angle", targets_by_unit[2101])
+        self.assertFalse(targets_by_unit[2102].available)
+        self.assertEqual({}, targets_by_unit[2102].target_values)
+        self.assertTrue(targets_by_unit[2101].available)
+        self.assertIn("blade_angle", targets_by_unit[2101].target_values)
 
     def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
@@ -564,9 +563,10 @@ class PumpFlowDmpcTest(unittest.TestCase):
             self.assertEqual("CONTINUE", payload["status"])
             self.assertEqual("request-001", payload["request_id"])
             self.assertEqual(
-                {"unit_status", "blade_angle"},
+                {"blade_angle"},
                 set(payload["actuator_targets"][0]["target_values"]),
             )
+            self.assertTrue(payload["actuator_targets"][0]["available"])
         finally:
             server.shutdown()
             server.server_close()

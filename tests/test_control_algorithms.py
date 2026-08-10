@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from hydros_agent_sdk import ControlAlgorithmRuntime as PublicControlAlgorithmRuntime
 from hydros_agent_sdk.control_algorithms import (
     ControlActuator,
+    ControlActuatorTarget,
     ControlAlgorithmContext,
     ControlAlgorithmInput,
     ControlAlgorithmOutput,
@@ -65,6 +66,31 @@ class ControlAlgorithmsTest(unittest.TestCase):
         payload["control_task_type"] = "UNKNOWN_TASK"
         with self.assertRaises(ValidationError):
             ControlAlgorithmInput.model_validate(payload)
+
+    def test_actuator_target_serializes_edge_available_contract(self):
+        running = ControlActuatorTarget(
+            object_type="Pump",
+            object_id=2101,
+            available=True,
+            target_values={"blade_angle": -1.5},
+        )
+        stopped = ControlActuatorTarget(
+            object_type="Pump",
+            object_id=2102,
+            available=False,
+        )
+
+        self.assertEqual(
+            {
+                "object_type": "Pump",
+                "object_id": 2101,
+                "available": True,
+                "target_values": {"blade_angle": -1.5},
+            },
+            running.model_dump(mode="json"),
+        )
+        self.assertFalse(stopped.model_dump(mode="json")["available"])
+        self.assertEqual({}, stopped.target_values)
 
     def test_runtime_returns_hold_and_standard_failures(self):
         runtime = ControlAlgorithmRuntime()

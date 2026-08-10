@@ -4,7 +4,7 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
     ControlActuatorTarget,
@@ -104,17 +104,18 @@ class PumpStationFlowDmpcAlgorithm:
             ),
         ]
 
-        # Project the solver's explicit start/stop decision for every unit.
+        # Project start/stop through the edge actuator availability contract.
         actuator_targets: List[ControlActuatorTarget] = []
         for unit_id in sorted(action.unit_status):
-            unit_status = int(action.unit_status[unit_id])
-            target_values = {"unit_status": float(unit_status)}
-            if unit_status == 1:
+            is_running = int(action.unit_status[unit_id]) == 1
+            target_values: Dict[str, float] = {}
+            if is_running:
                 target_values["blade_angle"] = float(action.unit_openings.get(unit_id, 0.0))
             actuator_targets.append(
                 ControlActuatorTarget(
                     object_type="Pump",
                     object_id=unit_id,
+                    available=is_running,
                     target_values=target_values,
                 )
             )
