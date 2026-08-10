@@ -139,7 +139,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_projects_explicit_unit_status_without_blade_angle_for_stopped_unit(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.actuators[1].values["unit_status"] = 0.0
+        input_data.actuators[1].values["blade_angle"] = 100.0
 
         output = self.algorithm.solve(input_data)
 
@@ -150,10 +150,9 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(1.0, targets_by_unit[2101]["unit_status"])
         self.assertIn("blade_angle", targets_by_unit[2101])
 
-    def test_resolver_uses_explicit_unit_status_instead_of_blade_angle_sentinel(self):
+    def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
-        input_data.actuators[1].values["unit_status"] = 0.0
-        input_data.actuators[1].values["blade_angle"] = 10.0
+        input_data.actuators[1].values["blade_angle"] = 100.0
         input_data.signals.append(
             ControlSignal(
                 type=SignalType.OBSERVATION,
@@ -174,16 +173,6 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual([2101], arguments.active_unit_ids)
         self.assertEqual(0, arguments.unit_status[2102])
         self.assertEqual(0.0, arguments.unit_openings[2102])
-
-    def test_resolver_requires_explicit_unit_status(self):
-        input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.actuators[1].values.pop("unit_status")
-
-        output = self.algorithm.solve(input_data)
-
-        self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
-        self.assertEqual("MISSING_UNIT_STATUS", output.error_code)
-        self.assertEqual([], output.actuator_targets)
 
     def test_single_step_optimizer_honors_maximum_blade_delta(self):
         unit_model = SimpleNamespace(
@@ -643,7 +632,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
                     object_type="Pump",
                     object_id=2101,
                     available=True,
-                    values={"unit_status": 1.0, "blade_angle": 10.0},
+                    values={"blade_angle": 10.0},
                     ranges={
                         "blade_angle": ControlValueRange(
                             min_value=0.0,
@@ -656,7 +645,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
                     object_type="Pump",
                     object_id=2102,
                     available=True,
-                    values={"unit_status": 1.0, "blade_angle": 10.0},
+                    values={"blade_angle": 10.0},
                     ranges={
                         "blade_angle": ControlValueRange(
                             min_value=0.0,
