@@ -1475,6 +1475,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     ObjectTimeSeries(
                         object_id=1001,
                         object_name="lateral-inflow",
+                        metrics_code="water_flow",
                         time_series=[
                             TimeSeriesValue(step=10, value=100.0),
                             TimeSeriesValue(step=20, value=200.0),

@@ -209,6 +209,8 @@ class MpcPlanningClient:
             if event.hydro_event_source_type == "WATER_USE":
                 continue
             for object_time_series in event.object_time_series or []:
+                if (object_time_series.metrics_code or "").lower() != "water_flow":
+                    continue
                 values = cls.collect_values_with_interpolation(object_time_series, current_step)
                 if values and object_time_series.object_id is not None:
                     boundaries[str(object_time_series.object_id)] = values
