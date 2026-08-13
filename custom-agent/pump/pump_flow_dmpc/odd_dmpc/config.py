@@ -20,6 +20,8 @@ from .types import (
     UnitConfig,
 )
 
+STATIC_CONFIG_FILENAME = "mpc_static_config.yaml"
+
 
 DEFAULT_REMOTE_STATION_NAMES = {
     1: "泗洪站",
@@ -45,6 +47,52 @@ def _load_config(config_path: Path) -> Dict:
     if not isinstance(payload, dict):
         raise ValueError(f"Invalid config payload in {config_path}")
     return payload
+
+
+def _default_static_config_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "data" / STATIC_CONFIG_FILENAME
+
+
+def _resolve_static_config_path(
+    payload: Mapping[str, object],
+    runtime_config_path: Path,
+    static_config_path: Optional[str] = None,
+) -> Path:
+    configured_path = static_config_path or payload.get("static_config_path")
+    if isinstance(configured_path, str) and configured_path.strip():
+        candidate = Path(configured_path)
+        if candidate.is_absolute():
+            return candidate
+        if runtime_config_path.name != "agent_config_memory":
+            return (runtime_config_path.resolve().parent / candidate).resolve()
+        return (_default_static_config_path().parent / candidate).resolve()
+    return _default_static_config_path()
+
+
+def _merge_mapping(base: Mapping[str, object], overrides: Mapping[str, object]) -> Dict[str, object]:
+    merged = dict(base)
+    for key, value in overrides.items():
+        if (
+            key in merged
+            and isinstance(merged[key], Mapping)
+            and isinstance(value, Mapping)
+        ):
+            merged[key] = _merge_mapping(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _merge_with_static_config(
+    payload: Dict[str, object],
+    runtime_config_path: Path,
+    static_config_path: Optional[str] = None,
+) -> Dict[str, object]:
+    static_path = _resolve_static_config_path(payload, runtime_config_path, static_config_path)
+    static_payload = _load_config(static_path)
+    merged = _merge_mapping(static_payload, payload)
+    merged.pop("static_config_path", None)
+    return merged
 
 
 def _build_station_config(payload: Dict) -> StationConfig:
@@ -278,6 +326,7 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
     raw_boundary_level = data_files.get("boundary_level", "data/boundary-level.xlsx")
     boundary_level_path = raw_boundary_level if isinstance(raw_boundary_level, str) else None
     hydro_model_path = data_files.get("hydro_model")
+    flow_depart = payload.get("flow_depart", {})
     topology = _build_topology_config(payload, stations)
     return SystemConfig(
         project=payload["project"],
@@ -289,10 +338,10 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
         target_avg_flow_last_station=payload["scheduling"]["target_avg_flow_last_station"],
         stations=stations,
         canal_pools=pools,
-        flow_depart_step_q=payload["flow_depart"]["step_q"],
-        flow_depart_step_h=payload["flow_depart"]["step_h"],
-        flow_depart_data_dir=payload["flow_depart"]["data_dir"],
-        flow_depart_output_dir=payload["flow_depart"]["output_dir"],
+        flow_depart_step_q=flow_depart["step_q"],
+        flow_depart_step_h=flow_depart["step_h"],
+        flow_depart_data_dir=flow_depart.get("data_dir", "data"),
+        flow_depart_output_dir=flow_depart.get("output_dir", "output"),
         source_config_path=str(config_path),
         hydro_model_path=hydro_model_path,
         boundary_level_path=boundary_level_path,
@@ -326,13 +375,15 @@ def load_boundary_level_plan(
 def load_system_config(config_path: str = "data/config.yaml") -> SystemConfig:
     path = Path(config_path)
     payload = _load_config(path)
-    return _system_config_from_payload(payload, path)
+    merged_payload = _merge_with_static_config(payload, path)
+    return _system_config_from_payload(merged_payload, path)
 
 
 def load_runtime_parameters(config_path: str = "data/config.yaml") -> RuntimeParameters:
     path = Path(config_path)
     payload = _load_config(path)
-    return _runtime_from_payload(payload)
+    merged_payload = _merge_with_static_config(payload, path)
+    return _runtime_from_payload(merged_payload)
 
 
 def load_runtime_context(
@@ -343,25 +394,29 @@ def load_runtime_context(
     payload = _load_config(path)
     return _runtime_context_from_payload(payload, path, demand_path)
 
-def load_runtime_context_from_payload(payload: Dict[str, object]) -> Dict[str, object]:
-    return _runtime_context_from_payload(payload, Path("agent_config_memory"), None)
+def load_runtime_context_from_payload(
+    payload: Dict[str, object],
+    static_config_path: Optional[str] = None,
+) -> Dict[str, object]:
+    return _runtime_context_from_payload(payload, Path("agent_config_memory"), None, static_config_path)
 
 def _runtime_context_from_payload(
     payload: Dict[str, object], 
     path: Path,
-    demand_path: Optional[str] = None
+    demand_path: Optional[str] = None,
+    static_config_path: Optional[str] = None,
 ) -> Dict[str, object]:
     del demand_path
-    system_config = _system_config_from_payload(payload, path)
-    runtime = _runtime_from_payload(payload)
+    merged_payload = _merge_with_static_config(payload, path, static_config_path)
+    system_config = _system_config_from_payload(merged_payload, path)
+    runtime = _runtime_from_payload(merged_payload)
     demand_plan = build_zero_demand_plan(system_config)
 
-    output_dir = Path(runtime.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     return {
         "demand_plan": demand_plan,
         "system_config": system_config,
         "runtime": runtime,
+        "config_payload": merged_payload,
     }
 
 

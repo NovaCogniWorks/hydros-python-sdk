@@ -314,7 +314,7 @@ class LocalController:
             new_open = float(step0_openings.get(unit_id, 0.0))
             open_delta = abs(new_open - current_open)
             switch_age = float(station_memory.time_since_switch.get(unit_id, 0))
-            if open_delta > self.runtime.opening_change_threshold:
+            if open_delta > 0.0:
                 adjust_count += 1
 
             current_status = int(station_memory.unit_status.get(unit_id, 0))

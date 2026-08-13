@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ODD 阈值域配置</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #d9e0ea;
+      --text: #172033;
+      --muted: #64748b;
+      --keep: #1b8f5a;
+      --fine: #c17b13;
+      --switch: #c83f32;
+      --blue: #2563eb;
+      --shadow: 0 10px 28px rgba(20, 32, 54, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 24px 40px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .lead {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .widget {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .span-7 {
+      grid-column: span 7;
+    }
+
+    .span-5 {
+      grid-column: span 5;
+    }
+
+    .span-12 {
+      grid-column: span 12;
+    }
+
+    .widget-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .widget-title h2 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .matrix th {
+      color: var(--muted);
+      font-weight: 600;
+      background: #fbfcfe;
+    }
+
+    .matrix input {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 8px;
+      color: var(--text);
+      background: #fff;
+      font: inherit;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill.keep {
+      color: #0f6842;
+      background: #e4f5ec;
+    }
+
+    .pill.fine {
+      color: #86540d;
+      background: #fff2d4;
+    }
+
+    .pill.switch {
+      color: #933027;
+      background: #fde6e2;
+    }
+
+    .boundary-stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .threshold-row {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr) 76px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .metric-name {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .metric-range {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .domain-bar {
+      position: relative;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: visible;
+      background:
+        linear-gradient(
+          to right,
+          var(--keep) 0,
+          var(--keep) var(--first-stop),
+          var(--fine) var(--first-stop),
+          var(--fine) var(--second-stop),
+          var(--switch) var(--second-stop),
+          var(--switch) 100%
+        );
+    }
+
+    .domain-bar::before,
+    .domain-bar::after {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+    }
+
+    .domain-bar::before {
+      content: "保持运行";
+      left: 14px;
+    }
+
+    .domain-bar::after {
+      content: "机组启停";
+      right: 14px;
+    }
+
+    .fine-label {
+      position: absolute;
+      top: 50%;
+      left: calc((var(--first-stop) + var(--second-stop)) / 2);
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+      white-space: nowrap;
+    }
+
+    .handle {
+      position: absolute;
+      top: -7px;
+      width: 18px;
+      height: 56px;
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: var(--blue);
+      box-shadow: 0 4px 12px rgba(22, 35, 62, 0.28);
+      cursor: ew-resize;
+      transform: translateX(-50%);
+      touch-action: none;
+    }
+
+    .handle::after {
+      content: "";
+      position: absolute;
+      top: 15px;
+      left: 7px;
+      width: 2px;
+      height: 22px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .handle.first {
+      left: var(--first-stop);
+    }
+
+    .handle.second {
+      left: var(--second-stop);
+    }
+
+    .handle-value {
+      position: absolute;
+      top: -28px;
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 48px;
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #172033;
+      color: #fff;
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .legend-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .legend-item strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .legend-item.keep {
+      border-top: 4px solid var(--keep);
+    }
+
+    .legend-item.fine {
+      border-top: 4px solid var(--fine);
+    }
+
+    .legend-item.switch {
+      border-top: 4px solid var(--switch);
+    }
+
+    pre {
+      margin: 0;
+      min-height: 400px;
+      padding: 14px;
+      border-radius: 8px;
+      overflow: auto;
+      background: #101827;
+      color: #e8edf6;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 900px) {
+      .span-5,
+      .span-7,
+      .span-12 {
+        grid-column: span 12;
+      }
+
+      .threshold-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .metric-range {
+        text-align: left;
+      }
+
+      .legend {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ODD 阈值域配置</h1>
+    <p class="lead">仅保留阈值矩阵编辑、域边界预览和配置片段预览。流量、水位、效率三条 bar 可横向拖动两个边界点，形成保持运行、微调、机组启停三个 ODD 域。</p>
+
+    <section class="grid">
+      <div class="widget span-7">
+        <div class="widget-title">
+          <h2>组件二：阈值矩阵编辑</h2>
+          <span class="tag">Threshold Matrix</span>
+        </div>
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>控制域</th>
+              <th>流量阈值 m3/s</th>
+              <th>水位阈值 m</th>
+              <th>效率下限 %</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill keep">keep_running</span></td>
+              <td><input data-field="flow.keep" value="4"></td>
+              <td><input data-field="level.keep" value="0.15"></td>
+              <td><input data-field="efficiency.keep" placeholder="null"></td>
+              <td>ODD1 稳态保持阈值</td>
+            </tr>
+            <tr>
+              <td><span class="pill fine">fine_adjust</span></td>
+              <td><input data-field="flow.fine" placeholder="null"></td>
+              <td><input data-field="level.fine" placeholder="null"></td>
+              <td><input data-field="efficiency.fine" placeholder="null"></td>
+              <td>微调保持阈值，预留</td>
+            </tr>
+            <tr>
+              <td><span class="pill switch">unit_switching</span></td>
+              <td><input data-field="flow.switch" value="8"></td>
+              <td><input data-field="level.switch" value="0.8"></td>
+              <td><input data-field="efficiency.switch" placeholder="null"></td>
+              <td>机组启停阈</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="widget span-5">
+        <div class="widget-title">
+          <h2>组件六：配置片段预览</h2>
+          <span class="tag">YAML Preview</span>
+        </div>
+        <pre id="yamlPreview"></pre>
+      </div>
+
+      <div class="widget span-12">
+        <div class="widget-title">
+          <h2>组件四：域边界预览</h2>
+          <span class="tag">Drag Boundary</span>
+        </div>
+        <div class="boundary-stack">
+          <div class="threshold-row" data-metric="flow">
+            <div class="metric-name">流量</div>
+            <div class="domain-bar" style="--first-stop: 50%; --second-stop: 78%;">
+              <span class="fine-label">微调</span>
+              <span class="handle first" data-handle="first"><span class="handle-value">4</span></span>
+              <span class="handle second" data-handle="second"><span class="handle-value">8</span></span>
+            </div>
+            <div class="metric-range">0 - 10 m3/s</div>
+          </div>
+
+          <div class="threshold-row" data-metric="level">
+            <div class="metric-name">水位</div>
+            <div class="domain-bar" style="--first-stop: 22%; --second-stop: 86%;">
+              <span class="fine-label">微调</span>
+              <span class="handle first" data-handle="first"><span class="handle-value">0.15</span></span>
+              <span class="handle second" data-handle="second"><span class="handle-value">0.8</span></span>
+            </div>
+            <div class="metric-range">0 - 1 m</div>
+          </div>
+
+          <div class="threshold-row" data-metric="efficiency">
+            <div class="metric-name">效率</div>
+            <div class="domain-bar" style="--first-stop: 34%; --second-stop: 68%;">
+              <span class="fine-label">微调</span>
+              <span class="handle first" data-handle="first"><span class="handle-value">null</span></span>
+              <span class="handle second" data-handle="second"><span class="handle-value">null</span></span>
+            </div>
+            <div class="metric-range">0 - 100 %</div>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item keep">
+            <strong>keep_running</strong>
+            ODD1 稳态保持区，误差落在第一条边界内。
+          </div>
+          <div class="legend-item fine">
+            <strong>fine_adjust</strong>
+            保持机组组合，仅做局部微调；字段预留给后续逻辑。
+          </div>
+          <div class="legend-item switch">
+            <strong>unit_switching</strong>
+            允许重构运行机组组合，对应启停域。
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const metrics = {
+      flow: { min: 0, max: 10, decimals: 2, keep: 4, switch: 8 },
+      level: { min: 0, max: 1, decimals: 2, keep: 0.15, switch: 0.8 },
+      efficiency: { min: 0, max: 100, decimals: 1, keep: null, switch: null }
+    };
+
+    const inputByField = new Map(
+      Array.from(document.querySelectorAll("[data-field]")).map((input) => [
+        input.dataset.field,
+        input
+      ])
+    );
+
+    function formatValue(metricName, value) {
+      if (value === null || value === "") {
+        return "null";
+      }
+      const decimals = metrics[metricName].decimals;
+      return Number(value).toFixed(decimals).replace(/\.?0+$/, "");
+    }
+
+    function percentFor(metricName, value, domain) {
+      const metric = metrics[metricName];
+      if (value === null || value === "") {
+        if (metricName === "efficiency") {
+          return domain === "switch" ? 68 : 34;
+        }
+        return domain === "switch" ? 78 : 50;
+      }
+      return ((Number(value) - metric.min) / (metric.max - metric.min)) * 100;
+    }
+
+    function valueFor(metricName, percent) {
+      const metric = metrics[metricName];
+      const value = metric.min + (percent / 100) * (metric.max - metric.min);
+      return Number(value.toFixed(metric.decimals));
+    }
+
+    function normalizedPercent(firstPercent, secondPercent) {
+      const first = Math.max(5, Math.min(firstPercent, 92));
+      const second = Math.max(first + 4, Math.min(secondPercent, 96));
+      return { first, second };
+    }
+
+    function syncBar(metricName) {
+      const row = document.querySelector(`[data-metric="${metricName}"]`);
+      const bar = row.querySelector(".domain-bar");
+      const firstHandle = row.querySelector('[data-handle="first"]');
+      const secondHandle = row.querySelector('[data-handle="second"]');
+      const firstValue = metrics[metricName].keep;
+      const secondValue = metrics[metricName].switch;
+      const stops = normalizedPercent(
+        percentFor(metricName, firstValue, "keep"),
+        percentFor(metricName, secondValue, "switch")
+      );
+
+      bar.style.setProperty("--first-stop", `${stops.first}%`);
+      bar.style.setProperty("--second-stop", `${stops.second}%`);
+      firstHandle.querySelector(".handle-value").textContent = formatValue(metricName, firstValue);
+      secondHandle.querySelector(".handle-value").textContent = formatValue(metricName, secondValue);
+    }
+
+    function syncInputs() {
+      inputByField.get("flow.keep").value = formatValue("flow", metrics.flow.keep);
+      inputByField.get("flow.switch").value = formatValue("flow", metrics.flow.switch);
+      inputByField.get("level.keep").value = formatValue("level", metrics.level.keep);
+      inputByField.get("level.switch").value = formatValue("level", metrics.level.switch);
+      inputByField.get("efficiency.keep").value = metrics.efficiency.keep === null ? "" : formatValue("efficiency", metrics.efficiency.keep);
+      inputByField.get("efficiency.switch").value = metrics.efficiency.switch === null ? "" : formatValue("efficiency", metrics.efficiency.switch);
+    }
+
+    function yamlValue(value, metricName) {
+      if (value === null || value === "") {
+        return "null";
+      }
+      return formatValue(metricName, value);
+    }
+
+    function renderYaml() {
+      document.getElementById("yamlPreview").textContent = `odd:
+  # ODD1 稳态保持阈值。
+  keep_running:
+    # 流量误差阈值，单位 m3/s。
+    flow_tolerance: ${yamlValue(metrics.flow.keep, "flow")}
+    # 水位误差阈值，单位 m。
+    level_tolerance: ${yamlValue(metrics.level.keep, "level")}
+    # 效率下限，单位 %；当前代码暂未使用，预留给后续效率判别。
+    efficiency_min: ${yamlValue(metrics.efficiency.keep, "efficiency")}
+
+  # fine_adjust 微调保持阈值；当前代码暂未使用，预留。
+  fine_adjust:
+    # 流量误差阈值，单位 m3/s。
+    flow_tolerance: null
+    # 水位误差阈值，单位 m。
+    level_tolerance: null
+    # 效率下限，单位 %。
+    efficiency_min: null
+
+  # 机组启停阈。
+  unit_switching:
+    # 流量误差阈值，单位 m3/s。
+    flow_tolerance: ${yamlValue(metrics.flow.switch, "flow")}
+    # 水位误差阈值，单位 m。
+    level_tolerance: ${yamlValue(metrics.level.switch, "level")}
+    # 效率下限，单位 %；当前代码暂未使用，预留给后续效率判别。
+    efficiency_min: ${yamlValue(metrics.efficiency.switch, "efficiency")}`;
+    }
+
+    function renderAll() {
+      Object.keys(metrics).forEach(syncBar);
+      syncInputs();
+      renderYaml();
+    }
+
+    function parseInputValue(value) {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.toLowerCase() === "null") {
+        return null;
+      }
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    document.querySelectorAll("[data-field]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const [metricName, domain] = input.dataset.field.split(".");
+        if (domain !== "fine") {
+          metrics[metricName][domain] = parseInputValue(input.value);
+          renderAll();
+        }
+      });
+    });
+
+    document.querySelectorAll(".handle").forEach((handle) => {
+      handle.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        handle.setPointerCapture(event.pointerId);
+        const row = handle.closest(".threshold-row");
+        const bar = row.querySelector(".domain-bar");
+        const metricName = row.dataset.metric;
+        const handleType = handle.dataset.handle;
+
+        function onMove(moveEvent) {
+          const rect = bar.getBoundingClientRect();
+          const percent = Math.max(0, Math.min(100, ((moveEvent.clientX - rect.left) / rect.width) * 100));
+          const value = valueFor(metricName, percent);
+          metrics[metricName][handleType === "first" ? "keep" : "switch"] = value;
+          renderAll();
+        }
+
+        function onUp(upEvent) {
+          handle.releasePointerCapture(upEvent.pointerId);
+          handle.removeEventListener("pointermove", onMove);
+          handle.removeEventListener("pointerup", onUp);
+          handle.removeEventListener("pointercancel", onUp);
+        }
+
+        handle.addEventListener("pointermove", onMove);
+        handle.addEventListener("pointerup", onUp);
+        handle.addEventListener("pointercancel", onUp);
+      });
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

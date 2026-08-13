@@ -189,7 +189,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             except Exception as e:
                 logger.error(f"无法从 mpc_config_url 加载配置: {e}")
 
-        if not payload or 'project' not in payload:
+        if not payload:
             logger.warning("未配置 mpc_config_url 或加载失败/缺少项目字段，回退到默认的 'custom-agent/pump/data/config_xhh.yaml'。")
             fallback_path = self._resolve_config_path()
             config_source = fallback_path
@@ -197,16 +197,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 payload = yaml.safe_load(f)
             edge_config_source = os.path.abspath(fallback_path)
         context = load_runtime_context_from_payload(payload)
+        effective_payload = context.get("config_payload", payload)
         self._edge_mpc_config_source = edge_config_source
-        self.response_metadata = payload.get("service_mapping", {}).get("response_metadata", {})
+        self.response_metadata = effective_payload.get("service_mapping", {}).get("response_metadata", {})
         self.system_config = context["system_config"]
         self.runtime = context["runtime"]
         
-        self._init_dynamic_demand_plan(build_zero_demand_plan, payload)
+        self._init_dynamic_demand_plan(build_zero_demand_plan, effective_payload)
         
         cache_dir = self._resolve_flow_depart_cache_dir()
         self.flow_service = FlowDepartService(
-            self.system_config, config_dict=payload, cache_dir=cache_dir,
+            self.system_config, config_dict=effective_payload, cache_dir=cache_dir,
         )
         loaded = self.flow_service.load_flow_depart_cache()
         logger.info("flow depart cache loaded %d tables from %s", loaded, cache_dir)
@@ -239,7 +240,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         self.total_shutdown_count = 0
         self.total_blade_adjust_count = 0
         
-        self.station_sensors = payload.get("service_mapping", {}).get("station_sensors", [])
+        self.station_sensors = effective_payload.get("service_mapping", {}).get("station_sensors", [])
         
         self.odd_initialized = True
         self.upper_scheduler = UpperScheduler(
@@ -306,8 +307,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     f"flow_bias_correction_gain={runtime.upper_flow_bias_correction_gain}",
                     f"下层权重: flow={runtime.lower_flow_weight}, level={runtime.lower_level_weight}, "
                     f"switch={runtime.lower_switch_weight}, adjust_count={runtime.lower_adjust_count_weight}",
-                    f"控制记忆: opening_change_threshold={runtime.opening_change_threshold}, "
-                    f"station_memory_init_age={runtime.station_memory_init_age}",
                     f"扰动观察器: gain={runtime.observer_gain}, smoothing={runtime.observer_smoothing}, "
                     f"forecast_window_hours={runtime.disturbance_forecast_window_hours}, "
                     f"forecast_method={runtime.disturbance_forecast_method}",
@@ -760,7 +759,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                 
                 old_op = station_memory.unit_openings.get(uid, 0.0)
                 new_op = action.unit_openings.get(uid, 0.0)
-                if abs(new_op - old_op) > getattr(self.runtime, 'opening_change_threshold', 0.0):
+                if abs(new_op - old_op) > 0.0:
                     station_memory.time_since_adjust[uid] = 0
                     self.total_blade_adjust_count += 1
                 else:

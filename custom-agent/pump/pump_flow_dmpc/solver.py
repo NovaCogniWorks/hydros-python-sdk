@@ -56,7 +56,13 @@ class PumpFlowDmpcSolver:
                     "cannot build pump DMPC runtime from config source %s: %s"
                     % (config_source, exc),
                 ) from exc
+            effective_payload = context.get("config_payload", payload)
             self._system_config = context["system_config"]
+            if not self._system_config.stations:
+                raise PumpFlowDmpcError(
+                    "INVALID_RUNTIME_CONFIG",
+                    "pump DMPC config has no stations: %s" % config_source,
+                )
             self._runtime = context["runtime"]
             flow_service_config_path = (
                 config_source
@@ -65,7 +71,7 @@ class PumpFlowDmpcSolver:
             )
             self._flow_service = FlowDepartService(
                 self._system_config,
-                config_dict=payload,
+                config_dict=effective_payload,
                 config_path=flow_service_config_path,
                 cache_dir=str(self._resolve_flow_depart_cache_dir()),
                 generation_enabled=False,
@@ -113,10 +119,10 @@ class PumpFlowDmpcSolver:
                 "CONFIG_LOAD_FAILED",
                 "cannot load pump DMPC config from %s: %s" % (config_source, exc),
             ) from exc
-        if not isinstance(payload, dict) or not payload.get("stations"):
+        if not isinstance(payload, dict):
             raise PumpFlowDmpcError(
                 "INVALID_RUNTIME_CONFIG",
-                "pump DMPC config has no stations: %s" % config_source,
+                "pump DMPC config is not a mapping: %s" % config_source,
             )
         return payload
 
