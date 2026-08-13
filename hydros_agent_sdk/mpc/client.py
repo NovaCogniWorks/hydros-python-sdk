@@ -12,6 +12,7 @@ from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
 from hydros_agent_sdk.sensor_data import SensorData
 
+from .lateral_inflow_projector import MpcLateralInflowProjector
 from .models import MpcOptimizeRequest, MpcOptimizeResponse
 
 if TYPE_CHECKING:
@@ -146,7 +147,16 @@ class MpcPlanningClient:
             )
             raise MpcPlanningError("MPC optimization requires non-empty sensor data")
 
+        prediction_horizon = (
+            mpc_task_state.prediction_horizon
+            if mpc_task_state.prediction_horizon is not None
+            else DEFAULT_PREDICTION_HORIZON
+        )
         diversion_boundaries = self.build_diversion_boundaries(
+            mpc_task_state.hydro_events,
+            mpc_task_state.current_step,
+        )
+        lateral_inflow_boundaries = self.build_lateral_inflow_boundaries(
             mpc_task_state.hydro_events,
             mpc_task_state.current_step,
         )
@@ -155,14 +165,12 @@ class MpcPlanningClient:
             step_index=mpc_task_state.current_step,
             mpc_config_url=mpc_task_state.algorithm_config_url,
             control_config_url=mpc_task_state.control_config_url,
-            prediction_horizon=(
-                mpc_task_state.prediction_horizon
-                if mpc_task_state.prediction_horizon is not None
-                else DEFAULT_PREDICTION_HORIZON
-            ),
-            upstream_boundaries=self.build_lateral_inflow_boundaries(
-                mpc_task_state.hydro_events,
-                mpc_task_state.current_step,
+            prediction_horizon=prediction_horizon,
+            upstream_boundaries=MpcLateralInflowProjector.project_for_task(
+                mpc_task_state,
+                lateral_inflow_boundaries,
+                self.build_rainstorm_source_object_ids(mpc_task_state.hydro_events),
+                prediction_horizon,
             ),
             diversion_boundaries=diversion_boundaries or None,
             sensor_data=normalized_sensor_data,
@@ -221,6 +229,23 @@ class MpcPlanningClient:
                 if values and object_time_series.object_id is not None:
                     boundaries[str(object_time_series.object_id)] = values
         return boundaries
+
+    @staticmethod
+    def build_rainstorm_source_object_ids(
+        events: Iterable[TimeSeriesDataChangedEvent],
+    ) -> set[str]:
+        source_object_ids: set[str] = set()
+        for event in events or []:
+            if event.hydro_event_source_type != "WEATHER_FORECAST":
+                continue
+            for object_time_series in event.object_time_series or []:
+                if (
+                    object_time_series.object_id is not None
+                    and object_time_series.object_type == "UnifiedCanal"
+                    and (object_time_series.metrics_code or "").lower() == "water_flow"
+                ):
+                    source_object_ids.add(str(object_time_series.object_id))
+        return source_object_ids
 
     @classmethod
     def collect_values_with_interpolation(
