@@ -164,6 +164,24 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(7, arguments.time_since_adjust[2102])
         self.assertEqual(5.0, arguments.max_blade_delta_per_step)
 
+    def test_resolver_reads_nested_algorithm_params_for_lower_controller(self):
+        input_data = self._input(target_flow=64.0, current_flow=32.0)
+        input_data.parameters = {
+            "algorithm_params": {
+                "lower_controller": {
+                    "max_blade_delta_per_step": 200.0,
+                },
+            },
+        }
+
+        arguments = PumpFlowDmpcInputResolver().resolve(input_data)
+
+        self.assertEqual(200.0, arguments.max_blade_delta_per_step)
+        self.assertEqual(
+            {"lower_controller": {"max_blade_delta_per_step": 200.0}},
+            arguments.algorithm_params,
+        )
+
     def test_projects_stopped_unit_as_unavailable_without_blade_angle(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
         input_data.actuators[1].values["blade_angle"] = 100.0
@@ -556,6 +574,48 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertIn(20000, solver._system_config.station_by_id)
         self.assertEqual(config_path, solver._loaded_config_source)
         self.assertFalse(solver._flow_service.generation_enabled)
+
+    def test_solver_uses_algorithm_params_without_loading_config_url(self):
+        solver = PumpFlowDmpcSolver()
+
+        with tempfile.TemporaryDirectory() as temporary_directory, patch.object(
+            solver,
+            "_resolve_flow_depart_cache_dir",
+            return_value=Path(temporary_directory),
+        ), patch.object(
+            solver,
+            "_load_config_payload",
+            side_effect=AssertionError("must not load runtime YAML"),
+        ):
+            solver._ensure_loaded(
+                PumpFlowDmpcArguments(
+                    station_id=20000,
+                    mode="ODD2",
+                    config_path="https://config.example/mpc.yaml",
+                    reference_flow=[50.0],
+                    algorithm_params={
+                        "odd": {
+                            "odd1_flow_tolerance": 4.0,
+                            "odd1_level_tolerance": 0.15,
+                            "odd3_flow_tolerance": 8.0,
+                            "odd3_level_tolerance": 0.8,
+                        },
+                        "lower_controller": {
+                            "control_horizon_lower": 10,
+                            "lower_flow_weight": 4.0,
+                            "lower_level_weight": 2.5,
+                            "lower_switch_weight": 0.0,
+                            "lower_adjust_count_weight": 0.0,
+                            "max_blade_delta_per_step": 200.0,
+                        },
+                    },
+                )
+            )
+
+        self.assertIn(20000, solver._system_config.station_by_id)
+        self.assertEqual(4.0, solver._runtime.odd1_flow_tolerance)
+        self.assertEqual(4.0, solver._runtime.lower_flow_weight)
+        self.assertTrue(solver._loaded_config_source.startswith("parameters.algorithm_params:"))
 
     def test_edge_flow_service_never_generates_missing_offline_table(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

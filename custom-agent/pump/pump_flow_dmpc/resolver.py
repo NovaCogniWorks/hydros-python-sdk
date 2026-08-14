@@ -5,7 +5,7 @@ Resolve Hydros standard ControlAlgorithmInput into PumpFlowDmpcArguments.
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 from hydros_agent_sdk.control_algorithms import (
     ControlAlgorithmInput,
@@ -21,6 +21,8 @@ class PumpFlowDmpcInputResolver:
 
     def resolve(self, input_data: ControlAlgorithmInput) -> PumpFlowDmpcArguments:
         station_id = self._target_station_id(input_data)
+        algorithm_params = self._algorithm_params(input_data)
+        lower_controller_params = self._lower_controller_params(algorithm_params)
 
         # ---- signal lookups ----
         sig_by_type: Dict[str, dict] = {}
@@ -164,7 +166,10 @@ class PumpFlowDmpcInputResolver:
         current_flow_val = _get_value("OBSERVATION", "PumpStation", station_id, "water_flow")
         current_flow = float(current_flow_val) if current_flow_val is not None else last_selected_flow
 
-        raw_max_delta = input_data.parameters.get(
+        raw_max_delta = self._parameter_value(
+            input_data.parameters,
+            algorithm_params,
+            lower_controller_params,
             "max_blade_delta_per_step",
             input_data.parameters.get("max_adjustment_delta", 2.0),
         )
@@ -211,7 +216,49 @@ class PumpFlowDmpcInputResolver:
             current_head=current_head,
             current_flow=current_flow,
             max_blade_delta_per_step=max_blade_delta_per_step,
+            algorithm_params=algorithm_params,
         )
+
+    @staticmethod
+    def _algorithm_params(input_data: ControlAlgorithmInput) -> Dict[str, Any]:
+        raw = input_data.parameters.get("algorithm_params", {})
+        if raw is None:
+            return {}
+        if not isinstance(raw, Mapping):
+            raise PumpFlowDmpcError(
+                "INVALID_ALGORITHM_PARAMS",
+                "parameters.algorithm_params must be a mapping",
+            )
+        return dict(raw)
+
+    @staticmethod
+    def _lower_controller_params(algorithm_params: Mapping[str, Any]) -> Dict[str, Any]:
+        raw_lower = algorithm_params.get("lower_controller", {})
+        raw_odd = algorithm_params.get("odd", {})
+        if not raw_lower and isinstance(raw_odd, Mapping):
+            raw_lower = raw_odd.get("lower_controller", {})
+        if raw_lower is None:
+            return {}
+        if not isinstance(raw_lower, Mapping):
+            raise PumpFlowDmpcError(
+                "INVALID_ALGORITHM_PARAMS",
+                "parameters.algorithm_params.lower_controller must be a mapping",
+            )
+        return dict(raw_lower)
+
+    @staticmethod
+    def _parameter_value(
+        flat_parameters: Mapping[str, Any],
+        algorithm_params: Mapping[str, Any],
+        lower_controller_params: Mapping[str, Any],
+        key: str,
+        default: Any,
+    ) -> Any:
+        if key in lower_controller_params:
+            return lower_controller_params[key]
+        if key in algorithm_params:
+            return algorithm_params[key]
+        return flat_parameters.get(key, default)
 
     @staticmethod
     def _target_station_id(input_data: ControlAlgorithmInput) -> int:

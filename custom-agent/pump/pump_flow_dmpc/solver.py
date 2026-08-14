@@ -4,6 +4,7 @@ Call the service-private ODD-DMPC LocalController from standalone algorithm cont
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from threading import RLock
@@ -40,14 +41,14 @@ class PumpFlowDmpcSolver:
         self._config_lock = RLock()
 
     def _ensure_loaded(self, arguments: PumpFlowDmpcArguments) -> None:
-        config_source = str(arguments.config_path or "").strip()
+        config_source = self._config_source_key(arguments)
         with self._config_lock:
             if (
                 self._system_config is not None
                 and self._loaded_config_source == config_source
             ):
                 return
-            payload = self._load_config_payload(config_source)
+            payload = self._load_config_payload_for_arguments(arguments)
             try:
                 context = load_runtime_context_from_payload(payload)
             except Exception as exc:
@@ -67,6 +68,7 @@ class PumpFlowDmpcSolver:
             flow_service_config_path = (
                 config_source
                 if config_source and not self._is_remote_config(config_source)
+                and not arguments.algorithm_params
                 else None
             )
             self._flow_service = FlowDepartService(
@@ -125,6 +127,51 @@ class PumpFlowDmpcSolver:
                 "pump DMPC config is not a mapping: %s" % config_source,
             )
         return payload
+
+    def _load_config_payload_for_arguments(self, arguments: PumpFlowDmpcArguments) -> dict:
+        if arguments.algorithm_params:
+            return self._payload_from_algorithm_params(arguments)
+        return self._load_config_payload(str(arguments.config_path or "").strip())
+
+    def _payload_from_algorithm_params(self, arguments: PumpFlowDmpcArguments) -> dict:
+        lower_controller = self._lower_controller_params(arguments.algorithm_params)
+        control_horizon = int(lower_controller.get("control_horizon_lower", 10))
+        return {
+            "flow_depart": {
+                "step_q": 1.0,
+                "step_h": 0.1,
+            },
+            "scheduling": {
+                "horizon_hours": max(control_horizon, 1),
+                "dt_hours": 1,
+                "target_avg_flow_last_station": (
+                    float(arguments.reference_flow[0])
+                    if arguments.reference_flow
+                    else 0.0
+                ),
+            },
+            "runtime": dict(arguments.algorithm_params),
+        }
+
+    @staticmethod
+    def _lower_controller_params(algorithm_params: dict) -> dict:
+        raw_lower = algorithm_params.get("lower_controller", {})
+        raw_odd = algorithm_params.get("odd", {})
+        if not raw_lower and isinstance(raw_odd, dict):
+            raw_lower = raw_odd.get("lower_controller", {})
+        return dict(raw_lower) if isinstance(raw_lower, dict) else {}
+
+    @staticmethod
+    def _config_source_key(arguments: PumpFlowDmpcArguments) -> str:
+        if arguments.algorithm_params:
+            serialized = json.dumps(
+                arguments.algorithm_params,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            return "parameters.algorithm_params:%s" % serialized
+        return str(arguments.config_path or "").strip()
 
     def solve(self, arguments: PumpFlowDmpcArguments) -> ControlAction:
         self._ensure_loaded(arguments)

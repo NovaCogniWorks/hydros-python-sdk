@@ -5,7 +5,7 @@ Pump flow DMPC domain models.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 @dataclass
@@ -42,3 +42,6 @@ class PumpFlowDmpcArguments:
 
     # Edge-provided safety constraint for one control step.
     max_blade_delta_per_step: float = 2.0
+
+    # Runtime algorithm parameters supplied by ControlAlgorithmInput.parameters.
+    algorithm_params: Dict[str, Any] = field(default_factory=dict)
