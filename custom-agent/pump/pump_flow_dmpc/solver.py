@@ -175,6 +175,7 @@ class PumpFlowDmpcSolver:
 
     def solve(self, arguments: PumpFlowDmpcArguments) -> ControlAction:
         self._ensure_loaded(arguments)
+        self._print_lower_controller_parameters(arguments)
 
         station_id = arguments.station_id
         configured_station_ids = sorted(self._system_config.station_by_id)
@@ -245,4 +246,37 @@ class PumpFlowDmpcSolver:
             disturbance_forecast={},
             transfer_bundle=transfer_bundle,
             station_memory=station_memory,
+        )
+
+    def _print_lower_controller_parameters(self, arguments: PumpFlowDmpcArguments) -> None:
+        runtime = self._runtime
+        source = (
+            "parameters.algorithm_params"
+            if arguments.algorithm_params
+            else (arguments.config_path or "runtime_defaults")
+        )
+        print(
+            "[pump_flow_dmpc] lower controller parameters "
+            "source=%s station_id=%s mode=%s "
+            "odd1_flow_tolerance=%s odd1_level_tolerance=%s "
+            "odd3_flow_tolerance=%s odd3_level_tolerance=%s "
+            "control_horizon_lower=%s lower_flow_weight=%s "
+            "lower_level_weight=%s lower_switch_weight=%s "
+            "lower_adjust_count_weight=%s max_blade_delta_per_step=%s"
+            % (
+                source,
+                arguments.station_id,
+                arguments.mode,
+                getattr(runtime, "odd1_flow_tolerance", None),
+                getattr(runtime, "odd1_level_tolerance", None),
+                getattr(runtime, "odd3_flow_tolerance", None),
+                getattr(runtime, "odd3_level_tolerance", None),
+                getattr(runtime, "control_horizon_lower", None),
+                getattr(runtime, "lower_flow_weight", None),
+                getattr(runtime, "lower_level_weight", None),
+                getattr(runtime, "lower_switch_weight", None),
+                getattr(runtime, "lower_adjust_count_weight", None),
+                arguments.max_blade_delta_per_step,
+            ),
+            flush=True,
         )
