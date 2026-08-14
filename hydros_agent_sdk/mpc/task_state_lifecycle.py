@@ -142,7 +142,7 @@ class MpcTaskStateLifecycle:
             algorithm_config_url=algorithm_config_url,
             control_config_url=control_config_url,
         )
-        task_state.register_hydro_event(event)
+        task_state.register_hydro_event(event, int(current_step))
         return task_state
 
     def clear(self) -> None:

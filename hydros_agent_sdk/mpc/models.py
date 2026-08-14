@@ -82,6 +82,9 @@ class HorizonStep(MpcResultContractModel):
 class MpcOptimizeRequest(HydroBaseModel):
     biz_scene_instance_id: str = _payload_field("biz_scene_instance_id", default=...)
     step_index: int = _payload_field("step_index", default=...)
+    scene_type: str = _payload_field("scene_type", default="DEFAULT")
+    scene_parameters: Optional[Dict[str, Any]] = _payload_field("scene_parameters")
+    biz_customize_config_url: Optional[str] = _payload_field("biz_customize_config_url")
     mpc_config_url: Optional[str] = _payload_field("mpc_config_url")
     control_config_url: Optional[str] = _payload_field("control_config_url")
     prediction_horizon: int = _payload_field("predictionHorizon", default=...)

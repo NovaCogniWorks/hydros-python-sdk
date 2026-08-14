@@ -8,6 +8,7 @@ from typing import Any, Callable, List, Optional
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
+from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuildResult
 from hydros_agent_sdk.mpc.control_dispatch_tracker import MpcControlExecutionError
 from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
@@ -17,6 +18,8 @@ from hydros_agent_sdk.protocol.models import AgentStatus, SimulationContext
 from hydros_agent_sdk.utils.property_parse_utils import PropertyParseUtils
 
 logger = logging.getLogger(__name__)
+
+NORMAL_HYDRO_ENVIRONMENT_TYPE = "NORMAL"
 
 
 class MpcRollingRuntime:
@@ -28,12 +31,17 @@ class MpcRollingRuntime:
         properties: AgentProperties,
         optimize_step: Callable[[int], Optional[List[Any]]],
         dispatch_control_commands: Callable[[List[Any], int], None],
-        build_control_commands: Callable[[MpcControlExecutionPlan, int, int], List[Any]],
+        build_control_commands: Callable[
+            [MpcControlExecutionPlan, int, int],
+            List[Any] | MpcControlCommandBuildResult,
+        ],
         set_current_step: Callable[[int], None],
         get_current_step: Callable[[], int],
         set_agent_status: Callable[[AgentStatus], None],
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
+        configured_biz_customize_config_url: Optional[str] = None,
+        configured_hydro_environment_type: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
         rolling_cycle_runner: Optional[Callable[[MpcTaskState], Optional[List[Any]]]] = None,
     ):
@@ -49,6 +57,8 @@ class MpcRollingRuntime:
         self.configured_target_and_constrain_config_url = (
             configured_target_and_constrain_config_url
         )
+        self.configured_biz_customize_config_url = configured_biz_customize_config_url
+        self.configured_hydro_environment_type = configured_hydro_environment_type
         self.configured_mpc_service_base_url = configured_mpc_service_base_url
         self.rolling_cycle_runner = rolling_cycle_runner
         self._last_optimization_step = 0
@@ -150,6 +160,16 @@ class MpcRollingRuntime:
     def get_output_future_steps(self) -> Optional[int]:
         """返回任务级预测步数，缺省值由 MPC 请求装配边界处理。"""
         return self._get_scenario_int("output_future_steps", "output_future_steps")
+
+    def get_hydro_environment_type(self) -> str:
+        """返回水环境类型；运行时 properties 优先，缺省按 NORMAL 处理。"""
+        value = PropertyParseUtils.get_string(
+            self.properties,
+            "hydro_environment_type",
+            self.configured_hydro_environment_type,
+        )
+        normalized = (value or NORMAL_HYDRO_ENVIRONMENT_TYPE).strip().upper()
+        return normalized or NORMAL_HYDRO_ENVIRONMENT_TYPE
 
     def should_auto_start_mpc_on_tick(self) -> bool:
         """判断 tick 是否可以在时间序列更新到达前激活 MPC。"""
@@ -307,6 +327,7 @@ class MpcRollingRuntime:
         )
         task_state.latest_control_plan_start_step = task_state.current_step
         task_state.dispatched_horizon_steps.clear()
+        task_state.dispatched_control_keys.clear()
         logger.info("MPC optimization completed at step %s", task_state.current_step)
         self.dispatch_control_for_current_step(task_state)
         return control_plan
@@ -314,22 +335,80 @@ class MpcRollingRuntime:
     def dispatch_control_for_current_step(self, task_state: MpcTaskState) -> None:
         if task_state.latest_control_plan is None or task_state.latest_control_plan_start_step is None:
             return
-        horizon_step = task_state.current_step - task_state.latest_control_plan_start_step + 1
+        if not self._has_remaining_control_step(task_state):
+            logger.info(
+                "MPC control dispatch skipped at final simulation step: "
+                "bizSceneInstanceId=%s, currentStep=%s, expectedEffectiveStep=%s, totalSteps=%s",
+                self.context.biz_scene_instance_id,
+                task_state.current_step,
+                task_state.current_step + 1,
+                task_state.total_steps,
+            )
+            return
+        horizon_step = self._resolve_reference_horizon_step(task_state)
         if horizon_step <= 0 or horizon_step in task_state.dispatched_horizon_steps:
             return
-        control_commands = self.build_control_commands(
+        if not task_state.latest_control_plan.get_control_targets(horizon_step):
+            logger.info(
+                "MPC control dispatch skipped because the selected horizon has no controls: "
+                "bizSceneInstanceId=%s, currentStep=%s, horizonStep=%s",
+                self.context.biz_scene_instance_id,
+                task_state.current_step,
+                horizon_step,
+            )
+            return
+        build_result = self.build_control_commands(
             task_state.latest_control_plan,
             horizon_step,
             task_state.current_step,
         )
+        if isinstance(build_result, MpcControlCommandBuildResult):
+            control_commands = build_result.commands
+            build_failures = build_result.failures
+        else:
+            control_commands = build_result
+            build_failures = []
         if not control_commands:
+            failure_message = (
+                build_failures[0].error_message
+                if build_failures
+                else "no command could be built"
+            )
             raise MpcControlExecutionError(
                 "MPC execution plan has no dispatchable controls: "
                 f"optimize_step={task_state.latest_control_plan.optimize_step}, "
-                f"horizon_step={horizon_step}"
+                f"horizon_step={horizon_step}, reason={failure_message}"
             )
         self.dispatch_control_commands(control_commands, horizon_step)
+        if build_failures:
+            raise MpcControlExecutionError(
+                "MPC control dispatch was only partially prepared after dispatched "
+                "controls reached terminal state: "
+                f"failure_count={len(build_failures)}, "
+                f"first_error={build_failures[0].error_message}"
+            )
         task_state.dispatched_horizon_steps.add(horizon_step)
+
+    def _resolve_reference_horizon_step(self, task_state: MpcTaskState) -> int:
+        if not self._should_dispatch_sequential_horizon_steps(task_state):
+            return 1
+        return task_state.current_step - task_state.latest_control_plan_start_step + 1
+
+    def _should_dispatch_sequential_horizon_steps(
+        self,
+        task_state: MpcTaskState,
+    ) -> bool:
+        return (
+            task_state.rolling_interval_steps > 1
+            and self.get_hydro_environment_type() == NORMAL_HYDRO_ENVIRONMENT_TYPE
+        )
+
+    @staticmethod
+    def _has_remaining_control_step(task_state: MpcTaskState) -> bool:
+        """当前步控制用于下一步生效；最终步之后没有可控制区间。"""
+        if task_state.total_steps is None or task_state.total_steps <= 0:
+            return True
+        return task_state.current_step + 1 <= task_state.total_steps
 
     def _create_task_state(
         self,
@@ -343,6 +422,7 @@ class MpcRollingRuntime:
             configured_target_and_constrain_config_url=(
                 self.configured_target_and_constrain_config_url
             ),
+            configured_biz_customize_config_url=self.configured_biz_customize_config_url,
             configured_mpc_service_base_url=self.configured_mpc_service_base_url,
         )
         logger.debug(
@@ -352,7 +432,7 @@ class MpcRollingRuntime:
             mpc_config.mpc_config_url,
             mpc_config.target_and_constrain_config_url,
         )
-        return self._task_state_lifecycle.ensure_task_state(
+        task_state = self._task_state_lifecycle.ensure_task_state(
             current_step,
             rolling_interval_steps=rolling_interval_steps,
             total_steps=total_steps,
@@ -361,6 +441,9 @@ class MpcRollingRuntime:
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,
         )
+        task_state.biz_customize_config_url = mpc_config.biz_customize_config_url
+        task_state.hydro_environment_type = self.get_hydro_environment_type()
+        return task_state
 
     def _activate_task_state_from_event(
         self,
@@ -375,9 +458,10 @@ class MpcRollingRuntime:
             configured_target_and_constrain_config_url=(
                 self.configured_target_and_constrain_config_url
             ),
+            configured_biz_customize_config_url=self.configured_biz_customize_config_url,
             configured_mpc_service_base_url=self.configured_mpc_service_base_url,
         )
-        return self._task_state_lifecycle.activate_from_event(
+        task_state = self._task_state_lifecycle.activate_from_event(
             event,
             step=current_step,
             use_event_step=False,
@@ -388,3 +472,6 @@ class MpcRollingRuntime:
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,
         )
+        task_state.biz_customize_config_url = mpc_config.biz_customize_config_url
+        task_state.hydro_environment_type = self.get_hydro_environment_type()
+        return task_state

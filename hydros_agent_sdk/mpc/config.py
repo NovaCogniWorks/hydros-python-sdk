@@ -16,6 +16,7 @@ DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS = 200.0
 class MpcRuntimeConfig:
     mpc_config_url: Optional[str] = None
     target_and_constrain_config_url: Optional[str] = None
+    biz_customize_config_url: Optional[str] = None
     mpc_service_base_url: Optional[str] = None
     mpc_request_timeout_seconds: float = DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS
 
@@ -29,6 +30,7 @@ class MpcConfigResolver:
         properties: AgentProperties,
         configured_mpc_config_url: Optional[str] = None,
         configured_target_and_constrain_config_url: Optional[str] = None,
+        configured_biz_customize_config_url: Optional[str] = None,
         configured_mpc_service_base_url: Optional[str] = None,
         configured_mpc_request_timeout_seconds: Optional[float] = None,
         runtime_settings: Optional["RuntimeEnvSettings"] = None,
@@ -38,6 +40,10 @@ class MpcConfigResolver:
             target_and_constrain_config_url=cls.get_target_and_constrain_config_url(
                 properties,
                 configured_target_and_constrain_config_url,
+            ),
+            biz_customize_config_url=cls.get_biz_customize_config_url(
+                properties,
+                configured_biz_customize_config_url,
             ),
             mpc_service_base_url=cls.get_mpc_service_base_url(
                 properties,
@@ -66,6 +72,17 @@ class MpcConfigResolver:
         return PropertyParseUtils.get_string(
             properties,
             "target_and_constrain_config_url",
+            configured_url,
+        )
+
+    @staticmethod
+    def get_biz_customize_config_url(
+        properties: AgentProperties,
+        configured_url: Optional[str] = None,
+    ) -> Optional[str]:
+        return PropertyParseUtils.get_string(
+            properties,
+            "biz_customize_config_url",
             configured_url,
         )
 

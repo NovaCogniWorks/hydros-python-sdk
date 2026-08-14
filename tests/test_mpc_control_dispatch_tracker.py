@@ -62,7 +62,9 @@ def test_ack_is_not_terminal_and_edge_report_completes_barrier():
     assert transition[1] == "STARTED"
     assert not record.completion.is_set()
     assert record.biz_idem_key == "MPC_DETAIL:4:1:101:101:water_level"
-    assert record.dispatch_key == "MPC_CTRL:scene-terminal-barrier:4:1:101:water_level"
+    assert record.dispatch_key == (
+        "MPC_CTRL:scene-terminal-barrier:4:1:GateStation:101:water_level"
+    )
 
     terminal = tracker.handle_execution_report(
         EdgeControlExecutionReport(
@@ -126,3 +128,24 @@ def test_missing_edge_terminal_report_times_out():
         assert "timed out" in str(error)
     else:
         raise AssertionError("ACK without edge terminal report must time out")
+
+
+def test_dispatch_key_keeps_object_type_as_part_of_business_identity():
+    gate_station_key = MpcControlDispatchTracker.build_dispatch_key(
+        "scene-key",
+        4,
+        1,
+        "GateStation",
+        101,
+        "water_level",
+    )
+    pump_station_key = MpcControlDispatchTracker.build_dispatch_key(
+        "scene-key",
+        4,
+        1,
+        "PumpStation",
+        101,
+        "water_level",
+    )
+
+    assert gate_station_key != pump_station_key

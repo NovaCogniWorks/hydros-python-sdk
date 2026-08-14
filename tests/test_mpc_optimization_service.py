@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.field_metrics_cache import FieldMetricsCache
+from hydros_agent_sdk.mpc.config import MpcConfigResolver
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
@@ -41,6 +42,19 @@ class FakeMpcPredictionResultReporter:
 
 
 class MpcOptimizationServiceTest(unittest.TestCase):
+    def test_resolves_business_customize_config_url_from_agent_properties(self):
+        config = MpcConfigResolver.resolve(
+            AgentProperties(
+                {"biz_customize_config_url": "http://config/pollution.json"}
+            ),
+            configured_biz_customize_config_url="http://config/fallback.json",
+        )
+
+        self.assertEqual(
+            config.biz_customize_config_url,
+            "http://config/pollution.json",
+        )
+
     def test_creates_planning_client_with_configured_timeout(self):
         service = MpcOptimizationService(
             properties=AgentProperties(
@@ -62,7 +76,10 @@ class MpcOptimizationServiceTest(unittest.TestCase):
         context = SimulationContext(biz_scene_instance_id="scene-service")
         source = SimpleNamespace(context=context)
         state = MpcTaskState(context=context, rolling_interval_steps=3, start_step=1, current_step=4)
-        cache = FieldMetricsCache(max_steps=3)
+        cache = FieldMetricsCache(
+            max_steps=3,
+            biz_scene_instance_id=context.biz_scene_instance_id,
+        )
         cache.update(
             {
                 "object_id": 1001,

@@ -22,7 +22,12 @@ from hydros_agent_sdk.coordination_callback import SimCoordinationCallback
 from hydros_agent_sdk.coordination_client import SimCoordinationClient
 from hydros_agent_sdk.mpc.client import MpcPlanningClient, MpcPlanningError
 from hydros_agent_sdk.mpc.config import MpcConfigResolver
-from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
+from hydros_agent_sdk.mpc.control_command_builder import (
+    MpcControlCommandBuildFailure,
+    MpcControlCommandBuildResult,
+    MpcControlCommandBuilder,
+)
+from hydros_agent_sdk.mpc.control_dispatch_tracker import MpcControlExecutionError
 from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
 from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
@@ -33,6 +38,7 @@ from hydros_agent_sdk.mpc.models import (
     ValueItem,
 )
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
+from hydros_agent_sdk.mpc.rolling_runtime import MpcRollingRuntime
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
@@ -833,7 +839,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                         ),
                         build_control_object_result(
                             object_id=502,
-                            object_type="Gate",
+                            object_type="GateStation",
                             target_value_type=" ",
                             target_value=0.5,
                         ),
@@ -848,6 +854,278 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             [],
         )
         resolver.assert_not_called()
+
+    def test_normal_mpc_runtime_skips_control_dispatch_at_or_after_final_simulation_step(self):
+        context = SimulationContext(biz_scene_instance_id="scene-final-step")
+        build_control_commands = Mock(return_value=[Mock(name="control-command")])
+        dispatch_control_commands = Mock()
+        runtime = MpcRollingRuntime(
+            context=context,
+            properties=AgentProperties(),
+            optimize_step=Mock(),
+            dispatch_control_commands=dispatch_control_commands,
+            build_control_commands=build_control_commands,
+            set_current_step=Mock(),
+            get_current_step=Mock(return_value=36),
+            set_agent_status=Mock(),
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=7,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_id=501,
+                            object_type="Gate",
+                            target_value_type="gate_opening",
+                            target_value=0.45,
+                        )
+                    ],
+                )
+            ],
+        )
+        states = []
+        for current_step in (36, 37):
+            with self.subTest(current_step=current_step):
+                state = MpcTaskState(
+                    context=context,
+                    rolling_interval_steps=10,
+                    start_step=10,
+                    current_step=current_step,
+                    total_steps=36,
+                    latest_control_plan=MpcControlExecutionPlan.from_responses(30, [response]),
+                    latest_control_plan_start_step=30,
+                )
+                runtime.dispatch_control_for_current_step(state)
+                states.append(state)
+
+        build_control_commands.assert_not_called()
+        dispatch_control_commands.assert_not_called()
+        self.assertTrue(all(state.dispatched_horizon_steps == set() for state in states))
+
+    def test_normal_mpc_runtime_dispatches_control_before_final_simulation_step(self):
+        context = SimulationContext(biz_scene_instance_id="scene-before-final-step")
+        control_command = Mock(name="control-command")
+        build_control_commands = Mock(return_value=[control_command])
+        dispatch_control_commands = Mock()
+        runtime = MpcRollingRuntime(
+            context=context,
+            properties=AgentProperties(),
+            optimize_step=Mock(),
+            dispatch_control_commands=dispatch_control_commands,
+            build_control_commands=build_control_commands,
+            set_current_step=Mock(),
+            get_current_step=Mock(return_value=35),
+            set_agent_status=Mock(),
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=6,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_id=501,
+                            object_type="GateStation",
+                            target_value_type="gate_opening",
+                            target_value=0.45,
+                        )
+                    ],
+                )
+            ],
+        )
+        plan = MpcControlExecutionPlan.from_responses(30, [response])
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=10,
+            start_step=10,
+            current_step=35,
+            total_steps=36,
+            latest_control_plan=plan,
+            latest_control_plan_start_step=30,
+        )
+
+        runtime.dispatch_control_for_current_step(state)
+
+        build_control_commands.assert_called_once_with(plan, 6, 35)
+        dispatch_control_commands.assert_called_once_with([control_command], 6)
+        self.assertEqual(state.dispatched_horizon_steps, {6})
+
+    def test_mpc_runtime_consumes_horizon_by_environment_type(self):
+        context = SimulationContext(biz_scene_instance_id="scene-horizon-policy")
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=horizon_step,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_id=501,
+                            object_type="GateStation",
+                            target_value_type="gate_opening",
+                            target_value=0.45,
+                        )
+                    ],
+                )
+                for horizon_step in (1, 3)
+            ],
+        )
+        plan = MpcControlExecutionPlan.from_responses(30, [response])
+
+        for environment_type, rolling_interval_steps, expected_horizon in (
+            ("NORMAL", 10, 3),
+            ("WATER_POLLUTION", 10, 1),
+            ("NORMAL", 1, 1),
+        ):
+            with self.subTest(
+                environment_type=environment_type,
+                rolling_interval_steps=rolling_interval_steps,
+            ):
+                build_control_commands = Mock(return_value=[Mock(name="control-command")])
+                dispatch_control_commands = Mock()
+                runtime = MpcRollingRuntime(
+                    context=context,
+                    properties=AgentProperties(
+                        {"hydro_environment_type": environment_type}
+                    ),
+                    optimize_step=Mock(),
+                    dispatch_control_commands=dispatch_control_commands,
+                    build_control_commands=build_control_commands,
+                    set_current_step=Mock(),
+                    get_current_step=Mock(return_value=32),
+                    set_agent_status=Mock(),
+                )
+                state = MpcTaskState(
+                    context=context,
+                    rolling_interval_steps=rolling_interval_steps,
+                    start_step=30,
+                    current_step=32,
+                    total_steps=36,
+                    latest_control_plan=plan,
+                    latest_control_plan_start_step=30,
+                )
+
+                runtime.dispatch_control_for_current_step(state)
+
+                build_control_commands.assert_called_once_with(
+                    plan,
+                    expected_horizon,
+                    32,
+                )
+                dispatch_control_commands.assert_called_once_with(
+                    [build_control_commands.return_value[0]],
+                    expected_horizon,
+                )
+
+    def test_mpc_runtime_skips_prediction_only_plan_without_control_failure(self):
+        context = SimulationContext(biz_scene_instance_id="scene-prediction-only")
+        build_control_commands = Mock()
+        dispatch_control_commands = Mock()
+        runtime = MpcRollingRuntime(
+            context=context,
+            properties=AgentProperties({"hydro_environment_type": "NORMAL"}),
+            optimize_step=Mock(),
+            dispatch_control_commands=dispatch_control_commands,
+            build_control_commands=build_control_commands,
+            set_current_step=Mock(),
+            get_current_step=Mock(return_value=5),
+            set_agent_status=Mock(),
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    predicted_result_list=[
+                        PredictedResult(
+                            object_type="GateStation",
+                            object_id=501,
+                            predicted_value_list=[
+                                ValueItem(value_type="front_water_level", value=3.4)
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=10,
+            start_step=5,
+            current_step=5,
+            total_steps=36,
+            latest_control_plan=MpcControlExecutionPlan.from_responses(5, [response]),
+            latest_control_plan_start_step=5,
+        )
+
+        runtime.dispatch_control_for_current_step(state)
+
+        build_control_commands.assert_not_called()
+        dispatch_control_commands.assert_not_called()
+
+    def test_mpc_runtime_dispatches_prepared_commands_before_partial_build_failure(self):
+        context = SimulationContext(biz_scene_instance_id="scene-partial-build-runtime")
+        dispatch_control_commands = Mock()
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_id=501,
+                            object_type="GateStation",
+                            target_value_type="water_level",
+                            target_value=3.5,
+                        )
+                    ],
+                )
+            ],
+        )
+        plan = MpcControlExecutionPlan.from_responses(5, [response])
+        control_target = plan.get_control_targets(1)[0]
+        command = Mock(name="control-command")
+        build_control_commands = Mock(
+            return_value=MpcControlCommandBuildResult(
+                commands=[command],
+                failures=[
+                    MpcControlCommandBuildFailure(
+                        control_target=control_target,
+                        error_code="MPC_CONTROL_COMMAND_DISPATCH_FAILED",
+                        error_message="target agent is missing",
+                    )
+                ],
+            )
+        )
+        runtime = MpcRollingRuntime(
+            context=context,
+            properties=AgentProperties({"hydro_environment_type": "NORMAL"}),
+            optimize_step=Mock(),
+            dispatch_control_commands=dispatch_control_commands,
+            build_control_commands=build_control_commands,
+            set_current_step=Mock(),
+            get_current_step=Mock(return_value=5),
+            set_agent_status=Mock(),
+        )
+        state = MpcTaskState(
+            context=context,
+            rolling_interval_steps=10,
+            start_step=5,
+            current_step=5,
+            total_steps=36,
+            latest_control_plan=plan,
+            latest_control_plan_start_step=5,
+        )
+
+        with self.assertRaisesRegex(
+            MpcControlExecutionError,
+            "after dispatched controls reached terminal state",
+        ):
+            runtime.dispatch_control_for_current_step(state)
+
+        dispatch_control_commands.assert_called_once_with([command], 1)
+        self.assertEqual(state.dispatched_horizon_steps, set())
 
     def test_control_command_dispatcher_sends_control_commands(self):
         state_manager = AgentStateManager()
@@ -1497,6 +1775,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     ObjectTimeSeries(
                         object_id=3001,
                         time_series=[
+                            TimeSeriesValue(step=12, value=2.0),
                             TimeSeriesValue(step=15, value=3.0),
                             TimeSeriesValue(step=18, value=4.0),
                         ],
@@ -1521,18 +1800,146 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(payload["control_config_url"], "http://config/control.yaml")
         self.assertEqual(payload["predictionHorizon"], 12)
         self.assertEqual(payload["horizon_interval_seconds"], 7200)
-        self.assertEqual(payload["upstream_boundaries"]["1001"], [150.0, 200.0])
-        self.assertEqual(payload["diversionBoundaries"]["3001"], [3.0, 4.0])
+        self.assertEqual(payload["upstream_boundaries"]["1001"], [100.0, 200.0])
+        self.assertEqual(payload["diversionBoundaries"]["3001"], [2.0, 3.0, 4.0])
+        self.assertEqual(payload["targets"], {3001: [2.0, 3.0, 4.0]})
         self.assertNotIn("3001", payload["upstream_boundaries"])
         self.assertEqual(payload["sensor_data"][0]["object_id"], 9001)
         self.assertEqual(payload["sensor_data"][0]["metrics_code"], "water_level")
         self.assertEqual(payload["fixed_controls"], {"2001": 0.0})
         self.assertTrue(payload["include_diversion"])
+        self.assertEqual(payload["scene_type"], "DEFAULT")
         self.assertNotIn("bizSceneInstanceId", payload)
         self.assertNotIn("upstreamBoundaries", payload)
         self.assertNotIn("sensorData", payload)
         self.assertNotIn("downstreamBoundaries", payload)
-        self.assertNotIn("targets", payload)
+
+    def test_mpc_planning_client_slices_series_from_runtime_injection_step(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-injection-slice"),
+            rolling_interval_steps=10,
+            start_step=5,
+            current_step=10,
+        )
+        lateral_event = TimeSeriesDataChangedEvent(
+            auto_schedule_at_step=1,
+            hydro_event_source_type="WEATHER_FORECAST",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=21001,
+                    metrics_code="water_flow",
+                    time_series=[
+                        TimeSeriesValue(step=step, value=float(step))
+                        for step in range(1, 21)
+                    ],
+                )
+            ],
+        )
+        diversion_event = TimeSeriesDataChangedEvent(
+            auto_schedule_at_step=1,
+            hydro_event_source_type="WATER_USE",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=31001,
+                    time_series=[
+                        TimeSeriesValue(step=step, value=float(step))
+                        for step in range(1, 21)
+                    ],
+                )
+            ],
+        )
+        state.register_hydro_event(lateral_event, injected_start_step=5)
+        state.register_hydro_event(diversion_event, injected_start_step=8)
+
+        lateral_boundaries = MpcPlanningClient.build_lateral_inflow_boundaries(
+            state.hydro_events,
+            state.current_step,
+            state.get_injected_start_step,
+        )
+        diversion_boundaries = MpcPlanningClient.build_diversion_boundaries(
+            state.hydro_events,
+            state.current_step,
+            state.get_injected_start_step,
+        )
+
+        self.assertEqual(lateral_boundaries["21001"], list(map(float, range(6, 21))))
+        self.assertEqual(diversion_boundaries["31001"], list(map(float, range(3, 21))))
+
+        state.current_step = 25
+        exhausted = MpcPlanningClient.build_lateral_inflow_boundaries(
+            state.hydro_events,
+            state.current_step,
+            state.get_injected_start_step,
+        )
+        self.assertNotIn("21001", exhausted)
+
+    def test_mpc_planning_client_falls_back_to_event_schedule_for_injection_step(self):
+        event = TimeSeriesDataChangedEvent(
+            auto_schedule_at_step=5,
+            hydro_event_source_type="WEATHER_FORECAST",
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=21002,
+                    metrics_code="water_flow",
+                    time_series=[
+                        TimeSeriesValue(step=step, value=float(step))
+                        for step in range(1, 21)
+                    ],
+                )
+            ],
+        )
+
+        boundaries = MpcPlanningClient.build_lateral_inflow_boundaries(
+            [event],
+            current_step=10,
+        )
+
+        self.assertEqual(boundaries["21002"], list(map(float, range(6, 21))))
+
+    def test_mpc_planning_client_builds_water_pollution_scene_request(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-pollution"),
+            rolling_interval_steps=10,
+            start_step=10,
+            current_step=10,
+            biz_customize_config_url="http://config/pollution.json",
+        )
+        state.register_hydro_event(
+            TimeSeriesDataChangedEvent(
+                hydro_event_source_type="POLLUTANT_RELEASE",
+                hydro_event_name="release-1",
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=7001,
+                        metrics_code="pollutant_concentration",
+                        time_series=[TimeSeriesValue(step=10, value=0.8)],
+                    )
+                ],
+            )
+        )
+        client = MpcPlanningClient(
+            base_url="http://mpc.local/hydros/api/v1/mpc/planning/start",
+            require_sensor_data=False,
+        )
+
+        payload = client.build_optimize_request(state, []).model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+        )
+
+        self.assertEqual(payload["scene_type"], "WATER_POLLUTION")
+        self.assertEqual(
+            payload["biz_customize_config_url"],
+            "http://config/pollution.json",
+        )
+        self.assertEqual(
+            payload["scene_parameters"]["biz_customize_config_url"],
+            "http://config/pollution.json",
+        )
+        pollution_event = payload["scene_parameters"]["pollution_event"]
+        self.assertEqual(pollution_event["hydro_event_source_type"], "POLLUTANT_RELEASE")
+        self.assertEqual(pollution_event["hydro_event_name"], "release-1")
 
     def test_mpc_planning_client_uses_task_prediction_horizon(self):
         state = MpcTaskState(
@@ -2077,6 +2484,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             object_id=501,
                             target_value=3.45,
                             target_value_type="water_level",
+                            )
+                        ],
+                    predicted_result_list=[
+                        build_predicted_result(
+                            object_type="GateStation",
+                            object_id=501,
+                            front_water_level=3.4,
+                            final_target_value=3.45,
+                            final_target_value_type="water_level",
                         )
                     ],
                 ),
@@ -2089,6 +2505,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             object_id=502,
                             target_value=3.55,
                             target_value_type="water_level",
+                            )
+                        ],
+                    predicted_result_list=[
+                        build_predicted_result(
+                            object_type="GateStation",
+                            object_id=502,
+                            front_water_level=3.5,
+                            final_target_value=3.55,
+                            final_target_value_type="water_level",
                         )
                     ],
                 ),
@@ -2101,6 +2526,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                             object_id=503,
                             target_value=3.65,
                             target_value_type="water_level",
+                            )
+                        ],
+                    predicted_result_list=[
+                        build_predicted_result(
+                            object_type="GateStation",
+                            object_id=503,
+                            front_water_level=3.6,
+                            final_target_value=3.65,
+                            final_target_value_type="water_level",
                         )
                     ],
                 )
@@ -2195,14 +2629,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         def send_and_complete(command):
             sent_commands.append(command)
-            agent._handle_agent_command_response(
-                HydroStationTargetValueResponse.from_request(
-                    command,
-                    command_status=CommandStatus.SUCCEED,
-                    success=True,
-                )
-            )
-            agent.on_station_control_execution(
+            agent._mpc_dispatch_tracker.handle_execution_report(
                 EdgeControlExecutionReport(
                     command_id="edge-terminal-015",
                     context=context,
@@ -2239,7 +2666,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(sent_commands[0].main_step_index, 1)
         self.assertEqual(
             [report.execution_status for report in execution_reports],
-            ["DISPATCHED", "STARTED", "COMPLETED"],
+            ["DISPATCHED"],
         )
 
     def test_mpc_central_dispatches_the_current_horizon_on_each_tick(self):
@@ -2295,14 +2722,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         def send_and_complete(command):
             sent_commands.append(command)
-            agent._handle_agent_command_response(
-                HydroStationTargetValueResponse.from_request(
-                    command,
-                    command_status=CommandStatus.SUCCEED,
-                    success=True,
-                )
-            )
-            agent.on_station_control_execution(
+            agent._mpc_dispatch_tracker.handle_execution_report(
                 EdgeControlExecutionReport(
                     command_id=f"edge-{command.command_id}",
                     context=context,
@@ -2327,8 +2747,158 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual([command.target_value for command in sent_commands], [3.45, 3.55])
         self.assertEqual(
             [report.execution_status for report in execution_reports],
-            ["DISPATCHED", "STARTED", "COMPLETED", "DISPATCHED", "STARTED", "COMPLETED"],
+            ["DISPATCHED", "DISPATCHED"],
         )
+
+    def test_mpc_central_keeps_successful_dispatch_keys_and_retries_only_failed_targets(self):
+        state_manager = AgentStateManager()
+        state_manager.set_node_id("node-a")
+        state_manager.set_cluster_id("demo-cluster")
+        callback = TestSiblingCacheCallback()
+        execution_reports = []
+        sim_client = SimpleNamespace(
+            broker_url="127.0.0.1",
+            broker_port=1883,
+            topic="/hydros/commands/coordination/demo-cluster",
+            state_manager=state_manager,
+            transport=InMemoryTransport(),
+            sim_coordination_callback=callback,
+            enqueue=execution_reports.append,
+        )
+        context = SimulationContext(biz_scene_instance_id="scene-partial-dispatch")
+        register_sim_agent_properties(context, roll_steps=3, total_steps=20)
+        for object_id in (501, 502):
+            callback._store_sibling_agent_instance(
+                build_agent_instance(
+                    f"gate-agent-{object_id}",
+                    f"GATE_AGENT_{object_id}",
+                    "node-b",
+                    context,
+                )
+            )
+        mpc_response = MpcOptimizeResponse(
+            plan_type="optimal",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        build_control_object_result(
+                            object_type="GateStation",
+                            object_id=object_id,
+                            target_value=3.0 + object_id / 1000,
+                            target_value_type="water_level",
+                        )
+                        for object_id in (501, 502)
+                    ],
+                )
+            ],
+        )
+        agent = ProductionCentralSchedulingAgentForTest(
+            sim_coordination_client=sim_client,
+            agent_id="agent-partial-dispatch",
+            agent_code="CENTRAL_SCHEDULING_AGENT",
+            agent_type="CENTRAL_SCHEDULING_AGENT",
+            agent_name="中央调度智能体",
+            context=context,
+            hydros_cluster_id="demo-cluster",
+            hydros_node_id="node-a",
+            mpc_planning_client=FakeMpcPlanningClient([mpc_response]),
+            mpc_prediction_result_reporter=FakeMpcPredictionResultReporter(),
+            object_agent_code_map={
+                501: "GATE_AGENT_501",
+                502: "GATE_AGENT_502",
+            },
+        )
+        attempted_commands = []
+
+        def partially_send(command):
+            attempted_commands.append(command)
+            if command.object_id == 502:
+                raise RuntimeError("target 502 transport unavailable")
+            agent._mpc_dispatch_tracker.handle_execution_report(
+                EdgeControlExecutionReport(
+                    command_id=f"edge-{command.command_id}",
+                    context=context,
+                    broadcast=True,
+                    source_agent_instance=command.target,
+                    target_agent_instance=agent,
+                    exec_command_id=command.command_id,
+                    object_type=command.object_type,
+                    object_id=command.object_id,
+                    target_value_type=command.target_value_type,
+                    target_value=command.target_value,
+                    exec_status="COMPLETED",
+                )
+            )
+
+        with patch.object(
+            agent._control_command_dispatcher,
+            "send_command",
+            side_effect=partially_send,
+        ):
+            response = agent.on_time_series_data_update(
+                build_time_series_update_request(
+                    context,
+                    command_id="ts-partial-dispatch",
+                    auto_schedule_at_step=1,
+                )
+            )
+
+        self.assertEqual(response.command_status, CommandStatus.FAILED)
+        self.assertEqual([command.object_id for command in attempted_commands], [501, 502])
+        self.assertEqual(
+            [report.execution_status for report in execution_reports],
+            ["DISPATCHED", "FAILED"],
+        )
+        failed_report = execution_reports[-1]
+        self.assertEqual(failed_report.object_id, 502)
+        self.assertEqual(
+            failed_report.execution_error_code,
+            "MPC_CONTROL_COMMAND_DISPATCH_FAILED",
+        )
+        self.assertIn(
+            "target 502 transport unavailable",
+            failed_report.execution_error_message,
+        )
+
+        task_state = agent._mpc_rolling_runtime.require_task_state()
+        self.assertEqual(
+            task_state.dispatched_control_keys,
+            {
+                "MPC_CTRL:scene-partial-dispatch:1:1:GateStation:501:water_level"
+            },
+        )
+
+        retry_attempts = []
+
+        def complete_retry(command):
+            retry_attempts.append(command)
+            agent._mpc_dispatch_tracker.handle_execution_report(
+                EdgeControlExecutionReport(
+                    command_id=f"edge-retry-{command.command_id}",
+                    context=context,
+                    broadcast=True,
+                    source_agent_instance=command.target,
+                    target_agent_instance=agent,
+                    exec_command_id=command.command_id,
+                    object_type=command.object_type,
+                    object_id=command.object_id,
+                    target_value_type=command.target_value_type,
+                    target_value=command.target_value,
+                    exec_status="COMPLETED",
+                )
+            )
+
+        with patch.object(
+            agent._control_command_dispatcher,
+            "send_command",
+            side_effect=complete_retry,
+        ):
+            agent._dispatch_and_await_control_commands(attempted_commands, 1)
+
+        self.assertEqual([command.object_id for command in retry_attempts], [502])
+        self.assertEqual(retry_attempts[0].group_size, 1)
+        self.assertEqual(len(task_state.dispatched_control_keys), 2)
 
     def test_mpc_control_timeout_returns_failed_tick_response(self):
         state_manager = AgentStateManager()
@@ -2492,7 +3062,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         def send_and_complete(command):
             sent_commands.append(command)
-            agent.on_station_control_execution(
+            agent._mpc_dispatch_tracker.handle_execution_report(
                 EdgeControlExecutionReport(
                     command_id="edge-terminal-015-managed",
                     context=context,
@@ -2522,7 +3092,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(sent_commands[0].target_value_type, "water_level")
         self.assertEqual(sent_commands[0].target_value, 3.68)
 
-    def test_central_scheduling_agent_rejects_device_opening_as_mpc_control(self):
+    def test_central_scheduling_agent_skips_non_station_mpc_control(self):
         state_manager = AgentStateManager()
         state_manager.set_node_id("node-a")
         state_manager.set_cluster_id("demo-cluster")
@@ -2618,7 +3188,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(response.command_status, CommandStatus.FAILED)
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         self.assertEqual(sent_commands, [])
 
     def test_coordination_client_sends_local_mpc_prediction_result_report(self):
@@ -2683,6 +3253,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     target_value_type="water_level",
                                 )
                             ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=501,
+                                    front_water_level=3.4,
+                                    final_target_value=3.45,
+                                    final_target_value_type="water_level",
+                                )
+                            ],
                         ),
                         HorizonStep(
                             horizon_step=2,
@@ -2695,6 +3274,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     target_value_type="water_level",
                                 )
                             ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=502,
+                                    front_water_level=3.5,
+                                    final_target_value=3.55,
+                                    final_target_value_type="water_level",
+                                )
+                            ],
                         ),
                         HorizonStep(
                             horizon_step=3,
@@ -2705,6 +3293,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     object_id=503,
                                     target_value=3.65,
                                     target_value_type="water_level",
+                                )
+                            ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=503,
+                                    front_water_level=3.6,
+                                    final_target_value=3.65,
+                                    final_target_value_type="water_level",
                                 )
                             ],
                         ),
@@ -2764,6 +3361,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     target_value_type="water_level",
                                 )
                             ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=501,
+                                    front_water_level=3.4,
+                                    final_target_value=3.45,
+                                    final_target_value_type="water_level",
+                                )
+                            ],
                         ),
                         HorizonStep(
                             horizon_step=2,
@@ -2776,6 +3382,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     target_value_type="water_level",
                                 )
                             ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=502,
+                                    front_water_level=3.5,
+                                    final_target_value=3.55,
+                                    final_target_value_type="water_level",
+                                )
+                            ],
                         ),
                         HorizonStep(
                             horizon_step=3,
@@ -2786,6 +3401,15 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                                     object_id=503,
                                     target_value=3.65,
                                     target_value_type="water_level",
+                                )
+                            ],
+                            predicted_result_list=[
+                                build_predicted_result(
+                                    object_type="GateStation",
+                                    object_id=503,
+                                    front_water_level=3.6,
+                                    final_target_value=3.65,
+                                    final_target_value_type="water_level",
                                 )
                             ],
                         ),

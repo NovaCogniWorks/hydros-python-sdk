@@ -49,6 +49,7 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
         self.assertEqual(state.current_step, 7)
         self.assertEqual(state.start_step, 7)
         self.assertEqual(state.hydro_events, [event])
+        self.assertEqual(state.get_injected_start_step(event), 7)
 
     def test_activate_from_event_can_use_resolved_step_over_event_step(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-resolved-step")
@@ -69,6 +70,7 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
         self.assertIsNotNone(state)
         self.assertEqual(state.current_step, 10)
         self.assertEqual(state.start_step, 10)
+        self.assertEqual(state.get_injected_start_step(event), 10)
 
     def test_ensure_task_state_refreshes_existing_state_without_resetting_start_step(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-refresh")

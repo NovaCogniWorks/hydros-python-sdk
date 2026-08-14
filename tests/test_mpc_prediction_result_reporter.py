@@ -6,6 +6,7 @@ from hydros_agent_sdk.mpc.models import (
     ControlObjectResult,
     DeviceResult,
     HorizonStep,
+    MpcOptimizeResponse,
     PredictedResult,
     ValueItem,
 )
@@ -16,6 +17,39 @@ from hydros_agent_sdk.protocol.models import SimulationContext
 
 
 class MpcPredictionResultReporterTest(unittest.TestCase):
+    def test_default_report_skips_control_only_response(self):
+        state = SimpleNamespace(
+            context=SimulationContext(biz_scene_instance_id="scene-control-only"),
+            current_step=4,
+            total_steps=12,
+            rolling_interval_steps=3,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        ControlObjectResult(
+                            object_type="GateStation",
+                            object_id=101,
+                            target_value_list=[
+                                ValueItem(value_type="gate_opening", value=0.4)
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+
+        report = MpcPredictionResultReporter().build_report(
+            SimpleNamespace(context=state.context),
+            state,
+            [response],
+        )
+
+        self.assertIsNone(report)
+
     def test_truncates_horizon_at_zero_based_total_steps_boundary(self):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-96-steps"),
@@ -158,6 +192,60 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
             "MPC_DETAIL:4:1:101:501:gate_opening",
         )
         self.assertEqual(json.loads(device_detail.attributes)["value_role"], "forecast")
+
+    def test_projects_pollutant_concentration_as_independent_prediction_detail(self):
+        state = SimpleNamespace(
+            context=SimulationContext(biz_scene_instance_id="scene-pollution-report"),
+            current_step=10,
+            total_steps=36,
+            rolling_interval_steps=10,
+        )
+        horizon = HorizonStep(
+            horizon_step=1,
+            predicted_result_list=[
+                PredictedResult(
+                    object_type="Canal",
+                    object_id=701,
+                    target_value=ValueItem(
+                        value_type="safe_concentration",
+                        value=0.3,
+                    ),
+                    predicted_value_list=[
+                        ValueItem(value_type="front_water_level", value=12.4),
+                        ValueItem(value_type="pollutant_concentration", value=0.72),
+                    ],
+                )
+            ],
+        )
+
+        result = MpcPredictionResultReporter.build_prediction_result(
+            mpc_task_state=state,
+            horizon_step=[horizon],
+            plan_type="OPTIMAL",
+        )
+
+        self.assertEqual(len(result.station_prediction_details), 2)
+        hydraulic_detail, pollutant_detail = result.station_prediction_details
+        self.assertEqual(hydraulic_detail.command_type, "water_level")
+        self.assertEqual(hydraulic_detail.value, 12.4)
+        self.assertIsNone(hydraulic_detail.target_value)
+        self.assertEqual(
+            pollutant_detail.biz_idem_key,
+            "MPC_DETAIL:10:1:701:701:pollutant_concentration",
+        )
+        self.assertEqual(
+            pollutant_detail.command_type,
+            "pollutant_concentration",
+        )
+        self.assertEqual(pollutant_detail.value, 0.72)
+        self.assertEqual(pollutant_detail.target_value, 0.3)
+        self.assertEqual(
+            json.loads(pollutant_detail.attributes),
+            {
+                "value_role": "forecast",
+                "final_target_safe_concentration": 0.3,
+            },
+        )
 
 
 if __name__ == "__main__":

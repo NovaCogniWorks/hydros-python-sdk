@@ -26,6 +26,8 @@ logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
 MPC_OPERATION_WATER_FLOW = "WATER_FLOW"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
+MPC_OPERATION_SAFE_CONCENTRATION = "SAFE_CONCENTRATION"
+MPC_OPERATION_POLLUTANT_CONCENTRATION = "pollutant_concentration"
 MPC_PLAN_DISPATCH_PENDING = "PENDING"
 
 
@@ -41,7 +43,10 @@ class MpcPredictionResultReporter:
         mpc_task_state: "MpcTaskState",
         responses: Iterable[MpcOptimizeResponse],
     ) -> Optional[MpcPredictionResultReport]:
-        results = self.build_prediction_results(mpc_task_state, responses)
+        response_list = list(responses or [])
+        if not self._has_predicted_results(response_list):
+            return None
+        results = self.build_prediction_results(mpc_task_state, response_list)
         if not results:
             return None
         return MpcPredictionResultReport(
@@ -207,6 +212,13 @@ class MpcPredictionResultReporter:
                         station_water_level_targets.get(predicted_result.object_id),
                     )
                 )
+                pollutant_detail = cls._pollutant_prediction_to_detail(
+                    predicted_result,
+                    control.horizon_step,
+                    optimize_step,
+                )
+                if pollutant_detail is not None:
+                    station_details.append(pollutant_detail)
                 if predicted_result.object_id is not None:
                     predicted_station_ids.add(predicted_result.object_id)
                 device_details.extend(
@@ -343,15 +355,24 @@ class MpcPredictionResultReporter:
         station_target_water_level: Optional[float],
     ) -> MpcPredictionResultDetail:
         target_value = predicted_result.target_value
-        final_target_value = target_value.numeric_value() if target_value else None
+        is_safe_concentration_target = bool(
+            target_value
+            and target_value.value_type.strip().upper()
+            == MPC_OPERATION_SAFE_CONCENTRATION
+        )
+        final_target_value = None
+        if target_value and not is_safe_concentration_target:
+            final_target_value = target_value.numeric_value()
         if final_target_value is None:
             final_target_value = station_target_water_level
-        if target_value and target_value.value_type.strip():
+        if (
+            target_value
+            and target_value.value_type.strip()
+            and not is_safe_concentration_target
+        ):
             target_value_type = target_value.value_type
-        elif final_target_value is not None:
-            target_value_type = "water_level"
         else:
-            target_value_type = None
+            target_value_type = "water_level"
         front_water_level = MpcPredictionResultReporter._find_numeric_value(
             predicted_result.predicted_value_list,
             "front_water_level",
@@ -418,6 +439,52 @@ class MpcPredictionResultReporter:
             back_water_level=back_water_level,
             out_flow=out_flow,
             attributes=json.dumps(attributes, ensure_ascii=False, separators=(",", ":")),
+        )
+
+    @staticmethod
+    def _pollutant_prediction_to_detail(
+        predicted_result: PredictedResult,
+        horizon_step: Optional[int],
+        optimize_step: int,
+    ) -> Optional[MpcPredictionResultDetail]:
+        pollutant_concentration = MpcPredictionResultReporter._find_numeric_value(
+            predicted_result.predicted_value_list,
+            MPC_OPERATION_POLLUTANT_CONCENTRATION,
+        )
+        if pollutant_concentration is None:
+            return None
+
+        safe_concentration = None
+        if (
+            predicted_result.target_value
+            and predicted_result.target_value.value_type.strip().upper()
+            == MPC_OPERATION_SAFE_CONCENTRATION
+        ):
+            safe_concentration = predicted_result.target_value.numeric_value()
+
+        return MpcPredictionResultDetail(
+            biz_idem_key=build_mpc_detail_identity(
+                optimize_step,
+                horizon_step,
+                predicted_result.object_id,
+                predicted_result.object_id,
+                MPC_OPERATION_POLLUTANT_CONCENTRATION,
+            ),
+            horizon_step=horizon_step,
+            command_type=MPC_OPERATION_POLLUTANT_CONCENTRATION,
+            object_type=predicted_result.object_type,
+            node_id=predicted_result.object_id,
+            object_id=predicted_result.object_id,
+            value=pollutant_concentration,
+            target_value=safe_concentration,
+            attributes=json.dumps(
+                {
+                    "value_role": "forecast",
+                    "final_target_safe_concentration": safe_concentration,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
         )
 
     @staticmethod
@@ -491,6 +558,14 @@ class MpcPredictionResultReporter:
         if target_value_type is None or target_value_type.upper() == MPC_OPERATION_WATER_LEVEL:
             return "water_level"
         return target_value_type
+
+    @staticmethod
+    def _has_predicted_results(responses: Iterable[MpcOptimizeResponse]) -> bool:
+        return any(
+            horizon.predicted_result_list
+            for response in responses or []
+            for horizon in response.horizon_controls or []
+        )
 
     @staticmethod
     def _context_tenant_id(context: SimulationContext) -> Optional[str]:

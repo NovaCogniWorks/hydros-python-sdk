@@ -172,6 +172,15 @@ class ControlExecutionBarrier:
                 if record.biz_scene_instance_id == biz_scene_instance_id
             )
 
+    def discard(self, command_id: Optional[str]) -> None:
+        """丢弃发送失败且不会再收到终态报告的登记记录。"""
+        if not command_id:
+            return
+        with self._lock:
+            record = self._records.get(command_id)
+            if record is not None:
+                self._cleanup([record])
+
     def _cleanup_completed(self, records: Iterable[ControlDispatchRecord]) -> None:
         self._cleanup(record for record in records if record.completion.is_set())
 

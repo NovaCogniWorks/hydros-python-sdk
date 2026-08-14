@@ -48,6 +48,7 @@ class MpcControlDispatchTracker(ControlExecutionBarrier):
             biz_scene_instance_id,
             optimize_step,
             horizon_step,
+            command.object_type,
             command.object_id,
             command.target_value_type,
         )
@@ -95,6 +96,7 @@ class MpcControlDispatchTracker(ControlExecutionBarrier):
         biz_scene_instance_id: str,
         optimize_step: int,
         horizon_step: int,
+        object_type: Optional[str],
         object_id: Optional[int],
         target_value_type: Optional[str],
     ) -> str:
@@ -104,6 +106,7 @@ class MpcControlDispatchTracker(ControlExecutionBarrier):
                 str(biz_scene_instance_id),
                 str(optimize_step),
                 str(horizon_step),
+                str(object_type),
                 str(object_id),
                 str(target_value_type),
             )

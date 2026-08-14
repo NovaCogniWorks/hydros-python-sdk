@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -13,6 +14,7 @@ from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilde
 from hydros_agent_sdk.mpc.control_dispatch_tracker import (
     MpcControlDispatchRecord,
     MpcControlDispatchTracker,
+    MpcControlExecutionError,
 )
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.optimization_service import MpcOptimizationService
@@ -49,6 +51,8 @@ class MpcSchedulingOptions:
 
     mpc_config_url: Optional[str] = None
     target_and_constrain_config_url: Optional[str] = None
+    biz_customize_config_url: Optional[str] = None
+    hydro_environment_type: Optional[str] = None
     mpc_service_base_url: Optional[str] = None
     mpc_request_timeout_seconds: Optional[float] = None
     mpc_control_execution_timeout_seconds: float = 120.0
@@ -64,6 +68,8 @@ class MpcSchedulingOptions:
             target_and_constrain_config_url=kwargs.pop(
                 "target_and_constrain_config_url", None
             ),
+            biz_customize_config_url=kwargs.pop("biz_customize_config_url", None),
+            hydro_environment_type=kwargs.pop("hydro_environment_type", None),
             mpc_service_base_url=kwargs.pop("mpc_service_base_url", None),
             mpc_request_timeout_seconds=kwargs.pop(
                 "mpc_request_timeout_seconds",
@@ -175,7 +181,9 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
             properties=self.properties,
             optimize_step=self.on_optimization,
             dispatch_control_commands=self._dispatch_and_await_control_commands,
-            build_control_commands=self._control_command_builder.build_from_control_plan,
+            build_control_commands=(
+                self._control_command_builder.build_result_from_control_plan
+            ),
             set_current_step=lambda step: setattr(self, "_current_step", step),
             get_current_step=lambda: self._current_step,
             set_agent_status=lambda status: object.__setattr__(self, "agent_status", status),
@@ -183,6 +191,8 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
             configured_target_and_constrain_config_url=(
                 mpc_options.target_and_constrain_config_url
             ),
+            configured_biz_customize_config_url=mpc_options.biz_customize_config_url,
+            configured_hydro_environment_type=mpc_options.hydro_environment_type,
             configured_mpc_service_base_url=self._configured_mpc_service_base_url,
         )
         self._agent_command_gateway.add_response_listener(self._handle_agent_command_response)
@@ -196,38 +206,110 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         plan = task_state.latest_control_plan
         if plan is None:
             raise RuntimeError("MPC control execution plan is not initialized")
+        prepared_commands = self._prepare_mpc_dispatch_commands(
+            commands,
+            task_state,
+            plan.optimize_step,
+            horizon_step,
+        )
         records: List[MpcControlDispatchRecord] = []
-        for command in commands:
-            if not isinstance(command, HydroStationTargetValueRequest):
-                continue
+        dispatch_failures = 0
+        first_dispatch_error: Optional[Exception] = None
+        for command in prepared_commands:
             record = self._mpc_dispatch_tracker.register(
                 command=command,
                 biz_scene_instance_id=self.context.biz_scene_instance_id,
                 optimize_step=plan.optimize_step,
                 horizon_step=horizon_step,
             )
+            try:
+                self._control_command_dispatcher.dispatch([command])
+            except Exception as error:
+                dispatch_failures += 1
+                first_dispatch_error = first_dispatch_error or error
+                failed_records = self._mpc_dispatch_tracker.mark_dispatch_failed(
+                    [record],
+                    error,
+                )
+                for failed_record in failed_records:
+                    self._publish_mpc_execution_status(
+                        failed_record,
+                        execution_status="FAILED",
+                        executed_at=datetime.now().isoformat(),
+                        error_code=failed_record.error_code,
+                        error_message=failed_record.error_message,
+                    )
+                self._mpc_dispatch_tracker.discard(command.command_id)
+                continue
+
+            task_state.dispatched_control_keys.add(record.dispatch_key)
             records.append(record)
             self._publish_mpc_execution_status(
                 record,
                 execution_status="DISPATCHED",
             )
 
-        try:
-            self._control_command_dispatcher.dispatch(commands)
-        except Exception as error:
-            for record in self._mpc_dispatch_tracker.mark_dispatch_failed(records, error):
-                self._publish_mpc_execution_status(
-                    record,
-                    execution_status="FAILED",
-                    executed_at=datetime.now().isoformat(),
-                    error_code=record.error_code,
-                    error_message=record.error_message,
-                )
+        if records:
+            self._mpc_dispatch_tracker.await_all(
+                records,
+                self._mpc_options.mpc_control_execution_timeout_seconds,
+            )
 
-        self._mpc_dispatch_tracker.await_all(
-            records,
-            self._mpc_options.mpc_control_execution_timeout_seconds,
-        )
+        if dispatch_failures:
+            raise MpcControlExecutionError(
+                "MPC control dispatch failed after dispatched controls reached "
+                "terminal state: "
+                f"failure_count={dispatch_failures}, "
+                f"first_error={first_dispatch_error}"
+            )
+
+    def _prepare_mpc_dispatch_commands(
+        self,
+        commands: List[Any],
+        task_state,
+        optimize_step: int,
+        horizon_step: int,
+    ) -> List[HydroStationTargetValueRequest]:
+        candidates: List[HydroStationTargetValueRequest] = []
+        for command in commands:
+            if not isinstance(command, HydroStationTargetValueRequest):
+                continue
+            dispatch_key = self._mpc_dispatch_tracker.build_dispatch_key(
+                self.context.biz_scene_instance_id,
+                optimize_step,
+                horizon_step,
+                command.object_type,
+                command.object_id,
+                command.target_value_type,
+            )
+            if dispatch_key in task_state.dispatched_control_keys:
+                logger.debug(
+                    "MPC control command already dispatched; skip duplicate: dispatchKey=%s",
+                    dispatch_key,
+                )
+                continue
+            candidates.append(command)
+
+        candidates_by_target_type: Dict[
+            str,
+            List[HydroStationTargetValueRequest],
+        ] = {}
+        for command in candidates:
+            target_value_type = command.target_value_type.strip().lower()
+            candidates_by_target_type.setdefault(target_value_type, []).append(command)
+
+        for target_value_type, grouped_commands in candidates_by_target_type.items():
+            group_id = (
+                "MPC_CTRL_GROUP:"
+                f"{self.context.biz_scene_instance_id}:"
+                f"{task_state.current_step}:{optimize_step}:{horizon_step}:"
+                f"{target_value_type}:{uuid.uuid4()}"
+            )
+            for command in grouped_commands:
+                command.group_id = group_id
+                command.group_size = len(grouped_commands)
+
+        return candidates
 
     def _handle_agent_command_response(self, response) -> None:
         if not isinstance(response, HydroStationTargetValueResponse):

@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 from hydros_agent_sdk.mpc.config import DEFAULT_MPC_REQUEST_TIMEOUT_SECONDS
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
-from hydros_agent_sdk.protocol.models import ObjectTimeSeries, TimeSeriesValue
+from hydros_agent_sdk.protocol.models import ObjectTimeSeries
 from hydros_agent_sdk.sensor_data import SensorData
 
 from .lateral_inflow_projector import MpcLateralInflowProjector
@@ -20,6 +20,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 DEFAULT_PREDICTION_HORIZON = 12
+DEFAULT_SCENE_TYPE = "DEFAULT"
+WATER_POLLUTION_SCENE_TYPE = "WATER_POLLUTION"
+POLLUTANT_RELEASE_EVENT_SOURCE_TYPE = "POLLUTANT_RELEASE"
 
 
 class MpcPlanningError(RuntimeError):
@@ -155,14 +158,32 @@ class MpcPlanningClient:
         diversion_boundaries = self.build_diversion_boundaries(
             mpc_task_state.hydro_events,
             mpc_task_state.current_step,
+            mpc_task_state.get_injected_start_step,
         )
+        targets = self.build_targets(mpc_task_state.hydro_events)
         lateral_inflow_boundaries = self.build_lateral_inflow_boundaries(
             mpc_task_state.hydro_events,
             mpc_task_state.current_step,
+            mpc_task_state.get_injected_start_step,
         )
+        pollution_event = self.find_pollution_event(mpc_task_state.hydro_events)
+        scene_parameters: Optional[Dict[str, Any]] = None
+        if pollution_event is not None:
+            scene_parameters = {"pollution_event": pollution_event}
+            if mpc_task_state.biz_customize_config_url:
+                scene_parameters["biz_customize_config_url"] = (
+                    mpc_task_state.biz_customize_config_url
+                )
         return MpcOptimizeRequest(
             biz_scene_instance_id=mpc_task_state.context.biz_scene_instance_id,
             step_index=mpc_task_state.current_step,
+            scene_type=(
+                WATER_POLLUTION_SCENE_TYPE
+                if pollution_event is not None
+                else DEFAULT_SCENE_TYPE
+            ),
+            scene_parameters=scene_parameters,
+            biz_customize_config_url=mpc_task_state.biz_customize_config_url,
             mpc_config_url=mpc_task_state.algorithm_config_url,
             control_config_url=mpc_task_state.control_config_url,
             prediction_horizon=prediction_horizon,
@@ -175,7 +196,8 @@ class MpcPlanningClient:
             diversion_boundaries=diversion_boundaries or None,
             sensor_data=normalized_sensor_data,
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
-            include_diversion=bool(diversion_boundaries),
+            targets=targets or None,
+            include_diversion=bool(targets),
             horizon_interval_seconds=mpc_task_state.output_step_size,
         )
 
@@ -203,6 +225,9 @@ class MpcPlanningClient:
         cls,
         events: Iterable[TimeSeriesDataChangedEvent],
         current_step: int,
+        get_injected_start_step: Optional[
+            Callable[[TimeSeriesDataChangedEvent], Optional[int]]
+        ] = None,
     ) -> Dict[str, List[float]]:
         boundaries: Dict[str, List[float]] = {}
         for event in events or []:
@@ -211,7 +236,11 @@ class MpcPlanningClient:
             for object_time_series in event.object_time_series or []:
                 if (object_time_series.metrics_code or "").lower() != "water_flow":
                     continue
-                values = cls.collect_values_with_interpolation(object_time_series, current_step)
+                values = cls.collect_remaining_values(
+                    object_time_series,
+                    cls.resolve_injected_start_step(event, get_injected_start_step),
+                    current_step,
+                )
                 if values and object_time_series.object_id is not None:
                     boundaries[str(object_time_series.object_id)] = values
         return boundaries
@@ -221,16 +250,55 @@ class MpcPlanningClient:
         cls,
         events: Iterable[TimeSeriesDataChangedEvent],
         current_step: int,
+        get_injected_start_step: Optional[
+            Callable[[TimeSeriesDataChangedEvent], Optional[int]]
+        ] = None,
     ) -> Dict[str, List[float]]:
         boundaries: Dict[str, List[float]] = {}
         for event in events or []:
             if event.hydro_event_source_type != "WATER_USE":
                 continue
             for object_time_series in event.object_time_series or []:
-                values = cls.collect_values_with_interpolation(object_time_series, current_step)
+                values = cls.collect_remaining_values(
+                    object_time_series,
+                    cls.resolve_injected_start_step(event, get_injected_start_step),
+                    current_step,
+                )
                 if values and object_time_series.object_id is not None:
                     boundaries[str(object_time_series.object_id)] = values
         return boundaries
+
+    @staticmethod
+    def build_targets(
+        events: Iterable[TimeSeriesDataChangedEvent],
+    ) -> Dict[int, List[float]]:
+        """按 Java central 语义从 WATER_USE 事件保留完整规划目标序列。"""
+        targets: Dict[int, List[float]] = {}
+        for event in events or []:
+            if event.hydro_event_source_type != "WATER_USE":
+                continue
+            for object_time_series in event.object_time_series or []:
+                if object_time_series.object_id is None:
+                    continue
+                values = [
+                    float(item.value)
+                    for item in object_time_series.time_series or []
+                    if item.value is not None
+                ]
+                if values:
+                    targets[object_time_series.object_id] = values
+        return targets
+
+    @staticmethod
+    def find_pollution_event(
+        events: Iterable[TimeSeriesDataChangedEvent],
+    ) -> Optional[TimeSeriesDataChangedEvent]:
+        for event in events or []:
+            if (
+                event.hydro_event_source_type or ""
+            ).upper() == POLLUTANT_RELEASE_EVENT_SOURCE_TYPE:
+                return event
+        return None
 
     @staticmethod
     def build_rainstorm_source_object_ids(
@@ -249,49 +317,35 @@ class MpcPlanningClient:
                     source_object_ids.add(str(object_time_series.object_id))
         return source_object_ids
 
-    @classmethod
-    def collect_values_with_interpolation(
-        cls,
+    @staticmethod
+    def collect_remaining_values(
         object_time_series: ObjectTimeSeries,
+        injected_start_step: Optional[int],
         current_step: int,
     ) -> List[float]:
-        series = sorted(
-            [item for item in object_time_series.time_series if item.step is not None and item.value is not None],
-            key=lambda item: item.step,
-        )
-        if not series:
-            return []
+        consumed_count = 0
+        if (
+            injected_start_step is not None
+            and injected_start_step >= 0
+            and current_step > injected_start_step
+        ):
+            consumed_count = current_step - injected_start_step
+        return [
+            float(item.value)
+            for item in (object_time_series.time_series or [])[consumed_count:]
+            if item.value is not None
+        ]
 
-        min_step = series[0].step
-        if min_step is None or current_step < min_step:
-            logger.warning(
-                "Object %s (%s) time series starts after current step: minStep=%s, currentStep=%s",
-                object_time_series.object_name,
-                object_time_series.object_id,
-                min_step,
-                current_step,
-            )
-            return []
-
-        prev_value = cls._find_prev_value(series, current_step)
-        next_value = cls._find_next_value(series, current_step)
-        if prev_value is None:
-            return []
-
-        if prev_value.step == current_step:
-            return cls._collect_values_from_start(series, prev_value.step)
-
-        if next_value is None:
-            return []
-
-        prev_step = prev_value.step
-        next_step = next_value.step
-        if prev_step is None or next_step is None or next_step == prev_step:
-            return []
-
-        ratio = (current_step - prev_step) / (next_step - prev_step)
-        interpolated_value = float(prev_value.value) + (float(next_value.value) - float(prev_value.value)) * ratio
-        return [interpolated_value] + cls._collect_values_from_start(series, next_step)
+    @staticmethod
+    def resolve_injected_start_step(
+        event: TimeSeriesDataChangedEvent,
+        get_injected_start_step: Optional[
+            Callable[[TimeSeriesDataChangedEvent], Optional[int]]
+        ],
+    ) -> Optional[int]:
+        if get_injected_start_step is not None:
+            return get_injected_start_step(event)
+        return getattr(event, "auto_schedule_at_step", None)
 
     @staticmethod
     def build_fixed_controls(events: Iterable[TimeSeriesDataChangedEvent]) -> Dict[str, float]:
@@ -303,30 +357,6 @@ class MpcPlanningClient:
                 if object_time_series.object_id is not None:
                     fixed_controls[str(object_time_series.object_id)] = 0.0
         return fixed_controls
-
-    @staticmethod
-    def _find_prev_value(
-        series: List[TimeSeriesValue],
-        current_step: int,
-    ) -> Optional[TimeSeriesValue]:
-        candidates = [item for item in series if item.step is not None and item.step <= current_step]
-        return candidates[-1] if candidates else None
-
-    @staticmethod
-    def _find_next_value(
-        series: List[TimeSeriesValue],
-        current_step: int,
-    ) -> Optional[TimeSeriesValue]:
-        candidates = [item for item in series if item.step is not None and item.step > current_step]
-        return candidates[0] if candidates else None
-
-    @staticmethod
-    def _collect_values_from_start(series: List[TimeSeriesValue], start_step: int) -> List[float]:
-        return [
-            float(item.value)
-            for item in series
-            if item.step is not None and item.step >= start_step and item.value is not None
-        ]
 
     def _retry_sensor_data(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 from hydros_agent_sdk.protocol.agent_commands import (
@@ -21,6 +22,19 @@ from hydros_agent_sdk.utils import generate_agent_command_id
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class MpcControlCommandBuildFailure:
+    control_target: MpcControlExecutionTarget
+    error_code: str
+    error_message: str
+
+
+@dataclass
+class MpcControlCommandBuildResult:
+    commands: List[AgentCommand] = field(default_factory=list)
+    failures: List[MpcControlCommandBuildFailure] = field(default_factory=list)
+
+
 class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
     """把 MPC 结果和内部控制意图转换成智能体指令。"""
 
@@ -30,7 +44,20 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
         horizon_step: int,
         current_step: int,
     ) -> List[AgentCommand]:
+        return self.build_result_from_control_plan(
+            plan,
+            horizon_step,
+            current_step,
+        ).commands
+
+    def build_result_from_control_plan(
+        self,
+        plan: MpcControlExecutionPlan,
+        horizon_step: int,
+        current_step: int,
+    ) -> MpcControlCommandBuildResult:
         control_commands: List[AgentCommand] = []
+        failures: List[MpcControlCommandBuildFailure] = []
         control_targets = plan.get_control_targets(horizon_step)
         resolved_targets: List[Tuple[MpcControlExecutionTarget, HydroAgentInstance]] = []
         for control_target in control_targets:
@@ -43,6 +70,17 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
                     "Cannot resolve target agent for MPC control: objectId=%s, objectType=%s",
                     control_target.object_id,
                     control_target.object_type,
+                )
+                failures.append(
+                    MpcControlCommandBuildFailure(
+                        control_target=control_target,
+                        error_code="MPC_CONTROL_COMMAND_DISPATCH_FAILED",
+                        error_message=(
+                            "Cannot resolve target agent for MPC control: "
+                            f"objectId={control_target.object_id}, "
+                            f"objectType={control_target.object_type}"
+                        ),
+                    )
                 )
                 continue
             resolved_targets.append((control_target, target_agent))
@@ -82,7 +120,10 @@ class MpcControlCommandBuilder(StationTargetValueCommandBuilder):
             len(control_commands),
             horizon_step,
         )
-        return control_commands
+        return MpcControlCommandBuildResult(
+            commands=control_commands,
+            failures=failures,
+        )
 
     @staticmethod
     def _group_key(control_target: MpcControlExecutionTarget) -> str:

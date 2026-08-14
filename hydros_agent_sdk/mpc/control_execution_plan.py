@@ -9,11 +9,10 @@ from hydros_agent_sdk.control_algorithms.models import ControlSignal
 from hydros_agent_sdk.mpc.models import MpcOptimizeResponse
 
 
-EXECUTABLE_CONTROL_TARGETS = frozenset({
-    ("GateStation", "water_level"),
-    ("PumpStation", "water_level"),
-    ("PumpStation", "water_flow"),
-    ("PowerStation", "water_flow"),
+EXECUTABLE_CONTROL_OBJECT_TYPES = frozenset({
+    "GateStation",
+    "PumpStation",
+    "PowerStation",
 })
 
 
@@ -104,4 +103,7 @@ class MpcControlExecutionPlan:
 
 
 def is_executable_control_target(object_type: str, target_value_type: str) -> bool:
-    return (object_type, target_value_type.strip().lower()) in EXECUTABLE_CONTROL_TARGETS
+    return (
+        object_type in EXECUTABLE_CONTROL_OBJECT_TYPES
+        and bool(target_value_type.strip())
+    )
