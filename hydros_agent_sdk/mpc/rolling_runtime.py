@@ -141,7 +141,7 @@ class MpcRollingRuntime:
         if scenario_max_steps is not None:
             return scenario_max_steps
 
-        return PropertyParseUtils.get_int(self.properties, "total_steps", None)
+        return PropertyParseUtils.get_int(self.properties, "max_steps", None)
 
     def get_output_step_seconds(self) -> Optional[int]:
         """返回每步预测时长，匹配 Java 侧 runtime options 优先的兜底规则。"""
@@ -152,7 +152,7 @@ class MpcRollingRuntime:
         if scenario_output_step_seconds is not None:
             return scenario_output_step_seconds
 
-        value = self.properties.get_property("output_step_size", None)
+        value = self.properties.get_property("output_step_seconds", None)
         if value is None:
             return None
         return int(value)

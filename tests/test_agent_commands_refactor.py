@@ -1482,7 +1482,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         )
 
         context = SimulationContext(biz_scene_instance_id="scene-011-config-alias")
-        register_sim_agent_properties(context, roll_steps=3, total_steps=20, output_step_size=None)
+        register_sim_agent_properties(context, roll_steps=3, total_steps=None, output_step_size=None)
         agent = CentralSchedulingAgentForTest(
             sim_coordination_client=sim_client,
             agent_id="agent-011-config-alias",
@@ -1497,7 +1497,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             {
                 "mpc_config_url": "http://config/mpc.yaml",
                 "target_and_constrain_config_url": "http://config/control.yaml",
-                "output_step_size": "3600",
+                "max_steps": "20",
+                "output_step_seconds": "3600",
             }
         )
 
@@ -1507,6 +1508,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
 
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
+        self.assertEqual(runtime.task_state.max_steps, 20)
         self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
         self.assertEqual(
             runtime.task_state.control_config_url,
