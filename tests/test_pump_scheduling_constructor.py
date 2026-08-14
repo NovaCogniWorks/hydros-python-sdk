@@ -97,6 +97,34 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     agent.dispatch_control_commands_and_await_execution.assert_called_once_with(commands)
 
 
+def test_pump_scheduling_agent_uses_biz_customize_config_url_as_mpc_config(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    context = SimulationContext(biz_scene_instance_id="task-biz-config")
+    agent = module.PumpCentralSchedulingAgent(
+        sim_coordination_client=Mock(state_manager=Mock()),
+        agent_id="agent-biz-config",
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="Pump Scheduling Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+        biz_customize_config_url="https://config.example/mpc_config.yaml",
+        mpc_config_url="https://legacy.example/mpc_config.yaml",
+    )
+
+    assert agent._configured_mpc_config_url == "https://config.example/mpc_config.yaml"
+    assert (
+        agent._mpc_task_state_lifecycle.get_algorithm_config_url()
+        == "https://config.example/mpc_config.yaml"
+    )
+
+
 def test_pump_tick_waits_for_edge_terminal_report_before_returning(monkeypatch):
     _install_optional_dependency_stubs(monkeypatch)
     scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")

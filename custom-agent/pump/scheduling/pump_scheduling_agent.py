@@ -55,7 +55,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         **kwargs
     ):
         """初始化中央调度智能体。"""
-        configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
+        configured_biz_customize_config_url = kwargs.pop("biz_customize_config_url", None)
+        legacy_configured_mpc_config_url = kwargs.pop("mpc_config_url", None)
+        configured_mpc_config_url = (
+            configured_biz_customize_config_url
+            or legacy_configured_mpc_config_url
+        )
         configured_target_and_constrain_config_url = kwargs.pop(
             "target_and_constrain_config_url",
             None,
@@ -72,6 +77,11 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             **kwargs
         )
         object.__setattr__(self, "_configured_mpc_config_url", configured_mpc_config_url)
+        object.__setattr__(
+            self,
+            "_configured_biz_customize_config_url",
+            configured_biz_customize_config_url,
+        )
         object.__setattr__(
             self,
             "_configured_target_and_constrain_config_url",
@@ -168,11 +178,12 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
-            configured_mpc_config_url=getattr(self, '_configured_mpc_config_url', None)
+            configured_mpc_config_url=getattr(self, '_configured_mpc_config_url', None),
+            configured_biz_customize_config_url=getattr(self, '_configured_biz_customize_config_url', None),
         )
         logger.info(f"解析得到的 mpc_config 对象内容: {mpc_config}")
         
-        mpc_config_url = mpc_config.mpc_config_url
+        mpc_config_url = mpc_config.biz_customize_config_url or mpc_config.mpc_config_url
         config_source = str(mpc_config_url or "未配置")
         edge_config_source = ""
         payload = {}
