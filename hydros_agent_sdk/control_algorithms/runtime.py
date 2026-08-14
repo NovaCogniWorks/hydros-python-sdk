@@ -43,18 +43,37 @@ class ControlAlgorithmRuntime:
         try:
             output = algorithm.solve(input_data)
         except Exception as exc:
+            origin = exc.__traceback__
+            while origin.tb_next is not None:
+                origin = origin.tb_next
+            origin_code = origin.tb_frame.f_code
+            origin_owner = origin.tb_frame.f_locals.get("self")
+            exception_class = (
+                "%s.%s" % (type(origin_owner).__module__, type(origin_owner).__qualname__)
+                if origin_owner is not None
+                else None
+            )
             logger.exception(
                 "Control algorithm execution failed: requestId=%s, "
-                "algorithmType=%s, algorithmVersion=%s, controlTaskType=%s, "
+                "contextId=%s, stepIndex=%s, algorithmType=%s, "
+                "algorithmVersion=%s, algorithmClass=%s, controlTaskType=%s, "
                 "targetObjectType=%s, targetObjectId=%s, exceptionType=%s, "
-                "exceptionMessage=%s",
+                "exceptionClass=%s, exceptionLocation=%s:%s, "
+                "exceptionFunction=%s, exceptionMessage=%s",
                 input_data.context.request_id,
+                input_data.context.context_id,
+                input_data.context.step_index,
                 input_data.algorithm_type,
                 input_data.algorithm_version,
+                "%s.%s" % (type(algorithm).__module__, type(algorithm).__qualname__),
                 input_data.control_task_type.value,
                 input_data.context.target_object_type,
                 input_data.context.target_object_id,
                 type(exc).__name__,
+                exception_class,
+                origin_code.co_filename,
+                origin.tb_lineno,
+                origin_code.co_name,
                 exc,
             )
             return self._failed_output(

@@ -4,6 +4,7 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
@@ -21,6 +22,9 @@ from .console_reporter import PumpFlowDmpcConsoleReporter
 from .resolver import PumpFlowDmpcInputResolver
 from .solver import PumpFlowDmpcSolver
 from .types import PumpFlowDmpcArguments
+
+
+logger = logging.getLogger(__name__)
 
 
 class PumpStationFlowDmpcAlgorithm:
@@ -60,6 +64,36 @@ class PumpStationFlowDmpcAlgorithm:
             )
             return output
         except PumpFlowDmpcError as exc:
+            origin = exc.__traceback__
+            while origin.tb_next is not None:
+                origin = origin.tb_next
+            origin_code = origin.tb_frame.f_code
+            origin_owner = origin.tb_frame.f_locals.get("self")
+            exception_class = (
+                "%s.%s" % (type(origin_owner).__module__, type(origin_owner).__qualname__)
+                if origin_owner is not None
+                else None
+            )
+            logger.exception(
+                "Pump flow DMPC algorithm failed: requestId=%s, "
+                "contextId=%s, stepIndex=%s, algorithmClass=%s, "
+                "algorithmMethod=solve, targetObjectType=%s, targetObjectId=%s, "
+                "errorCode=%s, exceptionType=%s, exceptionClass=%s, "
+                "exceptionLocation=%s:%s, exceptionFunction=%s, exceptionMessage=%s",
+                input_data.context.request_id,
+                input_data.context.context_id,
+                input_data.context.step_index,
+                type(self).__name__,
+                input_data.context.target_object_type,
+                input_data.context.target_object_id,
+                exc.error_code,
+                type(exc).__name__,
+                exception_class,
+                origin_code.co_filename,
+                origin.tb_lineno,
+                origin_code.co_name,
+                exc,
+            )
             output = self._failed(input_data, exc.error_code, str(exc))
             self._console_reporter.report_failure(input_data, output)
             return output

@@ -517,11 +517,24 @@ class PumpFlowDmpcTest(unittest.TestCase):
             resolver=PumpFlowDmpcInputResolver(),
         )
 
-        output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        with self.assertLogs("pump_flow_dmpc.algorithm", level="ERROR") as captured_logs:
+            output = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
 
         self.assertEqual(ControlAlgorithmStatus.FAILED, output.status)
         self.assertEqual("CONFIG_NOT_FOUND", output.error_code)
         self.assertEqual([], output.actuator_targets)
+        self.assertEqual(1, len(captured_logs.records))
+        self.assertIsNotNone(captured_logs.records[0].exc_info)
+        formatted_log = captured_logs.output[0]
+        self.assertIn("algorithmClass=PumpStationFlowDmpcAlgorithm", formatted_log)
+        self.assertIn("errorCode=CONFIG_NOT_FOUND", formatted_log)
+        self.assertIn(
+            "exceptionClass=pump_flow_dmpc.solver.PumpFlowDmpcSolver",
+            formatted_log,
+        )
+        self.assertIn("exceptionFunction=_load_config_payload", formatted_log)
+        self.assertIn("PumpFlowDmpcError", formatted_log)
+        self.assertIn("pump_flow_dmpc/solver.py", formatted_log)
 
     def test_solver_reports_target_station_missing_from_loaded_config(self):
         solver = PumpFlowDmpcSolver()

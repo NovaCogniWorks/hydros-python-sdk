@@ -120,7 +120,14 @@ class ControlAlgorithmsTest(unittest.TestCase):
         self.assertIn("controlTaskType=STATION_FLOW_ALLOCATION", failure_log)
         self.assertIn("targetObjectId=2001", failure_log)
         self.assertIn("exceptionType=RuntimeError", failure_log)
+        self.assertIn(
+            "exceptionClass=tests.test_control_algorithms._BrokenAlgorithm",
+            failure_log,
+        )
         self.assertIn("exceptionMessage=solver unavailable", failure_log)
+        self.assertIn("exceptionLocation=", failure_log)
+        self.assertIn("test_control_algorithms.py", failure_log)
+        self.assertIn("exceptionFunction=solve", failure_log)
 
     def test_runtime_rejects_duplicate_algorithm_type(self):
         runtime = ControlAlgorithmRuntime()
