@@ -184,7 +184,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             context=context,
             get_current_step=lambda: self._current_step,
             get_rolling_interval_steps=self._resolve_roll_steps,
-            get_total_steps=self._resolve_total_steps,
+            get_max_steps=self._resolve_max_steps,
             get_algorithm_config_url=lambda: self._configured_mpc_config_url,
             get_control_config_url=(
                 lambda: self._configured_target_and_constrain_config_url
@@ -372,7 +372,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return 1
         return max(int(value), 1)
 
-    def _resolve_total_steps(self) -> int:
+    def _resolve_max_steps(self) -> int:
         session = getattr(self._hydrosim_api, "_session", None)
         if session is None:
             return 0
@@ -390,7 +390,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     ) -> Tuple[int, int]:
         roll_steps = max(int(task_state.rolling_interval_steps), 1)
         start_step = int(task_state.start_step)
-        total_steps = int(task_state.total_steps)
+        max_steps = int(task_state.max_steps)
         if window_start_override is not None:
             window_start = int(window_start_override)
         elif step < start_step:
@@ -399,8 +399,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             window_index = (step - start_step) // roll_steps
             window_start = start_step + (window_index * roll_steps)
         window_end = window_start + roll_steps - 1
-        if total_steps > 0:
-            window_end = min(window_end, total_steps - 1)
+        if max_steps > 0:
+            window_end = min(window_end, max_steps - 1)
         return window_start, window_end
 
     def _should_refresh_rolling_window(self, step: int, task_state: MpcTaskState) -> bool:
@@ -423,7 +423,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         return None
 
     def _is_control_target_step(self, target_step: int, task_state: MpcTaskState) -> bool:
-        if int(task_state.total_steps) > 0 and int(target_step) >= int(task_state.total_steps):
+        if int(task_state.max_steps) > 0 and int(target_step) >= int(task_state.max_steps):
             return False
         return task_state.should_start_new_rolling(int(target_step))
 
@@ -460,11 +460,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         horizon_steps = self._build_window_horizon_steps(window_start, window_end)
         if not horizon_steps:
             logger.warning(
-                "Skip empty MPC rolling report: triggerStep=%s, window=%s-%s, totalSteps=%s",
+                "Skip empty MPC rolling report: triggerStep=%s, window=%s-%s, maxSteps=%s",
                 step,
                 window_start,
                 window_end,
-                task_state.total_steps,
+                task_state.max_steps,
             )
         self._rolling_window_start_step = window_start
         self._rolling_window_end_step = window_end
@@ -1042,10 +1042,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         )
 
     def _resolve_effective_control_step(self, current_step: int) -> int:
-        total_steps = self._resolve_total_steps()
+        max_steps = self._resolve_max_steps()
         effective_step = max(0, int(current_step) + 1)
-        if total_steps > 0:
-            effective_step = min(effective_step, max(0, int(total_steps) - 1))
+        if max_steps > 0:
+            effective_step = min(effective_step, max(0, int(max_steps) - 1))
         return effective_step
 
     def _resolve_event_current_step(self, event: Any) -> int:

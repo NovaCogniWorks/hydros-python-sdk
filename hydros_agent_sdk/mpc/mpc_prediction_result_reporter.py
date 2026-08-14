@@ -195,10 +195,10 @@ class MpcPredictionResultReporter:
         device_details: List[MpcPredictionResultDetail] = []
         optimize_step = mpc_task_state.current_step if mpc_task_state else 0
         for control in horizon_step or []:
-            if not cls._is_horizon_within_total_steps(
+            if not cls._is_horizon_within_max_steps(
                 control.horizon_step,
                 optimize_step,
-                mpc_task_state.total_steps if mpc_task_state else None,
+                mpc_task_state.max_steps if mpc_task_state else None,
             ):
                 continue
             station_water_level_targets = cls._collect_station_water_level_targets(control)
@@ -254,7 +254,7 @@ class MpcPredictionResultReporter:
             tenant_id=cls._context_tenant_id(context) if context else None,
             biz_scenario_id=cls._context_biz_scenario_id(context) if context else None,
             step=mpc_task_state.current_step if mpc_task_state else 0,
-            total_step=mpc_task_state.total_steps if mpc_task_state else None,
+            total_step=mpc_task_state.max_steps if mpc_task_state else None,
             roll_steps=mpc_task_state.rolling_interval_steps if mpc_task_state else None,
             execution_status=MPC_PLAN_DISPATCH_PENDING,
             plan_type=plan_type,
@@ -291,16 +291,16 @@ class MpcPredictionResultReporter:
         )
 
     @staticmethod
-    def _is_horizon_within_total_steps(
+    def _is_horizon_within_max_steps(
         horizon_step: Optional[int],
         optimize_step: int,
-        total_steps: Optional[int],
+        max_steps: Optional[int],
     ) -> bool:
         """Keep only predictions whose zero-based absolute step belongs to the task."""
-        if horizon_step is None or total_steps is None or total_steps <= 0:
+        if horizon_step is None or max_steps is None or max_steps <= 0:
             return True
         absolute_step = optimize_step + horizon_step - 1
-        return 0 <= absolute_step < total_steps
+        return 0 <= absolute_step < max_steps
 
     @staticmethod
     def _collect_station_water_level_targets(

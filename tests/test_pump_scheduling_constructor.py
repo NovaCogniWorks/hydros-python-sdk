@@ -6,6 +6,7 @@ from threading import Event, Thread
 from unittest.mock import Mock
 
 from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.utils import HydroObjectType, MetricsCodes
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.mpc.models import ControlObjectResult, HorizonStep, ValueItem
@@ -28,6 +29,10 @@ from hydros_agent_sdk.protocol.models import (
     HydroAgentInstance,
     ObjectTimeSeries,
     SimulationContext,
+)
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
 )
 
 
@@ -81,6 +86,7 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert agent._configured_mpc_config_url == "custom-agent/pump/data/config_xhh.yaml"
 
     commands = [{"target_agent_code": "agent", "target_command_type": "BLADE_ANGLE"}]
+    agent._ensure_mpc_task_state = Mock(return_value=Mock())
     object.__setattr__(agent, "on_optimization", Mock(return_value=commands))
     agent.dispatch_control_commands_and_await_execution = Mock()
 
@@ -400,6 +406,15 @@ def test_pump_scheduling_time_series_update_activates_mpc_task_state(monkeypatch
 
     client = Mock(state_manager=Mock())
     context = SimulationContext(biz_scene_instance_id="task-002")
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(
+                max_steps=48,
+                output_step_seconds=900,
+            ),
+        ),
+    )
     agent = module.PumpCentralSchedulingAgent(
         sim_coordination_client=client,
         agent_id="agent-002",
@@ -425,15 +440,20 @@ def test_pump_scheduling_time_series_update_activates_mpc_task_state(monkeypatch
         broadcast=False,
     )
 
-    response = agent.on_time_series_data_update(request)
+    try:
+        response = agent.on_time_series_data_update(request)
 
-    assert response.command_status == CommandStatus.SUCCEED
-    task_state = agent._mpc_task_state_lifecycle.task_state
-    assert task_state is not None
-    assert task_state.current_step == 12
-    assert task_state.context is context
-    assert task_state.algorithm_config_url == "custom-agent/pump/data/config_xhh.yaml"
-    assert task_state.hydro_events == [request.time_series_data_changed_event]
+        assert response.command_status == CommandStatus.SUCCEED
+        task_state = agent._mpc_task_state_lifecycle.task_state
+        assert task_state is not None
+        assert task_state.current_step == 12
+        assert task_state.context is context
+        assert task_state.max_steps == 48
+        assert task_state.output_step_seconds == 900
+        assert task_state.algorithm_config_url == "custom-agent/pump/data/config_xhh.yaml"
+        assert task_state.hydro_events == [request.time_series_data_changed_event]
+    finally:
+        ContextManager.remove(context)
 
 
 def test_pump_scheduling_termination_clears_mpc_task_state(monkeypatch):
@@ -454,7 +474,11 @@ def test_pump_scheduling_termination_clears_mpc_task_state(monkeypatch):
         hydros_cluster_id="cluster",
         hydros_node_id="node",
     )
-    agent._mpc_task_state_lifecycle.ensure_task_state(1)
+    agent._mpc_task_state_lifecycle.ensure_task_state(
+        1,
+        max_steps=1,
+        output_step_seconds=1,
+    )
     agent.discard_control_execution_waiters = Mock()
     agent._agent_command_gateway.shutdown = Mock()
 

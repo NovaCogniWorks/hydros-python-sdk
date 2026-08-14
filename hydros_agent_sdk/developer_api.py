@@ -5,6 +5,12 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
+
+from hydros_agent_sdk.runtime.agent_context import resolve_simulation_runtime_options
+
+if TYPE_CHECKING:
+    from hydros_agent_sdk.scenario_config import SimulationRuntimeOptions
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,13 @@ class AgentExecutionContext:
     @property
     def config(self):
         return self._properties
+
+    @property
+    def simulation_runtime_options(
+        self,
+    ) -> Optional["SimulationRuntimeOptions"]:
+        """当前任务最终合并后的仿真运行参数。"""
+        return resolve_simulation_runtime_options(self.simulation_context)
 
     @property
     def logger(self) -> logging.Logger:

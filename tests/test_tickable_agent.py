@@ -1,4 +1,5 @@
 from hydros_agent_sdk.agents.tickable_agent import TickableAgent
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.protocol.commands import (
     SimTaskInitResponse,
     SimTaskTerminateResponse,
@@ -11,6 +12,10 @@ from hydros_agent_sdk.protocol.models import (
     SimulationContext,
 )
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
+)
 
 
 class FakeClient:
@@ -94,6 +99,39 @@ def test_tickable_agent_exposes_runtime_context():
     assert runtime_context.client is client
     assert runtime_context.state_manager is client.state_manager
     assert runtime_context.config is agent.properties
+
+
+def test_tickable_agent_runtime_context_exposes_simulation_runtime_options():
+    context = SimulationContext(biz_scene_instance_id="TASK_RUNTIME_OPTIONS")
+    runtime_options = SimulationRuntimeOptions(
+        max_steps=48,
+        output_step_seconds=900,
+    )
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=runtime_options,
+        ),
+    )
+    try:
+        agent = MinimalTickableAgent(
+            sim_coordination_client=FakeClient(),
+            agent_id="AGT_RUNTIME_OPTIONS",
+            agent_code="TEST_AGENT",
+            agent_type="TEST_AGENT",
+            agent_name="Test Agent",
+            context=context,
+            hydros_cluster_id="cluster",
+            hydros_node_id="node",
+        )
+
+        resolved = agent.runtime_context.simulation_runtime_options
+
+        assert resolved is not None
+        assert resolved.max_steps == 48
+        assert resolved.output_step_seconds == 900
+    finally:
+        ContextManager.remove(context)
 
 
 def test_tick_failure_response_includes_error_detail():

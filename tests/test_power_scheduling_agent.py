@@ -238,7 +238,7 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
             rolling_interval_steps=1,
             start_step=3,
             current_step=3,
-            total_steps=12,
+            max_steps=12,
         ),
     )
     agent._hydrosim_api._session = _build_session(12)
@@ -417,7 +417,7 @@ def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
         rolling_interval_steps=20,
         start_step=1,
         current_step=20,
-        total_steps=60,
+        max_steps=60,
     )
     _configure_mpc_task_state(agent, roll_steps=20, task_state=task_state)
     agent._hydrosim_initialized = False
@@ -457,7 +457,7 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
         rolling_interval_steps=10,
         start_step=1,
         current_step=1,
-        total_steps=30,
+        max_steps=30,
     )
     _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(30)
@@ -508,7 +508,7 @@ def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
         rolling_interval_steps=10,
         start_step=0,
         current_step=0,
-        total_steps=96,
+        max_steps=96,
     )
     _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(96)
@@ -685,7 +685,7 @@ def test_power_scheduling_weather_update_does_not_rewind_active_rolling_step():
         rolling_interval_steps=10,
         start_step=1,
         current_step=21,
-        total_steps=96,
+        max_steps=96,
     )
     _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(96)
@@ -761,7 +761,7 @@ def test_power_scheduling_mid_cycle_event_keeps_original_rolling_anchor():
         rolling_interval_steps=10,
         start_step=1,
         current_step=21,
-        total_steps=96,
+        max_steps=96,
     )
     _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
     agent._hydrosim_api._session = _build_session(96)
@@ -951,7 +951,7 @@ def test_power_scheduling_report_only_contains_control_metrics():
             rolling_interval_steps=1,
             start_step=2,
             current_step=2,
-            total_steps=4,
+            max_steps=4,
         ),
     )
     agent._hydrosim_api._session = SimpleNamespace(
@@ -1077,7 +1077,7 @@ def test_power_scheduling_report_includes_station_predicted_aggregates():
             rolling_interval_steps=1,
             start_step=2,
             current_step=2,
-            total_steps=4,
+            max_steps=4,
         ),
     )
     agent._hydrosim_api._session = SimpleNamespace(

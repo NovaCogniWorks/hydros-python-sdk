@@ -893,7 +893,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     rolling_interval_steps=10,
                     start_step=10,
                     current_step=current_step,
-                    total_steps=36,
+                    max_steps=36,
                     latest_control_plan=MpcControlExecutionPlan.from_responses(30, [response]),
                     latest_control_plan_start_step=30,
                 )
@@ -941,7 +941,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             rolling_interval_steps=10,
             start_step=10,
             current_step=35,
-            total_steps=36,
+            max_steps=36,
             latest_control_plan=plan,
             latest_control_plan_start_step=30,
         )
@@ -1001,7 +1001,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
                     rolling_interval_steps=rolling_interval_steps,
                     start_step=30,
                     current_step=32,
-                    total_steps=36,
+                    max_steps=36,
                     latest_control_plan=plan,
                     latest_control_plan_start_step=30,
                 )
@@ -1054,7 +1054,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             rolling_interval_steps=10,
             start_step=5,
             current_step=5,
-            total_steps=36,
+            max_steps=36,
             latest_control_plan=MpcControlExecutionPlan.from_responses(5, [response]),
             latest_control_plan_start_step=5,
         )
@@ -1113,7 +1113,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             rolling_interval_steps=10,
             start_step=5,
             current_step=5,
-            total_steps=36,
+            max_steps=36,
             latest_control_plan=plan,
             latest_control_plan_start_step=5,
         )
@@ -1323,8 +1323,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(runtime.task_state.start_step, 5)
         self.assertEqual(runtime.task_state.current_step, 5)
         self.assertEqual(runtime.task_state.rolling_interval_steps, 3)
-        self.assertEqual(runtime.task_state.total_steps, 20)
-        self.assertEqual(runtime.task_state.output_step_size, 7200)
+        self.assertEqual(runtime.task_state.max_steps, 20)
+        self.assertEqual(runtime.task_state.output_step_seconds, 7200)
         self.assertEqual(runtime.task_state.algorithm_config_url, "http://config/mpc.yaml")
         self.assertEqual(runtime.task_state.control_config_url, "http://config/control.yaml")
         self.assertEqual(len(runtime.task_state.hydro_events), 1)
@@ -1405,8 +1405,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
         self.assertEqual(runtime.task_state.rolling_interval_steps, 60)
-        self.assertEqual(runtime.task_state.total_steps, 36)
-        self.assertEqual(runtime.task_state.output_step_size, 1800)
+        self.assertEqual(runtime.task_state.max_steps, 36)
+        self.assertEqual(runtime.task_state.output_step_seconds, 1800)
 
     def test_central_scheduling_agent_prefers_simulation_runtime_options(self):
         state_manager = AgentStateManager()
@@ -1464,8 +1464,8 @@ class AgentCommandsRefactorTest(unittest.TestCase):
         self.assertEqual(response.command_status, CommandStatus.SUCCEED)
         runtime = agent._mpc_rolling_runtime
         self.assertEqual(runtime.task_state.rolling_interval_steps, 8)
-        self.assertEqual(runtime.task_state.total_steps, 32)
-        self.assertEqual(runtime.task_state.output_step_size, 900)
+        self.assertEqual(runtime.task_state.max_steps, 32)
+        self.assertEqual(runtime.task_state.output_step_seconds, 900)
         self.assertEqual(runtime.task_state.prediction_horizon, 24)
 
     def test_central_scheduling_agent_reads_mpc_config_urls_from_configured_property_names(self):
@@ -1512,7 +1512,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             runtime.task_state.control_config_url,
             "http://config/control.yaml",
         )
-        self.assertEqual(runtime.task_state.output_step_size, 3600)
+        self.assertEqual(runtime.task_state.output_step_seconds, 3600)
 
     def test_central_scheduling_agent_can_opt_into_tick_auto_start_and_rolls(self):
         state_manager = AgentStateManager()
@@ -1742,7 +1742,7 @@ class AgentCommandsRefactorTest(unittest.TestCase):
             rolling_interval_steps=3,
             start_step=10,
             current_step=15,
-            output_step_size=7200,
+            output_step_seconds=7200,
             algorithm_config_url="http://config/mpc.yaml",
             control_config_url="http://config/control.yaml",
         )

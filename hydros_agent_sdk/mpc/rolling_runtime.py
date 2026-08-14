@@ -66,8 +66,8 @@ class MpcRollingRuntime:
             context=context,
             get_current_step=get_current_step,
             get_rolling_interval_steps=self.get_roll_steps,
-            get_total_steps=self.get_total_steps,
-            get_output_step_size=self.get_output_step_size,
+            get_max_steps=self.get_max_steps,
+            get_output_step_seconds=self.get_output_step_seconds,
             get_prediction_horizon=self.get_output_future_steps,
         )
         self._lock = RLock()
@@ -135,22 +135,22 @@ class MpcRollingRuntime:
             None,
         )
 
-    def get_total_steps(self) -> int:
+    def get_max_steps(self) -> int:
         """返回任务总步数，用于避免在任务结束时再次滚动。"""
-        scenario_total_steps = self._get_scenario_int("max_steps", "total_steps")
-        if scenario_total_steps is not None:
-            return scenario_total_steps
+        scenario_max_steps = self._get_scenario_int("max_steps", "total_steps")
+        if scenario_max_steps is not None:
+            return scenario_max_steps
 
         return PropertyParseUtils.get_int(self.properties, "total_steps", None)
 
-    def get_output_step_size(self) -> Optional[int]:
+    def get_output_step_seconds(self) -> Optional[int]:
         """返回每步预测时长，匹配 Java 侧 runtime options 优先的兜底规则。"""
-        scenario_output_step_size = self._get_scenario_int(
+        scenario_output_step_seconds = self._get_scenario_int(
             "output_step_seconds",
             "output_step_size",
         )
-        if scenario_output_step_size is not None:
-            return scenario_output_step_size
+        if scenario_output_step_seconds is not None:
+            return scenario_output_step_seconds
 
         value = self.properties.get_property("output_step_size", None)
         if value is None:
@@ -207,7 +207,7 @@ class MpcRollingRuntime:
 
             task_state = self.require_task_state()
             task_state.current_step = step
-            task_state.total_steps = self.get_total_steps()
+            task_state.max_steps = self.get_max_steps()
             should_roll = task_state.should_start_new_rolling(step)
 
             logger.info(
@@ -247,7 +247,7 @@ class MpcRollingRuntime:
                 self.set_current_step(event.auto_schedule_at_step)
 
             current_step = self.get_current_step()
-            total_steps = self.get_total_steps()
+            max_steps = self.get_max_steps()
 
             logger.info(
                 "MPC time series event: bizSceneInstanceId=%s, currentStep=%s, "
@@ -266,7 +266,7 @@ class MpcRollingRuntime:
                     event,
                     rolling_interval_steps=rolling_interval_steps,
                     current_step=current_step,
-                    total_steps=total_steps,
+                    max_steps=max_steps,
                 )
                 self.do_rolling_optimal(task_state)
                 self._last_optimization_step = current_step
@@ -277,7 +277,7 @@ class MpcRollingRuntime:
                 event,
                 rolling_interval_steps=rolling_interval_steps,
                 current_step=current_step,
-                total_steps=total_steps,
+                max_steps=max_steps,
             )
 
     def activate_from_tick(self, current_step: int) -> None:
@@ -288,16 +288,16 @@ class MpcRollingRuntime:
         task_state = self._create_task_state(
             rolling_interval_steps=rolling_interval_steps,
             current_step=current_step,
-            total_steps=self.get_total_steps(),
+            max_steps=self.get_max_steps(),
         )
 
         logger.info(
             "MPC rolling loop auto-started by tick: bizSceneInstanceId=%s, "
-            "startStep=%s, rollStep=%s, totalSteps=%s",
+            "startStep=%s, rollStep=%s, maxSteps=%s",
             self.context.biz_scene_instance_id,
             task_state.start_step,
             task_state.rolling_interval_steps,
-            task_state.total_steps,
+            task_state.max_steps,
         )
         self.do_rolling_optimal(task_state)
         self._last_optimization_step = current_step
@@ -338,11 +338,11 @@ class MpcRollingRuntime:
         if not self._has_remaining_control_step(task_state):
             logger.info(
                 "MPC control dispatch skipped at final simulation step: "
-                "bizSceneInstanceId=%s, currentStep=%s, expectedEffectiveStep=%s, totalSteps=%s",
+                "bizSceneInstanceId=%s, currentStep=%s, expectedEffectiveStep=%s, maxSteps=%s",
                 self.context.biz_scene_instance_id,
                 task_state.current_step,
                 task_state.current_step + 1,
-                task_state.total_steps,
+                task_state.max_steps,
             )
             return
         horizon_step = self._resolve_reference_horizon_step(task_state)
@@ -406,15 +406,15 @@ class MpcRollingRuntime:
     @staticmethod
     def _has_remaining_control_step(task_state: MpcTaskState) -> bool:
         """当前步控制用于下一步生效；最终步之后没有可控制区间。"""
-        if task_state.total_steps is None or task_state.total_steps <= 0:
+        if task_state.max_steps is None or task_state.max_steps <= 0:
             return True
-        return task_state.current_step + 1 <= task_state.total_steps
+        return task_state.current_step + 1 <= task_state.max_steps
 
     def _create_task_state(
         self,
         rolling_interval_steps: int,
         current_step: int,
-        total_steps: int,
+        max_steps: int,
     ) -> MpcTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
@@ -435,8 +435,8 @@ class MpcRollingRuntime:
         task_state = self._task_state_lifecycle.ensure_task_state(
             current_step,
             rolling_interval_steps=rolling_interval_steps,
-            total_steps=total_steps,
-            output_step_size=self.get_output_step_size(),
+            max_steps=max_steps,
+            output_step_seconds=self.get_output_step_seconds(),
             prediction_horizon=self.get_output_future_steps(),
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,
@@ -450,7 +450,7 @@ class MpcRollingRuntime:
         event: TimeSeriesDataChangedEvent,
         rolling_interval_steps: int,
         current_step: int,
-        total_steps: int,
+        max_steps: int,
     ) -> MpcTaskState:
         mpc_config = MpcConfigResolver.resolve(
             self.properties,
@@ -466,8 +466,8 @@ class MpcRollingRuntime:
             step=current_step,
             use_event_step=False,
             rolling_interval_steps=rolling_interval_steps,
-            total_steps=total_steps,
-            output_step_size=self.get_output_step_size(),
+            max_steps=max_steps,
+            output_step_seconds=self.get_output_step_seconds(),
             prediction_horizon=self.get_output_future_steps(),
             algorithm_config_url=mpc_config.mpc_config_url,
             control_config_url=mpc_config.target_and_constrain_config_url,

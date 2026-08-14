@@ -18,9 +18,9 @@ class MpcTaskState:
     rolling_interval_steps: int
     start_step: int
     current_step: int = -1
-    total_steps: int = 36
+    max_steps: int = 36
     current_loop: int = 1
-    output_step_size: Optional[int] = None
+    output_step_seconds: Optional[int] = None
     prediction_horizon: Optional[int] = None
     algorithm_config_url: Optional[str] = None
     control_config_url: Optional[str] = None
@@ -66,7 +66,7 @@ class MpcTaskState:
     def should_start_new_rolling(self, current_step: int) -> bool:
         if self.rolling_interval_steps <= 0:
             return False
-        if self.total_steps > 0 and current_step >= self.total_steps:
+        if self.max_steps > 0 and current_step >= self.max_steps:
             return False
         step_delta = current_step - self.start_step
         return (

@@ -8,12 +8,25 @@ AgentContext 是智能体常用运行时服务的小型门面。新代码可以�
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from hydros_agent_sdk.base_agent import BaseHydroAgent
     from hydros_agent_sdk.coordination_client import SimCoordinationClient
+    from hydros_agent_sdk.scenario_config import SimulationRuntimeOptions
     from hydros_agent_sdk.state_manager import AgentStateManager
+
+
+def resolve_simulation_runtime_options(
+    simulation_context,
+) -> Optional["SimulationRuntimeOptions"]:
+    """返回当前任务最终合并后的仿真运行参数。"""
+    from hydros_agent_sdk.context_manager import ContextManager
+
+    model_context = ContextManager.get_context(simulation_context)
+    if model_context is None:
+        return None
+    return model_context.simulation_runtime_options
 
 
 class AgentContext:
@@ -48,6 +61,13 @@ class AgentContext:
     def context(self):
         """该智能体实例的仿真上下文。"""
         return self.agent.context
+
+    @property
+    def simulation_runtime_options(
+        self,
+    ) -> Optional["SimulationRuntimeOptions"]:
+        """当前任务最终合并后的仿真运行参数。"""
+        return resolve_simulation_runtime_options(self.context)
 
     def send_response(self, response) -> None:
         """通过协调客户端队列发送响应。"""

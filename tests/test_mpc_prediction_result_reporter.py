@@ -21,7 +21,7 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-control-only"),
             current_step=4,
-            total_steps=12,
+            max_steps=12,
             rolling_interval_steps=3,
         )
         response = MpcOptimizeResponse(
@@ -50,11 +50,11 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
 
         self.assertIsNone(report)
 
-    def test_truncates_horizon_at_zero_based_total_steps_boundary(self):
+    def test_truncates_horizon_at_zero_based_max_steps_boundary(self):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-96-steps"),
             current_step=0,
-            total_steps=96,
+            max_steps=96,
             rolling_interval_steps=10,
         )
         horizons = [
@@ -89,7 +89,7 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-last-window"),
             current_step=90,
-            total_steps=96,
+            max_steps=96,
             rolling_interval_steps=10,
         )
         horizons = [
@@ -123,7 +123,7 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-structured-report"),
             current_step=4,
-            total_steps=12,
+            max_steps=12,
             rolling_interval_steps=3,
         )
         horizon = HorizonStep(
@@ -197,7 +197,7 @@ class MpcPredictionResultReporterTest(unittest.TestCase):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-pollution-report"),
             current_step=10,
-            total_steps=36,
+            max_steps=36,
             rolling_interval_steps=10,
         )
         horizon = HorizonStep(

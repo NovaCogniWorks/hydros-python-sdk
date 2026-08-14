@@ -1,18 +1,45 @@
 import unittest
 
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import ObjectTimeSeries, SimulationContext
 from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
+)
 
 
 class MpcTaskStateLifecycleTest(unittest.TestCase):
+    def test_uses_task_runtime_options_by_default(self):
+        context = SimulationContext(biz_scene_instance_id="scene-runtime-defaults")
+        ContextManager.create(
+            context=context,
+            scenario_config=BizScenarioConfiguration(
+                simulation_runtime_options=SimulationRuntimeOptions(
+                    max_steps=48,
+                    output_step_seconds=900,
+                ),
+            ),
+        )
+        self.addCleanup(ContextManager.remove, context)
+        lifecycle = MpcTaskStateLifecycle(
+            context=context,
+            get_rolling_interval_steps=lambda: 2,
+        )
+
+        state = lifecycle.ensure_task_state(3)
+
+        self.assertEqual(state.max_steps, 48)
+        self.assertEqual(state.output_step_seconds, 900)
+
     def test_ensure_task_state_creates_mpc_task_state(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle")
         lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_rolling_interval_steps=lambda: 2,
-            get_total_steps=lambda: 12,
-            get_output_step_size=lambda: 3600,
+            get_max_steps=lambda: 12,
+            get_output_step_seconds=lambda: 3600,
             get_algorithm_config_url=lambda: "http://config/algorithm.yaml",
             get_control_config_url=lambda: "http://config/control.yaml",
         )
@@ -24,8 +51,8 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
         self.assertEqual(state.rolling_interval_steps, 2)
         self.assertEqual(state.start_step, 3)
         self.assertEqual(state.current_step, 3)
-        self.assertEqual(state.total_steps, 12)
-        self.assertEqual(state.output_step_size, 3600)
+        self.assertEqual(state.max_steps, 12)
+        self.assertEqual(state.output_step_seconds, 3600)
         self.assertEqual(state.algorithm_config_url, "http://config/algorithm.yaml")
         self.assertEqual(state.control_config_url, "http://config/control.yaml")
 
@@ -35,7 +62,7 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
             context=context,
             get_current_step=lambda: 1,
             get_rolling_interval_steps=lambda: 5,
-            get_total_steps=lambda: 20,
+            get_max_steps=lambda: 20,
         )
         event = TimeSeriesDataChangedEvent(
             hydro_event_source_type="WATER_USE",
@@ -57,7 +84,7 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
             context=context,
             get_current_step=lambda: 10,
             get_rolling_interval_steps=lambda: 5,
-            get_total_steps=lambda: 20,
+            get_max_steps=lambda: 20,
         )
         event = TimeSeriesDataChangedEvent(
             hydro_event_source_type="WATER_USE",
@@ -74,27 +101,27 @@ class MpcTaskStateLifecycleTest(unittest.TestCase):
 
     def test_ensure_task_state_refreshes_existing_state_without_resetting_start_step(self):
         context = SimulationContext(biz_scene_instance_id="scene-lifecycle-refresh")
-        total_steps = {"value": 20}
+        max_steps = {"value": 20}
         lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_rolling_interval_steps=lambda: 3,
-            get_total_steps=lambda: total_steps["value"],
+            get_max_steps=lambda: max_steps["value"],
         )
 
         state = lifecycle.ensure_task_state(4)
-        total_steps["value"] = 30
+        max_steps["value"] = 30
         refreshed = lifecycle.ensure_task_state(8)
 
         self.assertIs(refreshed, state)
         self.assertEqual(refreshed.start_step, 4)
         self.assertEqual(refreshed.current_step, 8)
-        self.assertEqual(refreshed.total_steps, 30)
+        self.assertEqual(refreshed.max_steps, 30)
 
     def test_clear_releases_task_state(self):
         lifecycle = MpcTaskStateLifecycle(
             context=SimulationContext(biz_scene_instance_id="scene-lifecycle-clear"),
             get_rolling_interval_steps=lambda: 3,
-            get_total_steps=lambda: 30,
+            get_max_steps=lambda: 30,
         )
         lifecycle.ensure_task_state(4)
 

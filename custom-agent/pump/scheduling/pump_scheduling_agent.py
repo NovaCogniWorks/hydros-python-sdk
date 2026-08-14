@@ -91,7 +91,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             context=context,
             get_current_step=self._get_current_scheduling_step,
             get_rolling_interval_steps=lambda: 1,
-            get_total_steps=self._get_total_scheduling_steps,
             get_algorithm_config_url=lambda: self._configured_mpc_config_url,
             get_control_config_url=(
                 lambda: self._configured_target_and_constrain_config_url
@@ -1160,11 +1159,6 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         if hasattr(self, "_outer_step"):
             return self._outer_step
         return self._current_step
-
-    def _get_total_scheduling_steps(self) -> int:
-        if hasattr(self, "system_config"):
-            return self.system_config.horizon_hours
-        return 0
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
         return self._mpc_task_state_lifecycle.ensure_task_state(step)

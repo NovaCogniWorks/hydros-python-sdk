@@ -198,7 +198,7 @@ class MpcPlanningClient:
             fixed_controls=self.build_fixed_controls(mpc_task_state.hydro_events),
             targets=targets or None,
             include_diversion=bool(targets),
-            horizon_interval_seconds=mpc_task_state.output_step_size,
+            horizon_interval_seconds=mpc_task_state.output_step_seconds,
         )
 
     @staticmethod

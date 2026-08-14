@@ -15,6 +15,11 @@ from odd_dmpc.config import build_zero_demand_plan, load_runtime_context_from_pa
 from odd_dmpc.observers import DisturbanceObserverBank
 from odd_dmpc.types import StationMemory
 from pump_scheduling_agent import PumpCentralSchedulingAgent
+from hydros_agent_sdk.context_manager import ContextManager
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
+)
 
 
 class MockClient:
@@ -31,6 +36,16 @@ class MockClient:
 class TestPumpDynamicDemandPlan(unittest.TestCase):
     def setUp(self):
         self.context = SimulationContext(biz_scene_instance_id="test_scene")
+        ContextManager.create(
+            context=self.context,
+            scenario_config=BizScenarioConfiguration(
+                simulation_runtime_options=SimulationRuntimeOptions(
+                    max_steps=48,
+                    output_step_seconds=900,
+                ),
+            ),
+        )
+        self.addCleanup(ContextManager.remove, self.context)
         self.agent = PumpCentralSchedulingAgent(
             sim_coordination_client=MockClient(),
             agent_id="agent1",

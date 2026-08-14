@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from hydros_agent_sdk.protocol.events import TimeSeriesDataChangedEvent
 from hydros_agent_sdk.protocol.models import SimulationContext
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
+from hydros_agent_sdk.runtime.agent_context import resolve_simulation_runtime_options
 
 
 class MpcTaskStateLifecycle:
@@ -17,8 +18,8 @@ class MpcTaskStateLifecycle:
         context: SimulationContext,
         get_current_step: Optional[Callable[[], int]] = None,
         get_rolling_interval_steps: Optional[Callable[[], int]] = None,
-        get_total_steps: Optional[Callable[[], int]] = None,
-        get_output_step_size: Optional[Callable[[], Optional[int]]] = None,
+        get_max_steps: Optional[Callable[[], int]] = None,
+        get_output_step_seconds: Optional[Callable[[], Optional[int]]] = None,
         get_prediction_horizon: Optional[Callable[[], Optional[int]]] = None,
         get_algorithm_config_url: Optional[Callable[[], Optional[str]]] = None,
         get_control_config_url: Optional[Callable[[], Optional[str]]] = None,
@@ -26,8 +27,10 @@ class MpcTaskStateLifecycle:
         self.context = context
         self.get_current_step = get_current_step
         self.get_rolling_interval_steps = get_rolling_interval_steps
-        self.get_total_steps = get_total_steps
-        self.get_output_step_size = get_output_step_size
+        self.get_max_steps = get_max_steps or self._get_runtime_max_steps
+        self.get_output_step_seconds = (
+            get_output_step_seconds or self._get_runtime_output_step_seconds
+        )
         self.get_prediction_horizon = get_prediction_horizon
         self.get_algorithm_config_url = get_algorithm_config_url
         self.get_control_config_url = get_control_config_url
@@ -52,8 +55,8 @@ class MpcTaskStateLifecycle:
         self,
         step: int,
         rolling_interval_steps: Optional[int] = None,
-        total_steps: Optional[int] = None,
-        output_step_size: Optional[int] = None,
+        max_steps: Optional[int] = None,
+        output_step_seconds: Optional[int] = None,
         prediction_horizon: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
@@ -63,14 +66,14 @@ class MpcTaskStateLifecycle:
             self.get_rolling_interval_steps,
             "rolling_interval_steps",
         )
-        resolved_total_steps = self._resolve_int(
-            total_steps,
-            self.get_total_steps,
-            "total_steps",
+        resolved_max_steps = self._resolve_int(
+            max_steps,
+            self.get_max_steps,
+            "max_steps",
         )
-        resolved_output_step_size = self._resolve_optional(
-            output_step_size,
-            self.get_output_step_size,
+        resolved_output_step_seconds = self._resolve_optional(
+            output_step_seconds,
+            self.get_output_step_seconds,
         )
         resolved_prediction_horizon = self._resolve_optional(
             prediction_horizon,
@@ -91,8 +94,8 @@ class MpcTaskStateLifecycle:
                 rolling_interval_steps=resolved_rolling_interval_steps,
                 start_step=step,
                 current_step=step,
-                total_steps=resolved_total_steps,
-                output_step_size=resolved_output_step_size,
+                max_steps=resolved_max_steps,
+                output_step_seconds=resolved_output_step_seconds,
                 prediction_horizon=resolved_prediction_horizon,
                 algorithm_config_url=resolved_algorithm_config_url,
                 control_config_url=resolved_control_config_url,
@@ -101,8 +104,8 @@ class MpcTaskStateLifecycle:
 
         self._task_state.rolling_interval_steps = resolved_rolling_interval_steps
         self._task_state.current_step = step
-        self._task_state.total_steps = resolved_total_steps
-        self._task_state.output_step_size = resolved_output_step_size
+        self._task_state.max_steps = resolved_max_steps
+        self._task_state.output_step_seconds = resolved_output_step_seconds
         self._task_state.prediction_horizon = resolved_prediction_horizon
         self._task_state.algorithm_config_url = resolved_algorithm_config_url
         self._task_state.control_config_url = resolved_control_config_url
@@ -114,8 +117,8 @@ class MpcTaskStateLifecycle:
         step: Optional[int] = None,
         use_event_step: bool = True,
         rolling_interval_steps: Optional[int] = None,
-        total_steps: Optional[int] = None,
-        output_step_size: Optional[int] = None,
+        max_steps: Optional[int] = None,
+        output_step_seconds: Optional[int] = None,
         prediction_horizon: Optional[int] = None,
         algorithm_config_url: Optional[str] = None,
         control_config_url: Optional[str] = None,
@@ -136,8 +139,8 @@ class MpcTaskStateLifecycle:
         task_state = self.ensure_task_state(
             int(current_step),
             rolling_interval_steps=rolling_interval_steps,
-            total_steps=total_steps,
-            output_step_size=output_step_size,
+            max_steps=max_steps,
+            output_step_seconds=output_step_seconds,
             prediction_horizon=prediction_horizon,
             algorithm_config_url=algorithm_config_url,
             control_config_url=control_config_url,
@@ -148,6 +151,18 @@ class MpcTaskStateLifecycle:
     def clear(self) -> None:
         """Agent 终止时释放 task-scoped MPC 状态。"""
         self._task_state = None
+
+    def _get_runtime_max_steps(self) -> int:
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        if runtime_options is None:
+            raise ValueError("simulation_runtime_options is required")
+        return int(runtime_options.max_steps)
+
+    def _get_runtime_output_step_seconds(self) -> Optional[int]:
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        if runtime_options is None:
+            return None
+        return int(runtime_options.output_step_seconds)
 
     @staticmethod
     def _resolve_int(

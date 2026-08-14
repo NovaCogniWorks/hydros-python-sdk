@@ -3,10 +3,12 @@
 from pathlib import Path
 
 from hydros_agent_sdk import (
+    AgentExecutionContext,
     AgentIdentity,
     CustomAgent,
     CustomAgentFactory,
 )
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.launcher.support import AgentClassResolver, AgentFactoryRegistrationService
 from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
@@ -17,6 +19,10 @@ from hydros_agent_sdk.protocol.commands import (
 from hydros_agent_sdk.protocol.models import HydroAgent, SimulationContext
 from hydros_agent_sdk.runtime.custom_agent_runtime_adapter import CustomAgentRuntimeAdapter
 from hydros_agent_sdk.state_manager import AgentStateManager
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
+)
 
 
 class FakeClient:
@@ -59,6 +65,39 @@ def make_init_request(context, agent_type="COMPOSED_AGENT"):
             )
         ],
     )
+
+
+def test_agent_execution_context_exposes_simulation_runtime_options():
+    context = SimulationContext(biz_scene_instance_id="TASK_CUSTOM_RUNTIME_OPTIONS")
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(
+                max_steps=36,
+                output_step_seconds=1800,
+            ),
+        ),
+    )
+    try:
+        runtime = AgentExecutionContext(
+            client=FakeClient(),
+            identity=AgentIdentity(
+                agent_id="AGT_COMPOSED",
+                agent_code="COMPOSED_AGENT",
+                agent_type="COMPOSED_AGENT",
+                agent_name="Composed Agent",
+            ),
+            simulation_context=context,
+            properties={},
+        )
+
+        runtime_options = runtime.simulation_runtime_options
+
+        assert runtime_options is not None
+        assert runtime_options.max_steps == 36
+        assert runtime_options.output_step_seconds == 1800
+    finally:
+        ContextManager.remove(context)
 
 
 def test_custom_agent_adapter_keeps_developer_agent_outside_protocol_inheritance():
