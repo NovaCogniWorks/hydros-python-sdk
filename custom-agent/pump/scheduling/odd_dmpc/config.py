@@ -309,7 +309,11 @@ def _build_topology_config(payload: Mapping[str, object], stations: Sequence[Sta
     )
 
 
-def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfig:
+def _system_config_from_payload(
+    payload: Dict,
+    config_path: Path,
+    task_max_steps: Optional[int] = None,
+) -> SystemConfig:
     stations = []
     raw_stations = payload["stations"]
     for idx, item in enumerate(raw_stations, start=1):
@@ -328,14 +332,25 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
     hydro_model_path = data_files.get("hydro_model")
     flow_depart = payload.get("flow_depart", {})
     topology = _build_topology_config(payload, stations)
+    scheduling = payload["scheduling"]
+    raw_horizon_hours = task_max_steps
+    if raw_horizon_hours is None:
+        raw_horizon_hours = scheduling.get("horizon_hours")
+    if raw_horizon_hours is None:
+        raise ValueError("task max_steps is required for pump scheduling")
+
+    horizon_hours = int(raw_horizon_hours)
+    if horizon_hours <= 0:
+        raise ValueError("task max_steps must be positive")
+
     return SystemConfig(
         project=payload["project"],
         description=payload["description"],
         rho=payload["global_params"]["rho"],
         g=payload["global_params"]["g"],
-        horizon_hours=payload["scheduling"]["horizon_hours"],
-        dt_hours=payload["scheduling"]["dt_hours"],
-        target_avg_flow_last_station=payload["scheduling"]["target_avg_flow_last_station"],
+        horizon_hours=horizon_hours,
+        dt_hours=scheduling["dt_hours"],
+        target_avg_flow_last_station=scheduling["target_avg_flow_last_station"],
         stations=stations,
         canal_pools=pools,
         flow_depart_step_q=flow_depart["step_q"],
@@ -397,18 +412,30 @@ def load_runtime_context(
 def load_runtime_context_from_payload(
     payload: Dict[str, object],
     static_config_path: Optional[str] = None,
+    task_max_steps: Optional[int] = None,
 ) -> Dict[str, object]:
-    return _runtime_context_from_payload(payload, Path("agent_config_memory"), None, static_config_path)
+    return _runtime_context_from_payload(
+        payload,
+        Path("agent_config_memory"),
+        None,
+        static_config_path,
+        task_max_steps,
+    )
 
 def _runtime_context_from_payload(
     payload: Dict[str, object], 
     path: Path,
     demand_path: Optional[str] = None,
     static_config_path: Optional[str] = None,
+    task_max_steps: Optional[int] = None,
 ) -> Dict[str, object]:
     del demand_path
     merged_payload = _merge_with_static_config(payload, path, static_config_path)
-    system_config = _system_config_from_payload(merged_payload, path)
+    system_config = _system_config_from_payload(
+        merged_payload,
+        path,
+        task_max_steps=task_max_steps,
+    )
     runtime = _runtime_from_payload(merged_payload)
     demand_plan = build_zero_demand_plan(system_config)
 

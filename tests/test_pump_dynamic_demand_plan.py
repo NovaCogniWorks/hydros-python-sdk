@@ -25,6 +25,7 @@ from hydros_agent_sdk.scenario_config import (
 class MockClient:
     def __init__(self):
         self.state_manager = self
+        self.transport = Mock()
         self.topic = "test/topic"
 
     def send_command(self, req):
@@ -119,6 +120,30 @@ class TestPumpDynamicDemandPlan(unittest.TestCase):
         expected = build_zero_demand_plan(system_config)
         self.assertListEqual(list(demand_plan.columns), list(expected.columns))
         self.assertTrue(demand_plan.equals(expected))
+
+    def test_runtime_max_steps_overrides_algorithm_config_horizon(self):
+        self.assertEqual(self.agent.system_config.horizon_hours, 48)
+
+    def test_runtime_context_accepts_config_without_horizon_hours(self):
+        with open("custom-agent/pump/data/config_xhh.yaml", "r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle)
+        del payload["scheduling"]["horizon_hours"]
+
+        runtime_context = load_runtime_context_from_payload(
+            payload,
+            task_max_steps=36,
+        )
+
+        self.assertEqual(runtime_context["system_config"].horizon_hours, 36)
+
+    def test_task_state_max_steps_precedes_runtime_options(self):
+        self.agent._mpc_task_state_lifecycle.ensure_task_state(
+            1,
+            max_steps=24,
+            output_step_seconds=900,
+        )
+
+        self.assertEqual(self.agent._resolve_task_max_steps(), 24)
 
     def test_live_station_state_sync_updates_memory_flow_and_active_units(self):
         station_id = self.agent.system_config.station_ids[0]

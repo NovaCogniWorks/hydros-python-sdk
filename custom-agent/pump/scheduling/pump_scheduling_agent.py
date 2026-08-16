@@ -26,6 +26,7 @@ from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import *
 from hydros_agent_sdk.protocol.models import *
+from hydros_agent_sdk.runtime.agent_context import resolve_simulation_runtime_options
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             with open(fallback_path, 'r', encoding='utf-8') as f:
                 payload = yaml.safe_load(f)
             edge_config_source = os.path.abspath(fallback_path)
-        context = load_runtime_context_from_payload(payload)
+        context = load_runtime_context_from_payload(
+            payload,
+            task_max_steps=self._resolve_task_max_steps(),
+        )
         effective_payload = context.get("config_payload", payload)
         self._edge_mpc_config_source = edge_config_source
         self.response_metadata = effective_payload.get("service_mapping", {}).get("response_metadata", {})
@@ -1159,6 +1163,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         if hasattr(self, "_outer_step"):
             return self._outer_step
         return self._current_step
+
+    def _resolve_task_max_steps(self) -> Optional[int]:
+        """Resolve the scheduling horizon from task runtime state."""
+        task_state = self._mpc_task_state_lifecycle.task_state
+        if task_state is not None and task_state.max_steps is not None:
+            return int(task_state.max_steps)
+
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        if runtime_options is None or runtime_options.max_steps is None:
+            return None
+        return int(runtime_options.max_steps)
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
         return self._mpc_task_state_lifecycle.ensure_task_state(step)
