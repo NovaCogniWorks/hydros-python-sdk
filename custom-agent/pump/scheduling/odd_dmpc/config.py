@@ -313,6 +313,7 @@ def _system_config_from_payload(
     payload: Dict,
     config_path: Path,
     task_max_steps: Optional[int] = None,
+    task_output_step_seconds: Optional[int] = None,
 ) -> SystemConfig:
     stations = []
     raw_stations = payload["stations"]
@@ -343,13 +344,25 @@ def _system_config_from_payload(
     if horizon_hours <= 0:
         raise ValueError("task max_steps must be positive")
 
+    raw_dt_hours = scheduling.get("dt_hours")
+    if task_output_step_seconds is not None:
+        raw_dt_hours = float(task_output_step_seconds) / 3600.0
+    if raw_dt_hours is None:
+        raise ValueError(
+            "task output_step_seconds is required for pump scheduling"
+        )
+
+    dt_hours = float(raw_dt_hours)
+    if dt_hours <= 0:
+        raise ValueError("task output_step_seconds must be positive")
+
     return SystemConfig(
         project=payload["project"],
         description=payload["description"],
         rho=payload["global_params"]["rho"],
         g=payload["global_params"]["g"],
         horizon_hours=horizon_hours,
-        dt_hours=scheduling["dt_hours"],
+        dt_hours=dt_hours,
         target_avg_flow_last_station=scheduling["target_avg_flow_last_station"],
         stations=stations,
         canal_pools=pools,
@@ -413,6 +426,7 @@ def load_runtime_context_from_payload(
     payload: Dict[str, object],
     static_config_path: Optional[str] = None,
     task_max_steps: Optional[int] = None,
+    task_output_step_seconds: Optional[int] = None,
 ) -> Dict[str, object]:
     return _runtime_context_from_payload(
         payload,
@@ -420,6 +434,7 @@ def load_runtime_context_from_payload(
         None,
         static_config_path,
         task_max_steps,
+        task_output_step_seconds,
     )
 
 def _runtime_context_from_payload(
@@ -428,6 +443,7 @@ def _runtime_context_from_payload(
     demand_path: Optional[str] = None,
     static_config_path: Optional[str] = None,
     task_max_steps: Optional[int] = None,
+    task_output_step_seconds: Optional[int] = None,
 ) -> Dict[str, object]:
     del demand_path
     merged_payload = _merge_with_static_config(payload, path, static_config_path)
@@ -435,6 +451,7 @@ def _runtime_context_from_payload(
         merged_payload,
         path,
         task_max_steps=task_max_steps,
+        task_output_step_seconds=task_output_step_seconds,
     )
     runtime = _runtime_from_payload(merged_payload)
     demand_plan = build_zero_demand_plan(system_config)

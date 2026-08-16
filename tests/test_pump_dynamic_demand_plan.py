@@ -124,6 +124,9 @@ class TestPumpDynamicDemandPlan(unittest.TestCase):
     def test_runtime_max_steps_overrides_algorithm_config_horizon(self):
         self.assertEqual(self.agent.system_config.horizon_hours, 48)
 
+    def test_runtime_output_step_seconds_overrides_algorithm_config_dt_hours(self):
+        self.assertEqual(self.agent.system_config.dt_hours, 0.25)
+
     def test_runtime_context_accepts_config_without_horizon_hours(self):
         with open("custom-agent/pump/data/config_xhh.yaml", "r", encoding="utf-8") as handle:
             payload = yaml.safe_load(handle)
@@ -136,14 +139,27 @@ class TestPumpDynamicDemandPlan(unittest.TestCase):
 
         self.assertEqual(runtime_context["system_config"].horizon_hours, 36)
 
+    def test_runtime_context_accepts_config_without_dt_hours(self):
+        with open("custom-agent/pump/data/config_xhh.yaml", "r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle)
+        del payload["scheduling"]["dt_hours"]
+
+        runtime_context = load_runtime_context_from_payload(
+            payload,
+            task_output_step_seconds=1800,
+        )
+
+        self.assertEqual(runtime_context["system_config"].dt_hours, 0.5)
+
     def test_task_state_max_steps_precedes_runtime_options(self):
         self.agent._mpc_task_state_lifecycle.ensure_task_state(
             1,
             max_steps=24,
-            output_step_seconds=900,
+            output_step_seconds=1800,
         )
 
         self.assertEqual(self.agent._resolve_task_max_steps(), 24)
+        self.assertEqual(self.agent._resolve_task_output_step_seconds(), 1800)
 
     def test_live_station_state_sync_updates_memory_flow_and_active_units(self):
         station_id = self.agent.system_config.station_ids[0]

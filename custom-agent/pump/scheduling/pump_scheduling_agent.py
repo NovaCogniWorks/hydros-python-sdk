@@ -210,6 +210,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         context = load_runtime_context_from_payload(
             payload,
             task_max_steps=self._resolve_task_max_steps(),
+            task_output_step_seconds=self._resolve_task_output_step_seconds(),
         )
         effective_payload = context.get("config_payload", payload)
         self._edge_mpc_config_source = edge_config_source
@@ -1174,6 +1175,17 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         if runtime_options is None or runtime_options.max_steps is None:
             return None
         return int(runtime_options.max_steps)
+
+    def _resolve_task_output_step_seconds(self) -> Optional[int]:
+        """Resolve the scheduling step duration from task runtime state."""
+        task_state = self._mpc_task_state_lifecycle.task_state
+        if task_state is not None and task_state.output_step_seconds is not None:
+            return int(task_state.output_step_seconds)
+
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        if runtime_options is None or runtime_options.output_step_seconds is None:
+            return None
+        return int(runtime_options.output_step_seconds)
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
         return self._mpc_task_state_lifecycle.ensure_task_state(step)
