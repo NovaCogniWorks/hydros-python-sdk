@@ -13,11 +13,74 @@ from hydros_agent_sdk.mpc.models import (
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import (
     MpcPredictionResultReporter,
 )
-from hydros_agent_sdk.protocol.models import SimulationContext
+from hydros_agent_sdk.protocol.models import (
+    AgentDriveMode,
+    HydroAgentInstance,
+    SimulationContext,
+)
+
+
+def build_source_agent(context: SimulationContext) -> HydroAgentInstance:
+    return HydroAgentInstance(
+        agent_id="central-agent",
+        agent_code="CENTRAL_SCHEDULING_AGENT",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="central-agent",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        hydros_cluster_id="cluster-a",
+        hydros_node_id="node-a",
+        context=context,
+        drive_mode=AgentDriveMode.PROACTIVE,
+    )
 
 
 class MpcPredictionResultReporterTest(unittest.TestCase):
-    def test_default_report_skips_control_only_response(self):
+    def test_default_report_builds_control_only_water_level_response(self):
+        state = SimpleNamespace(
+            context=SimulationContext(biz_scene_instance_id="scene-control-only"),
+            current_step=4,
+            max_steps=12,
+            rolling_interval_steps=3,
+        )
+        response = MpcOptimizeResponse(
+            plan_type="OPTIMAL",
+            horizon_controls=[
+                HorizonStep(
+                    horizon_step=1,
+                    control_object_list=[
+                        ControlObjectResult(
+                            object_type="GateStation",
+                            object_id=101,
+                            target_value_list=[
+                                ValueItem(value_type="water_level", value=3.4)
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+
+        report = MpcPredictionResultReporter().build_report(
+            build_source_agent(state.context),
+            state,
+            [response],
+        )
+
+        self.assertIsNotNone(report)
+        self.assertEqual(len(report.mpc_prediction_results), 1)
+        result = report.mpc_prediction_results[0]
+        self.assertEqual(len(result.details), 1)
+        detail = result.details[0]
+        self.assertEqual(detail.node_id, 101)
+        self.assertEqual(detail.object_id, 101)
+        self.assertEqual(detail.command_type, "water_level")
+        self.assertEqual(detail.target_value, 3.4)
+        self.assertEqual(
+            detail.biz_idem_key,
+            "MPC_DETAIL:4:1:101:101:water_level",
+        )
+
+    def test_default_report_skips_control_only_non_water_level_response(self):
         state = SimpleNamespace(
             context=SimulationContext(biz_scene_instance_id="scene-control-only"),
             current_step=4,

@@ -44,7 +44,7 @@ class MpcPredictionResultReporter:
         responses: Iterable[MpcOptimizeResponse],
     ) -> Optional[MpcPredictionResultReport]:
         response_list = list(responses or [])
-        if not self._has_predicted_results(response_list):
+        if not self._has_reportable_results(response_list):
             return None
         results = self.build_prediction_results(mpc_task_state, response_list)
         if not results:
@@ -559,10 +559,14 @@ class MpcPredictionResultReporter:
             return "water_level"
         return target_value_type
 
-    @staticmethod
-    def _has_predicted_results(responses: Iterable[MpcOptimizeResponse]) -> bool:
+    @classmethod
+    def _has_reportable_results(
+        cls,
+        responses: Iterable[MpcOptimizeResponse],
+    ) -> bool:
         return any(
             horizon.predicted_result_list
+            or cls._collect_station_water_level_targets(horizon)
             for response in responses or []
             for horizon in response.horizon_controls or []
         )
