@@ -25,6 +25,7 @@ from pump_flow_dmpc import (
 from pump_flow_dmpc.odd_dmpc.types import ControlAction
 from pump_flow_dmpc.plot_tracker import PumpFlowDmpcExecutionTracker
 from pump_flow_dmpc.types import PumpFlowDmpcArguments
+from pump_flow_dmpc_service import create_default_plot_tracker
 
 
 class StubSolver:
@@ -163,6 +164,14 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
                 default_tracker.output_dir.rmdir()
 
         self.assertNotIn("scheduling", str(tracker.output_dir))
+
+    def test_create_default_plot_tracker_returns_tracker(self):
+        tracker = create_default_plot_tracker(output_dir=self.output_dir)
+        self.assertIsNotNone(tracker)
+        self.assertEqual(
+            str(tracker.output_dir).replace("\\", "/"),
+            str(self.output_dir).replace("\\", "/"),
+        )
 
     def test_none_tracker_does_not_break_algorithm_solve(self):
         algorithm = PumpStationFlowDmpcAlgorithm(

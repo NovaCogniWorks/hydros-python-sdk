@@ -32,6 +32,21 @@ from pump_flow_dmpc import (  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+def create_default_plot_tracker(
+    output_dir: Optional[Path] = None,
+) -> Optional["PumpFlowDmpcExecutionTracker"]:
+    """创建默认下层执行结果跟踪器；matplotlib 缺失时降级为 None。"""
+
+    try:
+        from pump_flow_dmpc.plot_tracker import PumpFlowDmpcExecutionTracker
+    except Exception:
+        logger.exception(
+            "pump flow DMPC plot tracker unavailable; edge execution plotting disabled"
+        )
+        return None
+    return PumpFlowDmpcExecutionTracker(output_dir=output_dir)
+
+
 def create_pump_flow_dmpc_server(
     host: str = "127.0.0.1",
     port: int = 8080,
@@ -132,18 +147,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument(
         "--plot-output-dir",
         default=None,
-        help="可选：启用下层执行结果绘图并指定输出目录（默认不启用）",
+        help="可选：指定下层执行结果绘图输出目录；缺省使用 pump_flow_dmpc/output/edge_execution（始终启用）",
     )
     args = parser.parse_args(argv)
 
     setup_logging()
-    plot_tracker = None
-    if args.plot_output_dir:
-        from pump_flow_dmpc.plot_tracker import PumpFlowDmpcExecutionTracker
-
-        plot_tracker = PumpFlowDmpcExecutionTracker(
-            output_dir=Path(args.plot_output_dir)
-        )
+    plot_tracker = create_default_plot_tracker(
+        output_dir=Path(args.plot_output_dir) if args.plot_output_dir else None
+    )
     server = create_pump_flow_dmpc_server(
         host=args.host, port=args.port, plot_tracker=plot_tracker
     )

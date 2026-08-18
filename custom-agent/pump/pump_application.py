@@ -17,7 +17,10 @@ for import_root in (PROJECT_ROOT, PUMP_AGENT_ROOT):
         sys.path.insert(0, str(import_root))
 
 from hydros_agent_sdk.launcher.support import MultiAgentLauncherApp  # noqa: E402
-from pump_flow_dmpc_service import PumpFlowDmpcHttpHost  # noqa: E402
+from pump_flow_dmpc_service import (  # noqa: E402
+    PumpFlowDmpcHttpHost,
+    create_default_plot_tracker,
+)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -38,6 +41,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         type=int,
         default=int(os.getenv("HYDROS_CONTROL_ALGORITHM_HTTP_PORT", "8015")),
     )
+    parser.add_argument(
+        "--control-algorithm-plot-output-dir",
+        default=os.getenv("HYDROS_CONTROL_ALGORITHM_PLOT_OUTPUT_DIR"),
+        help="可选：指定下层执行结果绘图输出目录；缺省使用 pump_flow_dmpc/output/edge_execution（始终启用）",
+    )
     parser.add_argument("launcher_args", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
 
@@ -47,9 +55,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     launcher_dir = os.path.abspath(options.launcher_dir)
     log_dir = os.path.join(launcher_dir, "logs")
+    plot_output_dir = options.control_algorithm_plot_output_dir
+    plot_tracker = create_default_plot_tracker(
+        output_dir=Path(plot_output_dir) if plot_output_dir else None
+    )
     algorithm_host = PumpFlowDmpcHttpHost(
         host=options.control_algorithm_host,
         port=options.control_algorithm_port,
+        plot_tracker=plot_tracker,
     )
     app = MultiAgentLauncherApp(
         launcher_dir=launcher_dir,
