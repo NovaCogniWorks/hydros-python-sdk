@@ -40,6 +40,12 @@ class PumpFlowDmpcSolver:
         self._loaded_config_source = ""
         self._config_lock = RLock()
 
+    @property
+    def system_config(self) -> "SystemConfig | None":
+        """已加载的站网配置；首次成功求解前为 ``None``。"""
+
+        return self._system_config
+
     def _ensure_loaded(self, arguments: PumpFlowDmpcArguments) -> None:
         config_source = self._config_source_key(arguments)
         with self._config_lock:

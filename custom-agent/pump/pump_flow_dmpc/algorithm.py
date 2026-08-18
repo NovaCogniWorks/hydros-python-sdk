@@ -116,6 +116,7 @@ class PumpStationFlowDmpcAlgorithm:
                 arguments=arguments,
                 action=action,
                 output=output,
+                system_config=getattr(self._solver, "system_config", None),
             )
         except Exception:
             logger.exception(

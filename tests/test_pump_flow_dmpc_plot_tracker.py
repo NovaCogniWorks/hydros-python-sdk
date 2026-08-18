@@ -22,7 +22,13 @@ from pump_flow_dmpc import (
     PumpFlowDmpcInputResolver,
     PumpStationFlowDmpcAlgorithm,
 )
-from pump_flow_dmpc.odd_dmpc.types import ControlAction
+from pump_flow_dmpc.odd_dmpc.types import (
+    ControlAction,
+    PoolConfig,
+    StationConfig,
+    SystemConfig,
+    UnitConfig,
+)
 from pump_flow_dmpc.plot_tracker import PumpFlowDmpcExecutionTracker
 from pump_flow_dmpc.types import PumpFlowDmpcArguments
 from pump_flow_dmpc_service import create_default_plot_tracker
@@ -59,6 +65,37 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmpdir.cleanup)
         self.output_dir = Path(self.tmpdir.name) / "plots"
+
+    def _system_config(self):
+        return SystemConfig(
+            project="test",
+            description="test",
+            rho=1000.0,
+            g=9.81,
+            horizon_hours=72,
+            dt_hours=1.0,
+            target_avg_flow_last_station=20.0,
+            stations=[
+                StationConfig(
+                    id=2001,
+                    name="Station1",
+                    level_back_min=0.0,
+                    level_back_max=10.0,
+                    level_front_min=0.0,
+                    level_front_max=10.0,
+                    num_units=2,
+                    units=[
+                        UnitConfig(id=2101, name="Pump1"),
+                        UnitConfig(id=2102, name="Pump2"),
+                    ],
+                )
+            ],
+            canal_pools=[PoolConfig(id=1, name="Pool1")],
+            flow_depart_step_q=1.0,
+            flow_depart_step_h=1.0,
+            flow_depart_data_dir="data",
+            flow_depart_output_dir="output",
+        )
 
     def _arguments(self):
         return PumpFlowDmpcArguments(
@@ -97,6 +134,7 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
             predicted_head=5.0,
             predicted_efficiencies=[0.8, 0.81],
             predicted_unit_efficiencies={2101: [0.8], 2102: [0.81]},
+            predicted_unit_flows={2101: [10.2], 2102: [10.3]},
         )
 
     def _input(self):
@@ -137,33 +175,28 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
             ],
         )
 
-    def test_record_and_finalize_create_files_in_given_dir(self):
+    def test_record_and_finalize_create_scheduling_style_files(self):
         tracker = PumpFlowDmpcExecutionTracker(output_dir=self.output_dir)
         tracker.record_decision(
             input_data=self._input(),
             arguments=self._arguments(),
             action=self._action(),
             output=self._output(),
+            system_config=self._system_config(),
         )
+
+        self.assertTrue((self.output_dir / "step_000.png").exists())
+
         tracker.finalize()
+        self.assertTrue((self.output_dir / "closed_loop_overview_2001.png").exists())
+        self.assertTrue((self.output_dir / "summary_and_predictions.xlsx").exists())
 
-        self.assertTrue((self.output_dir / "steps").exists())
-        self.assertTrue(any(self.output_dir.glob("steps/step_*_station_2001.png")))
-        self.assertTrue((self.output_dir / "summary_station_2001.png").exists())
-        self.assertTrue((self.output_dir / "edge_execution_summary.xlsx").exists())
-
-    def test_default_output_dir_is_edge_only_not_scheduling(self):
-        tracker = PumpFlowDmpcExecutionTracker(output_dir=self.output_dir)
-        default_tracker = PumpFlowDmpcExecutionTracker(save_step_plots=False)
-        try:
-            default_path = str(default_tracker.output_dir).replace("\\", "/")
-            self.assertIn("pump_flow_dmpc/output/edge_execution", default_path)
-            self.assertNotIn("scheduling", default_path)
-        finally:
-            if default_tracker.output_dir.exists():
-                default_tracker.output_dir.rmdir()
-
-        self.assertNotIn("scheduling", str(tracker.output_dir))
+    def test_default_output_dir_matches_scheduling(self):
+        tracker = PumpFlowDmpcExecutionTracker(save_step_plots=False)
+        self.assertEqual(
+            str(tracker.output_dir).replace("\\", "/"),
+            "output/agent_steps",
+        )
 
     def test_create_default_plot_tracker_returns_tracker(self):
         tracker = create_default_plot_tracker(output_dir=self.output_dir)
