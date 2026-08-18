@@ -101,7 +101,19 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
 
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[Any]]:
         """执行泵站自定义滚动调度，并下发生成的控制指令。"""
-        self._ensure_mpc_task_state(request.step).current_step = request.step
+        task_state = self._ensure_mpc_task_state(request.step)
+        task_state.current_step = request.step
+        if not task_state.has_remaining_control_step():
+            logger.info(
+                "Pump scheduling control skipped at final simulation step: "
+                "bizSceneInstanceId=%s, currentStep=%s, expectedEffectiveStep=%s, maxSteps=%s",
+                self.context.biz_scene_instance_id,
+                request.step,
+                task_state.expected_effective_step(),
+                task_state.max_steps,
+            )
+            return None
+
         commands = self.on_optimization(request.step)
         if commands:
             self.dispatch_control_commands_and_await_execution(commands)

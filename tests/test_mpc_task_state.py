@@ -46,6 +46,38 @@ class MpcTaskStateTest(unittest.TestCase):
         self.assertFalse(state.should_start_new_rolling(96))
         self.assertFalse(state.should_start_new_rolling(97))
 
+    def test_control_step_targets_next_simulation_step(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-control-boundary"),
+            rolling_interval_steps=1,
+            start_step=0,
+            current_step=79,
+            max_steps=80,
+        )
+
+        self.assertEqual(state.expected_effective_step(), 80)
+        self.assertTrue(state.has_remaining_control_step())
+
+        state.current_step = 80
+
+        self.assertEqual(state.expected_effective_step(), 81)
+        self.assertFalse(state.has_remaining_control_step())
+
+    def test_control_step_boundary_is_open_when_max_steps_is_unspecified(self):
+        state = MpcTaskState(
+            context=SimulationContext(biz_scene_instance_id="scene-control-unbounded"),
+            rolling_interval_steps=1,
+            start_step=0,
+            current_step=80,
+            max_steps=None,
+        )
+
+        self.assertTrue(state.has_remaining_control_step())
+
+        state.max_steps = 0
+
+        self.assertTrue(state.has_remaining_control_step())
+
 
 if __name__ == "__main__":
     unittest.main()

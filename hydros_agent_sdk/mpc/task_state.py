@@ -18,7 +18,7 @@ class MpcTaskState:
     rolling_interval_steps: int
     start_step: int
     current_step: int = -1
-    max_steps: int = 36
+    max_steps: Optional[int] = 36
     current_loop: int = 1
     output_step_seconds: Optional[int] = None
     prediction_horizon: Optional[int] = None
@@ -66,10 +66,24 @@ class MpcTaskState:
     def should_start_new_rolling(self, current_step: int) -> bool:
         if self.rolling_interval_steps <= 0:
             return False
-        if self.max_steps > 0 and current_step >= self.max_steps:
+        if (
+            self.max_steps is not None
+            and self.max_steps > 0
+            and current_step >= self.max_steps
+        ):
             return False
         step_delta = current_step - self.start_step
         return (
             step_delta % self.rolling_interval_steps == 0
             and step_delta != 0
         )
+
+    def expected_effective_step(self) -> int:
+        """返回当前控制意图预期生效的下一仿真步。"""
+        return self.current_step + 1
+
+    def has_remaining_control_step(self) -> bool:
+        """判断当前控制意图是否仍有后续仿真区间可以生效。"""
+        if self.max_steps is None or self.max_steps <= 0:
+            return True
+        return self.expected_effective_step() <= self.max_steps
