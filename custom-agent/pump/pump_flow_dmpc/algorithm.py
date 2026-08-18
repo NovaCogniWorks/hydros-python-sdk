@@ -5,7 +5,7 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
     ControlActuatorTarget,
@@ -38,10 +38,12 @@ class PumpStationFlowDmpcAlgorithm:
         solver: PumpFlowDmpcSolver,
         resolver: PumpFlowDmpcInputResolver,
         console_reporter: Optional[PumpFlowDmpcConsoleReporter] = None,
+        execution_tracker: Optional[Any] = None,
     ) -> None:
         self._solver = solver
         self._resolver = resolver
         self._console_reporter = console_reporter or PumpFlowDmpcConsoleReporter()
+        self._execution_tracker = execution_tracker
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         if input_data.control_task_type != ControlTaskType.STATION_FLOW_ALLOCATION:
@@ -62,6 +64,7 @@ class PumpStationFlowDmpcAlgorithm:
                 action=action,
                 output=output,
             )
+            self._record_execution(input_data, arguments, action, output)
             return output
         except PumpFlowDmpcError as exc:
             origin = exc.__traceback__
@@ -97,6 +100,29 @@ class PumpStationFlowDmpcAlgorithm:
             output = self._failed(input_data, exc.error_code, str(exc))
             self._console_reporter.report_failure(input_data, output)
             return output
+
+    def _record_execution(
+        self,
+        input_data: ControlAlgorithmInput,
+        arguments: PumpFlowDmpcArguments,
+        action,
+        output: ControlAlgorithmOutput,
+    ) -> None:
+        if self._execution_tracker is None:
+            return
+        try:
+            self._execution_tracker.record_decision(
+                input_data=input_data,
+                arguments=arguments,
+                action=action,
+                output=output,
+            )
+        except Exception:
+            logger.exception(
+                "Pump flow DMPC execution tracker failed: requestId=%s, stepIndex=%s",
+                input_data.context.request_id,
+                input_data.context.step_index,
+            )
 
     def _project(
         self,

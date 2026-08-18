@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 def create_pump_flow_dmpc_server(
     host: str = "127.0.0.1",
     port: int = 8080,
+    *,
+    plot_tracker: Optional["PumpFlowDmpcExecutionTracker"] = None,
 ) -> ThreadingHTTPServer:
     """创建仅注册泵站流量 DMPC 的标准 HTTP 服务。"""
 
@@ -43,6 +45,7 @@ def create_pump_flow_dmpc_server(
         PumpStationFlowDmpcAlgorithm(
             solver=PumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
+            execution_tracker=plot_tracker,
         )
     )
     return create_control_algorithm_http_server(runtime, host=host, port=port)
@@ -55,9 +58,12 @@ class PumpFlowDmpcHttpHost:
         self,
         host: str = "0.0.0.0",
         port: int = 8015,
+        *,
+        plot_tracker: Optional["PumpFlowDmpcExecutionTracker"] = None,
     ) -> None:
         self._host = host
         self._port = port
+        self._plot_tracker = plot_tracker
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -76,7 +82,11 @@ class PumpFlowDmpcHttpHost:
         if self._server is not None:
             raise RuntimeError("pump flow DMPC HTTP host is already started")
 
-        server = create_pump_flow_dmpc_server(host=self._host, port=self._port)
+        server = create_pump_flow_dmpc_server(
+            host=self._host,
+            port=self._port,
+            plot_tracker=self._plot_tracker,
+        )
         thread = threading.Thread(
             target=server.serve_forever,
             name="pump-flow-dmpc-http-host",
@@ -108,6 +118,8 @@ class PumpFlowDmpcHttpHost:
                 thread.join(timeout=5)
             self._server = None
             self._thread = None
+        if self._plot_tracker is not None:
+            self._plot_tracker.finalize()
         logger.info("Pump flow DMPC HTTP host stopped")
 
 
@@ -117,16 +129,32 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(description="Hydros pump flow DMPC service")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8080, type=int)
+    parser.add_argument(
+        "--plot-output-dir",
+        default=None,
+        help="可选：启用下层执行结果绘图并指定输出目录（默认不启用）",
+    )
     args = parser.parse_args(argv)
 
     setup_logging()
-    server = create_pump_flow_dmpc_server(host=args.host, port=args.port)
+    plot_tracker = None
+    if args.plot_output_dir:
+        from pump_flow_dmpc.plot_tracker import PumpFlowDmpcExecutionTracker
+
+        plot_tracker = PumpFlowDmpcExecutionTracker(
+            output_dir=Path(args.plot_output_dir)
+        )
+    server = create_pump_flow_dmpc_server(
+        host=args.host, port=args.port, plot_tracker=plot_tracker
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if plot_tracker is not None:
+            plot_tracker.finalize()
 
 
 if __name__ == "__main__":
