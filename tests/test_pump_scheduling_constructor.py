@@ -86,7 +86,7 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert agent._configured_mpc_config_url == "custom-agent/pump/data/config_xhh.yaml"
 
     commands = [{"target_agent_code": "agent", "target_command_type": "BLADE_ANGLE"}]
-    agent._ensure_mpc_task_state = Mock(return_value=Mock())
+    agent._ensure_mpc_task_state = Mock(return_value=Mock(max_steps=36))
     object.__setattr__(agent, "on_optimization", Mock(return_value=commands))
     agent.dispatch_control_commands_and_await_execution = Mock()
 
@@ -101,6 +101,61 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert result is None
     agent.on_optimization.assert_called_once_with(7)
     agent.dispatch_control_commands_and_await_execution.assert_called_once_with(commands)
+
+
+def test_pump_tick_skips_optimization_and_dispatch_at_or_after_final_step(monkeypatch):
+    _install_optional_dependency_stubs(monkeypatch)
+    scheduling_dir = os.path.abspath("custom-agent/pump/scheduling")
+    if scheduling_dir not in sys.path:
+        sys.path.insert(0, scheduling_dir)
+
+    module = importlib.import_module("pump_scheduling_agent")
+    context = SimulationContext(biz_scene_instance_id="pump-final-step")
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(
+                max_steps=80,
+                output_step_seconds=900,
+            ),
+        ),
+    )
+    agent = module.PumpCentralSchedulingAgent(
+        sim_coordination_client=Mock(state_manager=Mock()),
+        agent_id="pump-final-step-agent",
+        agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="Pump Scheduling Agent",
+        context=context,
+        hydros_cluster_id="cluster",
+        hydros_node_id="node",
+    )
+    object.__setattr__(
+        agent,
+        "on_optimization",
+        Mock(return_value=[{"unused": "terminal-control"}]),
+    )
+    agent.dispatch_control_commands_and_await_execution = Mock()
+
+    try:
+        for step in (80, 81):
+            result = agent.on_tick_simulation(
+                TickCmdRequest(
+                    command_id=f"tick-final-{step}",
+                    context=context,
+                    step=step,
+                )
+            )
+            assert result is None
+
+        task_state = agent._mpc_task_state_lifecycle.task_state
+        assert task_state is not None
+        assert task_state.current_step == 81
+        assert task_state.max_steps == 80
+        agent.on_optimization.assert_not_called()
+        agent.dispatch_control_commands_and_await_execution.assert_not_called()
+    finally:
+        ContextManager.remove(context)
 
 
 def test_pump_scheduling_agent_uses_biz_customize_config_url_as_mpc_config(monkeypatch):
@@ -175,7 +230,7 @@ def test_pump_tick_waits_for_edge_terminal_report_before_returning(monkeypatch):
         group_size=1,
         main_step_index=12,
     )
-    agent._ensure_mpc_task_state = Mock(return_value=Mock())
+    agent._ensure_mpc_task_state = Mock(return_value=Mock(max_steps=36))
     agent.on_optimization = Mock(return_value=[{"unused": "dict-intent"}])
     agent._control_command_dispatcher.prepare = Mock(return_value=[command])
     dispatched = Event()

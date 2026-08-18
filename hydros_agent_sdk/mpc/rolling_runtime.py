@@ -335,13 +335,13 @@ class MpcRollingRuntime:
     def dispatch_control_for_current_step(self, task_state: MpcTaskState) -> None:
         if task_state.latest_control_plan is None or task_state.latest_control_plan_start_step is None:
             return
-        if not self._has_remaining_control_step(task_state):
+        if not task_state.has_remaining_control_step():
             logger.info(
                 "MPC control dispatch skipped at final simulation step: "
                 "bizSceneInstanceId=%s, currentStep=%s, expectedEffectiveStep=%s, maxSteps=%s",
                 self.context.biz_scene_instance_id,
                 task_state.current_step,
-                task_state.current_step + 1,
+                task_state.expected_effective_step(),
                 task_state.max_steps,
             )
             return
@@ -402,13 +402,6 @@ class MpcRollingRuntime:
             task_state.rolling_interval_steps > 1
             and self.get_hydro_environment_type() == NORMAL_HYDRO_ENVIRONMENT_TYPE
         )
-
-    @staticmethod
-    def _has_remaining_control_step(task_state: MpcTaskState) -> bool:
-        """当前步控制用于下一步生效；最终步之后没有可控制区间。"""
-        if task_state.max_steps is None or task_state.max_steps <= 0:
-            return True
-        return task_state.current_step + 1 <= task_state.max_steps
 
     def _create_task_state(
         self,
