@@ -55,16 +55,23 @@ class PumpStationFlowDmpcAlgorithm:
             self._console_reporter.report_failure(input_data, output)
             return output
         try:
-            arguments = self._resolver.resolve(input_data)
-            action = self._solver.solve(arguments)
-            output = self._project(input_data, arguments, action)
-            self._console_reporter.report_success(
-                input_data=input_data,
-                arguments=arguments,
-                action=action,
-                output=output,
-            )
-            self._record_execution(input_data, arguments, action, output)
+            station_ids = self._resolver.resolve_station_ids(input_data)
+            station_results: list = []
+            for station_id in station_ids:
+                arguments = self._resolver.resolve_station(input_data, station_id)
+                action = self._solver.solve(arguments)
+                station_results.append((arguments, action))
+
+            output = self._project(input_data, station_results)
+
+            for arguments, action in station_results:
+                self._console_reporter.report_success(
+                    input_data=input_data,
+                    arguments=arguments,
+                    action=action,
+                    output=output,
+                )
+                self._record_execution(input_data, arguments, action, output)
             return output
         except PumpFlowDmpcError as exc:
             origin = exc.__traceback__
@@ -128,66 +135,121 @@ class PumpStationFlowDmpcAlgorithm:
     def _project(
         self,
         input_data: ControlAlgorithmInput,
-        arguments: PumpFlowDmpcArguments,
-        action,  # ControlAction from the service-private odd_dmpc package
+        station_results: list,
     ) -> ControlAlgorithmOutput:
-        station_id = arguments.station_id
+        """Aggregate lower-control decisions for all requested pump stations."""
 
-        # Build results
-        results: List[ControlSignal] = [
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type="PumpStation",
-                object_id=station_id,
-                value_type="water_flow",
-                value=float(action.selected_flow),
-            ),
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type="PumpStation",
-                object_id=station_id,
-                value_type="predicted_flow_error",
-                value=float(getattr(action, "predicted_flow_error", 0.0)),
-            ),
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type="PumpStation",
-                object_id=station_id,
-                value_type="fit_score",
-                value=float(getattr(action, "fit_score", 0.0)),
-            ),
-            ControlSignal(
-                type=SignalType.RESULT,
-                object_type="PumpStation",
-                object_id=station_id,
-                value_type="objective",
-                value=float(getattr(action, "objective", 0.0)),
-            ),
-        ]
-
-        # Project start/stop through the edge actuator availability contract.
+        results: List[ControlSignal] = []
         actuator_targets: List[ControlActuatorTarget] = []
-        for unit_id in sorted(action.unit_status):
-            is_running = int(action.unit_status[unit_id]) == 1
-            target_values: Dict[str, float] = {}
-            if is_running:
-                target_values["blade_angle"] = float(action.unit_openings.get(unit_id, 0.0))
-            actuator_targets.append(
-                ControlActuatorTarget(
-                    object_type="Pump",
-                    object_id=unit_id,
-                    available=is_running,
-                    target_values=target_values,
-                )
+        stations_state: Dict[str, Dict[str, Any]] = {}
+        stations_evidence: List[Dict[str, Any]] = []
+        station_ids: List[int] = []
+
+        for arguments, action in station_results:
+            station_id = arguments.station_id
+            station_ids.append(station_id)
+
+            results.extend(
+                [
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type="PumpStation",
+                        object_id=station_id,
+                        value_type="water_flow",
+                        value=float(action.selected_flow),
+                    ),
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type="PumpStation",
+                        object_id=station_id,
+                        value_type="predicted_flow_error",
+                        value=float(getattr(action, "predicted_flow_error", 0.0)),
+                    ),
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type="PumpStation",
+                        object_id=station_id,
+                        value_type="fit_score",
+                        value=float(getattr(action, "fit_score", 0.0)),
+                    ),
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type="PumpStation",
+                        object_id=station_id,
+                        value_type="objective",
+                        value=float(getattr(action, "objective", 0.0)),
+                    ),
+                ]
             )
 
-        # Build next_state
-        next_state: dict = {
-            "mode": action.mode,
-            "selected_flow": float(action.selected_flow),
-            "unit_status": {str(k): int(v) for k, v in action.unit_status.items()},
-            "unit_openings": {str(k): float(v) for k, v in action.unit_openings.items()},
+            for unit_id in sorted(action.unit_status):
+                is_running = int(action.unit_status[unit_id]) == 1
+                target_values: Dict[str, float] = {}
+                if is_running:
+                    target_values["blade_angle"] = float(action.unit_openings.get(unit_id, 0.0))
+                actuator_targets.append(
+                    ControlActuatorTarget(
+                        object_type="Pump",
+                        object_id=unit_id,
+                        available=is_running,
+                        target_values=target_values,
+                    )
+                )
+
+            stations_state[str(station_id)] = {
+                "mode": action.mode,
+                "selected_flow": float(action.selected_flow),
+                "unit_status": {str(k): int(v) for k, v in action.unit_status.items()},
+                "unit_openings": {str(k): float(v) for k, v in action.unit_openings.items()},
+            }
+            stations_evidence.append(
+                {
+                    "station_id": station_id,
+                    "mode": action.mode,
+                    "target_flow": float(arguments.reference_flow[0]) if arguments.reference_flow else 0.0,
+                    "selected_flow": float(action.selected_flow),
+                    "fit_score": float(getattr(action, "fit_score", 0.0)),
+                    "objective": float(getattr(action, "objective", 0.0)),
+                    "candidate_plan_count": len(getattr(action, "candidate_plans", [])),
+                }
+            )
+
+        next_state: Dict[str, Any] = {
+            "station_count": len(station_results),
+            "station_ids": station_ids,
+            "stations": stations_state,
         }
+        evidence: Dict[str, Any] = {
+            "station_count": len(station_results),
+            "station_ids": station_ids,
+            "stations": stations_evidence,
+        }
+
+        # Keep the legacy single-station top-level keys for backward
+        # compatibility with existing consumers and tests.
+        if len(station_results) == 1:
+            single_arguments, action = station_results[0]
+            next_state.update(
+                {
+                    "mode": action.mode,
+                    "selected_flow": float(action.selected_flow),
+                    "unit_status": {str(k): int(v) for k, v in action.unit_status.items()},
+                    "unit_openings": {str(k): float(v) for k, v in action.unit_openings.items()},
+                }
+            )
+            evidence.update(
+                {
+                    "station_id": single_arguments.station_id,
+                    "mode": action.mode,
+                    "target_flow": float(single_arguments.reference_flow[0])
+                    if single_arguments.reference_flow
+                    else 0.0,
+                    "selected_flow": float(action.selected_flow),
+                    "fit_score": float(getattr(action, "fit_score", 0.0)),
+                    "objective": float(getattr(action, "objective", 0.0)),
+                    "candidate_plan_count": len(getattr(action, "candidate_plans", [])),
+                }
+            )
 
         return ControlAlgorithmOutput(
             schema_version=input_data.schema_version,
@@ -197,15 +259,7 @@ class PumpStationFlowDmpcAlgorithm:
             actuator_targets=actuator_targets,
             results=results,
             next_state=next_state,
-            evidence={
-                "station_id": station_id,
-                "mode": action.mode,
-                "target_flow": float(arguments.reference_flow[0]) if arguments.reference_flow else 0.0,
-                "selected_flow": float(action.selected_flow),
-                "fit_score": float(getattr(action, "fit_score", 0.0)),
-                "objective": float(getattr(action, "objective", 0.0)),
-                "candidate_plan_count": len(getattr(action, "candidate_plans", [])),
-            },
+            evidence=evidence,
         )
 
     @staticmethod

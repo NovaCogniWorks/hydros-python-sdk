@@ -20,7 +20,32 @@ class PumpFlowDmpcInputResolver:
     """Extract full lower-controller domain input from ControlAlgorithmInput signals."""
 
     def resolve(self, input_data: ControlAlgorithmInput) -> PumpFlowDmpcArguments:
-        station_id = self._target_station_id(input_data)
+        """向后兼容：仍按 ``context.target_object_id`` 解析单站。"""
+
+        return self.resolve_station(input_data, self._target_station_id(input_data))
+
+    def resolve_station_ids(self, input_data: ControlAlgorithmInput) -> List[int]:
+        """从请求信号中提取所有泵站 id，不再依赖 ``context.target_object_id``。"""
+
+        station_ids = sorted(
+            {
+                signal.object_id
+                for signal in input_data.signals
+                if getattr(signal, "object_type", None) == "PumpStation"
+            }
+        )
+        if not station_ids:
+            raise PumpFlowDmpcError(
+                "NO_PUMP_STATION_TARGETS",
+                "no PumpStation signals found in request",
+            )
+        return station_ids
+
+    def resolve_station(
+        self,
+        input_data: ControlAlgorithmInput,
+        station_id: int,
+    ) -> PumpFlowDmpcArguments:
         algorithm_params = self._algorithm_params(input_data)
         lower_controller_params = self._lower_controller_params(algorithm_params)
 
