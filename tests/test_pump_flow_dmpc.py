@@ -911,5 +911,125 @@ class PumpFlowDmpcTest(unittest.TestCase):
         )
 
 
+    def test_solve_aggregates_all_pump_station_decisions(self):
+        input_data = self._multi_station_input()
+        output = self.algorithm.solve(input_data)
+
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
+        self.assertEqual(3, output.evidence["station_count"])
+        self.assertEqual([20000, 20300, 20600], output.evidence["station_ids"])
+        self.assertEqual(
+            {20000, 20300, 20600},
+            {
+                result.object_id
+                for result in output.results
+                if result.value_type == "water_flow"
+            },
+        )
+        self.assertEqual(
+            {20000, 20300, 20600},
+            {int(station_id) for station_id in output.next_state["stations"]},
+        )
+        self.assertEqual(
+            {20001, 20301, 20601},
+            {target.object_id for target in output.actuator_targets},
+        )
+
+    @staticmethod
+    def _station_pump_input(station_id, unit_id, target_flow, current_flow):
+        signals = [
+            ControlSignal(
+                type=SignalType.TARGET,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="water_flow",
+                value=target_flow,
+            ),
+            ControlSignal(
+                type=SignalType.OBSERVATION,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="water_flow",
+                value=current_flow,
+            ),
+            ControlSignal(
+                type=SignalType.OBSERVATION,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="station_memory",
+                attributes={"mode": "ODD2", "last_selected_flow": current_flow},
+            ),
+            ControlSignal(
+                type=SignalType.REFERENCE,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="station_front_water_level",
+                series=[10.0],
+            ),
+            ControlSignal(
+                type=SignalType.REFERENCE,
+                object_type="PumpStation",
+                object_id=station_id,
+                value_type="station_back_water_level",
+                series=[5.0],
+            ),
+        ]
+        actuators = [
+            ControlActuator(
+                object_type="Pump",
+                object_id=unit_id,
+                available=True,
+                values={"blade_angle": 10.0},
+                ranges={
+                    "blade_angle": ControlValueRange(
+                        min_value=0.0,
+                        max_value=40.0,
+                    )
+                },
+                attributes={"station_object_id": station_id},
+            )
+        ]
+        return signals, actuators
+
+    @staticmethod
+    def _multi_station_input():
+        stations = [
+            (20000, 20001, 50.0, 20.0),
+            (20300, 20301, 46.0, 21.0),
+            (20600, 20601, 53.0, 22.0),
+        ]
+        signals = []
+        actuators = []
+        for station_id, unit_id, target_flow, current_flow in stations:
+            station_signals, station_actuators = PumpFlowDmpcTest._station_pump_input(
+                station_id,
+                unit_id,
+                target_flow,
+                current_flow,
+            )
+            signals.extend(station_signals)
+            actuators.extend(station_actuators)
+
+        return ControlAlgorithmInput(
+            schema_version="1.0",
+            algorithm_type="pump_station_flow_dmpc",
+            algorithm_version="1.0.0",
+            control_task_type=ControlTaskType.STATION_FLOW_ALLOCATION,
+            context=ControlAlgorithmContext(
+                request_id="request-multi",
+                context_id="scene-multi",
+                step_index=1,
+                target_object_type="PumpStation",
+                target_object_id=20000,
+            ),
+            signals=signals,
+            actuators=actuators,
+            parameters={
+                "flow_tolerance": 1.0,
+                "max_blade_delta_per_step": 5.0,
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
