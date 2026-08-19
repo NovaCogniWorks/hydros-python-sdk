@@ -74,20 +74,40 @@ class PumpFlowDmpcExecutionTracker:
         output: "ControlAlgorithmOutput",
         system_config: Optional[SystemConfig] = None,
     ) -> None:
-        """记录一次边缘控制决策；首次获得站网配置后开始输出图片。"""
+        """记录单站决策并绘图（向后兼容入口）。"""
+
+        self.record_decisions(
+            [(input_data, arguments, action, output)],
+            system_config=system_config,
+        )
+
+    def record_decisions(
+        self,
+        decisions: list,
+        *,
+        system_config: Optional[SystemConfig] = None,
+    ) -> None:
+        """一次记录多个泵站决策；全部记录完后只画一张图。"""
 
         if system_config is not None:
             self._system_config = system_config
 
-        station_id = self._station_id(arguments, action)
-        if station_id is None:
-            logger.warning(
-                "pump flow DMPC execution tracker: cannot resolve station_id, skip record"
+        request_id = ""
+        recorded_station_id = None
+        for item in decisions:
+            input_data, arguments, action, output = item
+            station_id = self._station_id(arguments, action)
+            if station_id is None:
+                logger.warning(
+                    "pump flow DMPC execution tracker: cannot resolve station_id, skip record"
+                )
+                continue
+            self._latest_arguments[station_id] = arguments
+            self._latest_actions[station_id] = action
+            recorded_station_id = station_id
+            request_id = request_id or getattr(
+                getattr(input_data, "context", None), "request_id", ""
             )
-            return
-
-        self._latest_arguments[station_id] = arguments
-        self._latest_actions[station_id] = action
 
         if self._system_config is None:
             return
@@ -106,8 +126,8 @@ class PumpFlowDmpcExecutionTracker:
         except Exception:
             logger.exception(
                 "pump flow DMPC execution tracker: step plot failed requestId=%s station=%s",
-                getattr(getattr(input_data, "context", None), "request_id", ""),
-                station_id,
+                request_id,
+                recorded_station_id,
             )
 
     def finalize(self) -> None:

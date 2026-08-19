@@ -21,7 +21,6 @@ from .errors import PumpFlowDmpcError
 from .console_reporter import PumpFlowDmpcConsoleReporter
 from .resolver import PumpFlowDmpcInputResolver
 from .solver import PumpFlowDmpcSolver
-from .types import PumpFlowDmpcArguments
 
 
 logger = logging.getLogger(__name__)
@@ -71,7 +70,7 @@ class PumpStationFlowDmpcAlgorithm:
                     action=action,
                     output=output,
                 )
-                self._record_execution(input_data, arguments, action, output)
+            self._record_execution(input_data, station_results, output)
             return output
         except PumpFlowDmpcError as exc:
             origin = exc.__traceback__
@@ -111,20 +110,31 @@ class PumpStationFlowDmpcAlgorithm:
     def _record_execution(
         self,
         input_data: ControlAlgorithmInput,
-        arguments: PumpFlowDmpcArguments,
-        action,
+        station_results: list,
         output: ControlAlgorithmOutput,
     ) -> None:
         if self._execution_tracker is None:
             return
+        decisions = [
+            (input_data, arguments, action, output)
+            for arguments, action in station_results
+        ]
         try:
-            self._execution_tracker.record_decision(
-                input_data=input_data,
-                arguments=arguments,
-                action=action,
-                output=output,
-                system_config=getattr(self._solver, "system_config", None),
-            )
+            batch_recorder = getattr(self._execution_tracker, "record_decisions", None)
+            if batch_recorder is not None:
+                batch_recorder(
+                    decisions,
+                    system_config=getattr(self._solver, "system_config", None),
+                )
+            else:
+                for _, arguments, action, _ in decisions:
+                    self._execution_tracker.record_decision(
+                        input_data=input_data,
+                        arguments=arguments,
+                        action=action,
+                        output=output,
+                        system_config=getattr(self._solver, "system_config", None),
+                    )
         except Exception:
             logger.exception(
                 "Pump flow DMPC execution tracker failed: requestId=%s, stepIndex=%s",
