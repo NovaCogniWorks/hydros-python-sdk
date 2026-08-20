@@ -184,7 +184,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_projects_stopped_unit_as_unavailable_without_blade_angle(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.actuators[1].available = False
+        input_data.actuators[1].status = "OFF"
 
         output = self.algorithm.solve(input_data)
 
@@ -198,7 +198,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
-        input_data.actuators[1].available = False
+        input_data.actuators[1].status = "OFF"
         input_data.signals.append(
             ControlSignal(
                 type=SignalType.OBSERVATION,
@@ -219,6 +219,17 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual([2101], arguments.active_unit_ids)
         self.assertEqual(0, arguments.unit_status[2102])
         self.assertEqual(0.0, arguments.unit_openings[2102])
+
+    def test_resolver_skips_unavailable_actuator_from_candidate_pool(self):
+        input_data = self._input(target_flow=64.0, current_flow=32.0)
+        input_data.actuators[1].available = False
+
+        arguments = PumpFlowDmpcInputResolver().resolve(input_data)
+
+        self.assertEqual([2101], arguments.available_unit_ids)
+        self.assertEqual([2101], arguments.active_unit_ids)
+        self.assertNotIn(2102, arguments.unit_status)
+        self.assertNotIn(2102, arguments.unit_openings)
 
     def test_single_step_optimizer_honors_maximum_blade_delta(self):
         unit_model = SimpleNamespace(

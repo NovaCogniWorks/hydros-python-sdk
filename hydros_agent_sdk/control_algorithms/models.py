@@ -89,6 +89,7 @@ class ControlActuator(ControlAlgorithmModel):
     object_type: str
     object_id: int
     available: bool = False
+    status: Optional[str] = None
     values: Dict[str, float] = Field(default_factory=dict)
     ranges: Dict[str, ControlValueRange] = Field(default_factory=dict)
     attributes: Dict[str, Any] = Field(default_factory=dict)

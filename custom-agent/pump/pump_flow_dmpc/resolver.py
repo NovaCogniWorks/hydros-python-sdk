@@ -108,7 +108,8 @@ class PumpFlowDmpcInputResolver:
         actuator_by_id = {actuator.object_id: actuator for actuator in station_actuators}
         for uid in station_unit_ids:
             actuator = actuator_by_id.get(uid)
-            if actuator is None:
+            # available 表示机组可用性；不可用的机组不进入候选池。
+            if actuator is None or not actuator.available:
                 continue
             blade = actuator.values.get("blade_angle")
             blade_range = actuator.ranges.get("blade_angle") if actuator.ranges else None
@@ -127,8 +128,13 @@ class PumpFlowDmpcInputResolver:
                     "invalid blade_angle range [%s, %s] for pump %s"
                     % (min_val, max_val, uid),
                 )
-            # 所有机组都进入可用候选池；actuator.available 仅表示当前开/关机。
-            running = bool(actuator.available)
+            # 当前开/关机状态来自 edge 新增的 status 字段（OFF/ON）。
+            running = self._is_running(
+                self._actuator_status(actuator),
+                blade_val,
+                min_val,
+                max_val,
+            )
             available_unit_ids.append(uid)
             unit_blade_bounds[uid] = (min_val, max_val)
             unit_openings[uid] = blade_val if running else 0.0
@@ -243,6 +249,33 @@ class PumpFlowDmpcInputResolver:
             max_blade_delta_per_step=max_blade_delta_per_step,
             algorithm_params=algorithm_params,
         )
+
+    @staticmethod
+    def _actuator_status(actuator) -> Optional[str]:
+        for source in (
+            getattr(actuator, "status", None),
+            getattr(actuator, "values", {}).get("status"),
+            getattr(actuator, "attributes", {}).get("status"),
+        ):
+            if source is not None:
+                return str(source).strip()
+        return None
+
+    @staticmethod
+    def _is_running(
+        status: Optional[str],
+        blade_val: float,
+        min_val: float,
+        max_val: float,
+    ) -> bool:
+        if status is not None:
+            normalized = status.upper()
+            if normalized in ("ON", "1", "TRUE", "RUNNING"):
+                return True
+            if normalized in ("OFF", "0", "FALSE", "STOPPED"):
+                return False
+        # 回退：叶片角在允许范围内视为运行；100 度等哨兵值视为停机。
+        return min_val <= blade_val <= max_val
 
     @staticmethod
     def _algorithm_params(input_data: ControlAlgorithmInput) -> Dict[str, Any]:
