@@ -186,15 +186,15 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
         )
 
         tracker.finalize()
-        self.assertTrue((self.output_dir / "step_000.png").exists())
+        self.assertTrue((self.output_dir / "step_003.png").exists())
         self.assertTrue((self.output_dir / "closed_loop_overview_2001.png").exists())
         self.assertTrue((self.output_dir / "summary_and_predictions.xlsx").exists())
 
-    def test_default_output_dir_matches_scheduling(self):
+    def test_default_output_dir_uses_edge_execution(self):
         tracker = PumpFlowDmpcExecutionTracker(save_step_plots=False)
         self.assertEqual(
             str(tracker.output_dir).replace("\\", "/"),
-            "output/agent_steps",
+            "output/edge_execution",
         )
 
     def test_create_default_plot_tracker_returns_tracker(self):

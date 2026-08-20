@@ -5,7 +5,7 @@
 因此生成的单步图、汇总图与 scheduling 的图片输出保持一致。
 
 - 不改动 scheduling 代码。
-- 默认输出到 ``output/agent_steps``（与 scheduling 相同），可通过
+- 默认输出到 ``output/edge_execution``（与 scheduling 分离），可通过
   ``output_dir`` / ``--plot-output-dir`` / 环境变量改为其它目录，避免覆盖。
 """
 
@@ -49,7 +49,7 @@ except Exception:  # pragma: no cover - 依赖缺失时由上层降级处理
 class PumpFlowDmpcExecutionTracker:
     """适配边缘求解结果，并调用 scheduling 的绘图跟踪器输出同风格图片。"""
 
-    DEFAULT_OUTPUT_DIR = Path("output") / "agent_steps"
+    DEFAULT_OUTPUT_DIR = Path("output") / "edge_execution"
 
     def __init__(
         self,
@@ -66,7 +66,7 @@ class PumpFlowDmpcExecutionTracker:
         self._system_config: Optional[SystemConfig] = None
         self._latest_arguments: Dict[int, PumpFlowDmpcArguments] = {}
         self._latest_actions: Dict[int, ControlAction] = {}
-        self._order = 0
+        self._plot_count = 0
 
         self._queue = queue.Queue()
         self._worker = threading.Thread(
@@ -147,8 +147,11 @@ class PumpFlowDmpcExecutionTracker:
 
         request_id = ""
         recorded_station_id = None
+        first_input_data = None
         for item in decisions:
             input_data, arguments, action, output = item
+            if first_input_data is None:
+                first_input_data = input_data
             station_id = self._station_id(arguments, action)
             if station_id is None:
                 logger.warning(
@@ -168,11 +171,22 @@ class PumpFlowDmpcExecutionTracker:
         if self._scheduling_tracker is None:
             self._init_scheduling_tracker()
 
-        step_index = self._order
-        self._order += 1
+        # 使用请求里的真实步号，而不是本地自增计数器。
+        step_index = self._inner_step_index(first_input_data)
+        outer_step = self._outer_step_index(first_input_data, default=step_index)
 
         if not self.save_step_plots:
             return
+
+        self._plot_count += 1
+        logger.info(
+            "pump flow DMPC execution tracker: drawing step plot "
+            "plotCount=%s outerStep=%s innerStep=%s requestId=%s",
+            self._plot_count,
+            outer_step,
+            step_index,
+            request_id,
+        )
 
         try:
             self._plot_step(step_index)
@@ -212,6 +226,29 @@ class PumpFlowDmpcExecutionTracker:
         )
         tracker.step_predictions = []
         self._scheduling_tracker = tracker
+
+    @staticmethod
+    def _inner_step_index(input_data) -> int:
+        step_index = getattr(getattr(input_data, "context", None), "step_index", None)
+        try:
+            return int(step_index) if step_index is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _outer_step_index(cls, input_data, default: int = 0) -> int:
+        for signal in getattr(input_data, "signals", []):
+            attributes = getattr(signal, "attributes", None)
+            if not attributes:
+                continue
+            value = attributes.get("main_step_index")
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return default
 
     def _plot_step(self, step_index: int) -> None:
         cfg = self._system_config
@@ -278,7 +315,7 @@ class PumpFlowDmpcExecutionTracker:
 
         self._scheduling_tracker.update_and_plot(
             step_index=int(step_index),
-            current_time_hours=float(step_index),
+            current_time_hours=float(step_index) * float(getattr(cfg, "dt_hours", 1.0) or 1.0),
             lower_step_hours=float(getattr(cfg, "dt_hours", 1.0) or 1.0),
             upper_plan=upper_plan,
             actions=actions,

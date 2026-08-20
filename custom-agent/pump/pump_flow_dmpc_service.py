@@ -147,7 +147,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument(
         "--plot-output-dir",
         default=None,
-        help="可选：指定下层执行结果绘图输出目录；缺省使用 pump_flow_dmpc/output/edge_execution（始终启用）",
+        help="可选：指定下层执行结果绘图输出目录；缺省使用 output/edge_execution（始终启用）",
     )
     args = parser.parse_args(argv)
 

@@ -44,7 +44,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--control-algorithm-plot-output-dir",
         default=os.getenv("HYDROS_CONTROL_ALGORITHM_PLOT_OUTPUT_DIR"),
-        help="可选：指定下层执行结果绘图输出目录；缺省使用 pump_flow_dmpc/output/edge_execution（始终启用）",
+        help="可选：指定下层执行结果绘图输出目录；缺省使用 output/edge_execution（始终启用）",
     )
     parser.add_argument("launcher_args", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
