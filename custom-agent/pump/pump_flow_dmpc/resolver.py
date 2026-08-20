@@ -108,7 +108,7 @@ class PumpFlowDmpcInputResolver:
         actuator_by_id = {actuator.object_id: actuator for actuator in station_actuators}
         for uid in station_unit_ids:
             actuator = actuator_by_id.get(uid)
-            if actuator is None or not actuator.available:
+            if actuator is None:
                 continue
             blade = actuator.values.get("blade_angle")
             blade_range = actuator.ranges.get("blade_angle") if actuator.ranges else None
@@ -127,8 +127,8 @@ class PumpFlowDmpcInputResolver:
                     "invalid blade_angle range [%s, %s] for pump %s"
                     % (min_val, max_val, uid),
                 )
-            # blade_angle=100 means stopped
-            running = min_val <= blade_val <= max_val
+            # 所有机组都进入可用候选池；actuator.available 仅表示当前开/关机。
+            running = bool(actuator.available)
             available_unit_ids.append(uid)
             unit_blade_bounds[uid] = (min_val, max_val)
             unit_openings[uid] = blade_val if running else 0.0

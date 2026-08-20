@@ -184,7 +184,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_projects_stopped_unit_as_unavailable_without_blade_angle(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.actuators[1].values["blade_angle"] = 100.0
+        input_data.actuators[1].available = False
 
         output = self.algorithm.solve(input_data)
 
@@ -198,7 +198,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
-        input_data.actuators[1].values["blade_angle"] = 100.0
+        input_data.actuators[1].available = False
         input_data.signals.append(
             ControlSignal(
                 type=SignalType.OBSERVATION,
