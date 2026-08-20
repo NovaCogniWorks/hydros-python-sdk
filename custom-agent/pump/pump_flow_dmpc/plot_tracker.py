@@ -12,8 +12,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 import sys
+import queue
+import threading
 from types import SimpleNamespace
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -32,6 +35,9 @@ logger = logging.getLogger(__name__)
 _SCHEDULING_DIR = Path(__file__).resolve().parents[1] / "scheduling"
 if str(_SCHEDULING_DIR) not in sys.path:
     sys.path.insert(0, str(_SCHEDULING_DIR))
+
+# 后台线程画图必须使用无 GUI 后端，避免 TkAgg 在非主线程报错。
+os.environ["MPLBACKEND"] = "Agg"
 
 try:
     from plot_tracker import PlotHistoryTracker as SchedulingPlotHistoryTracker
@@ -62,6 +68,15 @@ class PumpFlowDmpcExecutionTracker:
         self._latest_actions: Dict[int, ControlAction] = {}
         self._order = 0
 
+        self._queue = queue.Queue()
+        self._worker = threading.Thread(
+            target=self._run_worker,
+            name="pump-flow-dmpc-plot-worker",
+            daemon=True,
+        )
+        self._worker.start()
+        self._finalized = False
+
     # ------------------------------------------------------------------
     # 记录入口
     # ------------------------------------------------------------------
@@ -87,8 +102,46 @@ class PumpFlowDmpcExecutionTracker:
         *,
         system_config: Optional[SystemConfig] = None,
     ) -> None:
-        """一次记录多个泵站决策；全部记录完后只画一张图。"""
+        """一次记录多个泵站决策；绘图在后台线程异步执行。"""
 
+        self._queue.put(("record", list(decisions), system_config))
+
+    def finalize(self) -> None:
+        """等待后台绘图完成并生成汇总图与 Excel。"""
+
+        if self._finalized:
+            return
+        self._finalized = True
+        self._queue.put(("finalize", None, None))
+        self._queue.join()
+
+    # ------------------------------------------------------------------
+    # 后台工作线程
+    # ------------------------------------------------------------------
+    def _run_worker(self) -> None:
+        while True:
+            job = self._queue.get()
+            try:
+                kind = job[0]
+                if kind == "record":
+                    _, decisions, system_config = job
+                    self._record_sync(decisions, system_config=system_config)
+                elif kind == "finalize":
+                    self._finalize_sync()
+                    break
+            except Exception:
+                logger.exception(
+                    "pump flow DMPC execution tracker: background plot worker failed"
+                )
+            finally:
+                self._queue.task_done()
+
+    def _record_sync(
+        self,
+        decisions: list,
+        *,
+        system_config: Optional[SystemConfig] = None,
+    ) -> None:
         if system_config is not None:
             self._system_config = system_config
 
@@ -130,9 +183,7 @@ class PumpFlowDmpcExecutionTracker:
                 recorded_station_id,
             )
 
-    def finalize(self) -> None:
-        """生成汇总图与 Excel，与 scheduling 输出格式一致。"""
-
+    def _finalize_sync(self) -> None:
         if self._scheduling_tracker is None:
             logger.info("pump flow DMPC execution tracker: no history to finalize")
             return

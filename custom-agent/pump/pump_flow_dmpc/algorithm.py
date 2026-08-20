@@ -71,6 +71,13 @@ class PumpStationFlowDmpcAlgorithm:
                     output=output,
                 )
             self._record_execution(input_data, station_results, output)
+
+            logger.info(
+                "Pump flow DMPC solve 已返回: requestId=%s, stations=%s, actuatorTargets=%s",
+                input_data.context.request_id,
+                station_ids,
+                len(output.actuator_targets),
+            )
             return output
         except PumpFlowDmpcError as exc:
             origin = exc.__traceback__
@@ -105,6 +112,11 @@ class PumpStationFlowDmpcAlgorithm:
             )
             output = self._failed(input_data, exc.error_code, str(exc))
             self._console_reporter.report_failure(input_data, output)
+            logger.info(
+                "Pump flow DMPC solve 已返回(失败): requestId=%s, errorCode=%s",
+                input_data.context.request_id,
+                output.error_code,
+            )
             return output
 
     def _record_execution(

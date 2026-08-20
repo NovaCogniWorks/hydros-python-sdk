@@ -185,9 +185,8 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
             system_config=self._system_config(),
         )
 
-        self.assertTrue((self.output_dir / "step_000.png").exists())
-
         tracker.finalize()
+        self.assertTrue((self.output_dir / "step_000.png").exists())
         self.assertTrue((self.output_dir / "closed_loop_overview_2001.png").exists())
         self.assertTrue((self.output_dir / "summary_and_predictions.xlsx").exists())
 
