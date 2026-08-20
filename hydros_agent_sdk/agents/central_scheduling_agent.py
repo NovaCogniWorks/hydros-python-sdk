@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_METRICS_HISTORY_STEPS = 10
-DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS = 120.0
+DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS = 300.0
 
 
 class CentralSchedulingAgent(TickableAgent):

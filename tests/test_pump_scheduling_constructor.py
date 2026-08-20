@@ -84,6 +84,7 @@ def test_pump_scheduling_agent_uses_generic_central_base(monkeypatch):
     assert not hasattr(agent, "_mpc_rolling_runtime")
     assert not hasattr(agent, "_mpc_optimization_service")
     assert agent._configured_mpc_config_url == "custom-agent/pump/data/config_xhh.yaml"
+    assert agent._control_execution_timeout_seconds == 300.0
 
     commands = [{"target_agent_code": "agent", "target_command_type": "BLADE_ANGLE"}]
     agent._ensure_mpc_task_state = Mock(return_value=Mock(max_steps=36))

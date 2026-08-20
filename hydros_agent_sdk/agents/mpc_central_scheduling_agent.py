@@ -8,7 +8,10 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import (
+    CentralSchedulingAgent,
+    DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS,
+)
 from hydros_agent_sdk.mpc.client import MpcPlanningClient
 from hydros_agent_sdk.mpc.control_command_builder import MpcControlCommandBuilder
 from hydros_agent_sdk.mpc.control_dispatch_tracker import (
@@ -55,7 +58,9 @@ class MpcSchedulingOptions:
     hydro_environment_type: Optional[str] = None
     mpc_service_base_url: Optional[str] = None
     mpc_request_timeout_seconds: Optional[float] = None
-    mpc_control_execution_timeout_seconds: float = 300.0
+    mpc_control_execution_timeout_seconds: float = (
+        DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS
+    )
     mpc_planning_client: Optional[MpcPlanningClient] = None
     mpc_prediction_result_reporter: Optional[MpcPredictionResultReporter] = None
     mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = None
@@ -77,7 +82,7 @@ class MpcSchedulingOptions:
             ),
             mpc_control_execution_timeout_seconds=kwargs.pop(
                 "mpc_control_execution_timeout_seconds",
-                120.0,
+                DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS,
             ),
             mpc_planning_client=kwargs.pop("mpc_planning_client", None),
             mpc_prediction_result_reporter=kwargs.pop("mpc_prediction_result_reporter", None),
