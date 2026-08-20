@@ -55,7 +55,7 @@ class MpcSchedulingOptions:
     hydro_environment_type: Optional[str] = None
     mpc_service_base_url: Optional[str] = None
     mpc_request_timeout_seconds: Optional[float] = None
-    mpc_control_execution_timeout_seconds: float = 120.0
+    mpc_control_execution_timeout_seconds: float = 300.0
     mpc_planning_client: Optional[MpcPlanningClient] = None
     mpc_prediction_result_reporter: Optional[MpcPredictionResultReporter] = None
     mpc_sensor_provider: Optional[Callable[..., Iterable[SensorData | Dict[str, Any]]]] = None
