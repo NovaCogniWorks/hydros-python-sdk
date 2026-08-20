@@ -52,6 +52,7 @@ class ControlAlgorithmsTest(unittest.TestCase):
         self.assertNotIn("controlTaskType", payload)
         self.assertEqual(decoded, input_data)
         self.assertEqual(decoded.signals[0].type, SignalType.TARGET)
+        self.assertEqual(decoded.actuators[0].status, "ON")
         self.assertEqual(decoded.actuators[0].ranges["blade_angle"].max_value, 100.0)
         self.assertIs(PublicControlAlgorithmRuntime, ControlAlgorithmRuntime)
 
@@ -61,6 +62,15 @@ class ControlAlgorithmsTest(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             ControlAlgorithmInput.model_validate(payload)
+
+    def test_model_accepts_legacy_actuator_without_status(self):
+        payload = self._input().model_dump(mode="json")
+        payload["actuators"][0].pop("status")
+
+        decoded = ControlAlgorithmInput.model_validate(payload)
+
+        self.assertIsNone(decoded.actuators[0].status)
+        self.assertTrue(decoded.actuators[0].available)
 
         payload = self._input().model_dump(mode="json")
         payload["control_task_type"] = "UNKNOWN_TASK"
@@ -167,6 +177,7 @@ class ControlAlgorithmsTest(unittest.TestCase):
                     object_type="Pump",
                     object_id=2101,
                     available=True,
+                    status="ON",
                     values={"unit_status": 1.0, "blade_angle": 40.0},
                     ranges={"blade_angle": ControlValueRange(min_value=0.0, max_value=100.0)},
                 )
