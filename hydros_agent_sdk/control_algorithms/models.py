@@ -84,7 +84,11 @@ class ControlValueRange(ControlAlgorithmModel):
 
 
 class ControlActuator(ControlAlgorithmModel):
-    """算法调用时一个执行器的当前事实、可用性和安全范围。"""
+    """算法调用时一个执行器的当前事实、可用性和安全范围。
+
+    ``status`` 表示 ``ON/OFF`` 开停机事实；``available`` 独立表示
+    执行器当前是否可以参与自动控制。
+    """
 
     object_type: str
     object_id: int
@@ -96,7 +100,10 @@ class ControlActuator(ControlAlgorithmModel):
 
 
 class ControlActuatorTarget(ControlAlgorithmModel):
-    """算法计算出的候选执行器目标，尚不代表设备已执行。"""
+    """算法计算出的候选执行器目标，尚不代表设备已执行。
+
+    ``available`` 保留输入中的可控语义，不表示执行器当前已开机。
+    """
 
     object_type: str
     object_id: int
