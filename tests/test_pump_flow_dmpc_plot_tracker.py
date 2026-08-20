@@ -197,8 +197,15 @@ class PumpFlowDmpcExecutionTrackerTest(unittest.TestCase):
             "output/edge_execution",
         )
 
-    def test_create_default_plot_tracker_returns_tracker(self):
+    def test_create_default_plot_tracker_disabled_by_default(self):
         tracker = create_default_plot_tracker(output_dir=self.output_dir)
+        self.assertIsNone(tracker)
+
+    def test_create_default_plot_tracker_returns_tracker_when_enabled(self):
+        tracker = create_default_plot_tracker(
+            output_dir=self.output_dir,
+            enabled=True,
+        )
         self.assertIsNotNone(tracker)
         self.assertEqual(
             str(tracker.output_dir).replace("\\", "/"),

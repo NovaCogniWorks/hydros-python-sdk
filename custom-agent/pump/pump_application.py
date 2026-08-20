@@ -42,9 +42,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=int(os.getenv("HYDROS_CONTROL_ALGORITHM_HTTP_PORT", "8015")),
     )
     parser.add_argument(
+        "--enable-plot",
+        action="store_true",
+        help="启用边缘控制算法下层执行结果绘图（默认关闭）",
+    )
+    parser.add_argument(
         "--control-algorithm-plot-output-dir",
         default=os.getenv("HYDROS_CONTROL_ALGORITHM_PLOT_OUTPUT_DIR"),
-        help="可选：指定下层执行结果绘图输出目录；缺省使用 output/edge_execution（始终启用）",
+        help="可选：指定下层执行结果绘图输出目录；需配合 --enable-plot 启用，缺省使用 output/edge_execution",
     )
     parser.add_argument("launcher_args", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
@@ -57,7 +62,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     log_dir = os.path.join(launcher_dir, "logs")
     plot_output_dir = options.control_algorithm_plot_output_dir
     plot_tracker = create_default_plot_tracker(
-        output_dir=Path(plot_output_dir) if plot_output_dir else None
+        output_dir=Path(plot_output_dir) if plot_output_dir else None,
+        enabled=options.enable_plot,
     )
     algorithm_host = PumpFlowDmpcHttpHost(
         host=options.control_algorithm_host,
