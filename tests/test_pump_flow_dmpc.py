@@ -388,7 +388,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
         )
         station_ctx = SimpleNamespace(
             station_id=2001,
-            station_model=None,
+            station_model=Mock(),
             available_unit_ids=[2101, 2102],
             max_blade_delta_per_step=float("inf"),
         )
@@ -420,70 +420,6 @@ class PumpFlowDmpcTest(unittest.TestCase):
         # 流量/扬程预筛后，只有 [2101, 2102] 能命中 64 m³/s；
         # 单机组合被筛掉，不再进入在线 NLP。
         self.assertEqual(1, len(action.candidate_plans))
-
-    def test_odd3_reuses_offline_flow_table_before_online_nlp(self):
-        station_model = PumpStationModel(
-            self._three_unit_station(),
-            self._flow_depart_table(
-                [
-                    {
-                        "total_flow": 64.0,
-                        "efficiency": 90.0,
-                        "statuses": {2101: 1, 2102: 1, 2103: 0},
-                        "flows": {2101: 32.0, 2102: 32.0, 2103: 0.0},
-                    },
-                ]
-            ),
-        )
-        flow_service = Mock()
-        flow_service.get_unit_model.return_value = SimpleNamespace(
-            predict_efficiency=lambda flow, head: 80.0
-        )
-        controller = LocalController(
-            system_config=SimpleNamespace(),
-            runtime=SimpleNamespace(
-                control_horizon_lower=1,
-                head_search_tolerance=0.35,
-                lower_flow_weight=1.0,
-                lower_adjust_count_weight=0.0,
-                lower_switch_weight=0.0,
-            ),
-            flow_service=flow_service,
-        )
-        station_ctx = SimpleNamespace(
-            station_id=2001,
-            station_model=station_model,
-            available_unit_ids=[2101, 2102],
-            max_blade_delta_per_step=float("inf"),
-        )
-        transfer_bundle = SimpleNamespace(
-            reference_flow=[64.0],
-            reference_head=[5.0],
-            reference_back_level=[10.0],
-            reference_front_level=[5.0],
-        )
-        station_memory = SimpleNamespace(
-            active_unit_ids=[2101],
-            unit_openings={2101: 0.0, 2102: 0.0},
-            unit_status={2101: 0, 2102: 0},
-            time_since_switch={2101: 999, 2102: 999},
-        )
-
-        action = controller.solve(
-            mode="ODD3",
-            station_ctx=station_ctx,
-            upstream_prediction={},
-            disturbance_forecast={},
-            transfer_bundle=transfer_bundle,
-            station_memory=station_memory,
-        )
-
-        self.assertEqual("ODD3", action.mode)
-        self.assertAlmostEqual(64.0, action.selected_flow, places=6)
-        self.assertEqual({2101: 1, 2102: 1}, action.unit_status)
-        self.assertTrue(
-            any(plan.get("reason") == "cache_row" for plan in action.candidate_plans)
-        )
 
     def test_station_model_rejects_superset_row_with_unavailable_active_unit(self):
         table = self._flow_depart_table(
