@@ -221,11 +221,22 @@ class PumpFlowDmpcSolver:
             disturbance_estimate={},
         )
 
-        # Online ODD control uses per-unit performance models directly. Station
-        # flow-depart tables are offline planning artifacts, not a solve input.
+        # ODD3 may reuse the offline optimal flow-depart table (same as the
+        # scheduling controller) to avoid exhaustive online unit-combination
+        # search.  If the cached table is unavailable, leave station_model as
+        # None so the lower controller degrades back to the online NLP path.
+        station_model = None
+        if arguments.mode == "ODD3":
+            try:
+                station_model = self._flow_service.get_station_model(
+                    station_id, arguments.available_unit_ids
+                )
+            except Exception:
+                station_model = None
+
         station_ctx = StationControlContext(
             station_id=station_id,
-            station_model=None,
+            station_model=station_model,
             available_unit_ids=list(arguments.available_unit_ids),
             basin_levels={},
             basin_profiles=None,
