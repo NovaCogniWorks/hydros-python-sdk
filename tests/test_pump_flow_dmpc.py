@@ -417,7 +417,9 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual({2101: 1, 2102: 1}, action.unit_status)
         self.assertAlmostEqual(64.0, action.selected_flow, places=6)
         self.assertAlmostEqual(64.0, sum(action.unit_flows.values()), places=6)
-        self.assertEqual(3, len(action.candidate_plans))
+        # 流量/扬程预筛后，只有 [2101, 2102] 能命中 64 m³/s；
+        # 单机组合被筛掉，不再进入在线 NLP。
+        self.assertEqual(1, len(action.candidate_plans))
 
     def test_station_model_rejects_superset_row_with_unavailable_active_unit(self):
         table = self._flow_depart_table(

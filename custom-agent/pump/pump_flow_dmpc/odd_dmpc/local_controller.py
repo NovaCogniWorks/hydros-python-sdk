@@ -129,6 +129,8 @@ class LocalController:
             mode=mode,
             available_unit_ids=station_ctx.available_unit_ids,
             current_active_unit_ids=station_memory.active_unit_ids,
+            station_ctx=station_ctx,
+            transfer_bundle=transfer_bundle,
         )
         if not candidate_sets:
             return self.hold_action(station_ctx, transfer_bundle, station_memory, mode=mode)
@@ -213,6 +215,8 @@ class LocalController:
         mode: str,
         available_unit_ids: List[int],
         current_active_unit_ids: List[int],
+        station_ctx: Optional[StationControlContext] = None,
+        transfer_bundle: Optional[TransferBundle] = None,
     ) -> List[List[int]]:
         available_ids = sorted(int(unit_id) for unit_id in available_unit_ids)
         available_set = set(available_ids)
@@ -224,7 +228,86 @@ class LocalController:
             for size in range(1, len(available_ids) + 1)
             for combo in combinations(available_ids, size)
         ]
-        return candidate_sets
+        screened = self._screen_candidates_by_flow_head(
+            candidate_sets,
+            station_ctx=station_ctx,
+            transfer_bundle=transfer_bundle,
+        )
+        return screened if screened else candidate_sets
+
+    def _screen_candidates_by_flow_head(
+        self,
+        candidate_sets: List[List[int]],
+        *,
+        station_ctx: Optional[StationControlContext],
+        transfer_bundle: Optional[TransferBundle],
+    ) -> List[List[int]]:
+        """跳过无法命中目标流量/扬程范围的机组组合，减少在线 NLP 次数。
+
+        仅在能够取得目标规划（流量/扬程序列）时启用；筛选结果为空时由调用方
+        回退到全量组合，保留原来的 best-effort 行为。
+        """
+        if (
+            station_ctx is None
+            or transfer_bundle is None
+            or not transfer_bundle.reference_flow
+            or not transfer_bundle.reference_head
+        ):
+            return candidate_sets
+
+        horizon = min(
+            self.runtime.control_horizon_lower,
+            len(transfer_bundle.reference_flow),
+            len(transfer_bundle.reference_head),
+        )
+        if horizon <= 0:
+            return candidate_sets
+
+        unit_models = {
+            unit_id: self.flow_service.get_unit_model(station_ctx.station_id, unit_id)
+            for unit_id in station_ctx.available_unit_ids
+        }
+
+        flow_plan = transfer_bundle.reference_flow
+        head_plan = transfer_bundle.reference_head
+        screened: List[List[int]] = []
+        for combo in candidate_sets:
+            if self._combo_can_track_plan(
+                combo,
+                unit_models=unit_models,
+                flow_plan=flow_plan,
+                head_plan=head_plan,
+                horizon=horizon,
+            ):
+                screened.append(combo)
+        return screened
+
+    @staticmethod
+    def _combo_can_track_plan(
+        combo: List[int],
+        *,
+        unit_models,
+        flow_plan: list,
+        head_plan: list,
+        horizon: int,
+    ) -> bool:
+        eps = 1e-9
+        for step in range(horizon):
+            target_flow = float(flow_plan[step])
+            head = float(head_plan[step])
+            if not np.isfinite(target_flow) or not np.isfinite(head):
+                return False
+            sum_q_min = 0.0
+            sum_q_max = 0.0
+            for unit_id in combo:
+                unit = unit_models[unit_id]
+                if not (float(unit.h_min) <= head <= float(unit.h_max)):
+                    return False
+                sum_q_min += float(unit.q_min)
+                sum_q_max += float(unit.q_max)
+            if not (sum_q_min - eps <= target_flow <= sum_q_max + eps):
+                return False
+        return True
 
     def _optimize_combo_over_horizon(
         self,
