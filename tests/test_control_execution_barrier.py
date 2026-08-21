@@ -1,7 +1,11 @@
 from threading import Event, Thread
 from unittest.mock import Mock
 
-from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.agents.central_scheduling_agent import (
+    CentralSchedulingAgent,
+    DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS,
+)
+from hydros_agent_sdk.agents.mpc_central_scheduling_agent import MpcSchedulingOptions
 from hydros_agent_sdk.protocol.agent_commands import (
     HydroStationTargetValueRequest,
     HydroStationTargetValueResponse,
@@ -66,6 +70,28 @@ def _build_central_and_command():
         main_step_index=8,
     )
     return context, central, target, command
+
+
+def test_central_control_execution_timeout_defaults_to_300_seconds():
+    context = SimulationContext(biz_scene_instance_id="scene-default-control-timeout")
+    client = Mock(state_manager=Mock(), transport=Mock())
+    central = GenericCentralForTest(
+        sim_coordination_client=client,
+        agent_id="central-default-timeout",
+        agent_code="CENTRAL_SCHEDULING_AGENT",
+        agent_type="CENTRAL_SCHEDULING_AGENT",
+        agent_name="Central",
+        context=context,
+        hydros_cluster_id="cluster-a",
+        hydros_node_id="node-a",
+    )
+
+    assert DEFAULT_CONTROL_EXECUTION_TIMEOUT_SECONDS == 300.0
+    assert central._control_execution_timeout_seconds == 300.0
+    assert (
+        MpcSchedulingOptions.from_kwargs({}).mpc_control_execution_timeout_seconds
+        == 300.0
+    )
 
 
 def test_generic_central_waits_for_edge_terminal_report_not_acceptance_response():
