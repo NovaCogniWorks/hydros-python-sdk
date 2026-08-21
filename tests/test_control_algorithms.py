@@ -77,17 +77,19 @@ class ControlAlgorithmsTest(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ControlAlgorithmInput.model_validate(payload)
 
-    def test_actuator_target_serializes_edge_available_contract(self):
+    def test_actuator_target_serializes_availability_and_target_status(self):
         running = ControlActuatorTarget(
             object_type="Pump",
             object_id=2101,
             available=True,
+            status="ON",
             target_values={"blade_angle": -1.5},
         )
         stopped = ControlActuatorTarget(
             object_type="Pump",
             object_id=2102,
-            available=False,
+            available=True,
+            status="OFF",
         )
 
         self.assertEqual(
@@ -95,11 +97,13 @@ class ControlAlgorithmsTest(unittest.TestCase):
                 "object_type": "Pump",
                 "object_id": 2101,
                 "available": True,
+                "status": "ON",
                 "target_values": {"blade_angle": -1.5},
             },
             running.model_dump(mode="json"),
         )
-        self.assertFalse(stopped.model_dump(mode="json")["available"])
+        self.assertTrue(stopped.model_dump(mode="json")["available"])
+        self.assertEqual("OFF", stopped.model_dump(mode="json")["status"])
         self.assertEqual({}, stopped.target_values)
 
     def test_runtime_returns_hold_and_standard_failures(self):
