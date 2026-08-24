@@ -7,8 +7,8 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, os.path.abspath("custom-agent/pump"))
 
-from control_algorithm_contract_probe import ControlAlgorithmContractProbe  # noqa: E402
-from control_algorithm_contract_probe_service import (  # noqa: E402
+from control_algorithm_contract_probe import (  # noqa: E402
+    ControlAlgorithmContractProbe,
     create_control_algorithm_contract_probe_server,
 )
 from hydros_agent_sdk import (  # noqa: E402
