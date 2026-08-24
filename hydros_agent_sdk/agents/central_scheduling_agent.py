@@ -30,7 +30,11 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateResponse,
     SimTaskTerminateRequest,
     SimTaskTerminateResponse,
+    HydroEventCommand,
+    OutflowTimeSeriesResponse,
 )
+from hydros_agent_sdk.protocol.events import OutflowPlanningEvent, TimeSeriesDataChangedEvent
+from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType
 from hydros_agent_sdk.protocol.agent_commands import (
     HydroStationTargetValueRequest,
     HydroStationTargetValueResponse,
@@ -349,6 +353,53 @@ class CentralSchedulingAgent(TickableAgent):
         except Exception as e:
             logger.error("Error handling central scheduling time series update: %s", e, exc_info=True)
             return ResponseFactory.time_series_data_update_failed(self, request)
+
+    def on_outflow_planning(
+        self,
+        request: HydroEventCommand,
+    ) -> OutflowTimeSeriesResponse:
+        """直接返回事件携带的规划时序；MPC 子类可在返回前注入运行态。"""
+        event = request.payload
+        if not isinstance(event, OutflowPlanningEvent):
+            raise TypeError("HydroEventCommand.payload must be OutflowPlanningEvent")
+        if not event.object_time_series:
+            raise ValueError("OutflowPlanningEvent.object_time_series must not be empty")
+        return ResponseFactory.outflow_planning_succeed(
+            self,
+            request,
+            self._group_object_time_series_by_type(event.object_time_series),
+        )
+
+    @staticmethod
+    def _group_object_time_series_by_type(
+        object_time_series: List[ObjectTimeSeries],
+    ) -> Dict[str, List[ObjectTimeSeries]]:
+        grouped: Dict[str, List[ObjectTimeSeries]] = {}
+        for item in object_time_series:
+            if not item.object_type:
+                raise ValueError("ObjectTimeSeries.object_type must not be empty")
+            grouped.setdefault(item.object_type, []).append(item)
+        return grouped
+
+    @staticmethod
+    def _build_time_series_changed_event_from_outflow(
+        event: OutflowPlanningEvent,
+        object_time_series: Optional[List[ObjectTimeSeries]] = None,
+    ) -> TimeSeriesDataChangedEvent:
+        return TimeSeriesDataChangedEvent(
+            hydro_event_type=AgentEventType.TIME_SERIES_DATA_UPDATED,
+            hydro_event_name=event.hydro_event_name,
+            hydro_event_source=event.hydro_event_id,
+            hydro_event_source_type=event.hydro_event_type,
+            hydro_event_description=event.hydro_event_description,
+            auto_schedule_at_step=event.auto_schedule_at_step,
+            context=event.context,
+            object_time_series=(
+                list(object_time_series)
+                if object_time_series is not None
+                else list(event.object_time_series)
+            ),
+        )
 
     def on_boundary_condition_update(self, time_series_list: List[ObjectTimeSeries]):
         """

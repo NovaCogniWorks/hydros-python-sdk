@@ -25,7 +25,7 @@ from hydros_agent_sdk.protocol.commands import (
     MpcPredictionResultReport,
     MpcExecutionStatusReport,
     EdgeControlExecutionReport,
-    OutflowTimeSeriesRequest,
+    HydroEventCommand,
 )
 from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.protocol.models import HydroAgentInstance
@@ -434,13 +434,13 @@ class SimCoordinationCallback(ABC):
         """
         logger.debug("Identified parameter updated (default handler)")
 
-    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+    def on_outflow_planning(self, request: HydroEventCommand):
         """
-        请求外发流量时序数据时调用。
+        收到面向中央调度智能体的出流规划事件时调用。
 
         默认实现会记录该事件。可按需覆盖。
 
         Args:
-            request: 外发流量时序请求
+            request: payload 为 OutflowPlanningEvent 的水利事件指令
         """
-        logger.debug("Outflow time series request received")
+        logger.debug("Outflow planning event received")

@@ -43,6 +43,8 @@ python scripts/run_test_baseline.py central-events
 - 成功事件激活 MPC rolling loop，并返回 `hydro_event_ack_response`。
 - 缺少 rolling 配置时返回 `FAILED` ack，且不创建 `task_state`。
 - 直接 `time_series_data_update_request` 能经 multi-agent 分发到中央调度。
+- `OUTFLOW_PLANNING` 事件激活默认 MPC，并返回 `outflow_time_series_response`。
+- 出流规划失败仍返回失败的 `outflow_time_series_response`，而不是通用 ACK。
 - `OUTFLOW_TIME_SERIES_DATA_UPDATED` 当前默认语义是成功 ack，但不激活 MPC。
 
 ### `central`
@@ -93,7 +95,6 @@ python scripts/run_test_baseline.py sdk
 测试之外、可被 `unittest` 稳定收集的测试。当前排除：
 
 - `tests.test_hydrosim_demo`
-- `tests.test_power_outflowplan_power_agent`
 - `tests.test_pump_dynamic_demand_plan`
 - `tests.test_pump_scheduling_agent`
 

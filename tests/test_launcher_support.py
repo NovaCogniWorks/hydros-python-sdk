@@ -14,19 +14,19 @@ def test_agent_directory_resolver_has_no_business_aliases_by_default():
     resolver = AgentDirectoryResolver("/tmp/hydros-agents")
 
     assert resolver.normalize_agent_name("pump") == "pump"
-    assert resolver.normalize_agent_name("outflowplan") == "outflowplan"
+    assert resolver.normalize_agent_name("scheduling") == "scheduling"
 
 
 def test_launcher_cli_parses_explicit_agent_names_without_business_expansion():
     class DiscoveryService:
         def discover_all(self):
-            return ["outflowplan", "scheduling"]
+            return ["pump", "scheduling"]
 
     cli = LauncherCli(DiscoveryService())
 
-    options = cli.parse(["multi_agent_launcher.py", "outflowplan", "scheduling"])
+    options = cli.parse(["multi_agent_launcher.py", "pump", "scheduling"])
 
-    assert options.agent_names == ["outflowplan", "scheduling"]
+    assert options.agent_names == ["pump", "scheduling"]
     assert not options.all_requested
 
 
@@ -235,11 +235,11 @@ def test_multi_agent_coordinator_runs_generic_registration_flow():
         managed_services=(managed_service,),
     )
 
-    assert coordinator.start_all(["outflowplan", "scheduling"])
+    assert coordinator.start_all(["pump", "scheduling"])
 
-    assert reporter.starting_agents == ["outflowplan", "scheduling"]
+    assert reporter.starting_agents == ["pump", "scheduling"]
     assert registration_service.callback is callback
-    assert registration_service.agent_names == ["outflowplan", "scheduling"]
+    assert registration_service.agent_names == ["pump", "scheduling"]
     assert client_factory.callback is callback
     assert callback.client is client
     assert managed_service.started

@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
+    HydroEventCommand,
     OutflowTimeSeriesDataUpdateRequest,
     SimTaskInitRequest,
     SimTaskTerminateRequest,
@@ -17,6 +18,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.events import (
+    OutflowPlanningEvent,
     OutflowTimeSeriesDataChangedEvent,
     TimeSeriesDataChangedEvent,
 )
@@ -106,6 +108,120 @@ def test_power_scheduling_agent_uses_generic_central_base():
     agent, _, _ = _build_agent(module, "power-generic-central-base")
     assert not hasattr(agent, "_mpc_rolling_runtime")
     assert not hasattr(agent, "_mpc_optimization_service")
+
+
+def test_power_outflow_planning_uses_embedded_power_series_and_returns_station_output():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-outflow-planning")
+    agent._hydrosim_api.get_station_power_planning_series = Mock(
+        return_value={
+            "station_power_series": [
+                {
+                    "node_id": 20100,
+                    "station": "Station-20100",
+                    "time_series": [{"step": 4, "value": 500.0}],
+                }
+            ]
+        }
+    )
+    agent._refresh_rolling_window_for_boundary_change = Mock()
+    event = OutflowPlanningEvent(
+        hydro_event_id="power-plan-event",
+        auto_schedule_at_step=4,
+        object_time_series=[
+            ObjectTimeSeries(
+                object_id=20100,
+                object_type="Station",
+                object_name="Station-20100",
+                metrics_code="output_power",
+                time_series=[TimeSeriesValue(step=4, value=500.0)],
+            )
+        ],
+    )
+
+    response = agent.on_outflow_planning(
+        HydroEventCommand(
+            command_id="power-plan-command",
+            context=context,
+            target_agent_instance=agent,
+            payload=event,
+        )
+    )
+
+    assert response.command_status == CommandStatus.SUCCEED
+    assert response.hydro_event == event
+    assert response.outflow_time_series_map["Station"][0].metrics_code == "output_power"
+    assert response.outflow_time_series_map["Station"][0].time_series[0].value == 500.0
+    assert agent._hydrosim_power_plan_loaded is True
+    agent._hydrosim_api.get_station_power_planning_series.assert_called_once()
+    assert agent._peek_mpc_task_state().hydro_events[0].hydro_event_source_type == "OUTFLOW_PLANNING"
+
+
+def test_power_outflow_planning_uses_inflow_path_without_fallback():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-inflow-planning")
+    agent._hydrosim_api.get_station_power_planning_series_from_inflow = Mock(
+        return_value={
+            "station_power_series": [
+                {
+                    "node_id": 20100,
+                    "station": "Station-20100",
+                    "time_series": [{"step": 3, "value": 480.0}],
+                }
+            ]
+        }
+    )
+    agent._refresh_rolling_window_for_boundary_change = Mock()
+
+    response = agent.on_outflow_planning(
+        HydroEventCommand(
+            command_id="power-inflow-command",
+            context=context,
+            target_agent_instance=agent,
+            payload=OutflowPlanningEvent(
+                auto_schedule_at_step=3,
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20100,
+                        object_type="Station",
+                        metrics_code="water_flow",
+                        time_series=[TimeSeriesValue(step=3, value=334.0)],
+                    )
+                ],
+            ),
+        )
+    )
+
+    assert response.outflow_time_series_map["Station"][0].time_series[0].value == 480.0
+    agent._hydrosim_api.get_station_power_planning_series_from_inflow.assert_called_once()
+
+
+def test_power_outflow_follow_up_is_ack_only():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-outflow-follow-up")
+    agent._hydrosim_api.apply_time_series_event_update = Mock()
+
+    response = agent.on_outflow_time_series_data_update(
+        OutflowTimeSeriesDataUpdateRequest(
+            command_id="power-outflow-follow-up-command",
+            context=context,
+            outflow_time_series_data_changed_event=OutflowTimeSeriesDataChangedEvent(
+                hydro_event_source_type="OUTFLOW_PLANNING",
+                object_type="Station",
+                object_time_series=[
+                    ObjectTimeSeries(
+                        object_id=20100,
+                        object_type="Station",
+                        metrics_code="output_power",
+                        time_series=[TimeSeriesValue(step=3, value=480.0)],
+                    )
+                ],
+            ),
+        )
+    )
+
+    assert response.command_status == CommandStatus.SUCCEED
+    agent._hydrosim_api.apply_time_series_event_update.assert_not_called()
 
 
 def test_power_scheduling_init_defers_expensive_power_plan_load():
@@ -394,7 +510,7 @@ def test_power_scheduling_uses_bundled_data_default_planning_file():
     agent, _, _ = _build_agent(module, "power-scene-default-001")
     agent.properties["hydrosim_time_series_file"] = (
         "/mnt/e/Hydros/hydros-python-sdk/custom-agent/power/.runtime/"
-        "outflowplan/time_series_power_planning.json"
+        "obsolete/time_series_power_planning.json"
     )
     agent._hydrosim_api.initialize = Mock(return_value={"session": {"session_id": "session-default-runtime-002"}})
 
@@ -1342,7 +1458,7 @@ def test_power_scheduling_optimization_uses_only_station_turbine_out_flow():
     )
 
 
-def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
+def test_power_scheduling_outflow_update_is_ack_only():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-005")
 
@@ -1361,7 +1477,7 @@ def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
             command_id="outflow-apply-001",
             context=context,
             outflow_time_series_data_changed_event=OutflowTimeSeriesDataChangedEvent(
-                hydro_event_source_type="OUTFLOW_TIME_SERIES",
+                hydro_event_source_type="OUTFLOW_PLANNING",
                 object_type="Gate",
                 object_time_series=[
                     ObjectTimeSeries(
@@ -1377,7 +1493,7 @@ def test_power_scheduling_outflow_update_refreshes_hydrosim_session():
     )
 
     assert response.command_status == "SUCCEED"
-    agent._hydrosim_api.apply_time_series_event_update.assert_called_once()
+    agent._hydrosim_api.apply_time_series_event_update.assert_not_called()
 
 
 def test_power_scheduling_time_series_update_passes_current_step_cache_to_hydrosim():
@@ -1757,7 +1873,7 @@ def test_hydrosim_apply_time_series_event_update_replaces_matching_outflow_serie
 
     api.apply_time_series_event_update(
         OutflowTimeSeriesDataChangedEvent(
-            hydro_event_source_type="OUTFLOW_TIME_SERIES",
+            hydro_event_source_type="OUTFLOW_PLANNING",
             object_type="Station",
             object_time_series=[
                 ObjectTimeSeries(
@@ -1827,7 +1943,7 @@ def test_hydrosim_apply_time_series_event_update_removes_overlapping_station_pow
 
     api.apply_time_series_event_update(
         OutflowTimeSeriesDataChangedEvent(
-            hydro_event_source_type="OUTFLOW_TIME_SERIES",
+            hydro_event_source_type="OUTFLOW_PLANNING",
             object_type="Station",
             object_time_series=[
                 ObjectTimeSeries(

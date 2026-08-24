@@ -20,6 +20,7 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
 )
 from hydros_agent_sdk.protocol.models import CommandStatus, HydroAgentInstance
+from hydros_agent_sdk.protocol.events import OutflowPlanningEvent
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.state_manager import AgentStateManager
 
@@ -64,6 +65,12 @@ class CoordinationErrorResponseFactory:
         elif isinstance(command, TimeSeriesDataUpdateRequest):
             error_code = ErrorCodes.TIME_SERIES_UPDATE_FAILURE
             factory_method = ResponseFactory.time_series_data_update_failed
+        elif (
+            isinstance(command, HydroEventCommand)
+            and isinstance(command.payload, OutflowPlanningEvent)
+        ):
+            error_code = ErrorCodes.SIMULATION_EXECUTION_FAILURE
+            factory_method = ResponseFactory.outflow_planning_failed
         elif isinstance(command, HydroEventCommand):
             return HydroEventAckResponse(
                 context=command.context,

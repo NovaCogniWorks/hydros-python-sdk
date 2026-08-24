@@ -15,6 +15,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateResponse,
     TimeSeriesDataUpdateResponse,
     OutflowTimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesResponse,
     TimeSeriesCalculationResponse,
 )
 from hydros_agent_sdk.protocol.models import (
@@ -171,6 +172,41 @@ class ResponseFactory:
             error_code=error_code,
             error_message=error_message,
             source_agent_instance=agent,
+            broadcast=False,
+        )
+
+    @staticmethod
+    def outflow_planning_succeed(
+        agent: HydroAgentInstance,
+        request,
+        outflow_time_series_map: Optional[Dict[str, List[ObjectTimeSeries]]] = None,
+    ) -> OutflowTimeSeriesResponse:
+        return OutflowTimeSeriesResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.SUCCEED,
+            source_agent_instance=agent,
+            hydro_event=request.payload,
+            outflow_time_series_map=outflow_time_series_map or {},
+            broadcast=False,
+        )
+
+    @staticmethod
+    def outflow_planning_failed(
+        agent: HydroAgentInstance,
+        request,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> OutflowTimeSeriesResponse:
+        return OutflowTimeSeriesResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.FAILED,
+            error_code=error_code,
+            error_message=error_message,
+            source_agent_instance=agent,
+            hydro_event=request.payload,
+            outflow_time_series_map={},
             broadcast=False,
         )
 

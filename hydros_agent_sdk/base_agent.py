@@ -29,7 +29,6 @@ from hydros_agent_sdk.protocol.commands import (
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
     TimeSeriesCalculationRequest,
-    OutflowTimeSeriesRequest,
 )
 from hydros_agent_sdk.agent_properties import AgentProperties
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
@@ -253,17 +252,6 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
             request: 时序计算请求
         """
         logger.info(f"Time series calculation: {request.command_id}")
-
-    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
-        """
-        处理外发流量时序请求。
-
-        默认实现。可按需覆盖。
-
-        Args:
-            request: 外发流量时序请求
-        """
-        logger.info(f"Outflow time series request: {request.command_id}")
 
     def send_response(self, response):
         """

@@ -57,8 +57,8 @@ python twins_agent.py
 cd examples/agents/ontology
 python ontology_agent.py
 
-cd examples/agents/outflowplan
-python pump_outflow_plan_agent.py
+cd custom-agent/power
+bash start_agents.sh scheduling
 ```
 
 ## Architecture
@@ -83,8 +83,7 @@ python pump_outflow_plan_agent.py
 - `OntologySimulationAgent`: Ontology-based simulation
 - `TwinsSimulationAgent`: Digital twins high-fidelity simulation
 - `ModelCalculationAgent`: Event-driven model calculation
-- `CentralSchedulingAgent`: Central scheduling with MPC optimization
-- `OutflowPlanAgent`: Event-driven outflow planning agent
+- `CentralSchedulingAgent`: Central scheduling with MPC optimization and event-driven outflow planning
 
 **Protocol Models** (`protocol/`)
 - `models.py`: Core data models (SimulationContext, HydroAgentInstance, etc.)

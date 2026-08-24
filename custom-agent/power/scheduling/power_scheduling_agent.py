@@ -34,8 +34,10 @@ from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
 from hydros_agent_sdk.protocol.commands import (
+    HydroEventCommand,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
+    OutflowTimeSeriesResponse,
     SimTaskInitRequest,
     SimTaskInitResponse,
     SimTaskTerminateRequest,
@@ -44,12 +46,20 @@ from hydros_agent_sdk.protocol.commands import (
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
 )
-from hydros_agent_sdk.protocol.models import AgentStatus, CommandStatus, SimulationContext
+from hydros_agent_sdk.protocol.events import OutflowPlanningEvent
+from hydros_agent_sdk.protocol.models import (
+    AgentStatus,
+    CommandStatus,
+    ObjectTimeSeries,
+    SimulationContext,
+    TimeSeriesValue,
+)
+from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-04-station-out-flow-control-v10"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-24-central-outflow-planning-v11"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -986,20 +996,112 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self,
         request: OutflowTimeSeriesDataUpdateRequest,
     ) -> OutflowTimeSeriesDataUpdateResponse:
-        with self._runtime_lock:
-            logger.info("Outflow time series update received: commandId=%s", request.command_id)
-            event = request.outflow_time_series_data_changed_event
-            task_state = self._activate_mpc_task_state_from_event(event)
-            self._refresh_hydrosim_session_from_event(event)
-            self._refresh_rolling_window_for_boundary_change(task_state.current_step, task_state)
-
-        return OutflowTimeSeriesDataUpdateResponse(
-            context=self.context,
-            command_id=request.command_id,
-            command_status=CommandStatus.SUCCEED,
-            source_agent_instance=self,
-            broadcast=False,
+        logger.info(
+            "Outflow planning follow-up acknowledged without reprocessing: commandId=%s",
+            request.command_id,
         )
+        return ResponseFactory.outflow_time_series_data_update_succeed(self, request)
+
+    def on_outflow_planning(
+        self,
+        request: HydroEventCommand,
+    ) -> OutflowTimeSeriesResponse:
+        """使用当前 HydroSim 会话生成 Station/output_power 规划结果。"""
+        event = request.payload
+        if not isinstance(event, OutflowPlanningEvent):
+            raise TypeError("HydroEventCommand.payload must be OutflowPlanningEvent")
+        if not event.object_time_series:
+            raise ValueError("OutflowPlanningEvent.object_time_series must not be empty")
+
+        with self._runtime_lock:
+            logger.info("Power outflow planning received: commandId=%s", request.command_id)
+            self._ensure_hydrosim_initialized()
+            planned_series = self._execute_power_outflow_planning(event.object_time_series)
+            self._hydrosim_power_plan_loaded = True
+
+            changed_event = self._build_time_series_changed_event_from_outflow(
+                event,
+                planned_series,
+            )
+            task_state = self._activate_mpc_task_state_from_event(changed_event)
+            self._refresh_rolling_window_for_boundary_change(
+                task_state.current_step,
+                task_state,
+            )
+
+        return ResponseFactory.outflow_planning_succeed(
+            self,
+            request,
+            {"Station": planned_series},
+        )
+
+    def _execute_power_outflow_planning(
+        self,
+        object_time_series: List[ObjectTimeSeries],
+    ) -> List[ObjectTimeSeries]:
+        power_series = [
+            item
+            for item in object_time_series
+            if item.object_type == "Station" and item.metrics_code == "output_power"
+        ]
+        inflow_series = [
+            item
+            for item in object_time_series
+            if item.object_type == "Station" and item.metrics_code == "water_flow"
+        ]
+
+        if power_series:
+            planning_result = self._hydrosim_api.get_station_power_planning_series(
+                self._build_planning_payload(power_series)
+            )
+        elif inflow_series:
+            planning_result = self._hydrosim_api.get_station_power_planning_series_from_inflow(
+                self._build_planning_payload(inflow_series)
+            )
+        else:
+            raise ValueError(
+                "OutflowPlanningEvent requires Station/output_power or Station/water_flow series"
+            )
+
+        planned_series = self._build_station_power_object_time_series(
+            planning_result.get("station_power_series", [])
+        )
+        if not planned_series:
+            raise ValueError("HydroSim returned no Station/output_power planning series")
+        return planned_series
+
+    @staticmethod
+    def _build_planning_payload(
+        object_time_series: List[ObjectTimeSeries],
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        return {
+            "object_time_series": [
+                item.model_dump(mode="json", exclude_none=True)
+                for item in object_time_series
+            ]
+        }
+
+    @staticmethod
+    def _build_station_power_object_time_series(
+        station_power_series: List[Dict[str, Any]],
+    ) -> List[ObjectTimeSeries]:
+        return [
+            ObjectTimeSeries(
+                time_series_name=f"{station['station']}_power_plan",
+                object_id=int(station["node_id"]),
+                object_type="Station",
+                object_name=station["station"],
+                metrics_code="output_power",
+                time_series=[
+                    TimeSeriesValue(
+                        step=int(row["step"]),
+                        value=float(row["value"]),
+                    )
+                    for row in station.get("time_series", [])
+                ],
+            )
+            for station in station_power_series
+        ]
 
     def _refresh_hydrosim_session_from_event(self, event: Any) -> None:
         if event is None or not getattr(event, "object_time_series", None):

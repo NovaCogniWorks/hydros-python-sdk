@@ -17,7 +17,7 @@ from hydros_agent_sdk.protocol.commands import (
     SimTaskTerminateRequest,
     TimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateRequest,
-    OutflowTimeSeriesRequest,
+    HydroEventCommand,
     EdgeControlExecutionReport,
     AgentInstanceStatusReport,
 )
@@ -618,9 +618,9 @@ class MultiAgentCallback(SimCoordinationCallback):
                 logger.error(f"Error in outflow time series update for {agent_code}: {e}", exc_info=True)
         return responses
 
-    def on_outflow_time_series(self, request: OutflowTimeSeriesRequest):
+    def on_outflow_planning(self, request: HydroEventCommand):
         """
-        处理目标智能体的出流时间序列请求。
+        将出流规划事件转发给指定的中央调度智能体。
 
         与会广播给全部智能体的 on_tick 或 on_time_series_data_update 不同，
         该方法只把请求路由给请求中指定的目标智能体。
@@ -645,13 +645,20 @@ class MultiAgentCallback(SimCoordinationCallback):
             )
             return None
 
+        if target_agent.agent_id != request.target_agent_instance.agent_id:
+            raise LookupError(
+                "Outflow planning target agent instance does not match active instance: "
+                f"requested={request.target_agent_instance.agent_id}, "
+                f"active={target_agent.agent_id}"
+            )
+
         # 仅将请求转发给目标智能体
         try:
-            logger.debug(f"Routing outflow time series request to agent: {target_agent_code}")
+            logger.debug(f"Routing outflow planning event to agent: {target_agent_code}")
             response = self._execute_with_status(
                 target_agent,
-                lambda: target_agent.on_outflow_time_series(request),
-                phase="OUTFLOW_TIME_SERIES",
+                lambda: target_agent.on_outflow_planning(request),
+                phase="OUTFLOW_PLANNING",
                 metadata={
                     "command_id": request.command_id,
                     "agent_code": target_agent_code,
@@ -663,10 +670,10 @@ class MultiAgentCallback(SimCoordinationCallback):
             return response
         except Exception as e:
             logger.error(
-                f"Error in outflow time series for {target_agent_code}: {e}",
+                f"Error in outflow planning for {target_agent_code}: {e}",
                 exc_info=True
             )
-            return None
+            raise
 
     def on_station_control_execution(self, report: EdgeControlExecutionReport):
         """把 edge 控制终态交给同一任务中的中心调度 Agent。"""

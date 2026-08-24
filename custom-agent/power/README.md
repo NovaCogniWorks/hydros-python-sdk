@@ -9,9 +9,6 @@ custom-agent/
 ├── power/
 │   ├── start_agents.sh           # 启动脚本
 │   ├── multi_agent_launcher.py   # MultiAgentLauncherApp 薄入口
-│   ├── outflowplan/
-│   │   ├── agent.properties
-│   │   └── power_outflow_plan_agent.py
 │   ├── scheduling/
 │   │   ├── agent.properties
 │   │   └── power_scheduling_agent.py
@@ -45,13 +42,13 @@ hydros_node_id=example-node
 
 ### agent.properties（每个 agent）
 
-位于 `custom-agent/power/outflowplan|scheduling/agent.properties`，用于描述 agent 元信息。
+位于 `custom-agent/power/scheduling/agent.properties`，用于描述 agent 元信息。
 
 示例：
 ```properties
-agent_code=OUTFLOW_PLAN_AGENT_POWER
-agent_type=OUTFLOW_PLAN_AGENT
-agent_name=Power Outflow Plan Agent
+agent_code=CENTRAL_SCHEDULING_AGENT_POWER
+agent_type=CENTRAL_SCHEDULING_AGENT
+agent_name=Power Central Scheduling Agent
 ```
 
 ## 启动方式
@@ -59,7 +56,7 @@ agent_name=Power Outflow Plan Agent
 ### 启动指定 agent
 
 ```bash
-bash custom-agent/power/start_agents.sh outflowplan scheduling
+bash custom-agent/power/start_agents.sh scheduling
 ```
 
 ### 启动全部 agent
@@ -109,19 +106,19 @@ bash custom-agent/power/start_agents.sh --logs
 ### 启用调试（等待调试器）
 
 ```bash
-bash custom-agent/power/start_agents.sh --debug outflowplan
+bash custom-agent/power/start_agents.sh --debug scheduling
 ```
 
 ### 启用调试（不等待调试器）
 
 ```bash
-bash custom-agent/power/start_agents.sh --debug --debug-nowait outflowplan
+bash custom-agent/power/start_agents.sh --debug --debug-nowait scheduling
 ```
 
 ### 指定调试端口
 
 ```bash
-bash custom-agent/power/start_agents.sh --debug --debug-port 5679 outflowplan
+bash custom-agent/power/start_agents.sh --debug --debug-port 5679 scheduling
 ```
 
 ## 日志
@@ -138,7 +135,7 @@ bash custom-agent/power/start_agents.sh --debug --debug-port 5679 outflowplan
 
 请使用可用的 Python 命令（如 `python` 或 `py`）直接启动：
 ```bash
-python -m hydros_agent_sdk.launcher --launcher-dir custom-agent/power --project-root . -- outflowplan scheduling
+python -m hydros_agent_sdk.launcher --launcher-dir custom-agent/power --project-root . -- scheduling
 ```
 
 ### 2) MQTT 连接失败

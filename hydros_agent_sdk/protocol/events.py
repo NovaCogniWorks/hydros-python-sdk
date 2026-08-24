@@ -42,16 +42,13 @@ class OutflowTimeSeriesDataChangedEvent(HydroEvent):
         validation_alias=AliasChoices("object_time_series", "objectTimeSeries")
     )
 
-class OutflowTimeSeriesEvent(HydroEvent):
-    hydro_event_type: Literal["OUTFLOW_TIME_SERIES"] = AgentEventType.OUTFLOW_TIME_SERIES
-    event_content_url: Optional[str] = Field(
+class OutflowPlanningEvent(HydroEvent):
+    """向中央调度智能体注入出流规划时间序列的事件。"""
+
+    hydro_event_type: Literal["OUTFLOW_PLANNING"] = AgentEventType.OUTFLOW_PLANNING
+    time_series_url: Optional[str] = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "event_content_url",
-            "eventContentUrl",
-            "time_series_url",
-            "timeSeriesUrl",
-        )
+        validation_alias=AliasChoices("time_series_url", "timeSeriesUrl"),
     )
     object_time_series: List[ObjectTimeSeries] = Field(
         default_factory=list,
@@ -61,13 +58,12 @@ class OutflowTimeSeriesEvent(HydroEvent):
         default=False,
         validation_alias=AliasChoices("direct_load_time_series", "directLoadTimeSeries")
     )
-    priority: Optional[str] = None
 
 # 后续需要多态事件时使用的 Union
 HydroEventUnion = Union[
     TimeSeriesDataChangedEvent,
     OutflowTimeSeriesDataChangedEvent,
-    OutflowTimeSeriesEvent,
+    OutflowPlanningEvent,
     # 是否增加通用 HydroEvent 作为兜底？
     HydroEvent
 ]

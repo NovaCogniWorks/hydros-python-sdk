@@ -9,11 +9,13 @@ from hydros_agent_sdk.multi_agent import MultiAgentCallback
 from hydros_agent_sdk.protocol.commands import (
     HydroEventAckResponse,
     HydroEventCommand,
+    OutflowTimeSeriesResponse,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
 )
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
+    OutflowPlanningEvent,
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.models import (
@@ -130,6 +132,77 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
         self.assertEqual(agent.optimization_steps, [7])
         self.assertEqual(agent._mpc_rolling_runtime.task_state.hydro_events, [event])
 
+    def test_outflow_planning_event_activates_mpc_and_returns_grouped_result(self):
+        context = SimulationContext(biz_scene_instance_id="scene-outflow-planning")
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=True
+        )
+        event = OutflowPlanningEvent(
+            hydro_event_id="outflow-plan-event-001",
+            hydro_event_name="central outflow planning",
+            auto_schedule_at_step=6,
+            object_time_series=[
+                ObjectTimeSeries(
+                    object_id=1001,
+                    object_name="station-1001",
+                    object_type="Station",
+                    metrics_code="water_flow",
+                    time_series=[TimeSeriesValue(step=6, value=42.0)],
+                )
+            ],
+        )
+
+        client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
+            HydroEventCommand(
+                command_id="event-outflow-planning-001",
+                context=context,
+                target_agent_instance=agent,
+                payload=event,
+            )
+        )
+
+        response = self._single_response_of_type(outbound, OutflowTimeSeriesResponse)
+        self.assertEqual(response.command_status, CommandStatus.SUCCEED)
+        self.assertEqual(response.hydro_event, event)
+        self.assertEqual(response.outflow_time_series_map, {"Station": event.object_time_series})
+        self.assertEqual(agent.optimization_steps, [6])
+        injected_event = agent._mpc_rolling_runtime.task_state.hydro_events[0]
+        self.assertIsInstance(injected_event, TimeSeriesDataChangedEvent)
+        self.assertEqual(injected_event.hydro_event_source, event.hydro_event_id)
+        self.assertEqual(injected_event.hydro_event_source_type, "OUTFLOW_PLANNING")
+        self.assertEqual(injected_event.object_time_series, event.object_time_series)
+
+    def test_outflow_planning_failure_returns_outflow_response_not_ack(self):
+        context = SimulationContext(biz_scene_instance_id="scene-outflow-planning-failed")
+        client, agent, outbound = self._build_registered_central_agent(
+            context, with_rolling_config=False
+        )
+
+        client._task_runtime_registry.get_or_create(context.biz_scene_instance_id).handle(
+            HydroEventCommand(
+                command_id="event-outflow-planning-failed",
+                context=context,
+                target_agent_instance=agent,
+                payload=OutflowPlanningEvent(
+                    auto_schedule_at_step=6,
+                    object_time_series=[
+                        ObjectTimeSeries(
+                            object_id=1001,
+                            object_type="Station",
+                            metrics_code="water_flow",
+                            time_series=[TimeSeriesValue(step=6, value=42.0)],
+                        )
+                    ],
+                ),
+            )
+        )
+
+        response = self._single_response_of_type(outbound, OutflowTimeSeriesResponse)
+        self.assertEqual(response.command_status, CommandStatus.FAILED)
+        self.assertEqual(response.outflow_time_series_map, {})
+        self.assertEqual(response.error_code, "SIMULATION_EXECUTION_FAILURE")
+        self.assertIsNone(agent._mpc_rolling_runtime.task_state)
+
     def test_outflow_data_event_injection_keeps_default_central_noop_ack_without_mpc_activation(self):
         context = SimulationContext(biz_scene_instance_id="scene-outflow-noop")
         client, agent, outbound = self._build_registered_central_agent(
@@ -144,7 +217,7 @@ class CentralSchedulingEventInjectionTest(unittest.TestCase):
                 payload=OutflowTimeSeriesDataChangedEvent(
                     hydro_event_source_type="OUTFLOW_PLAN",
                     auto_schedule_at_step=9,
-                    source_agent_code="OUTFLOW_PLAN_AGENT",
+                    source_agent_code="CENTRAL_SCHEDULING_AGENT",
                     object_type="GateStation",
                     object_time_series=[
                         ObjectTimeSeries(

@@ -25,7 +25,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
-    OutflowTimeSeriesEvent,
+    OutflowPlanningEvent,
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.models import (
@@ -114,7 +114,7 @@ class HydroEventCallback(ReturningCallback):
             broadcast=False,
         )
 
-    def on_outflow_time_series(self, request):
+    def on_outflow_planning(self, request):
         self.outflow_requests.append(request)
         return OutflowTimeSeriesResponse(
             command_id=request.command_id,
@@ -122,7 +122,7 @@ class HydroEventCallback(ReturningCallback):
             command_status=CommandStatus.SUCCEED,
             source_agent_instance=self.agent,
             broadcast=False,
-            hydro_event=request.hydro_event,
+            hydro_event=request.payload,
             outflow_time_series_map={},
         )
 
@@ -901,7 +901,7 @@ def test_hydro_event_command_routes_time_series_payload_and_returns_ack():
     assert response.command_status == CommandStatus.SUCCEED
 
 
-def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
+def test_hydro_event_command_routes_outflow_planning_event_to_central_path():
     context = make_context()
     agent = make_agent(context)
     state_manager = AgentStateManager()
@@ -911,9 +911,9 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     client = make_client(callback, state_manager)
     outbound = capture_outbound(client)
 
-    event = OutflowTimeSeriesEvent(
-        hydro_event_type="OUTFLOW_TIME_SERIES",
-        event_content_url="https://example.test/outflow.yaml",
+    event = OutflowPlanningEvent(
+        hydro_event_type="OUTFLOW_PLANNING",
+        time_series_url="https://example.test/outflow.yaml",
     )
     request = HydroEventCommand(
         command_id="CMD_OUTFLOW",
@@ -929,7 +929,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     forwarded = callback.outflow_requests[0]
     assert forwarded.command_id == "CMD_OUTFLOW"
     assert forwarded.target_agent_instance.agent_id == agent.agent_id
-    assert forwarded.hydro_event.event_content_url == "https://example.test/outflow.yaml"
+    assert forwarded.payload.time_series_url == "https://example.test/outflow.yaml"
 
     response = outbound.get_nowait()
     assert isinstance(response, OutflowTimeSeriesResponse)
@@ -938,7 +938,7 @@ def test_hydro_event_command_routes_outflow_event_to_outflow_plan_path():
     assert response.command_status == CommandStatus.SUCCEED
 
 
-def test_hydro_event_command_routes_outflow_event_without_content_url():
+def test_hydro_event_command_routes_outflow_planning_event_without_url():
     context = make_context()
     agent = make_agent(context)
     state_manager = AgentStateManager()
@@ -948,7 +948,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
     client = make_client(callback, state_manager)
     outbound = capture_outbound(client)
 
-    event = OutflowTimeSeriesEvent(hydro_event_type="OUTFLOW_TIME_SERIES")
+    event = OutflowPlanningEvent(hydro_event_type="OUTFLOW_PLANNING")
     request = HydroEventCommand(
         command_id="CMD_OUTFLOW_NO_URL",
         context=context,
@@ -962,7 +962,7 @@ def test_hydro_event_command_routes_outflow_event_without_content_url():
     assert len(callback.outflow_requests) == 1
     forwarded = callback.outflow_requests[0]
     assert forwarded.command_id == "CMD_OUTFLOW_NO_URL"
-    assert forwarded.hydro_event.event_content_url is None
+    assert forwarded.payload.time_series_url is None
 
     response = outbound.get_nowait()
     assert isinstance(response, OutflowTimeSeriesResponse)
@@ -982,7 +982,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
 
     event = OutflowTimeSeriesDataChangedEvent(
         hydro_event_type="OUTFLOW_TIME_SERIES_DATA_UPDATED",
-        source_agent_code="OUTFLOW_PLAN_AGENT_PUMP",
+        source_agent_code="CENTRAL_SCHEDULING_AGENT_PUMP",
         object_type="GateStation",
         object_time_series=[
             ObjectTimeSeries(
@@ -1006,7 +1006,7 @@ def test_hydro_event_command_routes_outflow_data_updated_payload_and_returns_ack
     assert len(callback.outflow_data_updates) == 1
     forwarded = callback.outflow_data_updates[0]
     assert forwarded.command_id == "CMD_OUTFLOW_UPDATED"
-    assert forwarded.outflow_time_series_data_changed_event.source_agent_code == "OUTFLOW_PLAN_AGENT_PUMP"
+    assert forwarded.outflow_time_series_data_changed_event.source_agent_code == "CENTRAL_SCHEDULING_AGENT_PUMP"
     assert forwarded.outflow_time_series_data_changed_event.object_type == "GateStation"
     assert forwarded.outflow_time_series_data_changed_event.object_time_series[0].object_id == 20000
 
@@ -1055,15 +1055,15 @@ def test_hydro_event_command_can_be_deserialized_from_java_outflow_payload_shape
             "broadcast": False,
             "target_agent_instance": agent.model_dump(mode="json"),
             "payload": {
-                "hydro_event_type": "OUTFLOW_TIME_SERIES",
-                "eventContentUrl": "https://example.test/outflow.yaml",
+                "hydro_event_type": "OUTFLOW_PLANNING",
+                "timeSeriesUrl": "https://example.test/outflow.yaml",
             },
         }
     )
 
     assert isinstance(envelope.command, HydroEventCommand)
-    assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
-    assert envelope.command.payload.event_content_url == "https://example.test/outflow.yaml"
+    assert isinstance(envelope.command.payload, OutflowPlanningEvent)
+    assert envelope.command.payload.time_series_url == "https://example.test/outflow.yaml"
 
 
 def test_hydro_event_command_can_deserialize_java_outflow_payload_without_content_url():
@@ -1077,7 +1077,7 @@ def test_hydro_event_command_can_deserialize_java_outflow_payload_without_conten
             "broadcast": False,
             "target_agent_instance": agent.model_dump(mode="json"),
             "payload": {
-                "hydro_event_type": "OUTFLOW_TIME_SERIES",
+                "hydro_event_type": "OUTFLOW_PLANNING",
                 "hydro_event_id": "EVENT_OUTFLOW",
                 "hydro_event_name": "出流规划事件",
             },
@@ -1085,8 +1085,8 @@ def test_hydro_event_command_can_deserialize_java_outflow_payload_without_conten
     )
 
     assert isinstance(envelope.command, HydroEventCommand)
-    assert isinstance(envelope.command.payload, OutflowTimeSeriesEvent)
-    assert envelope.command.payload.event_content_url is None
+    assert isinstance(envelope.command.payload, OutflowPlanningEvent)
+    assert envelope.command.payload.time_series_url is None
 
 
 def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_shape():
@@ -1101,7 +1101,7 @@ def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_s
             "target_agent_instance": agent.model_dump(mode="json"),
             "payload": {
                 "hydro_event_type": "OUTFLOW_TIME_SERIES_DATA_UPDATED",
-                "sourceAgentCode": "OUTFLOW_PLAN_AGENT_PUMP",
+                "sourceAgentCode": "CENTRAL_SCHEDULING_AGENT_PUMP",
                 "objectType": "GateStation",
                 "objectTimeSeries": [
                     {
@@ -1117,7 +1117,7 @@ def test_hydro_event_command_can_deserialize_java_outflow_data_updated_payload_s
 
     assert isinstance(envelope.command, HydroEventCommand)
     assert isinstance(envelope.command.payload, OutflowTimeSeriesDataChangedEvent)
-    assert envelope.command.payload.source_agent_code == "OUTFLOW_PLAN_AGENT_PUMP"
+    assert envelope.command.payload.source_agent_code == "CENTRAL_SCHEDULING_AGENT_PUMP"
     assert envelope.command.payload.object_type == "GateStation"
     assert envelope.command.payload.object_time_series[0].object_id == 20000
-    assert '"sourceAgentCode":"OUTFLOW_PLAN_AGENT_PUMP"' in envelope.command.model_dump_json(by_alias=True)
+    assert '"sourceAgentCode":"CENTRAL_SCHEDULING_AGENT_PUMP"' in envelope.command.model_dump_json(by_alias=True)
