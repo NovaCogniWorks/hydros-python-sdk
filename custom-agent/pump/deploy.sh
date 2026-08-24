@@ -9,7 +9,7 @@ DEFAULT_TARGET_PORT="2375"
 BASE_IMAGE="${BASE_IMAGE:-python:3.11-slim}"
 APT_MIRROR="https://mirrors.aliyun.com"
 TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
-DEFAULT_AGENT_START_ARGS="outflowplan scheduling"
+DEFAULT_AGENT_START_ARGS="scheduling"
 
 MODE=""
 CUSTOM_TAG=""
@@ -74,7 +74,7 @@ ${APP_NAME} Python 部署脚本
 
 示例:
   $0 deploy --target-host 192.168.20.51 --target-port 2375
-  $0 deploy --target-host 192.168.20.51 --tag v1.0.1 --start-args "outflowplan scheduling"
+  $0 deploy --target-host 192.168.20.51 --tag v1.0.1 --start-args "scheduling"
   $0 build-image --tag v1.0.1
 USAGE
     exit "${exit_code}"
