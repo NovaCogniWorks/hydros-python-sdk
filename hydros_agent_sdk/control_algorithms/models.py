@@ -103,11 +103,13 @@ class ControlActuatorTarget(ControlAlgorithmModel):
     """算法计算出的候选执行器目标，尚不代表设备已执行。
 
     ``available`` 保留输入中的可控语义，不表示执行器当前已开机。
+    ``status`` 表示算法期望的 ``ON/OFF`` 启停目标。
     """
 
     object_type: str
     object_id: int
     available: bool = True
+    status: Optional[str] = None
     target_values: Dict[str, float] = Field(default_factory=dict)
 
 

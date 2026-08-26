@@ -34,12 +34,15 @@ from hydros_agent_sdk.protocol.commands import (
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
     TimeSeriesDataUpdateResponse,
+    HydroEventCommand,
+    OutflowTimeSeriesResponse,
 )
 from hydros_agent_sdk.protocol.models import (
     AgentDriveMode,
     AgentStatus,
     SimulationContext,
 )
+from hydros_agent_sdk.protocol.events import OutflowPlanningEvent
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.sensor_data import SensorData
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
@@ -417,19 +420,34 @@ class MpcCentralSchedulingAgent(CentralSchedulingAgent):
         logger.debug("Received MPC central scheduling time series update: commandId=%s", request.command_id)
 
         try:
-            event = request.time_series_data_changed_event
-            if event and event.object_time_series:
-                for time_series in event.object_time_series:
-                    cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
-                    self._time_series_cache[cache_key] = time_series
-                self.on_boundary_condition_update(event.object_time_series)
-
-            self._mpc_rolling_runtime.handle_time_series_changed(event)
+            self._apply_time_series_changed(request.time_series_data_changed_event)
 
             return ResponseFactory.time_series_data_update_succeed(self, request)
         except Exception as e:
             logger.error("Error handling MPC central scheduling time series update: %s", e, exc_info=True)
             return ResponseFactory.time_series_data_update_failed(self, request)
+
+    def on_outflow_planning(
+        self,
+        request: HydroEventCommand,
+    ) -> OutflowTimeSeriesResponse:
+        """按 Java central 语义先注入 MPC，再直接返回规划结果。"""
+        event = request.payload
+        if not isinstance(event, OutflowPlanningEvent):
+            raise TypeError("HydroEventCommand.payload must be OutflowPlanningEvent")
+        if not event.object_time_series:
+            raise ValueError("OutflowPlanningEvent.object_time_series must not be empty")
+        changed_event = self._build_time_series_changed_event_from_outflow(event)
+        self._apply_time_series_changed(changed_event)
+        return super().on_outflow_planning(request)
+
+    def _apply_time_series_changed(self, event) -> None:
+        if event and event.object_time_series:
+            for time_series in event.object_time_series:
+                cache_key = f"{time_series.object_id}_{time_series.metrics_code}"
+                self._time_series_cache[cache_key] = time_series
+            self.on_boundary_condition_update(event.object_time_series)
+        self._mpc_rolling_runtime.handle_time_series_changed(event)
 
     def on_optimization(self, step: int) -> Optional[List[Any]]:
         """

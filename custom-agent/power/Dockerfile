@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
     PYTHONPATH=/opt/hydros \
-    HYDROS_AGENT_START_ARGS="outflowplan scheduling"
+    HYDROS_AGENT_START_ARGS="scheduling"
 
 WORKDIR /opt/hydros
 
@@ -43,15 +43,13 @@ COPY custom-agent/power /opt/hydros/custom-agent/power
 
 # Agent 源文件属于镜像运行契约。构建产物不完整时在 build 阶段直接失败，
 # 避免容器启动后才由 launcher 报告目录中没有 Python 实现。
-RUN test -s /opt/hydros/custom-agent/power/outflowplan/power_outflow_plan_agent.py \
-    && test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
-    && grep -q 'POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-04-station-out-flow-control-v10"' \
+RUN test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
+    && grep -q 'POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-24-central-outflow-planning-v11"' \
         /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py \
     && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json \
     && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml \
     && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml \
     && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml \
-    && test -s /opt/hydros/custom-agent/power/outflowplan/agent.properties \
     && test -s /opt/hydros/custom-agent/power/scheduling/agent.properties
 
 WORKDIR /opt/hydros/custom-agent/power

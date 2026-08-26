@@ -129,7 +129,7 @@ The example implementation includes these simple rules:
 
 1. **Water Level Constraint**: `water_level <= 10.0`
 2. **Flow Constraint**: `flow >= 0.0`
-3. **Gate Opening Constraint**: `gate_opening <= 1.0`
+3. **Gate Opening Constraint**: `gate_opening <= 1.0`（物理开度，单位米）
 
 In a real implementation, you would have more sophisticated rules:
 

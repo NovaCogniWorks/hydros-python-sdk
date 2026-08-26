@@ -10,7 +10,7 @@ class DeviceValueTypeEnum(Enum):
 
     WATER_LEVEL = ("water_level", "水位", float)
     WATER_FLOW = ("water_flow", "水流量", float)
-    GATE_OPENING = ("gate_opening", "闸门开度", float)
+    GATE_OPENING = ("gate_opening", "闸门实际开度（米）", float)
     BLADE_ANGLE = ("blade_angle", "叶片角度", float)
     OUTPUT_POWER = ("output_power", "输出功率", float)
     UNIT_STATUS = ("unit_status", "机组启停状态", int)

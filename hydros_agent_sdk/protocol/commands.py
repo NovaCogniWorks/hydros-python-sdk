@@ -34,7 +34,6 @@ SIMCMD_EDGE_CONTROL_RESULT_REPORT = "edge_control_result_report"
 SIMCMD_EDGE_CONTROL_EXECUTION_REPORT = "edge_control_execution_report"
 SIMCMD_IDENTIFIED_PARAMS_REPORT = "identified_params_report"
 SIMCMD_HYDRO_ALERT_REPORT = "report_hydro_alert"
-SIMCMD_OUTFLOW_TIME_SERIES_REQUEST = "outflow_time_series_request"
 SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE = "outflow_time_series_response"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST = "outflow_time_series_data_update_request"
 SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_RESPONSE = "outflow_time_series_data_update_response"
@@ -120,7 +119,7 @@ class TickCmdResponse(SimCoordinationResponse):
 
 # --- 时间序列指令 ---
 
-from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesEvent, OutflowTimeSeriesDataChangedEvent
+from .events import HydroEvent, TimeSeriesDataChangedEvent, OutflowTimeSeriesDataChangedEvent
 from .events import HydroEventUnion
 from .models import ObjectTimeSeries
 
@@ -148,13 +147,6 @@ class HydroEventCommand(SimCoordinationRequest):
 
 class HydroEventAckResponse(SimCoordinationResponse):
     command_type: Literal["hydro_event_ack_response"] = SIMCMD_HYDRO_EVENT_ACK_RESPONSE
-
-class OutflowTimeSeriesRequest(SimCoordinationRequest):
-    command_type: Literal["outflow_time_series_request"] = SIMCMD_OUTFLOW_TIME_SERIES_REQUEST
-    target_agent_instance: HydroAgentInstance
-    hydro_event: OutflowTimeSeriesEvent = Field(
-        validation_alias=AliasChoices("hydro_event", "outflow_time_series_event")
-    )
 
 class OutflowTimeSeriesResponse(SimCoordinationResponse):
     command_type: Literal["outflow_time_series_response"] = SIMCMD_OUTFLOW_TIME_SERIES_RESPONSE
@@ -315,7 +307,6 @@ CommandUnion = Union[
     TimeSeriesDataUpdateResponse,
     HydroEventCommand,
     HydroEventAckResponse,
-    OutflowTimeSeriesRequest,
     OutflowTimeSeriesResponse,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,

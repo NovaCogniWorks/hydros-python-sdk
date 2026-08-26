@@ -15,7 +15,6 @@ from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
-    OutflowTimeSeriesRequest,
     SimCommand,
     SimCoordinationResponse,
     SimTaskInitRequest,
@@ -31,7 +30,6 @@ from hydros_agent_sdk.protocol.commands import (
     SIMCMD_MPC_EXECUTION_STATUS_REPORT,
     SIMCMD_EDGE_CONTROL_EXECUTION_REPORT,
     SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST,
-    SIMCMD_OUTFLOW_TIME_SERIES_REQUEST,
     SIMCMD_TASK_INIT_REQUEST,
     SIMCMD_TASK_INIT_RESPONSE,
     SIMCMD_TASK_TERMINATE_REQUEST,
@@ -41,7 +39,7 @@ from hydros_agent_sdk.protocol.commands import (
 )
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
-    OutflowTimeSeriesEvent,
+    OutflowPlanningEvent,
     TimeSeriesDataChangedEvent,
 )
 
@@ -78,7 +76,6 @@ class CoordinationCommandRouter:
             SIMCMD_MPC_PREDICTION_RESULT_REPORT: self.handle_mpc_prediction_result_report,
             SIMCMD_MPC_EXECUTION_STATUS_REPORT: self.handle_mpc_execution_status_report,
             SIMCMD_EDGE_CONTROL_EXECUTION_REPORT: self.handle_station_control_execution_report,
-            SIMCMD_OUTFLOW_TIME_SERIES_REQUEST: self.handle_outflow_time_series_request,
             SIMCMD_OUTFLOW_TIME_SERIES_DATA_UPDATE_REQUEST: self.handle_outflow_time_series_data_update,
         }
 
@@ -169,21 +166,13 @@ class CoordinationCommandRouter:
             result = self.callback.on_outflow_time_series_data_update(update_request)
             return self.to_hydro_event_ack_response(request, result)
 
-        if isinstance(payload, OutflowTimeSeriesEvent):
+        if isinstance(payload, OutflowPlanningEvent):
             if request.target_agent_instance is None:
-                self.logger.warning(
-                    "Ignoring outflow hydro_event_command without target_agent_instance: id=%s",
-                    request.command_id,
+                raise ValueError(
+                    "Outflow planning event requires target_agent_instance: "
+                    f"command_id={request.command_id}"
                 )
-                return None
-            outflow_request = OutflowTimeSeriesRequest(
-                command_id=request.command_id,
-                context=request.context,
-                broadcast=request.broadcast,
-                target_agent_instance=request.target_agent_instance,
-                hydro_event=payload,
-            )
-            return self.callback.on_outflow_time_series(outflow_request)
+            return self.callback.on_outflow_planning(request)
 
         self.logger.warning(
             "Ignoring unsupported hydro_event_command payload: id=%s, eventType=%s",
@@ -265,8 +254,3 @@ class CoordinationCommandRouter:
         if self.callback.is_remote_agent(report.source_agent_instance):
             return self.callback.on_station_control_execution(report)
         return None
-
-    def handle_outflow_time_series_request(self, command: SimCommand):
-        request = command
-        assert isinstance(request, OutflowTimeSeriesRequest)
-        return self.callback.on_outflow_time_series(request)

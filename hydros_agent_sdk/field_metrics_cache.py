@@ -11,7 +11,6 @@ SUPPORTED_METRICS_CODES = {
     "water_level",
     "water_flow",
     "gate_opening",
-    "gate_opening_percentage",
     "water_depth",
 }
 POSITION_NONE = "none"
@@ -19,7 +18,7 @@ KNOWN_POSITION_CODES = {POSITION_NONE, "up_stream", "down_stream"}
 METRICS_VALUE_RANGES = {
     "water_level": (0.0, 1000.0),
     "water_flow": (0.0, 100000.0),
-    "gate_opening_percentage": (0.0, 100.0),
+    "gate_opening": (0.0, float("inf")),
 }
 ATTRIBUTE_COMPAT_FIELDS = {
     "front_water_flow",

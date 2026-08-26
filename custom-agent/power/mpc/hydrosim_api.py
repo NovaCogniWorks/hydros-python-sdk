@@ -1036,7 +1036,7 @@ class HydroSimulationApi:
             event_source_type = getattr(payload, "hydro_event_source_type")
         elif isinstance(payload, dict):
             event_source_type = payload.get("hydro_event_source_type") or payload.get("hydroEventSourceType")
-        return str(event_source_type) == "OUTFLOW_TIME_SERIES"
+        return str(event_source_type) == "OUTFLOW_PLANNING"
 
     def _replace_matching_time_series_items(
         self,
@@ -1367,5 +1367,4 @@ def run_configured_simulation(
 ) -> Dict[str, Any]:
     api = HydroSimulationApi(service=service)
     return api.run_configured(request=request, output_mode=output_mode, input_bundle=input_bundle)
-
 

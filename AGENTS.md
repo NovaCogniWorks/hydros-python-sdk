@@ -56,7 +56,7 @@
 ### `hydros_agent_sdk/agents/`
 
 - 放 Agent 抽象基类、内置 Agent 类型和 Agent 相关解析器。
-- 具体 Agent 要继承合适的基类，例如 `TickableAgent`、`CentralSchedulingAgent`、`OutflowPlanAgent`。
+- 具体 Agent 要继承合适的基类，例如 `TickableAgent`、`CentralSchedulingAgent`。
 - Agent 负责生命周期入口：初始化、tick、终止、边界条件更新。复杂算法要拆到服务类或领域对象中。
 - Agent 不直接拼 MQTT topic；统一使用 `HydrosTopics` 或现有客户端封装。
 - Agent 不直接吞异常。生命周期方法优先使用现有错误处理机制，返回符合协议的失败响应。
@@ -159,8 +159,8 @@
 
 ### P1：业务算法和 Agent 生命周期耦合
 
-- `custom-agent/pump/scheduling/`、`custom-agent/power/outflowplan/` 等业务目录中，Agent 类只负责生命周期适配，泵站、电站、出流、调度、MPC 等算法要封装成领域服务或求解器类。
-- 示例代码可以为了演示保持轻量，但不能把长流程业务算法直接写进 `on_init()`、`on_tick()`、`on_outflow_time_series()` 等生命周期方法。
+- `custom-agent/pump/scheduling/`、`custom-agent/power/scheduling/` 等业务目录中，Agent 类只负责生命周期适配，泵站、电站、出流、调度、MPC 等算法要封装成领域服务或求解器类。
+- 示例代码可以为了演示保持轻量，但不能把长流程业务算法直接写进 `on_init()`、`on_tick()`、`on_outflow_planning()` 等生命周期方法。
 
 ### 迁移要求
 

@@ -19,7 +19,6 @@ TESTS_DIR = PROJECT_ROOT / "tests"
 
 OPTIONAL_DEPENDENCY_TEST_MODULES = {
     "test_hydrosim_demo",
-    "test_power_outflowplan_power_agent",
     "test_pump_dynamic_demand_plan",
     "test_pump_scheduling_agent",
 }

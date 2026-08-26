@@ -79,6 +79,3 @@ class CustomAgent(ABC):
 
     def on_time_series_calculation(self, runtime: AgentExecutionContext, request):
         return None
-
-    def on_outflow_time_series(self, runtime: AgentExecutionContext, request):
-        return None

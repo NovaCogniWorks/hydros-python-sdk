@@ -78,6 +78,3 @@ class CustomAgentRuntimeAdapter(BaseHydroAgent):
 
     def on_time_series_calculation(self, request):
         return self.custom_agent.on_time_series_calculation(self.execution_context, request)
-
-    def on_outflow_time_series(self, request):
-        return self.custom_agent.on_outflow_time_series(self.execution_context, request)

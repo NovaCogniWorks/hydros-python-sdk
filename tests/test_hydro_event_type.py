@@ -1,7 +1,7 @@
 from hydros_agent_sdk.protocol import AgentEventType
 from hydros_agent_sdk.protocol.events import (
     OutflowTimeSeriesDataChangedEvent,
-    OutflowTimeSeriesEvent,
+    OutflowPlanningEvent,
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.hydro_event_type import AgentEventType as ProtocolAgentEventType
@@ -13,7 +13,7 @@ def test_agent_event_type_constants_match_java_codes():
     assert AgentEventType.PUMP_STATION_POWER_OUTAGE == "PUMP_STATION_POWER_OUTAGE"
     assert AgentEventType.DEVICE_FAULT == "DEVICE_FAULT"
     assert AgentEventType.NOISE_SIMULATION == "NOISE_SIMULATION"
-    assert AgentEventType.OUTFLOW_TIME_SERIES == "OUTFLOW_TIME_SERIES"
+    assert AgentEventType.OUTFLOW_PLANNING == "OUTFLOW_PLANNING"
     assert AgentEventType.DEVICE_STATUS_CHANGE == "DEVICE_STATUS_CHANGE"
     assert AgentEventType.HYDRO_ALERT == "HYDRO_ALERT"
     assert AgentEventType.HYDRO_MONITOR_RULE == "HYDRO_MONITOR_RULE"
@@ -38,4 +38,4 @@ def test_existing_hydro_events_serialize_agent_event_type_values():
         OutflowTimeSeriesDataChangedEvent().model_dump()["hydro_event_type"]
         == "OUTFLOW_TIME_SERIES_DATA_UPDATED"
     )
-    assert OutflowTimeSeriesEvent().model_dump()["hydro_event_type"] == "OUTFLOW_TIME_SERIES"
+    assert OutflowPlanningEvent().model_dump()["hydro_event_type"] == "OUTFLOW_PLANNING"
