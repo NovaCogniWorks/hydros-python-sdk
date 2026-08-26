@@ -352,6 +352,7 @@ class PlotHistoryTracker:
             
             text_lines = [
                 f"S{station_id} Mode: {actions[station_id].mode}",
+                f"Input Actual: Front={self._fmt(act_front)}m, Back={self._fmt(act_back)}m, Q={act_q} m3/s",
                 f"Upper MPC  : Q={up_q}",
                 f"Head(Pred/Act): {pred_h} / {act_h} m",
                 f"Lower Pred : Q={dn_q}",
