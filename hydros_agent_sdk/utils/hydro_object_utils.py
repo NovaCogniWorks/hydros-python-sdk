@@ -38,7 +38,6 @@ class MetricsCodes(str, Enum):
     WATER_LEVEL = "water_level"
     WATER_FLOW = "water_flow"
     GATE_OPENING = "gate_opening"
-    GATE_OPENING_PERCENTAGE = "gate_opening_percentage"
     WATER_DEPTH = "water_depth"
 
 
@@ -459,10 +458,7 @@ class HydroObjectUtilsV2:
                         MetricsCodes.WATER_DEPTH
                     ])
                 elif child.object_type == HydroObjectType.GATE:
-                    metrics.extend([
-                        MetricsCodes.GATE_OPENING,
-                        MetricsCodes.GATE_OPENING_PERCENTAGE
-                    ])
+                    metrics.append(MetricsCodes.GATE_OPENING)
                 elif child.object_type == HydroObjectType.PUMP:
                     metrics.extend([
                         MetricsCodes.WATER_FLOW
