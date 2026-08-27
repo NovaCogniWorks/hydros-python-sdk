@@ -57,7 +57,8 @@ class ControlAlgorithmContext(ControlAlgorithmModel):
 
     request_id: str
     context_id: Optional[str] = None
-    step_index: Optional[int] = None
+    compute_step: Optional[int] = None
+    main_step_index: Optional[int] = None
     elapsed_seconds: Optional[float] = None
     target_object_type: Optional[str] = None
     target_object_id: Optional[int] = None

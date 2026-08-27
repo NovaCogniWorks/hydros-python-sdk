@@ -6,7 +6,8 @@
 	"context": {
 		"request_id": "d00f0a17-6973-4686-8cbc-67f770bcdc54:72",
 		"context_id": "TASK202607231727YRBQNCH7TWTT",
-		"step_index": 72,
+		"compute_step": 72,
+		"main_step_index": 1,
 		"elapsed_seconds": 50.0,
 		"target_object_type": "PumpStation",
 		"target_object_id": 20000,

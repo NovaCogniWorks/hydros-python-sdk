@@ -35,7 +35,7 @@ class PumpStationFlowDmpcAlgorithm:
     """Full lower-controller logic: mode dispatch, unit combo optimization, horizon planning."""
 
     algorithm_type = "pump_station_flow_dmpc"
-    algorithm_version = "1.8.1"
+    algorithm_version = "1.8.2"
 
     def __init__(
         self,
@@ -75,20 +75,22 @@ class PumpStationFlowDmpcAlgorithm:
         cached = self._load_cached_output(input_data)
         if cached is not None:
             logger.info(
-                "Pump flow DMPC solve 命中上层步缓存: requestId=%s, contextId=%s, stepIndex=%s, file=%s",
+                "Pump flow DMPC solve 命中上层步缓存: requestId=%s, contextId=%s, mainStepIndex=%s, computeStepIndex=%s, file=%s",
                 input_data.context.request_id,
                 input_data.context.context_id,
-                input_data.context.step_index,
+                self._main_step_index(input_data),
+                input_data.context.compute_step,
                 self._cache_file(input_data),
             )
             return cached
         output = self._compute(input_data)
         self._save_cached_output(input_data, output)
         logger.info(
-            "Pump flow DMPC solve 记录新边缘步: requestId=%s, contextId=%s, stepIndex=%s",
+            "Pump flow DMPC solve 记录新边缘步: requestId=%s, contextId=%s, mainStepIndex=%s, computeStepIndex=%s",
             input_data.context.request_id,
             input_data.context.context_id,
-            input_data.context.step_index,
+            self._main_step_index(input_data),
+            input_data.context.compute_step,
         )
         return output
 
@@ -132,13 +134,13 @@ class PumpStationFlowDmpcAlgorithm:
             )
             logger.exception(
                 "Pump flow DMPC algorithm failed: requestId=%s, "
-                "contextId=%s, stepIndex=%s, algorithmClass=%s, "
+                "contextId=%s, computeStep=%s, algorithmClass=%s, "
                 "algorithmMethod=solve, targetObjectType=%s, targetObjectId=%s, "
                 "errorCode=%s, exceptionType=%s, exceptionClass=%s, "
                 "exceptionLocation=%s:%s, exceptionFunction=%s, exceptionMessage=%s",
                 input_data.context.request_id,
                 input_data.context.context_id,
-                input_data.context.step_index,
+                input_data.context.compute_step,
                 type(self).__name__,
                 input_data.context.target_object_type,
                 input_data.context.target_object_id,
@@ -162,13 +164,19 @@ class PumpStationFlowDmpcAlgorithm:
     def _cache_file(self, input_data: ControlAlgorithmInput) -> Optional[Path]:
         """Return the step-keyed cache path, or None when no stable key exists."""
 
-        step_index = input_data.context.step_index
+        step_index = self._main_step_index(input_data)
         if step_index is None:
             return None
         context_id = input_data.context.context_id or "_default"
         safe_context = re.sub(r"[^A-Za-z0-9]", "_", context_id) or "_default"
         filename = "step_%06d.json" % int(step_index)
         return self._step_cache_dir / safe_context / filename
+
+    @staticmethod
+    def _main_step_index(input_data: ControlAlgorithmInput) -> Optional[int]:
+        """Return the coordinator/MPC main step used for upper-step caching."""
+
+        return input_data.context.main_step_index
 
     def _load_cached_output(
         self,
@@ -222,9 +230,9 @@ class PumpStationFlowDmpcAlgorithm:
             os.replace(tmp, path)
         except Exception as exc:
             logger.warning(
-                "Pump flow DMPC step cache 写入失败: requestId=%s, stepIndex=%s, file=%s, error=%s",
+                "Pump flow DMPC step cache 写入失败: requestId=%s, mainStepIndex=%s, file=%s, error=%s",
                 input_data.context.request_id,
-                input_data.context.step_index,
+                self._main_step_index(input_data),
                 path,
                 exc,
             )
@@ -259,9 +267,9 @@ class PumpStationFlowDmpcAlgorithm:
                     )
         except Exception:
             logger.exception(
-                "Pump flow DMPC execution tracker failed: requestId=%s, stepIndex=%s",
+                "Pump flow DMPC execution tracker failed: requestId=%s, computeStep=%s",
                 input_data.context.request_id,
-                input_data.context.step_index,
+                input_data.context.compute_step,
             )
 
     def _project(
