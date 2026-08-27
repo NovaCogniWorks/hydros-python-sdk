@@ -55,14 +55,14 @@ class ControlAlgorithmRuntime:
             )
             logger.exception(
                 "Control algorithm execution failed: requestId=%s, "
-                "contextId=%s, stepIndex=%s, algorithmType=%s, "
+                "contextId=%s, computeStep=%s, algorithmType=%s, "
                 "algorithmVersion=%s, algorithmClass=%s, controlTaskType=%s, "
                 "targetObjectType=%s, targetObjectId=%s, exceptionType=%s, "
                 "exceptionClass=%s, exceptionLocation=%s:%s, "
                 "exceptionFunction=%s, exceptionMessage=%s",
                 input_data.context.request_id,
                 input_data.context.context_id,
-                input_data.context.step_index,
+                input_data.context.compute_step,
                 input_data.algorithm_type,
                 input_data.algorithm_version,
                 "%s.%s" % (type(algorithm).__module__, type(algorithm).__qualname__),
