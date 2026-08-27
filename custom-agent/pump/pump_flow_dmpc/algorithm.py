@@ -75,20 +75,20 @@ class PumpStationFlowDmpcAlgorithm:
         cached = self._load_cached_output(input_data)
         if cached is not None:
             logger.info(
-                "Pump flow DMPC solve 命中上层步缓存: requestId=%s, contextId=%s, stepIndex=%s, file=%s",
+                "Pump flow DMPC solve 命中上层步缓存: requestId=%s, contextId=%s, mainStepIndex=%s, file=%s",
                 input_data.context.request_id,
                 input_data.context.context_id,
-                input_data.context.step_index,
+                self._main_step_index(input_data),
                 self._cache_file(input_data),
             )
             return cached
         output = self._compute(input_data)
         self._save_cached_output(input_data, output)
         logger.info(
-            "Pump flow DMPC solve 记录新边缘步: requestId=%s, contextId=%s, stepIndex=%s",
+            "Pump flow DMPC solve 记录新边缘步: requestId=%s, contextId=%s, mainStepIndex=%s",
             input_data.context.request_id,
             input_data.context.context_id,
-            input_data.context.step_index,
+            self._main_step_index(input_data),
         )
         return output
 
@@ -159,10 +159,27 @@ class PumpStationFlowDmpcAlgorithm:
             )
             return output
 
+    @staticmethod
+    def _main_step_index(input_data: ControlAlgorithmInput) -> Optional[int]:
+        """Return the upper-MPC step carried by signal attributes, if present."""
+
+        for signal in getattr(input_data, "signals", []):
+            attributes = getattr(signal, "attributes", None)
+            if not attributes:
+                continue
+            value = attributes.get("main_step_index")
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     def _cache_file(self, input_data: ControlAlgorithmInput) -> Optional[Path]:
         """Return the step-keyed cache path, or None when no stable key exists."""
 
-        step_index = input_data.context.step_index
+        step_index = self._main_step_index(input_data)
         if step_index is None:
             return None
         context_id = input_data.context.context_id or "_default"
@@ -222,9 +239,9 @@ class PumpStationFlowDmpcAlgorithm:
             os.replace(tmp, path)
         except Exception as exc:
             logger.warning(
-                "Pump flow DMPC step cache 写入失败: requestId=%s, stepIndex=%s, file=%s, error=%s",
+                "Pump flow DMPC step cache 写入失败: requestId=%s, mainStepIndex=%s, file=%s, error=%s",
                 input_data.context.request_id,
-                input_data.context.step_index,
+                self._main_step_index(input_data),
                 path,
                 exc,
             )
