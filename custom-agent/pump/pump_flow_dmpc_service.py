@@ -60,6 +60,7 @@ def create_pump_flow_dmpc_server(
     port: int = 8080,
     *,
     plot_tracker: Optional["PumpFlowDmpcExecutionTracker"] = None,
+    step_cache_dir: Optional[Path] = None,
 ) -> ThreadingHTTPServer:
     """创建仅注册泵站流量 DMPC 的标准 HTTP 服务。"""
 
@@ -69,6 +70,7 @@ def create_pump_flow_dmpc_server(
             solver=PumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
             execution_tracker=plot_tracker,
+            cache_dir=step_cache_dir,
         )
     )
     return create_control_algorithm_http_server(runtime, host=host, port=port)
@@ -83,10 +85,12 @@ class PumpFlowDmpcHttpHost:
         port: int = 8015,
         *,
         plot_tracker: Optional["PumpFlowDmpcExecutionTracker"] = None,
+        step_cache_dir: Optional[Path] = None,
     ) -> None:
         self._host = host
         self._port = port
         self._plot_tracker = plot_tracker
+        self._step_cache_dir = step_cache_dir
         self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
@@ -109,6 +113,7 @@ class PumpFlowDmpcHttpHost:
             host=self._host,
             port=self._port,
             plot_tracker=self._plot_tracker,
+            step_cache_dir=self._step_cache_dir,
         )
         thread = threading.Thread(
             target=server.serve_forever,
@@ -162,6 +167,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         default=None,
         help="可选：指定下层执行结果绘图输出目录；需配合 --enable-plot 启用，缺省使用 output/edge_execution",
     )
+    parser.add_argument(
+        "--step-cache-dir",
+        default=None,
+        help="可选：指定按上层步缓存下层控制序列的目录；缺省使用 output/edge_step_cache",
+    )
     args = parser.parse_args(argv)
 
     setup_logging()
@@ -170,7 +180,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         enabled=args.enable_plot,
     )
     server = create_pump_flow_dmpc_server(
-        host=args.host, port=args.port, plot_tracker=plot_tracker
+        host=args.host,
+        port=args.port,
+        plot_tracker=plot_tracker,
+        step_cache_dir=Path(args.step_cache_dir) if args.step_cache_dir else None,
     )
     try:
         server.serve_forever()

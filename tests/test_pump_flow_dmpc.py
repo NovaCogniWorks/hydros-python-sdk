@@ -75,10 +75,95 @@ class StubPumpFlowDmpcSolver:
 
 class PumpFlowDmpcTest(unittest.TestCase):
     def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._prev_step_cache_dir = os.environ.get(
+            "HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR"
+        )
+        os.environ["HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR"] = self._temp_dir.name
         self.algorithm = PumpStationFlowDmpcAlgorithm(
             solver=StubPumpFlowDmpcSolver(),
             resolver=PumpFlowDmpcInputResolver(),
         )
+
+    def tearDown(self):
+        if self._prev_step_cache_dir is None:
+            os.environ.pop("HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR", None)
+        else:
+            os.environ["HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR"] = (
+                self._prev_step_cache_dir
+            )
+        self._temp_dir.cleanup()
+
+    def _cache_algorithm(self, solver):
+        return PumpStationFlowDmpcAlgorithm(
+            solver=solver,
+            resolver=PumpFlowDmpcInputResolver(),
+            cache_dir=Path(self._temp_dir.name) / "cache",
+        )
+
+    def _counted_solver(self):
+        stub = StubPumpFlowDmpcSolver()
+        solver = Mock(wraps=stub)
+        solver.solve.side_effect = stub.solve
+        return solver
+
+    def test_same_upper_step_is_computed_once_and_cached(self):
+        solver = self._counted_solver()
+        algorithm = self._cache_algorithm(solver)
+
+        first = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        second = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, first.status)
+        self.assertEqual(first.actuator_targets, second.actuator_targets)
+        solver.solve.assert_called_once()
+        cache_file = Path(self._temp_dir.name) / "cache" / "scene_001" / "step_000012.json"
+        self.assertTrue(cache_file.exists())
+
+    def test_cache_hit_remaps_request_id(self):
+        solver = self._counted_solver()
+        algorithm = self._cache_algorithm(solver)
+
+        algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.context = input_data.context.model_copy(
+            update={"request_id": "request-002"}
+        )
+        second = algorithm.solve(input_data)
+
+        self.assertEqual("request-002", second.request_id)
+        solver.solve.assert_called_once()
+
+    def test_new_upper_step_triggers_recompute(self):
+        solver = self._counted_solver()
+        algorithm = self._cache_algorithm(solver)
+
+        algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.context = input_data.context.model_copy(update={"step_index": 13})
+        algorithm.solve(input_data)
+
+        self.assertEqual(2, solver.solve.call_count)
+
+    def test_missing_step_index_always_recomputes(self):
+        solver = self._counted_solver()
+        algorithm = self._cache_algorithm(solver)
+
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.context = input_data.context.model_copy(update={"step_index": None})
+        algorithm.solve(input_data)
+        algorithm.solve(input_data)
+
+        self.assertEqual(2, solver.solve.call_count)
+
+    def test_failed_solve_is_not_cached(self):
+        failing = PumpFlowDmpcSolver()
+        algorithm = self._cache_algorithm(failing)
+
+        first = algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
+        self.assertEqual(ControlAlgorithmStatus.FAILED, first.status)
+        cache_root = Path(self._temp_dir.name) / "cache"
+        self.assertFalse(any(cache_root.rglob("*.json")))
 
     @staticmethod
     def _three_unit_station():

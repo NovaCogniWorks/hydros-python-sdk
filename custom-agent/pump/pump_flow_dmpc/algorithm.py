@@ -4,7 +4,12 @@ Pump station flow DMPC algorithm adapted from original ODD-DMPC LocalController.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import re
+from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from hydros_agent_sdk.control_algorithms import (
@@ -38,11 +43,21 @@ class PumpStationFlowDmpcAlgorithm:
         resolver: PumpFlowDmpcInputResolver,
         console_reporter: Optional[PumpFlowDmpcConsoleReporter] = None,
         execution_tracker: Optional[Any] = None,
+        cache_dir: Optional[Path] = None,
     ) -> None:
         self._solver = solver
         self._resolver = resolver
         self._console_reporter = console_reporter or PumpFlowDmpcConsoleReporter()
         self._execution_tracker = execution_tracker
+        if cache_dir is None:
+            cache_dir = Path(
+                os.getenv(
+                    "HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR",
+                    "output/edge_step_cache",
+                )
+            )
+        self._step_cache_dir = Path(cache_dir)
+        self._step_cache_lock = RLock()
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         if input_data.control_task_type != ControlTaskType.STATION_FLOW_ALLOCATION:
@@ -53,6 +68,31 @@ class PumpStationFlowDmpcAlgorithm:
             )
             self._console_reporter.report_failure(input_data, output)
             return output
+        with self._step_cache_lock:
+            return self._solve_or_cache(input_data)
+
+    def _solve_or_cache(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
+        cached = self._load_cached_output(input_data)
+        if cached is not None:
+            logger.info(
+                "Pump flow DMPC solve 命中上层步缓存: requestId=%s, contextId=%s, stepIndex=%s, file=%s",
+                input_data.context.request_id,
+                input_data.context.context_id,
+                input_data.context.step_index,
+                self._cache_file(input_data),
+            )
+            return cached
+        output = self._compute(input_data)
+        self._save_cached_output(input_data, output)
+        logger.info(
+            "Pump flow DMPC solve 记录新边缘步: requestId=%s, contextId=%s, stepIndex=%s",
+            input_data.context.request_id,
+            input_data.context.context_id,
+            input_data.context.step_index,
+        )
+        return output
+
+    def _compute(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         try:
             station_ids = self._resolver.resolve_station_ids(input_data)
             station_results: list = []
@@ -118,6 +158,76 @@ class PumpStationFlowDmpcAlgorithm:
                 output.error_code,
             )
             return output
+
+    def _cache_file(self, input_data: ControlAlgorithmInput) -> Optional[Path]:
+        """Return the step-keyed cache path, or None when no stable key exists."""
+
+        step_index = input_data.context.step_index
+        if step_index is None:
+            return None
+        context_id = input_data.context.context_id or "_default"
+        safe_context = re.sub(r"[^A-Za-z0-9]", "_", context_id) or "_default"
+        filename = "step_%06d.json" % int(step_index)
+        return self._step_cache_dir / safe_context / filename
+
+    def _load_cached_output(
+        self,
+        input_data: ControlAlgorithmInput,
+    ) -> Optional[ControlAlgorithmOutput]:
+        """Load a cached result for the current upper-MPC step, remapping request id."""
+
+        path = self._cache_file(input_data)
+        if path is None or not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            cached = ControlAlgorithmOutput.model_validate(payload)
+        except Exception as exc:
+            logger.warning(
+                "Pump flow DMPC step cache 读取失败，忽略并重新计算: file=%s, error=%s",
+                path,
+                exc,
+            )
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
+        return cached.model_copy(
+            update={"request_id": input_data.context.request_id}
+        )
+
+    def _save_cached_output(
+        self,
+        input_data: ControlAlgorithmInput,
+        output: ControlAlgorithmOutput,
+    ) -> None:
+        """Persist a successful result so later calls in the same step reuse it."""
+
+        if output.status not in (
+            ControlAlgorithmStatus.CONTINUE,
+            ControlAlgorithmStatus.COMPLETED,
+        ):
+            return
+        path = self._cache_file(input_data)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps(output.model_dump(mode="json"), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            os.replace(tmp, path)
+        except Exception as exc:
+            logger.warning(
+                "Pump flow DMPC step cache 写入失败: requestId=%s, stepIndex=%s, file=%s, error=%s",
+                input_data.context.request_id,
+                input_data.context.step_index,
+                path,
+                exc,
+            )
 
     def _record_execution(
         self,

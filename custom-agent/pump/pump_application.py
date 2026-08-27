@@ -51,6 +51,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=os.getenv("HYDROS_CONTROL_ALGORITHM_PLOT_OUTPUT_DIR"),
         help="可选：指定下层执行结果绘图输出目录；需配合 --enable-plot 启用，缺省使用 output/edge_execution",
     )
+    parser.add_argument(
+        "--control-algorithm-step-cache-dir",
+        default=os.getenv("HYDROS_PUMP_FLOW_DMPC_STEP_CACHE_DIR"),
+        help="可选：指定按上层步缓存下层控制序列的目录；缺省使用 output/edge_step_cache",
+    )
     parser.add_argument("launcher_args", nargs=argparse.REMAINDER)
     options = parser.parse_args(argv)
 
@@ -69,6 +74,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         host=options.control_algorithm_host,
         port=options.control_algorithm_port,
         plot_tracker=plot_tracker,
+        step_cache_dir=(
+            Path(options.control_algorithm_step_cache_dir)
+            if options.control_algorithm_step_cache_dir
+            else None
+        ),
     )
     app = MultiAgentLauncherApp(
         launcher_dir=launcher_dir,
