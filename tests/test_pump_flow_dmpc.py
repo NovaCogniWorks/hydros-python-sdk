@@ -109,15 +109,9 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     @staticmethod
     def _set_main_step_index(input_data, value):
-        for signal in input_data.signals:
-            if signal.value_type == "station_memory":
-                signal.attributes = dict(signal.attributes)
-                if value is None:
-                    signal.attributes.pop("main_step_index", None)
-                else:
-                    signal.attributes["main_step_index"] = value
-                return
-        raise AssertionError("station_memory signal not found")
+        input_data.context = input_data.context.model_copy(
+            update={"main_step_index": value}
+        )
 
     def test_same_upper_step_is_computed_once_and_cached(self):
         solver = self._counted_solver()
@@ -279,7 +273,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
             arguments.algorithm_params,
         )
 
-    def test_projects_stopped_unit_as_unavailable_without_blade_angle(self):
+    def test_projects_stopped_unit_with_status_off_and_preserved_available(self):
         input_data = self._input(target_flow=34.0, current_flow=20.0)
         input_data.actuators[1].status = "OFF"
 
@@ -288,10 +282,26 @@ class PumpFlowDmpcTest(unittest.TestCase):
         self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
         targets_by_unit = {target.object_id: target for target in output.actuator_targets}
         self.assertEqual({2101, 2102}, set(targets_by_unit))
-        self.assertFalse(targets_by_unit[2102].available)
+        self.assertTrue(targets_by_unit[2102].available)
+        self.assertEqual("OFF", targets_by_unit[2102].status)
         self.assertEqual({}, targets_by_unit[2102].target_values)
         self.assertTrue(targets_by_unit[2101].available)
+        self.assertEqual("ON", targets_by_unit[2101].status)
         self.assertIn("blade_angle", targets_by_unit[2101].target_values)
+
+    def test_projects_unavailable_unit_with_available_false(self):
+        input_data = self._input(target_flow=34.0, current_flow=20.0)
+        input_data.actuators[1].available = False
+
+        output = self.algorithm.solve(input_data)
+
+        self.assertEqual(ControlAlgorithmStatus.CONTINUE, output.status)
+        targets_by_unit = {target.object_id: target for target in output.actuator_targets}
+        self.assertIn(2102, targets_by_unit)
+        self.assertFalse(targets_by_unit[2102].available)
+        self.assertEqual("OFF", targets_by_unit[2102].status)
+        self.assertEqual({}, targets_by_unit[2102].target_values)
+        self.assertTrue(targets_by_unit[2101].available)
 
     def test_resolver_does_not_revive_stopped_actuator_from_stale_memory(self):
         input_data = self._input(target_flow=64.0, current_flow=32.0)
@@ -939,6 +949,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
                 request_id="request-001",
                 context_id="scene-001",
                 step_index=12,
+                main_step_index=12,
                 target_object_type="PumpStation",
                 target_object_id=2001,
             ),
@@ -966,7 +977,6 @@ class PumpFlowDmpcTest(unittest.TestCase):
                         "mode": "ODD2",
                         "last_selected_flow": current_flow,
                         "active_unit_ids": [2101, 2102],
-                        "main_step_index": 12,
                     },
                 ),
                 ControlSignal(

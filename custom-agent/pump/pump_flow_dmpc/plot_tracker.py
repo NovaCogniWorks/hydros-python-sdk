@@ -237,18 +237,11 @@ class PumpFlowDmpcExecutionTracker:
 
     @classmethod
     def _outer_step_index(cls, input_data, default: int = 0) -> int:
-        for signal in getattr(input_data, "signals", []):
-            attributes = getattr(signal, "attributes", None)
-            if not attributes:
-                continue
-            value = attributes.get("main_step_index")
-            if value is None:
-                continue
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                continue
-        return default
+        value = getattr(getattr(input_data, "context", None), "main_step_index", None)
+        try:
+            return int(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
 
     def _plot_step(self, step_index: int) -> None:
         cfg = self._system_config

@@ -33,6 +33,7 @@ class PumpFlowDmpcArguments:
     # Available units
     available_unit_ids: List[int] = field(default_factory=list)
     unit_blade_bounds: Dict[int, Tuple[float, float]] = field(default_factory=dict)
+    unit_available: Dict[int, bool] = field(default_factory=dict)
 
     # Current observation
     current_front_level: float = 0.0

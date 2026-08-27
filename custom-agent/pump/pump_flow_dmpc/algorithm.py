@@ -161,20 +161,15 @@ class PumpStationFlowDmpcAlgorithm:
 
     @staticmethod
     def _main_step_index(input_data: ControlAlgorithmInput) -> Optional[int]:
-        """Return the upper-MPC step carried by signal attributes, if present."""
+        """Return the upper-MPC step carried by the request context."""
 
-        for signal in getattr(input_data, "signals", []):
-            attributes = getattr(signal, "attributes", None)
-            if not attributes:
-                continue
-            value = attributes.get("main_step_index")
-            if value is None:
-                continue
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                continue
-        return None
+        value = getattr(getattr(input_data, "context", None), "main_step_index", None)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _cache_file(self, input_data: ControlAlgorithmInput) -> Optional[Path]:
         """Return the step-keyed cache path, or None when no stable key exists."""
@@ -331,16 +326,22 @@ class PumpStationFlowDmpcAlgorithm:
                 ]
             )
 
-            for unit_id in sorted(action.unit_status):
-                is_running = int(action.unit_status[unit_id]) == 1
+            unit_ids = sorted(
+                set(action.unit_status) | set(getattr(arguments, "unit_available", {}))
+            )
+            for unit_id in unit_ids:
+                is_running = int(action.unit_status.get(unit_id, 0)) == 1
                 target_values: Dict[str, float] = {}
                 if is_running:
-                    target_values["blade_angle"] = float(action.unit_openings.get(unit_id, 0.0))
+                    target_values["blade_angle"] = float(
+                        action.unit_openings.get(unit_id, 0.0)
+                    )
                 actuator_targets.append(
                     ControlActuatorTarget(
                         object_type="Pump",
                         object_id=unit_id,
-                        available=is_running,
+                        available=bool(getattr(arguments, "unit_available", {}).get(unit_id, True)),
+                        status="ON" if is_running else "OFF",
                         target_values=target_values,
                     )
                 )

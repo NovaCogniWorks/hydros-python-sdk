@@ -99,6 +99,7 @@ class PumpFlowDmpcInputResolver:
         station_unit_ids = sorted({actuator.object_id for actuator in station_actuators})
 
         available_unit_ids: List[int] = []
+        unit_available: Dict[int, bool] = {}
         unit_openings: Dict[int, float] = {}
         unit_status: Dict[int, int] = {}
         unit_blade_bounds: Dict[int, Tuple[float, float]] = {}
@@ -108,6 +109,7 @@ class PumpFlowDmpcInputResolver:
         actuator_by_id = {actuator.object_id: actuator for actuator in station_actuators}
         for uid in station_unit_ids:
             actuator = actuator_by_id.get(uid)
+            unit_available[uid] = bool(actuator.available) if actuator is not None else False
             # available 表示机组可用性；不可用的机组不进入候选池。
             if actuator is None or not actuator.available:
                 continue
@@ -242,6 +244,7 @@ class PumpFlowDmpcInputResolver:
             reference_head=reference_head,
             available_unit_ids=available_unit_ids,
             unit_blade_bounds=unit_blade_bounds,
+            unit_available=unit_available,
             current_front_level=current_front_level,
             current_back_level=current_back_level,
             current_head=current_head,
