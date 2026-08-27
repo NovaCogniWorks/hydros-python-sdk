@@ -493,6 +493,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         
         # 遍历每座泵站，从各机组获取实时数据
         pump_data_logs = []
+        actual_unit_inputs = {}
         for sid in self.system_config.station_ids:
             uids = self.available_units_map.get(sid, [])
             if not uids:
@@ -501,6 +502,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             total_q = 0.0
             up_levels = []
             dn_levels = []
+            actual_unit_inputs[sid] = {}
             
             for uid in uids:
                 # 获取机组开度(100为关机)
@@ -547,6 +549,13 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     f"  泵S{sid}-U{uid}: 状态={status}, 开度={angle_val}, 流量={q}, "
                     f"前水位={u_lvl}, 后水位={d_lvl}"
                 )
+                actual_unit_inputs[sid][uid] = {
+                    "status": None if status == "None" else int(status),
+                    "opening": None if angle_val == "None" else float(angle_val),
+                    "flow": float(q),
+                    "front_level": None if u_lvl is None else float(u_lvl),
+                    "back_level": None if d_lvl is None else float(d_lvl),
+                }
             
             # 前后平均水位作为实际前后水位
             f_val = sum(up_levels) / len(up_levels) if up_levels else None
@@ -880,7 +889,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             actions=actions,
             decisions=decisions,
             observation=observation,
-            transfer_bundles=transfer_bundles
+            transfer_bundles=transfer_bundles,
+            actual_unit_inputs=actual_unit_inputs
         )
         
         # 按照用户要求，生成 MpcPredictionResultReport 并发送

@@ -31,6 +31,7 @@ class PlotHistoryTracker:
         self.hist_odd_flow_errors = {sid: [] for sid in self.system_config.station_ids}
         self.hist_odd_level_errors = {sid: [] for sid in self.system_config.station_ids}
         self.hist_unit_status = []
+        self.hist_unit_inputs = []
         
         self.hist_modes = {sid: [] for sid in self.system_config.station_ids}
         self.hist_ref_flows = {sid: [] for sid in self.system_config.station_ids}
@@ -44,7 +45,7 @@ class PlotHistoryTracker:
         if val is None or np.isnan(val): return "N/A"
         return f"{val:.2f}"
 
-    def update_and_plot(self, step_index, current_time_hours, lower_step_hours, upper_plan, actions, decisions, observation, transfer_bundles):
+    def update_and_plot(self, step_index, current_time_hours, lower_step_hours, upper_plan, actions, decisions, observation, transfer_bundles, actual_unit_inputs=None):
         # 更新历史序列
         self.hist_times.append(current_time_hours)
         snapshot = {}
@@ -97,6 +98,7 @@ class PlotHistoryTracker:
             snapshot[station_id] = station_snapshot
             
         self.hist_unit_status.append(snapshot)
+        self.hist_unit_inputs.append(actual_unit_inputs if actual_unit_inputs else {})
         
         for pool_id in self.system_config.pool_ids:
             self.hist_pool_levels[pool_id].append(float(observation.pool_levels.get(pool_id, 0.0)))
@@ -138,6 +140,7 @@ class PlotHistoryTracker:
             actions=actions,
             decisions=decisions,
             hist_unit_status=self.hist_unit_status,
+            hist_unit_inputs=self.hist_unit_inputs,
         )
 
     def _predicted_series(self, predicted_values, history_values, n_points):
@@ -215,6 +218,7 @@ class PlotHistoryTracker:
         actions,
         decisions,
         hist_unit_status,
+        hist_unit_inputs,
     ) -> None:
         station_ids = self.system_config.station_ids
         pool_ids = self.system_config.pool_ids
@@ -372,6 +376,22 @@ class PlotHistoryTracker:
                 text_lines.append(
                     f"U{unit.id}: {actual_status}({self._fmt(actual_opening):>5}) -> {command_status}({self._fmt(command_opening):>5})"
                 )
+
+            actual_inputs = hist_unit_inputs[-1].get(station_id, {}) if hist_unit_inputs else {}
+            if actual_inputs:
+                text_lines.append("-" * 30)
+                text_lines.append("Per-Unit Actual Input:")
+                for unit in station.units:
+                    uin = actual_inputs.get(unit.id)
+                    if not uin:
+                        continue
+                    st = uin.get("status")
+                    st_s = "N/A" if st is None else ("ON" if int(st) == 1 else "OFF")
+                    text_lines.append(
+                        f"U{unit.id}: st={st_s}, ang={self._fmt(uin.get('opening'))}, "
+                        f"q={self._fmt(uin.get('flow'))}, front={self._fmt(uin.get('front_level'))}, "
+                        f"back={self._fmt(uin.get('back_level'))}"
+                    )
                 
             ax_text.text(
                 0.02, 0.5,
