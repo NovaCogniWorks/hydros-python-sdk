@@ -161,6 +161,23 @@ class PumpStationFlowDmpcAlgorithm:
             )
             return output
 
+    @staticmethod
+    def _main_step_index(input_data: ControlAlgorithmInput) -> Optional[int]:
+        """Return the upper-MPC step carried by signal attributes, if present."""
+
+        for signal in getattr(input_data, "signals", []):
+            attributes = getattr(signal, "attributes", None)
+            if not attributes:
+                continue
+            value = attributes.get("main_step_index")
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
     def _cache_file(self, input_data: ControlAlgorithmInput) -> Optional[Path]:
         """Return the step-keyed cache path, or None when no stable key exists."""
 

@@ -107,6 +107,18 @@ class PumpFlowDmpcTest(unittest.TestCase):
         solver.solve.side_effect = stub.solve
         return solver
 
+    @staticmethod
+    def _set_main_step_index(input_data, value):
+        for signal in input_data.signals:
+            if signal.value_type == "station_memory":
+                signal.attributes = dict(signal.attributes)
+                if value is None:
+                    signal.attributes.pop("main_step_index", None)
+                else:
+                    signal.attributes["main_step_index"] = value
+                return
+        raise AssertionError("station_memory signal not found")
+
     def test_same_upper_step_is_computed_once_and_cached(self):
         solver = self._counted_solver()
         algorithm = self._cache_algorithm(solver)
@@ -140,17 +152,17 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
         algorithm.solve(self._input(target_flow=34.0, current_flow=20.0))
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.context = input_data.context.model_copy(update={"step_index": 13})
+        self._set_main_step_index(input_data, 13)
         algorithm.solve(input_data)
 
         self.assertEqual(2, solver.solve.call_count)
 
-    def test_missing_step_index_always_recomputes(self):
+    def test_missing_main_step_index_always_recomputes(self):
         solver = self._counted_solver()
         algorithm = self._cache_algorithm(solver)
 
         input_data = self._input(target_flow=34.0, current_flow=20.0)
-        input_data.context = input_data.context.model_copy(update={"step_index": None})
+        self._set_main_step_index(input_data, None)
         algorithm.solve(input_data)
         algorithm.solve(input_data)
 
@@ -954,6 +966,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
                         "mode": "ODD2",
                         "last_selected_flow": current_flow,
                         "active_unit_ids": [2101, 2102],
+                        "main_step_index": 12,
                     },
                 ),
                 ControlSignal(
