@@ -640,9 +640,22 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         logger.info(f"完整的需水计划表 (task_step={current_step}, outer_step={step}):\n{self.odd_demand_plan.to_string()}")
         demand_row = self.odd_demand_plan.iloc[min(max(current_step, 0), len(self.odd_demand_plan) - 1)]
         logger.info(f"误差观察器扰动计算时用到的需水计划值 (task_step={current_step}):\n{demand_row}")
+        prev_basin_levels = getattr(self, "_prev_basin_levels", None)
+        logger.info(
+            "误差观察器相邻两步水位 (outer_step=%s):\n"
+            "  上一时刻 basin_levels=%s\n"
+            "  当前时刻 basin_levels=%s",
+            step,
+            prev_basin_levels if prev_basin_levels is not None else "N/A(首步)",
+            basin_levels,
+        )
+        if prev_basin_levels is None:
+            # 首步没有真实上一步，回退到当前水位，避免 observer 直接报错；
+            # 此时 storage_flow 仍为 0，从第二步开始使用真实水位差。
+            prev_basin_levels = dict(basin_levels)
         self.observers.update(
-            prev_basin_levels=basin_levels,
-            next_basin_levels=basin_levels, # 为简化 test_mpc，这里没有 prev
+            prev_basin_levels=prev_basin_levels,
+            next_basin_levels=basin_levels,
             actual_flows=station_flows,
             demand_row=demand_row,
             prev_basin_volumes=None,
@@ -653,7 +666,8 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             step_hours=step_hours,
             pool_areas=pool_areas,
         )
-        
+        self._prev_basin_levels = dict(basin_levels)
+
         # 边界计划
         boundary_levels_dict = {}
         for node in self.system_config.topology.boundary_nodes:
