@@ -1459,7 +1459,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                             self._sync_dynamic_demand_plan()
                             
                         # 强制正负号转换（反转符号），不设置多余的判断条件
-                        self.global_demand_plan.loc[target_idx, col_name] += -float(ts_val.value)
+                        self.global_demand_plan.loc[target_idx, col_name] += -(float(ts_val.value) / 2.0)
                         
                     logger.info(f"已成功将事件并入当前预测范围的用水计划中 (当前外层步数: {outer_step})")
                     logger.info("当前外层需水计划表 (global_demand_plan):")
