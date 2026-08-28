@@ -78,6 +78,30 @@ class FlowDepartService:
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir / "flow_depart_cache.pkl"
 
+    def _cache_meta(self) -> Dict[str, float]:
+        """Return the generation parameter fingerprint used to validate cached tables."""
+        return {
+            "step_q": float(getattr(self.system_config, "flow_depart_step_q", 1.0)),
+            "step_h": float(getattr(self.system_config, "flow_depart_step_h", 0.1)),
+            "rho": float(getattr(self.system_config, "global_rho", 1000.0)),
+            "g": float(getattr(self.system_config, "global_g", 9.81)),
+        }
+
+    def _cache_meta_matches(self, cached_meta: object) -> bool:
+        if not isinstance(cached_meta, dict):
+            return False
+        current = self._cache_meta()
+        for key, expected in current.items():
+            cached_value = cached_meta.get(key)
+            if cached_value is None:
+                return False
+            try:
+                if abs(float(cached_value) - expected) > 1e-6:
+                    return False
+            except (TypeError, ValueError):
+                return False
+        return True
+
     def load_flow_depart_cache(self) -> int:
         cache_path = self._resolve_cache_path()
         if not cache_path.exists():
@@ -85,9 +109,36 @@ class FlowDepartService:
             return 0
         try:
             with open(cache_path, "rb") as f:
-                loaded: dict = pickle.load(f)
+                loaded = pickle.load(f)
+            if not isinstance(loaded, dict):
+                logger.warning("flow depart cache payload is not a dict at %s", cache_path)
+                return 0
+
+            tables = loaded
+            if "_meta" in loaded and "_tables" in loaded:
+                cached_meta = loaded["_meta"]
+                if not self._cache_meta_matches(cached_meta):
+                    logger.warning(
+                        "flow depart cache is stale at %s (cached meta=%s, current=%s); discarding",
+                        cache_path,
+                        cached_meta,
+                        self._cache_meta(),
+                    )
+                    return 0
+                tables = loaded["_tables"]
+            else:
+                logger.warning(
+                    "flow depart cache uses legacy format without metadata at %s; discarding",
+                    cache_path,
+                )
+                return 0
+
+            if not isinstance(tables, dict):
+                logger.warning("flow depart cache tables payload is not a dict at %s", cache_path)
+                return 0
+
             loaded_count = 0
-            for key, df in loaded.items():
+            for key, df in tables.items():
                 if isinstance(key, tuple) and len(key) == 2 and isinstance(df, pd.DataFrame):
                     self._cache[key] = df
                     loaded_count += 1
@@ -100,12 +151,15 @@ class FlowDepartService:
     def save_flow_depart_cache(self) -> None:
         cache_path = self._resolve_cache_path()
         try:
+            payload = {
+                "_meta": self._cache_meta(),
+                "_tables": self._cache,
+            }
             with open(cache_path, "wb") as f:
-                pickle.dump(self._cache, f)
+                pickle.dump(payload, f)
             logger.info("flow depart cache saved: %d tables to %s", len(self._cache), cache_path)
         except Exception as e:
             logger.warning("failed to save flow depart cache: %s", e)
-
     def _load_unit_models(self, station_id: int) -> Dict[int, PumpUnit]:
         cached = self._unit_model_cache.get(station_id)
         if cached is not None:
