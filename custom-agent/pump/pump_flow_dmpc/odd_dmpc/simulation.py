@@ -948,6 +948,10 @@ class ClosedLoopSimulation:
             defer_visibility=False,
             step_hours=step_hours,
             pool_areas=observation.pool_areas,
+            prev_station_front_levels=observation.station_front_levels,
+            prev_station_back_levels=observation.station_back_levels,
+            next_station_front_levels=next_observation.station_front_levels,
+            next_station_back_levels=next_observation.station_back_levels,
         )
         actual_hidden_disturbance = self.environment.last_hidden_disturbance.copy()
         visible_disturbance = self.observers.get_estimate()

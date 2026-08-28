@@ -641,18 +641,30 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
         demand_row = self.odd_demand_plan.iloc[min(max(current_step, 0), len(self.odd_demand_plan) - 1)]
         logger.info(f"误差观察器扰动计算时用到的需水计划值 (task_step={current_step}):\n{demand_row}")
         prev_basin_levels = getattr(self, "_prev_basin_levels", None)
+        prev_station_front_levels = getattr(self, "_prev_station_front_levels", None)
+        prev_station_back_levels = getattr(self, "_prev_station_back_levels", None)
         logger.info(
             "误差观察器相邻两步水位 (outer_step=%s):\n"
             "  上一时刻 basin_levels=%s\n"
-            "  当前时刻 basin_levels=%s",
+            "  当前时刻 basin_levels=%s\n"
+            "  上一时刻 各站前池=%s 后池=%s\n"
+            "  当前时刻 各站前池=%s 后池=%s",
             step,
             prev_basin_levels if prev_basin_levels is not None else "N/A(首步)",
             basin_levels,
+            prev_station_front_levels if prev_station_front_levels is not None else "N/A(首步)",
+            prev_station_back_levels if prev_station_back_levels is not None else "N/A(首步)",
+            station_front_levels,
+            station_back_levels,
         )
         if prev_basin_levels is None:
             # 首步没有真实上一步，回退到当前水位，避免 observer 直接报错；
             # 此时 storage_flow 仍为 0，从第二步开始使用真实水位差。
             prev_basin_levels = dict(basin_levels)
+        if prev_station_front_levels is None:
+            prev_station_front_levels = dict(station_front_levels)
+        if prev_station_back_levels is None:
+            prev_station_back_levels = dict(station_back_levels)
         self.observers.update(
             prev_basin_levels=prev_basin_levels,
             next_basin_levels=basin_levels,
@@ -665,8 +677,14 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             defer_visibility=False,
             step_hours=step_hours,
             pool_areas=pool_areas,
+            prev_station_front_levels=prev_station_front_levels,
+            prev_station_back_levels=prev_station_back_levels,
+            next_station_front_levels=station_front_levels,
+            next_station_back_levels=station_back_levels,
         )
         self._prev_basin_levels = dict(basin_levels)
+        self._prev_station_front_levels = dict(station_front_levels)
+        self._prev_station_back_levels = dict(station_back_levels)
 
         # 边界计划
         boundary_levels_dict = {}

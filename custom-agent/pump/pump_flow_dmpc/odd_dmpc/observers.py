@@ -104,14 +104,16 @@ class DisturbanceObserverBank:
         defer_visibility: bool = False,
         step_hours: Optional[float] = None,
         pool_areas: Optional[Mapping[int, float]] = None,
+        prev_station_front_levels: Optional[Mapping[int, float]] = None,
+        prev_station_back_levels: Optional[Mapping[int, float]] = None,
+        next_station_front_levels: Optional[Mapping[int, float]] = None,
+        next_station_back_levels: Optional[Mapping[int, float]] = None,
     ) -> Dict[int, float]:
         dt_hours = float(step_hours if step_hours is not None else self.system_config.dt_hours)
         if dt_hours <= 0.0:
             raise ValueError("step_hours must be positive")
         dt_seconds = dt_hours * 3600.0
-        station_ids = _ordered_station_ids(self.system_config)
         chain_pairs = _chain_pairs(self.system_config)
-        level_keys = _level_keys(self.system_config)
         areas = {}
         for pair in chain_pairs:
             pool_id = pair["pool_id"]
@@ -120,7 +122,7 @@ class DisturbanceObserverBank:
             areas[pool_id] = float(pool_areas[pool_id])
 
         updated = {}
-        for index, pair in enumerate(chain_pairs):
+        for pair in chain_pairs:
             pool_id = int(pair["pool_id"])
             upstream_station_id = int(pair["upstream_station_id"])
             downstream_station_id = int(pair["downstream_station_id"])
@@ -128,16 +130,48 @@ class DisturbanceObserverBank:
             q_in = float(actual_flows[upstream_station_id])
             q_out = float(actual_flows[downstream_station_id])
             nominal_disturbance = float(demand_row.get(str(pair["demand_column"]), 0.0))
+
+            storage_source = "basin_level"
+            upstream_back_prev = None
+            upstream_back_next = None
+            upstream_back_delta = None
+            downstream_front_prev = None
+            downstream_front_next = None
+            downstream_front_delta = None
+
             if (
+                prev_station_back_levels is not None
+                and next_station_back_levels is not None
+                and prev_station_front_levels is not None
+                and next_station_front_levels is not None
+                and upstream_station_id in prev_station_back_levels
+                and upstream_station_id in next_station_back_levels
+                and downstream_station_id in prev_station_front_levels
+                and downstream_station_id in next_station_front_levels
+            ):
+                # 误差观察器基于“中间节点”计算未知扰动：
+                # 池段两端分别是上游站后池和下游站前池，不涉及两端边界水位节点
+                # （首站前池、末站后池）。
+                upstream_back_prev = float(prev_station_back_levels[upstream_station_id])
+                upstream_back_next = float(next_station_back_levels[upstream_station_id])
+                downstream_front_prev = float(prev_station_front_levels[downstream_station_id])
+                downstream_front_next = float(next_station_front_levels[downstream_station_id])
+                upstream_back_delta = upstream_back_next - upstream_back_prev
+                downstream_front_delta = downstream_front_next - downstream_front_prev
+                representative_delta = (upstream_back_delta + downstream_front_delta) / 2.0
+                storage_flow = areas[pool_id] * representative_delta / dt_seconds
+                storage_source = "station_endpoints"
+            elif (
                 prev_basin_profiles is not None
                 and next_basin_profiles is not None
                 and pool_id in prev_basin_profiles
                 and pool_id in next_basin_profiles
             ):
                 storage_flow = (
-                    float(next_basin_profiles[pool_id].reported_volume) - 
+                    float(next_basin_profiles[pool_id].reported_volume) -
                     float(prev_basin_profiles[pool_id].reported_volume)
                 ) / dt_seconds
+                storage_source = "basin_profiles"
             elif (
                 prev_basin_volumes is not None
                 and next_basin_volumes is not None
@@ -147,23 +181,36 @@ class DisturbanceObserverBank:
                 storage_flow = (
                     float(next_basin_volumes[pool_id]) - float(prev_basin_volumes[pool_id])
                 ) / dt_seconds
+                storage_source = "basin_volumes"
             else:
                 actual_delta = float(next_basin_levels[level_key] - prev_basin_levels[level_key])
                 storage_flow = areas[pool_id] * actual_delta / dt_seconds
+                storage_source = "basin_level"
             # 由于采用了 正=来水(inflow)，负=出水(outflow) 的符号约定：
             # storage_flow = q_in - q_out + nominal_disturbance + hidden_disturbance
             # 其中 planned inflow 会以正 demand 表示，因此反推 hidden disturbance 时
             # 采用的逻辑是：hidden_disturbance = 实际蓄量变化 - 理论已知净流量
             inferred = storage_flow - (q_in - q_out + nominal_disturbance)
-            
-            logger.info(
-                f"误差观察器计算 Pool {pool_id} 扰动:\n"
-                f"  实际流入(q_in)={q_in:.3f}, 实际流出(q_out)={q_out:.3f}, 计划需水(nominal)={nominal_disturbance:.3f}\n"
-                f"  理论已知流量差(q_in - q_out + nominal)={(q_in - q_out + nominal_disturbance):.3f}\n"
-                f"  实际蓄水量变化率(storage_flow)={storage_flow:.3f}\n"
-                f"  反推瞬时未知扰动(inferred)={inferred:.3f}"
-            )
-            
+
+            if storage_source == "station_endpoints":
+                logger.info(
+                    f"误差观察器计算 Pool {pool_id} 扰动 (中间节点水位差):\n"
+                    f"  上游站 S{upstream_station_id} 后池: {upstream_back_prev:.3f} -> {upstream_back_next:.3f} (Δ={upstream_back_delta:+.3f})\n"
+                    f"  下游站 S{downstream_station_id} 前池: {downstream_front_prev:.3f} -> {downstream_front_next:.3f} (Δ={downstream_front_delta:+.3f})\n"
+                    f"  实际流入(q_in)={q_in:.3f}, 实际流出(q_out)={q_out:.3f}, 计划需水(nominal)={nominal_disturbance:.3f}\n"
+                    f"  理论已知流量差(q_in - q_out + nominal)={(q_in - q_out + nominal_disturbance):.3f}\n"
+                    f"  实际蓄水量变化率(storage_flow)={storage_flow:.3f}\n"
+                    f"  反推瞬时未知扰动(inferred)={inferred:.3f}"
+                )
+            else:
+                logger.info(
+                    f"误差观察器计算 Pool {pool_id} 扰动 ({storage_source}):\n"
+                    f"  实际流入(q_in)={q_in:.3f}, 实际流出(q_out)={q_out:.3f}, 计划需水(nominal)={nominal_disturbance:.3f}\n"
+                    f"  理论已知流量差(q_in - q_out + nominal)={(q_in - q_out + nominal_disturbance):.3f}\n"
+                    f"  实际蓄水量变化率(storage_flow)={storage_flow:.3f}\n"
+                    f"  反推瞬时未知扰动(inferred)={inferred:.3f}"
+                )
+
             old = float(self.estimates[pool_id])
             corrected = old + self.runtime.observer_gain * (inferred - old)
             smoothed = self.runtime.observer_smoothing * old + (1.0 - self.runtime.observer_smoothing) * corrected
