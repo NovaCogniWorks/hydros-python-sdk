@@ -281,29 +281,22 @@ def basin_to_station_levels(
 def basin_profiles_to_basin_levels(
     basin_profiles: Mapping[int, PoolProfileState],
     boundary_levels: Mapping[str, float],
-    system_config: Optional[SystemConfig] = None,
+    system_config: SystemConfig,
 ) -> Dict[str, float]:
-    if system_config is not None:
-        level_keys = _level_keys(system_config)
-        pool_ids = _ordered_pool_ids(system_config)
-        basin_levels: Dict[str, float] = {}
-        if level_keys:
-            fallback_value = float(next(iter(boundary_levels.values()), 0.0))
-            last_value = float(next(reversed(list(boundary_levels.values())), fallback_value)) if boundary_levels else 0.0
-            basin_levels[level_keys[0]] = float(boundary_levels.get(level_keys[0], fallback_value))
-            basin_levels[level_keys[-1]] = float(boundary_levels.get(level_keys[-1], last_value))
-        for idx, pool_id in enumerate(pool_ids, start=1):
-            key = level_keys[idx] if idx < len(level_keys) else f"b{idx}"
-            profile = basin_profiles.get(pool_id)
-            if profile is not None:
-                basin_levels[key] = float(profile.representative_level)
-        return basin_levels
-    return {
-        "b0": float(boundary_levels["b0"]),
-        "b1": float(basin_profiles[1].representative_level),
-        "b2": float(basin_profiles[2].representative_level),
-        "b3": float(boundary_levels["b3"]),
-    }
+    level_keys = _level_keys(system_config)
+    pool_ids = _ordered_pool_ids(system_config)
+    basin_levels: Dict[str, float] = {}
+    if level_keys:
+        fallback_value = float(next(iter(boundary_levels.values()), 0.0))
+        last_value = float(next(reversed(list(boundary_levels.values())), fallback_value)) if boundary_levels else 0.0
+        basin_levels[level_keys[0]] = float(boundary_levels.get(level_keys[0], fallback_value))
+        basin_levels[level_keys[-1]] = float(boundary_levels.get(level_keys[-1], last_value))
+    for idx, pool_id in enumerate(pool_ids, start=1):
+        key = level_keys[idx] if idx < len(level_keys) else f"b{idx}"
+        profile = basin_profiles.get(pool_id)
+        if profile is not None:
+            basin_levels[key] = float(profile.representative_level)
+    return basin_levels
 
 
 def _validate_hidden_disturbance_frame(path: str, df: pd.DataFrame) -> pd.DataFrame:
@@ -337,9 +330,9 @@ def _hour_index(step_time: TimeLike) -> int:
 def hidden_disturbance_at_step(
     step_index: TimeLike,
     disturbance_plan: Optional[pd.DataFrame],
-    pool_ids: Optional[Iterable[int]] = None,
+    pool_ids: Iterable[int],
 ) -> Dict[int, float]:
-    ordered_pool_ids = [int(pool_id) for pool_id in (pool_ids or [1, 2])]
+    ordered_pool_ids = [int(pool_id) for pool_id in pool_ids]
     if disturbance_plan is None or disturbance_plan.empty:
         return {pool_id: 0.0 for pool_id in ordered_pool_ids}
 
@@ -401,28 +394,22 @@ def load_boundary_level_plan(system_config: SystemConfig) -> pd.DataFrame:
 def boundary_levels_at_hour(
     boundary_level_plan: pd.DataFrame,
     step_time: TimeLike,
-    system_config: Optional[SystemConfig] = None,
+    system_config: SystemConfig,
 ) -> Dict[str, float]:
     if boundary_level_plan.empty:
         raise ValueError("Boundary level plan is empty")
+    if not system_config.topology.boundary_nodes:
+        raise ValueError("Topology boundary_nodes is empty; cannot map boundary level columns")
     hour_index = min(max(_hour_index(step_time), 0), len(boundary_level_plan) - 1)
     row = boundary_level_plan.iloc[hour_index]
-    if system_config is not None and system_config.topology.boundary_nodes:
-        levels: Dict[str, float] = {}
-        for node in system_config.topology.boundary_nodes:
-            key = str(node.mpc_key or node.id or node.hydro_node)
-            column = str(node.series_column or node.hydro_node)
-            if column not in row:
-                raise ValueError(f"Missing boundary level column {column}")
-            levels[key] = float(row[column])
-        return levels
-    columns = list(boundary_level_plan.columns)
-    if len(columns) == 2:
-        return {
-            "b0": float(row[columns[0]]),
-            "b3": float(row[columns[1]]),
-        }
-    return {f"b{idx}": float(row[column]) for idx, column in enumerate(columns)}
+    levels: Dict[str, float] = {}
+    for node in system_config.topology.boundary_nodes:
+        key = str(node.mpc_key or node.id or node.hydro_node)
+        column = str(node.series_column or node.hydro_node)
+        if column not in row:
+            raise ValueError(f"Missing boundary level column {column}")
+        levels[key] = float(row[column])
+    return levels
 
 
 def _boundary_level_plan_for_system(
@@ -528,7 +515,7 @@ def simulate_basin_trajectory(
                         profile,
                         _profile_total_volume(profile) + (upstream_flow - downstream_flow + demand) * dt_seconds,
                     )
-                    margin = runtime.basin_clip_margin_b1 if pool_id == 1 else runtime.basin_clip_margin_b2
+                    margin = runtime.basin_clip_margin_for(pool_id)
                     min_level, max_level = _pool_level_clip_bounds(
                         system_config=system_config,
                         upstream_station_id=upstream_station_id,
@@ -543,7 +530,7 @@ def simulate_basin_trajectory(
                         )
                     levels.update(basin_profiles_to_basin_levels(profile_states, boundary_levels, system_config))
                 if profile_states is None:
-                    margin = runtime.basin_clip_margin_b1 if pool_id == 1 else runtime.basin_clip_margin_b2
+                    margin = runtime.basin_clip_margin_for(pool_id)
                     min_level, max_level = _pool_level_clip_bounds(
                         system_config=system_config,
                         upstream_station_id=upstream_station_id,
@@ -608,7 +595,7 @@ class RemoteHydraulicEnvironment:
         self.anchor_snapshot: Optional[ThreadSnapshotState] = None
         self.boundary_nominal_flows: Dict[str, float] = {"source": 0.0, "sink": 0.0}
         self.pool_areas: Dict[int, float] = resolve_pool_areas(system_config, auto_identify=False)
-        self.last_hidden_disturbance = {pool_id: 0.0 for pool_id in (self.system_config.pool_ids or [1, 2])}
+        self.last_hidden_disturbance = {pool_id: 0.0 for pool_id in self.system_config.pool_ids}
         self.last_bleeder_updates = {node: 0.0 for node in _channel_disturbance_nodes(self.system_config)}
         self.last_node_updates = {
             str(node.mpc_key or node.id or node.hydro_node): 0.0
@@ -652,7 +639,7 @@ class RemoteHydraulicEnvironment:
             "source": float(self.anchor_snapshot.station_total_flows[self.system_config.first_station_id]),
             "sink": float(self.anchor_snapshot.station_total_flows[self.system_config.last_station_id]),
         }
-        self.last_hidden_disturbance = {pool_id: 0.0 for pool_id in (self.system_config.pool_ids or [1, 2])}
+        self.last_hidden_disturbance = {pool_id: 0.0 for pool_id in self.system_config.pool_ids}
         self.last_bleeder_updates = {node: 0.0 for node in _channel_disturbance_nodes(self.system_config)}
         if self.system_config.topology.boundary_series_source == "create":
             initial_boundaries = {

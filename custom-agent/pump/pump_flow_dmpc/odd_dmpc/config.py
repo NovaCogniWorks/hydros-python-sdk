@@ -24,23 +24,6 @@ STATIC_CONFIG_FILENAME = "mpc_static_config.yaml"
 CURVES_CONFIG_FILENAME = "mpc_curves.yaml"
 
 
-DEFAULT_REMOTE_STATION_NAMES = {
-    1: "泗洪站",
-    2: "睢宁二站",
-    3: "邳州站",
-}
-
-DEFAULT_STATION_NODES = {
-    1: {"front": "0-洪泽湖", "back": "1-泗洪站下游"},
-    2: {"front": "2-睢宁二站上游", "back": "3-睢宁二站下游"},
-    3: {"front": "4-邳州站上游", "back": "5-骆马湖"},
-}
-
-DEFAULT_BOUNDARY_COLUMNS = {
-    1: "洪泽湖",
-    3: "骆马湖",
-}
-
 
 def _load_config(config_path: Path) -> Dict:
     with config_path.open("r", encoding="utf-8") as handle:
@@ -246,25 +229,6 @@ def _runtime_from_payload(payload: Mapping[str, object]) -> RuntimeParameters:
     return RuntimeParameters(**overrides)
 
 
-def _default_station_topology_fields(station_id: int, station_count: int) -> Dict[str, str]:
-    remote_name = DEFAULT_REMOTE_STATION_NAMES.get(station_id, f"Station{station_id}")
-    if station_id in DEFAULT_STATION_NODES:
-        nodes = DEFAULT_STATION_NODES[station_id]
-        return {
-            "remote_name": remote_name,
-            "front_level_key": f"b{station_id - 1}",
-            "back_level_key": f"b{station_id}",
-            "hydro_front_node": nodes["front"],
-            "hydro_back_node": nodes["back"],
-        }
-    return {
-        "remote_name": remote_name,
-        "front_level_key": f"b{station_id - 1}",
-        "back_level_key": f"b{station_id}",
-        "hydro_front_node": f"NODE-{station_id - 1}-FRONT",
-        "hydro_back_node": f"NODE-{station_id}-BACK",
-    }
-
 
 def _build_topology_config(payload: Mapping[str, object], stations: Sequence[StationConfig]) -> TopologyConfig:
     raw_topology = payload.get("topology", {})
@@ -308,25 +272,25 @@ def _build_topology_config(payload: Mapping[str, object], stations: Sequence[Sta
         )
 
     boundary_nodes: List[BoundaryNodeConfig] = []
-    for station in stations:
-        if station.front_level_key is None or station.hydro_front_node is None:
-            continue
-        if station.id == stations[0].id:
+    if stations:
+        first = stations[0]
+        last = stations[-1]
+        if first.hydro_front_node:
             boundary_nodes.append(
                 BoundaryNodeConfig(
                     id="upstream",
-                    hydro_node=station.hydro_front_node,
-                    series_column=DEFAULT_BOUNDARY_COLUMNS.get(station.id, station.hydro_front_node),
-                    mpc_key=station.front_level_key,
+                    hydro_node=first.hydro_front_node,
+                    series_column=first.hydro_front_node,
+                    mpc_key="b0",
                 )
             )
-        if station.id == stations[-1].id:
+        if last.hydro_back_node:
             boundary_nodes.append(
                 BoundaryNodeConfig(
                     id="downstream",
-                    hydro_node=station.hydro_back_node or "",
-                    series_column=DEFAULT_BOUNDARY_COLUMNS.get(station.id, station.hydro_back_node or ""),
-                    mpc_key=station.back_level_key,
+                    hydro_node=last.hydro_back_node,
+                    series_column=last.hydro_back_node,
+                    mpc_key=f"b{len(stations)}",
                 )
             )
 
@@ -371,14 +335,22 @@ def _system_config_from_payload(
     curves_by_id = _load_curves_by_id(curves_path)
     stations = []
     raw_stations = payload["stations"]
-    for idx, item in enumerate(raw_stations, start=1):
+    for item in raw_stations:
         station_payload = dict(item)
-        defaults = _default_station_topology_fields(station_payload["id"], len(raw_stations))
-        station_payload.setdefault("remote_name", defaults["remote_name"])
-        station_payload.setdefault("front_level_key", defaults["front_level_key"])
-        station_payload.setdefault("back_level_key", defaults["back_level_key"])
-        station_payload.setdefault("hydro_front_node", defaults["hydro_front_node"])
-        station_payload.setdefault("hydro_back_node", defaults["hydro_back_node"])
+        station_id = station_payload.get("id")
+        if not station_payload.get("hydro_front_node"):
+            raise ValueError(
+                f"station id={station_id} missing hydro_front_node (远程前池水位节点名)"
+            )
+        if not station_payload.get("hydro_back_node"):
+            raise ValueError(
+                f"station id={station_id} missing hydro_back_node (远程后池水位节点名)"
+            )
+        station_payload.setdefault(
+            "remote_name",
+            station_payload.get("name") or f"Station{station_id}",
+        )
+        # 水位节点 b0..bn 由 level_key_sequence 按站顺序自动推导，无需在配置中显式声明
         stations.append(_build_station_config(station_payload, curves_by_id))
     pools = [PoolConfig(**pool) for pool in payload["canal_pools"]]
     data_files = payload.get("data_files", {})
@@ -422,12 +394,6 @@ def load_boundary_level_plan(
     normalized = df.copy()
     for column in normalized.columns:
         normalized[column] = pd.to_numeric(normalized[column], errors="raise")
-    return normalized.reset_index(drop=True)
-    if list(df.columns) != ["洪泽湖", "骆马湖"]:
-        raise ValueError(f"Unexpected boundary level columns: {list(df.columns)}")
-    normalized = df.copy()
-    normalized["洪泽湖"] = pd.to_numeric(normalized["洪泽湖"], errors="raise")
-    normalized["骆马湖"] = pd.to_numeric(normalized["骆马湖"], errors="raise")
     return normalized.reset_index(drop=True)
 
 

@@ -1326,7 +1326,7 @@ class ClosedLoopSimulation:
         if history.empty:
             return pd.DataFrame()
 
-        last_station = history[history["station_id"] == 3]
+        last_station = history[history["station_id"] == self.system_config.last_station_id]
         target_flow_hour = float(self.system_config.target_avg_flow_last_station) * float(self.hours)
         actual_flow_hour = float((last_station["actual_flow"] * last_station["step_hours"]).sum())
         target_volume = target_flow_hour * 3600.0

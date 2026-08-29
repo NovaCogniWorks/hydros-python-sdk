@@ -83,19 +83,22 @@ class PumpFlowDmpcInputResolver:
         # remain authoritative for availability, running state and blade angle.
         active_unit_ids: List[int] = []
 
-        # ---- available units: include every station actuator supplied by edge ----
-        lo = station_id + 1
-        hi = station_id + 99
-        station_actuators = [
-            actuator
-            for actuator in input_data.actuators
-            if actuator.object_type == "Pump"
-            and (
-                int(actuator.attributes.get("station_object_id", station_id)) == station_id
-                if actuator.attributes.get("station_object_id") is not None
-                else lo <= actuator.object_id <= hi
-            )
-        ]
+        # ---- available units: pump actuators are assigned to stations via the
+        # station_object_id attribute supplied by the edge. There is no ID-range
+        # fallback; a missing attribute is surfaced as an explicit error. ----
+        station_actuators = []
+        for actuator in input_data.actuators:
+            if actuator.object_type != "Pump":
+                continue
+            station_object_id = actuator.attributes.get("station_object_id")
+            if station_object_id is None:
+                raise PumpFlowDmpcError(
+                    "MISSING_STATION_OBJECT_ID",
+                    "pump actuator %s has no station_object_id attribute; "
+                    "cannot map it to a station" % actuator.object_id,
+                )
+            if int(station_object_id) == station_id:
+                station_actuators.append(actuator)
         station_unit_ids = sorted({actuator.object_id for actuator in station_actuators})
 
         available_unit_ids: List[int] = []

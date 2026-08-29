@@ -1,35 +1,18 @@
 project: 三座串联梯级泵站调度优化
 description: Three cascaded pump stations scheduling optimization
 curves_config_path: mpc_curves.yaml
+
 global_params:
   rho: 1000
   g: 9.81
-topology:
-  boundary_nodes:
-  - id: upstream
-    hydro_node: 0-洪泽湖
-    series_column: 洪泽湖
-    mpc_key: b0
-  - id: downstream
-    hydro_node: 5-骆马湖
-    series_column: 骆马湖
-    mpc_key: b3
-  channel_segments:
-  - id: pool_1
-    upstream_station_id: 20000
-    downstream_station_id: 20300
-    hydro_channel: 泗洪站 -> 睢宁二站
-    disturbance_node: '20200'
-  - id: pool_2
-    upstream_station_id: 20300
-    downstream_station_id: 20600
-    hydro_channel: 睢宁二站 -> 邳州站
-    disturbance_node: '20400'
+
+# 拓扑不再显式声明：边界节点 = 首站前池 / 末站后池，渠道上下游 = stations 顺序，
+# 水位节点 b0..bn 由 level_key_sequence 按站顺序自动推导。
 stations:
 - id: 20000
   name: Station1
-  front_level_key: b0
-  back_level_key: b1
+  hydro_front_node: "0-洪泽湖"
+  hydro_back_node: "1-泗洪站下游"
   level_back_min: 12.75
   level_back_max: 16.8
   level_front_min: 10.58
@@ -56,10 +39,11 @@ stations:
     name: Pump5
     table_e_curve_id: 30001
     table_r_curve_id: 30002
+
 - id: 20300
   name: Station2
-  front_level_key: b1
-  back_level_key: b2
+  hydro_front_node: "2-睢宁二站上游"
+  hydro_back_node: "3-睢宁二站下游"
   level_back_min: 18.0
   level_back_max: 22.7
   level_front_min: 12.3
@@ -82,10 +66,11 @@ stations:
     name: Pump4
     table_e_curve_id: 30003
     table_r_curve_id: 30004
+
 - id: 20600
   name: Station3
-  front_level_key: b2
-  back_level_key: b3
+  hydro_front_node: "4-邳州站上游"
+  hydro_back_node: "5-骆马湖"
   level_back_min: 20.18
   level_back_max: 24.02
   level_front_min: 18.1
@@ -108,6 +93,7 @@ stations:
     name: pump4
     table_e_curve_id: 30005
     table_r_curve_id: 30006
+
 canal_pools:
 - id: 1
   name: Pool 1 (Station 1 -> Station 2)
@@ -115,13 +101,12 @@ canal_pools:
 - id: 2
   name: Pool 2 (Station 2 -> Station 3)
   area: 1847638.722359
+
 service_mapping:
   disturbance_sensors:
   - pool_id: 1
-    object_id: 20200
     node_id: 20200
     node_name: 沙集站分水
   - pool_id: 2
-    object_id: 20400
     node_id: 20400
     node_name: 沙集站入水

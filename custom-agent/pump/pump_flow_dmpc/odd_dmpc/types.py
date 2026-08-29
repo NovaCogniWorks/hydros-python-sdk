@@ -237,8 +237,7 @@ class RuntimeParameters:
     disturbance_forecast_window_hours: float = 4.0
     disturbance_forecast_method: str = "linear"
     env_substeps: int = 6
-    basin_clip_margin_b1: float = 1.0
-    basin_clip_margin_b2: float = 1.5
+    basin_clip_margins: Dict[int, float] = field(default_factory=dict)
     sim_api_base_url: str = "http://47.97.1.45:8000/"
     sim_create_is_steady_state: bool = True
     sim_sync_dt_seconds: int = 100
@@ -247,6 +246,20 @@ class RuntimeParameters:
     console_float_precision: int = 3
     output_dir: str = "output"
     save_step_plots: bool = True
+
+    def __post_init__(self) -> None:
+        normalized: Dict[int, float] = {}
+        for key, value in self.basin_clip_margins.items():
+            normalized[int(key)] = float(value)
+        self.basin_clip_margins = normalized
+
+    def basin_clip_margin_for(self, pool_id: int) -> float:
+        if pool_id not in self.basin_clip_margins:
+            raise ValueError(
+                f"runtime.basin_clip_margins is missing margin for pool {pool_id}; "
+                f"configured pools: {sorted(self.basin_clip_margins)}"
+            )
+        return float(self.basin_clip_margins[pool_id])
 
 
 @dataclass

@@ -561,14 +561,10 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
             f_val = sum(up_levels) / len(up_levels) if up_levels else None
             b_val = sum(dn_levels) / len(dn_levels) if dn_levels else None
             
-            # 仿真模块异常，临时写死边界水位
-            if sid == 20000 and (f_val is None or f_val < 0):
-                f_val = 13.26
-            if sid == 20600 and (b_val is None or b_val < 0):
-                b_val = 23.093
-            
-            if f_val is None or b_val is None:
-                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的最新水文数据")
+            if f_val is None or f_val < 0:
+                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的前池水位: {f_val}")
+            if b_val is None or b_val < 0:
+                raise ValueError(f"无法从 metrics_data_cache 提取 S{sid} 的后池水位: {b_val}")
                 
             station_front_levels[sid] = float(f_val)
             station_back_levels[sid] = float(b_val)

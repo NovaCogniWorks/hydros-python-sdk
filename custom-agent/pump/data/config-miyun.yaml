@@ -559,8 +559,12 @@ runtime:
     hidden_disturbance_rain_moderate_path: ../data/hidden-disturbance-rain-moderate.xlsx
     hidden_disturbance_rain_heavy_path: ../data/hidden-disturbance-rain-heavy.xlsx
     env_substeps: 6
-    basin_clip_margin_b1: 1.0
-    basin_clip_margin_b2: 1.5
+    basin_clip_margins:
+      '1': 1.0
+      '2': 1.5
+      '3': 1.5
+      '4': 1.5
+      '5': 1.5
     sim_api_base_url: http://172.20.90.78:8100/
     sim_create_is_steady_state: true
     sim_sync_dt_seconds: 100
