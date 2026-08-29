@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, fields
 from pathlib import Path
-from typing import Collection, Dict, List, Mapping, Optional, Sequence
+from typing import Collection, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pandas as pd
 import yaml
@@ -21,6 +21,7 @@ from .types import (
 )
 
 STATIC_CONFIG_FILENAME = "mpc_static_config.yaml"
+CURVES_CONFIG_FILENAME = "mpc_curves.yaml"
 
 
 DEFAULT_REMOTE_STATION_NAMES = {
@@ -69,6 +70,38 @@ def _resolve_static_config_path(
     return _default_static_config_path()
 
 
+def _resolve_curves_config_path(
+    payload: Mapping[str, object],
+    static_path: Path,
+) -> Path:
+    configured_path = payload.get("curves_config_path")
+    if isinstance(configured_path, str) and configured_path.strip():
+        candidate = Path(configured_path)
+        if candidate.is_absolute():
+            return candidate
+        return (static_path.resolve().parent / candidate).resolve()
+    return (static_path.resolve().parent / CURVES_CONFIG_FILENAME).resolve()
+
+
+def _load_curves_by_id(curves_path: Path) -> Dict[int, InlineTableConfig]:
+    payload = _load_config(curves_path)
+    raw_curves = payload.get("curves")
+    if not isinstance(raw_curves, list):
+        raise ValueError(f"curves config must contain a 'curves' list: {curves_path}")
+    curves_by_id: Dict[int, InlineTableConfig] = {}
+    for item in raw_curves:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"curve entry must be a mapping in {curves_path}")
+        curve_id = int(item["id"])
+        if curve_id in curves_by_id:
+            raise ValueError(f"duplicate curve id {curve_id} in {curves_path}")
+        table = _build_inline_table_config(item)
+        if table is None or not table.columns or not table.rows:
+            raise ValueError(f"curve id {curve_id} has empty columns/rows in {curves_path}")
+        curves_by_id[curve_id] = table
+    return curves_by_id
+
+
 def _merge_mapping(base: Mapping[str, object], overrides: Mapping[str, object]) -> Dict[str, object]:
     merged = dict(base)
     for key, value in overrides.items():
@@ -87,15 +120,18 @@ def _merge_with_static_config(
     payload: Dict[str, object],
     runtime_config_path: Path,
     static_config_path: Optional[str] = None,
-) -> Dict[str, object]:
+) -> Tuple[Dict[str, object], Path]:
     static_path = _resolve_static_config_path(payload, runtime_config_path, static_config_path)
     static_payload = _load_config(static_path)
     merged = _merge_mapping(static_payload, payload)
     merged.pop("static_config_path", None)
-    return merged
+    return merged, static_path
 
 
-def _build_station_config(payload: Dict) -> StationConfig:
+def _build_station_config(
+    payload: Dict,
+    curves_by_id: Mapping[int, InlineTableConfig],
+) -> StationConfig:
     units = [
         UnitConfig(
             id=unit["id"],
@@ -103,8 +139,8 @@ def _build_station_config(payload: Dict) -> StationConfig:
             remote_name=unit.get("remote_name"),
             q_min=unit.get("q_min"),
             q_max=unit.get("q_max"),
-            table_e=_build_inline_table_config(unit.get("table_e")),
-            table_r=_build_inline_table_config(unit.get("table_r")),
+            table_e=_resolve_unit_table(unit, "table_e", "table_e_curve_id", curves_by_id),
+            table_r=_resolve_unit_table(unit, "table_r", "table_r_curve_id", curves_by_id),
         )
         for unit in payload["units"]
     ]
@@ -141,6 +177,23 @@ def _build_inline_table_config(payload: object) -> Optional[InlineTableConfig]:
             raise ValueError("Inline table row must be a list")
         rows.append([float(value) for value in row])
     return InlineTableConfig(columns=columns, rows=rows)
+
+
+def _resolve_unit_table(
+    unit: Mapping[str, object],
+    inline_key: str,
+    curve_id_key: str,
+    curves_by_id: Mapping[int, InlineTableConfig],
+) -> Optional[InlineTableConfig]:
+    curve_id_value = unit.get(curve_id_key)
+    if curve_id_value is not None:
+        curve_id = int(curve_id_value)
+        if curve_id not in curves_by_id:
+            raise ValueError(
+                f"unknown {curve_id_key}={curve_id} for unit {unit.get('id')}"
+            )
+        return curves_by_id[curve_id]
+    return _build_inline_table_config(unit.get(inline_key))
 
 
 def _inline_table_to_frame(table: InlineTableConfig, label: str) -> pd.DataFrame:
@@ -309,7 +362,13 @@ def _build_topology_config(payload: Mapping[str, object], stations: Sequence[Sta
     )
 
 
-def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfig:
+def _system_config_from_payload(
+    payload: Dict,
+    config_path: Path,
+    static_path: Optional[Path] = None,
+) -> SystemConfig:
+    curves_path = _resolve_curves_config_path(payload, static_path or _default_static_config_path())
+    curves_by_id = _load_curves_by_id(curves_path)
     stations = []
     raw_stations = payload["stations"]
     for idx, item in enumerate(raw_stations, start=1):
@@ -320,7 +379,7 @@ def _system_config_from_payload(payload: Dict, config_path: Path) -> SystemConfi
         station_payload.setdefault("back_level_key", defaults["back_level_key"])
         station_payload.setdefault("hydro_front_node", defaults["hydro_front_node"])
         station_payload.setdefault("hydro_back_node", defaults["hydro_back_node"])
-        stations.append(_build_station_config(station_payload))
+        stations.append(_build_station_config(station_payload, curves_by_id))
     pools = [PoolConfig(**pool) for pool in payload["canal_pools"]]
     data_files = payload.get("data_files", {})
     raw_boundary_level = data_files.get("boundary_level", "data/boundary-level.xlsx")
@@ -375,14 +434,14 @@ def load_boundary_level_plan(
 def load_system_config(config_path: str = "data/config.yaml") -> SystemConfig:
     path = Path(config_path)
     payload = _load_config(path)
-    merged_payload = _merge_with_static_config(payload, path)
-    return _system_config_from_payload(merged_payload, path)
+    merged_payload, static_path = _merge_with_static_config(payload, path)
+    return _system_config_from_payload(merged_payload, path, static_path=static_path)
 
 
 def load_runtime_parameters(config_path: str = "data/config.yaml") -> RuntimeParameters:
     path = Path(config_path)
     payload = _load_config(path)
-    merged_payload = _merge_with_static_config(payload, path)
+    merged_payload, _ = _merge_with_static_config(payload, path)
     return _runtime_from_payload(merged_payload)
 
 
@@ -407,8 +466,8 @@ def _runtime_context_from_payload(
     static_config_path: Optional[str] = None,
 ) -> Dict[str, object]:
     del demand_path
-    merged_payload = _merge_with_static_config(payload, path, static_config_path)
-    system_config = _system_config_from_payload(merged_payload, path)
+    merged_payload, static_path = _merge_with_static_config(payload, path, static_config_path)
+    system_config = _system_config_from_payload(merged_payload, path, static_path=static_path)
     runtime = _runtime_from_payload(merged_payload)
     demand_plan = build_zero_demand_plan(system_config)
 
