@@ -299,19 +299,27 @@ def basin_profiles_to_basin_levels(
     return basin_levels
 
 
-def _validate_hidden_disturbance_frame(path: str, df: pd.DataFrame) -> pd.DataFrame:
-    expected = ["hour", "pool1", "pool2"]
+def _validate_hidden_disturbance_frame(
+    path: str,
+    df: pd.DataFrame,
+    pool_ids: Iterable[int],
+) -> pd.DataFrame:
+    ordered_pool_ids = [int(pool_id) for pool_id in pool_ids]
+    expected = ["hour"] + [f"pool{pool_id}" for pool_id in ordered_pool_ids]
     if list(df.columns) != expected:
         raise ValueError(f"Unexpected hidden disturbance columns in {path}: {list(df.columns)}")
     validated = df.copy()
     validated["hour"] = pd.to_numeric(validated["hour"], errors="raise").astype(int)
-    validated["pool1"] = pd.to_numeric(validated["pool1"], errors="raise")
-    validated["pool2"] = pd.to_numeric(validated["pool2"], errors="raise")
+    for pool_id in ordered_pool_ids:
+        validated[f"pool{pool_id}"] = pd.to_numeric(validated[f"pool{pool_id}"], errors="raise")
     validated = validated.sort_values("hour").drop_duplicates(subset=["hour"], keep="last")
     return validated.set_index("hour", drop=False)
 
 
-def load_hidden_disturbance_scenarios(runtime: RuntimeParameters) -> Dict[str, pd.DataFrame]:
+def load_hidden_disturbance_scenarios(
+    runtime: RuntimeParameters,
+    pool_ids: Iterable[int],
+) -> Dict[str, pd.DataFrame]:
     scenario_paths = {
         "light": runtime.hidden_disturbance_rain_light_path,
         "moderate": runtime.hidden_disturbance_rain_moderate_path,
@@ -319,7 +327,7 @@ def load_hidden_disturbance_scenarios(runtime: RuntimeParameters) -> Dict[str, p
     }
     scenarios = {}
     for scenario, path in scenario_paths.items():
-        scenarios[scenario] = _validate_hidden_disturbance_frame(path, pd.read_excel(path))
+        scenarios[scenario] = _validate_hidden_disturbance_frame(path, pd.read_excel(path), pool_ids)
     return scenarios
 
 
@@ -572,14 +580,15 @@ class RemoteHydraulicEnvironment:
         self.runtime = runtime
         self.client = client or RemoteThreadClient(runtime.sim_api_base_url)
         self.boundary_level_plan = _boundary_level_plan_for_system(system_config)
-        self.hidden_disturbance_scenarios = load_hidden_disturbance_scenarios(runtime)
         if runtime.hidden_disturbance_enabled:
+            self.hidden_disturbance_scenarios = load_hidden_disturbance_scenarios(runtime, system_config.pool_ids)
             scenario = runtime.hidden_disturbance_active_scenario.lower()
             if scenario not in self.hidden_disturbance_scenarios:
                 raise ValueError(f"Unsupported hidden disturbance scenario: {runtime.hidden_disturbance_active_scenario}")
             self.hidden_disturbance_scenario = scenario
             self.hidden_disturbance_plan = self.hidden_disturbance_scenarios[scenario]
         else:
+            self.hidden_disturbance_scenarios = {}
             self.hidden_disturbance_scenario = "disabled"
             self.hidden_disturbance_plan = None
 
