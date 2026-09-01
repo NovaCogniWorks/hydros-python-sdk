@@ -50,6 +50,10 @@ case "${DEPLOY_ENV}" in
         ;;
 esac
 
+if [ -n "${DEPLOY_HOST_OVERRIDE:-}" ]; then
+    DEPLOY_HOST="${DEPLOY_HOST_OVERRIDE}"
+fi
+
 DEPLOY_DOCKER_PORT="${DEPLOY_DOCKER_PORT:-2375}"
 export DOCKER_HOST="tcp://${DEPLOY_HOST}:${DEPLOY_DOCKER_PORT}"
 VERSION="${VERSION:-v1.0.0}"

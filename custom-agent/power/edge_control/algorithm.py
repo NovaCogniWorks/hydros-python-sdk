@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from allocation import (
+    HydroSimV47PowerAllocator,
+    StationPowerAllocationInput,
+    TurbinePowerInput,
+)
 from hydros_agent_sdk.control_algorithms import (
     ControlActuator,
     ControlActuatorTarget,
@@ -17,6 +22,7 @@ from hydros_agent_sdk.control_algorithms import (
 STATION_OBJECT_TYPE = "PowerStation"
 TURBINE_OBJECT_TYPE = "Turbine"
 WATER_FLOW_VALUE_TYPE = "water_flow"
+OUTPUT_POWER_VALUE_TYPE = "output_power"
 
 
 @dataclass(frozen=True)
@@ -205,3 +211,239 @@ class PowerControlAlgorithm:
             error_code=error_code,
             error_message=error_message,
         )
+
+
+@dataclass(frozen=True)
+class PowerOutputPowerAllocationConfig:
+    algorithm_type: str = "power_station_output_power_allocation"
+    algorithm_version: str = "1.0.0"
+    default_efficiency: float = 0.9
+    default_output_power_delta: float = 1.0e9
+
+
+class PowerStationOutputPowerAllocationAlgorithm:
+    def __init__(self, config: Optional[PowerOutputPowerAllocationConfig] = None) -> None:
+        self._config = config or PowerOutputPowerAllocationConfig()
+        self.algorithm_type = self._config.algorithm_type
+        self.algorithm_version = self._config.algorithm_version
+        self._allocator = HydroSimV47PowerAllocator()
+
+    def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
+        if input_data.control_task_type != ControlTaskType.STATION_POWER_ALLOCATION:
+            return PowerControlAlgorithm._failed(
+                input_data,
+                error_code="UNSUPPORTED_CONTROL_TASK",
+                error_message="Power output allocation only supports STATION_POWER_ALLOCATION.",
+            )
+
+        target_signals = self._select_station_power_targets(input_data)
+        if not target_signals:
+            return PowerControlAlgorithm._failed(
+                input_data,
+                error_code="MISSING_TARGET_SIGNAL",
+                error_message="Missing PowerStation target signal for output_power.",
+            )
+
+        actuator_targets: List[ControlActuatorTarget] = []
+        results: List[ControlSignal] = []
+        station_states: Dict[str, Any] = {}
+        station_evidence: List[Dict[str, Any]] = []
+        for target_signal in target_signals:
+            station_id = target_signal.object_id
+            turbines = self._select_station_actuators(input_data.actuators, station_id=station_id)
+            if not turbines:
+                return PowerControlAlgorithm._failed(
+                    input_data,
+                    error_code="NO_SUPPORTED_ACTUATORS",
+                    error_message=f"No turbine output-power actuators found for station={station_id}.",
+                )
+
+            target_power = max(float(target_signal.value or 0.0), 0.0)
+            allocation_result = self._allocator.allocate_station(
+                StationPowerAllocationInput(
+                    station_id=int(station_id),
+                    target_output_power=target_power,
+                    turbines=[self._to_turbine_power_input(actuator, input_data.parameters) for actuator in turbines],
+                    max_output_power_delta=float(
+                        input_data.parameters.get(
+                            "max_output_power_delta",
+                            input_data.parameters.get(
+                                "max_adjustment_delta",
+                                self._config.default_output_power_delta,
+                            ),
+                        )
+                    ),
+                    default_efficiency=float(input_data.parameters.get("efficiency", self._config.default_efficiency)),
+                    stage_hints=self._stage_hints(input_data),
+                )
+            )
+            allocation_by_turbine = {
+                allocation.object_id: allocation
+                for allocation in allocation_result.turbine_allocations
+            }
+
+            actuator_targets.extend(
+                ControlActuatorTarget(
+                    object_type=TURBINE_OBJECT_TYPE,
+                    object_id=actuator.object_id,
+                    target_values={
+                        OUTPUT_POWER_VALUE_TYPE: allocation_by_turbine[actuator.object_id].target_output_power,
+                    },
+                )
+                for actuator in turbines
+            )
+            results.extend(
+                [
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type=target_signal.object_type,
+                        object_id=target_signal.object_id,
+                        value_type=OUTPUT_POWER_VALUE_TYPE,
+                        value=allocation_result.allocated_output_power,
+                    ),
+                    ControlSignal(
+                        type=SignalType.RESULT,
+                        object_type=target_signal.object_type,
+                        object_id=target_signal.object_id,
+                        value_type=WATER_FLOW_VALUE_TYPE,
+                        value=allocation_result.estimated_water_flow,
+                    ),
+                ]
+            )
+            station_states[str(station_id)] = {
+                "target_output_power": target_power,
+                "allocated_turbine_output_power": allocation_result.allocated_output_power,
+                "estimated_turbine_water_flow": allocation_result.estimated_water_flow,
+            }
+            station_evidence.append(self._build_station_evidence(allocation_result))
+
+        return ControlAlgorithmOutput(
+            schema_version=input_data.schema_version,
+            request_id=input_data.context.request_id,
+            status=ControlAlgorithmStatus.CONTINUE,
+            reason="TURBINE_POWER_TARGET_ALLOCATED",
+            actuator_targets=actuator_targets,
+            results=results,
+            next_state={"stations": station_states},
+            evidence={
+                "algorithm": "HydroSim.V47-compatible output power allocation",
+                "stations": station_evidence,
+            },
+        )
+
+    def _to_turbine_power_input(
+        self,
+        actuator: ControlActuator,
+        parameters: Dict[str, Any],
+    ) -> TurbinePowerInput:
+        range_config = actuator.ranges.get(OUTPUT_POWER_VALUE_TYPE)
+        return TurbinePowerInput(
+            object_id=int(actuator.object_id),
+            current_output_power=float(actuator.values.get(OUTPUT_POWER_VALUE_TYPE, 0.0)),
+            min_output_power=(
+                float(range_config.min_value)
+                if range_config and range_config.min_value is not None
+                else 0.0
+            ),
+            max_output_power=(
+                float(range_config.max_value)
+                if range_config and range_config.max_value is not None
+                else None
+            ),
+            head=self._optional_float(actuator.attributes.get("head", parameters.get("head"))),
+            efficiency=self._optional_float(actuator.attributes.get("efficiency", parameters.get("efficiency"))),
+            water_flow_per_mw=self._optional_float(
+                actuator.attributes.get("water_flow_per_mw", parameters.get("water_flow_per_mw"))
+            ),
+            design_head=self._optional_float(actuator.attributes.get("design_head", parameters.get("design_head"))),
+            min_head=self._optional_float(actuator.attributes.get("min_head", parameters.get("min_head"))),
+            max_head=self._optional_float(actuator.attributes.get("max_head", parameters.get("max_head"))),
+            design_power=self._optional_float(
+                actuator.attributes.get("design_power", parameters.get("design_power"))
+            ),
+            design_efficiency=self._optional_float(
+                actuator.attributes.get("design_efficiency", parameters.get("design_efficiency"))
+            ),
+            eta_head_coeff=self._optional_float(
+                actuator.attributes.get("eta_head_coeff", parameters.get("eta_head_coeff"))
+            ),
+            eta_power_coeff=self._optional_float(
+                actuator.attributes.get("eta_power_coeff", parameters.get("eta_power_coeff"))
+            ),
+            attributes=dict(actuator.attributes),
+        )
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        return float(value)
+
+    @staticmethod
+    def _build_station_evidence(allocation_result) -> Dict[str, Any]:
+        return {
+            "station_id": allocation_result.station_id,
+            "target_output_power": allocation_result.target_output_power,
+            "allocated_turbine_output_power": allocation_result.allocated_output_power,
+            "estimated_turbine_water_flow": allocation_result.estimated_water_flow,
+            "available_turbine_count": len(allocation_result.turbine_allocations),
+            "turbine_allocations": [
+                {
+                    "object_id": allocation.object_id,
+                    "target_output_power": allocation.target_output_power,
+                    "estimated_water_flow": allocation.estimated_water_flow,
+                    "current_output_power": allocation.current_output_power,
+                }
+                for allocation in allocation_result.turbine_allocations
+            ],
+            "allocation": allocation_result.evidence["allocation"],
+            "feedback_used": allocation_result.evidence["feedback_used"],
+            "stage_hint_count": allocation_result.evidence["stage_hint_count"],
+        }
+
+    def _stage_hints(self, input_data: ControlAlgorithmInput) -> List[Dict[str, Any]]:
+        hints = []
+        configured_hints = input_data.parameters.get("stage_hints", [])
+        if isinstance(configured_hints, list):
+            hints.extend(item for item in configured_hints if isinstance(item, dict))
+        for signal in input_data.signals:
+            if signal.type != SignalType.OBSERVATION or signal.value is None:
+                continue
+            hints.append(
+                {
+                    "object_type": signal.object_type,
+                    "object_id": signal.object_id,
+                    "metrics_code": signal.value_type,
+                    "value": float(signal.value),
+                    "attributes": dict(signal.attributes or {}),
+                }
+            )
+        return hints
+
+    def _select_station_power_targets(self, input_data: ControlAlgorithmInput) -> List[ControlSignal]:
+        return [
+            signal
+            for signal in input_data.signals
+            if signal.type == SignalType.TARGET
+            and signal.object_type == STATION_OBJECT_TYPE
+            and signal.value is not None
+            and signal.value_type == OUTPUT_POWER_VALUE_TYPE
+        ]
+
+    def _select_station_actuators(
+        self,
+        actuators: List[ControlActuator],
+        *,
+        station_id: int,
+    ) -> List[ControlActuator]:
+        selected = []
+        for actuator in actuators:
+            if not actuator.available or actuator.object_type != TURBINE_OBJECT_TYPE:
+                continue
+            actuator_station_id = actuator.attributes.get("station_object_id", actuator.attributes.get("node_id"))
+            if actuator_station_id is not None and int(actuator_station_id) != int(station_id):
+                continue
+            if OUTPUT_POWER_VALUE_TYPE not in actuator.values and OUTPUT_POWER_VALUE_TYPE not in actuator.ranges:
+                continue
+            selected.append(actuator)
+        return selected

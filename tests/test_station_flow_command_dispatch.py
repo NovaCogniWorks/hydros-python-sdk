@@ -99,3 +99,26 @@ def test_station_target_request_rejects_output_power_before_mqtt_dispatch():
         client.publish_command(request)
 
     transport.publish.assert_not_called()
+
+
+def test_station_target_request_allows_power_station_output_power_dispatch():
+    context = SimulationContext(biz_scene_instance_id="scene-output-power")
+    source = build_agent("source-agent", context)
+    target = build_agent("target-agent", context)
+
+    request = HydroStationTargetValueRequest(
+        command_id="AGTCMD-power-station-output-power",
+        source=source,
+        target=target,
+        context=context,
+        object_id=20100,
+        object_type="PowerStation",
+        target_value_type="output_power",
+        target_value=386.0,
+    )
+    transport = Mock()
+    client = AgentCommandClient(transport=transport, topic="/hydros/commands/agent/test")
+
+    client.publish_command(request)
+
+    transport.publish.assert_called_once()

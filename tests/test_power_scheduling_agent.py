@@ -24,6 +24,7 @@ from hydros_agent_sdk.protocol.events import (
 )
 from hydros_agent_sdk.protocol.models import (
     AgentStatus,
+    CommandStatus,
     HydroAgent,
     ObjectTimeSeries,
     SimulationContext,
@@ -34,6 +35,7 @@ from hydros_agent_sdk.mpc.task_state import MpcTaskState as SchedulingTaskState
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
+MPC_STATION_POWER_COMMAND_TYPE = DeviceValueTypeEnum.OUTPUT_POWER.code
 
 
 def _load_power_scheduling_module():
@@ -224,7 +226,7 @@ def test_power_outflow_follow_up_is_ack_only():
     agent._hydrosim_api.apply_time_series_event_update.assert_not_called()
 
 
-def test_power_scheduling_init_defers_expensive_power_plan_load():
+def test_power_scheduling_init_preloads_power_plan_after_registration():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-init-lazy-plan")
     agent._hydrosim_initialized = False
@@ -233,6 +235,7 @@ def test_power_scheduling_init_defers_expensive_power_plan_load():
     agent._initialize_optimization_model = Mock()
     agent._initialize_hydrosim_session = Mock()
     agent._ensure_hydrosim_power_plan_loaded = Mock()
+    agent._start_hydrosim_power_plan_preload = Mock()
     agent.subscribe_field_metrics = Mock()
     agent._agent_command_gateway.start = Mock()
 
@@ -254,6 +257,27 @@ def test_power_scheduling_init_defers_expensive_power_plan_load():
     agent._initialize_hydrosim_session.assert_called_once_with()
     agent._ensure_hydrosim_power_plan_loaded.assert_not_called()
     agent._agent_command_gateway.start.assert_called_once_with()
+    agent._start_hydrosim_power_plan_preload.assert_called_once_with()
+
+
+def test_power_scheduling_tick_fails_fast_when_power_plan_preload_is_not_ready():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-plan-preload-wait")
+    agent._hydrosim_power_plan_loaded = False
+    agent.properties["hydrosim_power_plan_preload_wait_seconds"] = 0
+    agent._hydrosim_power_plan_preload_done.clear()
+    agent._hydrosim_power_plan_preload_thread = SimpleNamespace(
+        is_alive=Mock(return_value=True)
+    )
+
+    response = agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-preload-wait", context=context, step=1)
+    )
+
+    assert response.command_status == "FAILED"
+    assert response.completed_step == 1
+    assert "HydroSim power planning preload is still running" in response.error_message
+    agent.dispatch_control_commands_and_await_execution.assert_not_called()
 
 
 def test_power_scheduling_termination_clears_explicit_task_state():
@@ -403,17 +427,17 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     assert len(dispatched_commands) == 1
     dispatched = dispatched_commands[0]
     assert dispatched["target_agent_code"] == "TARGET_AGENT_20300"
-    assert dispatched["target_command_type"] == "water_flow"
-    assert dispatched["target_value"] == 43.0
+    assert dispatched["target_command_type"] == "output_power"
+    assert dispatched["target_value"] == 103.0
     assert dispatched["object_id"] == 20300
     assert dispatched["object_type"] == "PowerStation"
     assert dispatched["main_step_index"] == 3
     assert dispatched["group_size"] == 1
-    assert dispatched["group_id"].startswith("POWER_STATION_OUT_FLOW:power-scene-001:3:TARGET_AGENT_20300:")
+    assert dispatched["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-001:3:TARGET_AGENT_20300:")
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=3)
 
 
-def test_power_scheduling_optimization_builds_station_out_flow_command():
+def test_power_scheduling_optimization_builds_station_output_power_command():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-turbine-001")
     agent._hydrosim_api._session = _build_session(4)
@@ -423,13 +447,13 @@ def test_power_scheduling_optimization_builds_station_out_flow_command():
     assert len(commands) == 1
     command = commands[0]
     assert command["target_agent_code"] == "TARGET_AGENT_20300"
-    assert command["target_command_type"] == "water_flow"
-    assert command["target_value"] == 42.0
+    assert command["target_command_type"] == "output_power"
+    assert command["target_value"] == 102.0
     assert command["object_id"] == 20300
     assert command["object_type"] == "PowerStation"
     assert command["main_step_index"] == 2
     assert command["group_size"] == 1
-    assert command["group_id"].startswith("POWER_STATION_OUT_FLOW:power-scene-turbine-001:2:TARGET_AGENT_20300:")
+    assert command["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-turbine-001:2:TARGET_AGENT_20300:")
 
 
 def test_power_scheduling_init_downloads_hydrosim_inputs_from_config_urls():
@@ -741,6 +765,8 @@ def test_power_scheduling_time_series_update_activates_window_anchor():
     agent.dispatch_control_commands_and_await_execution.assert_not_called()
     assert agent._pending_boundary_control_commands
     assert agent._pending_boundary_control_target_step == 2
+    assert agent._pending_boundary_control_commands[0]["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+    assert agent._pending_boundary_control_commands[0]["target_value"] == 102.0
 
 
 def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
@@ -780,6 +806,7 @@ def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
     pending_commands = list(agent._pending_boundary_control_commands)
     assert pending_commands
     assert pending_commands[0]["main_step_index"] == 2
+    assert pending_commands[0]["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
 
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(1))
     agent.on_tick_simulation(
@@ -1315,19 +1342,21 @@ def test_power_scheduling_report_includes_station_predicted_aggregates():
     turbine_station_detail = next(
         detail
         for detail in report.mpc_prediction_results[0].details
-        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_POWER_COMMAND_TYPE
     )
     turbine_attributes = json.loads(turbine_station_detail.attributes)
     assert turbine_station_detail.node_id == 20300
     assert turbine_station_detail.object_id == 20300
-    assert turbine_station_detail.value == 100.0
-    assert turbine_station_detail.target_value == 100.0
+    assert turbine_station_detail.value == 262.0
+    assert turbine_station_detail.target_value == 262.0
     assert turbine_attributes["object_name"] == "Station-20300"
     assert turbine_attributes["front_water_level"] == 658.0
     assert turbine_attributes["back_water_level"] == 620.0
     assert turbine_attributes["final_target_water_level"] == 658.0
+    assert turbine_attributes["final_target_output_power"] == 262.0
     assert turbine_attributes["out_flow"] == 100.0
     assert turbine_attributes["diversion_flow"] is None
+    assert turbine_attributes["output_power"] == 262.0
     assert turbine_attributes["efficiency"] == 262.0
 
     gate_station_detail = next(
@@ -1382,7 +1411,7 @@ def test_power_scheduling_report_uses_station_diversion_flow_without_gate_device
     assert predicted_values["diversion_flow"] == 31.5
 
 
-def test_power_scheduling_optimization_ignores_station_output_power_when_turbine_flow_is_missing():
+def test_power_scheduling_optimization_uses_station_output_power_without_turbine_flow():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-station-fallback-001")
     agent._hydrosim_api._session = SimpleNamespace(
@@ -1398,10 +1427,17 @@ def test_power_scheduling_optimization_ignores_station_output_power_when_turbine
 
     commands = agent.on_optimization(2)
 
-    assert commands == []
+    assert len(commands) == 1
+    command = commands[0]
+    assert command["target_agent_code"] == "TARGET_AGENT_20300"
+    assert command["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+    assert command["target_value"] == 321.0
+    assert command["object_id"] == 20300
+    assert command["object_type"] == "PowerStation"
+    assert command["main_step_index"] == 2
 
 
-def test_power_scheduling_optimization_uses_only_station_turbine_out_flow():
+def test_power_scheduling_optimization_uses_turbine_output_power_when_station_series_is_missing():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-command-filter-001")
     agent._hydrosim_api._session = SimpleNamespace(
@@ -1447,14 +1483,55 @@ def test_power_scheduling_optimization_uses_only_station_turbine_out_flow():
     assert len(commands) == 1
     command = commands[0]
     assert command["target_agent_code"] == "TARGET_AGENT_20300"
-    assert command["target_command_type"] == "water_flow"
+    assert command["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+    assert command["target_value"] == 82.0
+    assert command["object_id"] == 20300
+    assert command["object_type"] == "PowerStation"
+    assert command["main_step_index"] == 2
+    assert command["group_size"] == 1
+    assert command["group_id"].startswith(
+        "POWER_STATION_OUTPUT_POWER:power-scene-command-filter-001:2:TARGET_AGENT_20300:"
+    )
+
+
+def test_power_scheduling_optimization_falls_back_to_turbine_out_flow_when_power_is_missing():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-flow-fallback-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[],
+        latest_device_output_series=[
+            {
+                "object_id": 20304,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20304",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20300,
+                "time_series": [{"step": 2, "value": 42.0}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 16.0}],
+            },
+        ],
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert command["target_agent_code"] == "TARGET_AGENT_20300"
+    assert command["target_command_type"] == MPC_STATION_FLOW_COMMAND_TYPE
     assert command["target_value"] == 42.0
     assert command["object_id"] == 20300
     assert command["object_type"] == "PowerStation"
     assert command["main_step_index"] == 2
     assert command["group_size"] == 1
     assert command["group_id"].startswith(
-        "POWER_STATION_OUT_FLOW:power-scene-command-filter-001:2:TARGET_AGENT_20300:"
+        "POWER_STATION_OUT_FLOW:power-scene-flow-fallback-001:2:TARGET_AGENT_20300:"
     )
 
 

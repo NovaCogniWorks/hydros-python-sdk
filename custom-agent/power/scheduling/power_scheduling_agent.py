@@ -8,7 +8,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from threading import RLock
+from threading import Event, RLock, Thread
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -63,7 +63,9 @@ POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-24-central-outflow-planning-v11"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
+MPC_STATION_POWER_COMMAND_TYPE = DeviceValueTypeEnum.OUTPUT_POWER.code
 STATION_DIVERSION_FLOW_SERIES_KEY = "diversion_flow_time_series"
+DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS = 240.0
 
 
 class HydroSimInputFileResolver:
@@ -183,6 +185,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._hydrosim_api = HydroSimulationApi()
         self._hydrosim_initialized = False
         self._hydrosim_power_plan_loaded = False
+        self._hydrosim_power_plan_preload_done = Event()
+        self._hydrosim_power_plan_preload_thread: Optional[Thread] = None
+        self._hydrosim_power_plan_preload_error: Optional[Exception] = None
         self._rolling_window_start_step: Optional[int] = None
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
@@ -222,11 +227,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._initialize_hydrosim_session()
             # Power planning conversion may take several minutes. The task-init
             # request is broadcast at cluster scope, so finish lightweight
-            # registration first and load the plan under the runtime lock on the
-            # first Tick/event. This lets the coordinator establish the accepted
-            # agentId before a stale SDK can claim the same agentCode.
+            # registration first and then warm the plan in the background. This
+            # preserves the accepted agentId ordering without making STEP_1 run
+            # the full configured HydroSim conversion on the tick ACK path.
             logger.info(
-                "HydroSim power planning load deferred until first Tick/event: runtime_revision=%s",
+                "HydroSim power planning load scheduled for background preload: runtime_revision=%s",
                 POWER_SCHEDULING_RUNTIME_REVISION,
             )
 
@@ -234,6 +239,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._agent_command_gateway.start()
 
             object.__setattr__(self, "agent_status", AgentStatus.ACTIVE)
+            self._start_hydrosim_power_plan_preload()
             return SimTaskInitResponse(
                 context=self.context,
                 command_id=request.command_id,
@@ -252,6 +258,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:
+        self._await_hydrosim_power_plan_preload_for_command(
+            command_name="tick",
+            step=request.step,
+        )
         with self._runtime_lock:
             self._ensure_hydrosim_initialized()
             self._ensure_hydrosim_power_plan_loaded()
@@ -301,7 +311,55 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
             return []
 
+        power_commands = self._build_station_output_power_commands(session, step)
+        if power_commands:
+            return power_commands
+        logger.warning(
+            "No station output-power control command is available at step=%s; fallback to station water-flow command.",
+            step,
+        )
         return self._build_station_turbine_out_flow_commands(session, step)
+
+    def _build_station_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+        station_output_powers: Dict[int, float] = {}
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            metrics_code = station.get("metrics_code")
+            if metrics_code is not None and str(metrics_code) != DeviceValueTypeEnum.OUTPUT_POWER.code:
+                continue
+            object_type = station.get("object_type")
+            if object_type is not None and str(object_type) not in {
+                HydroObjectType.STATION.value,
+                HydroObjectType.POWER_STATION.value,
+            }:
+                continue
+            station_id = station.get("node_id", station.get("object_id"))
+            if station_id is None:
+                continue
+            row = self._get_series_row_for_step(station.get("time_series", []), step)
+            if row is None:
+                continue
+            station_output_powers[int(station_id)] = float(row["value"])
+
+        if not station_output_powers:
+            for device in getattr(session, "latest_device_output_series", []) or []:
+                if (
+                    str(device.get("object_type")) != HydroObjectType.TURBINE.value
+                    or str(device.get("metrics_code")) != DeviceValueTypeEnum.OUTPUT_POWER.code
+                    or device.get("node_id") is None
+                ):
+                    continue
+                row = self._get_series_row_for_step(device.get("time_series", []), step)
+                if row is None:
+                    continue
+                station_id = int(device["node_id"])
+                station_output_powers[station_id] = station_output_powers.get(station_id, 0.0) + float(row["value"])
+
+        return self._build_station_target_commands(
+            station_values=station_output_powers,
+            step=step,
+            target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
+            group_prefix="POWER_STATION_OUTPUT_POWER",
+        )
 
     def _build_station_turbine_out_flow_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
         station_out_flows: Dict[int, float] = {}
@@ -318,24 +376,40 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             station_id = int(device["node_id"])
             station_out_flows[station_id] = station_out_flows.get(station_id, 0.0) + float(row["value"])
 
+        return self._build_station_target_commands(
+            station_values=station_out_flows,
+            step=step,
+            target_command_type=MPC_STATION_FLOW_COMMAND_TYPE,
+            group_prefix="POWER_STATION_OUT_FLOW",
+        )
+
+    def _build_station_target_commands(
+        self,
+        *,
+        station_values: Dict[int, float],
+        step: int,
+        target_command_type: str,
+        group_prefix: str,
+    ) -> List[Dict[str, Any]]:
         commands_by_agent: Dict[str, List[Dict[str, Any]]] = {}
-        for station_id, out_flow in station_out_flows.items():
+        for station_id, target_value in station_values.items():
             target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
                 object_id=station_id,
                 device_type=HydroObjectType.POWER_STATION.value,
             )
             if target_agent is None:
                 logger.warning(
-                    "Skip station turbine out-flow control because target agent is unavailable: stationId=%s, step=%s",
+                    "Skip station control because target agent is unavailable: stationId=%s, step=%s, targetCommandType=%s",
                     station_id,
                     step,
+                    target_command_type,
                 )
                 continue
             commands_by_agent.setdefault(target_agent.agent_code, []).append(
                 {
                     "target_agent_code": target_agent.agent_code,
-                    "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
-                    "target_value": out_flow,
+                    "target_command_type": target_command_type,
+                    "target_value": target_value,
                     "object_id": station_id,
                     "object_type": HydroObjectType.POWER_STATION.value,
                     "main_step_index": step,
@@ -345,7 +419,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         commands: List[Dict[str, Any]] = []
         for target_agent_code, grouped_commands in commands_by_agent.items():
             group_id = (
-                f"POWER_STATION_OUT_FLOW:{self.context.biz_scene_instance_id}:"
+                f"{group_prefix}:{self.context.biz_scene_instance_id}:"
                 f"{step}:{target_agent_code}:{uuid.uuid4()}"
             )
             for command in grouped_commands:
@@ -622,7 +696,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 step=step,
                 gate_flow=station_diversion_flow,
             )
-            station_efficiency = self._sum_device_metric_for_station_step(
+            station_output_power = self._sum_device_metric_for_station_step(
                 device_series=device_series,
                 station_id=station_id,
                 object_type=HydroObjectType.TURBINE.value,
@@ -635,20 +709,23 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             gate_device_results = self._build_station_device_results(
                 device_series, station_id, step, HydroObjectType.GATE.value
             )
-            if station_out_flow is not None or station_efficiency is not None or turbine_device_results:
+            if station_out_flow is not None or station_output_power is not None or turbine_device_results:
+                target_value = self._value_item(MPC_STATION_POWER_COMMAND_TYPE, station_output_power)
+                if target_value is None:
+                    target_value = self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_out_flow)
                 predicted_results.append(
                     MpcResultFactory.build_predicted_result(
                         object_id=station_id,
                         object_type=POWER_STATION_TURBINE,
                         object_name=station_name,
-                        target_value=self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_out_flow),
+                        target_value=target_value,
                         predicted_value_list=self._build_station_prediction_values(
                             front_water_level=front_water_level,
                             final_target_water_level=final_target_water_level,
                             back_water_level=back_water_level,
                             out_flow=station_out_flow,
                             diversion_flow=None,
-                            efficiency=station_efficiency,
+                            output_power=station_output_power,
                         ),
                         device_result_list=turbine_device_results,
                     )
@@ -667,7 +744,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                             back_water_level=back_water_level,
                             out_flow=None,
                             diversion_flow=station_diversion_flow,
-                            efficiency=None,
+                            output_power=None,
                         ),
                         device_result_list=gate_device_results,
                     )
@@ -738,7 +815,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         back_water_level: Optional[float],
         out_flow: Optional[float],
         diversion_flow: Optional[float],
-        efficiency: Optional[float],
+        output_power: Optional[float],
     ) -> List[ValueItem]:
         values = (
             ("front_water_level", front_water_level),
@@ -746,7 +823,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             ("back_water_level", back_water_level),
             ("out_flow", out_flow),
             ("diversion_flow", diversion_flow),
-            ("efficiency", efficiency),
+            ("output_power", output_power),
+            # Historical reports used the efficiency field to carry station
+            # turbine output. Keep it during migration so old consumers do not
+            # lose the value while new consumers switch to output_power.
+            ("efficiency", output_power),
         )
         return [
             ValueItem(value_type=value_type, value=float(value))
@@ -905,7 +986,98 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         if not self._hydrosim_initialized:
             self._initialize_hydrosim_session()
 
+    def _start_hydrosim_power_plan_preload(self) -> None:
+        if self._hydrosim_power_plan_loaded:
+            return
+        preload_thread = self._hydrosim_power_plan_preload_thread
+        if preload_thread is not None and preload_thread.is_alive():
+            return
+
+        self._hydrosim_power_plan_preload_error = None
+        self._hydrosim_power_plan_preload_done.clear()
+        preload_thread = Thread(
+            target=self._preload_hydrosim_power_plan,
+            name=f"hydrosim-power-plan-preload-{self.agent_id}",
+            daemon=True,
+        )
+        self._hydrosim_power_plan_preload_thread = preload_thread
+        preload_thread.start()
+
+    def _preload_hydrosim_power_plan(self) -> None:
+        try:
+            with self._runtime_lock:
+                self._ensure_hydrosim_initialized()
+                self._load_hydrosim_power_plan_locked()
+        except Exception as exc:
+            self._hydrosim_power_plan_preload_error = exc
+            logger.exception(
+                "HydroSim power planning background preload failed: runtime_revision=%s",
+                POWER_SCHEDULING_RUNTIME_REVISION,
+            )
+        finally:
+            self._hydrosim_power_plan_preload_done.set()
+
+    def _await_hydrosim_power_plan_preload_for_command(
+        self,
+        *,
+        command_name: str,
+        step: Optional[int] = None,
+    ) -> None:
+        if self._hydrosim_power_plan_loaded:
+            return
+
+        preload_thread = self._hydrosim_power_plan_preload_thread
+        if preload_thread is None:
+            return
+
+        wait_seconds = self._resolve_power_plan_preload_wait_seconds()
+        if preload_thread.is_alive():
+            logger.info(
+                "Waiting HydroSim power planning background preload before %s: step=%s, wait_seconds=%.3f",
+                command_name,
+                step,
+                wait_seconds,
+            )
+            if not self._hydrosim_power_plan_preload_done.wait(wait_seconds):
+                raise RuntimeError(
+                    "HydroSim power planning preload is still running "
+                    f"before {command_name}: step={step}, waited_seconds={wait_seconds:.3f}"
+                )
+
+        if self._hydrosim_power_plan_preload_error is not None:
+            raise RuntimeError(
+                "HydroSim power planning preload failed before "
+                f"{command_name}: {type(self._hydrosim_power_plan_preload_error).__name__}: "
+                f"{self._hydrosim_power_plan_preload_error}"
+            ) from self._hydrosim_power_plan_preload_error
+
+    def _resolve_power_plan_preload_wait_seconds(self) -> float:
+        raw_value = self.properties.get_property(
+            "hydrosim_power_plan_preload_wait_seconds",
+            DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS,
+        )
+        try:
+            wait_seconds = float(raw_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid hydrosim_power_plan_preload_wait_seconds=%s; using default %.3f",
+                raw_value,
+                DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS,
+            )
+            wait_seconds = DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS
+        return max(0.0, wait_seconds)
+
     def _ensure_hydrosim_power_plan_loaded(self) -> None:
+        if self._hydrosim_power_plan_loaded:
+            return
+        self._await_hydrosim_power_plan_preload_for_command(
+            command_name="power plan ensure",
+        )
+        if self._hydrosim_power_plan_loaded:
+            return
+        self._load_hydrosim_power_plan_locked()
+
+    def _load_hydrosim_power_plan_locked(self) -> None:
         if self._hydrosim_power_plan_loaded:
             return
         started_at = time.monotonic()
@@ -976,6 +1148,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_time_series_data_update(self, request: TimeSeriesDataUpdateRequest) -> TimeSeriesDataUpdateResponse:
+        self._await_hydrosim_power_plan_preload_for_command(
+            command_name="time series update",
+        )
         with self._runtime_lock:
             logger.info("Time series update received: commandId=%s", request.command_id)
             event = request.time_series_data_changed_event
@@ -1013,6 +1188,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         if not event.object_time_series:
             raise ValueError("OutflowPlanningEvent.object_time_series must not be empty")
 
+        self._await_hydrosim_power_plan_preload_for_command(
+            command_name="outflow planning",
+        )
         with self._runtime_lock:
             logger.info("Power outflow planning received: commandId=%s", request.command_id)
             self._ensure_hydrosim_initialized()

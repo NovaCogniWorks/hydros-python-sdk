@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+POWER_STATION_OBJECT_TYPE = "powerstation"
+
 
 class AgentCommandClient:
     """通过共享 ``Transport`` 解码和发布 Agent 指令。"""
@@ -82,10 +84,11 @@ class AgentCommandClient:
         if (
             isinstance(command, HydroStationTargetValueRequest)
             and command.target_value_type.strip().lower() == "output_power"
+            and command.object_type.strip().lower() != POWER_STATION_OBJECT_TYPE
         ):
             raise ValueError(
                 "output_power is a prediction/report metric and cannot be sent as "
-                "an update_station_target_value_request"
+                "an update_station_target_value_request unless object_type is PowerStation"
             )
         attempt = 0
         while attempt <= self.max_retry_count:

@@ -13,6 +13,8 @@ from edge_control import (  # noqa: E402
     ControlAlgorithmRuntime,
     PowerControlAlgorithm,
     PowerControlConfig,
+    PowerOutputPowerAllocationConfig,
+    PowerStationOutputPowerAllocationAlgorithm,
     create_control_algorithm_http_server,
 )
 
@@ -25,6 +27,7 @@ DEFAULT_CONTROL_ALGORITHM_PORT = 8015
 def build_runtime() -> ControlAlgorithmRuntime:
     runtime = ControlAlgorithmRuntime()
     runtime.register(PowerControlAlgorithm(PowerControlConfig()))
+    runtime.register(PowerStationOutputPowerAllocationAlgorithm(PowerOutputPowerAllocationConfig()))
     return runtime
 
 

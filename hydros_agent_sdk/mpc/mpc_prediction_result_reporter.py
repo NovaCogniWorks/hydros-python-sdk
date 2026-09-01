@@ -26,6 +26,7 @@ logger = logging.getLogger("hydros_agent_sdk.mpc.reporter")
 
 MPC_OPERATION_WATER_FLOW = "WATER_FLOW"
 MPC_OPERATION_WATER_LEVEL = "WATER_LEVEL"
+MPC_OPERATION_OUTPUT_POWER = "OUTPUT_POWER"
 MPC_OPERATION_SAFE_CONCENTRATION = "SAFE_CONCENTRATION"
 MPC_OPERATION_POLLUTANT_CONCENTRATION = "pollutant_concentration"
 MPC_PLAN_DISPATCH_PENDING = "PENDING"
@@ -389,6 +390,10 @@ class MpcPredictionResultReporter:
             predicted_result.predicted_value_list,
             "diversion_flow",
         )
+        output_power = MpcPredictionResultReporter._find_numeric_value(
+            predicted_result.predicted_value_list,
+            "output_power",
+        )
         is_power_station_result = predicted_result.object_type in {
             "POWER_STATION_TURBINE",
             "POWER_STATION_GATE",
@@ -402,6 +407,7 @@ class MpcPredictionResultReporter:
                 "final_target_water_level": None,
                 "out_flow": None,
                 "diversion_flow": None,
+                "output_power": None,
                 "efficiency": None,
                 **{
                     value_item.value_type: value_item.value
@@ -413,11 +419,17 @@ class MpcPredictionResultReporter:
                 attributes["final_target_water_flow"] = final_target_value
                 if not is_power_station_result:
                     attributes.pop("final_target_water_level", None)
+            elif target_value_type and target_value_type.upper() == MPC_OPERATION_OUTPUT_POWER:
+                attributes["final_target_output_power"] = final_target_value
+                if not is_power_station_result:
+                    attributes.pop("final_target_water_level", None)
             else:
                 attributes["final_target_water_level"] = final_target_value
         detail_value = front_water_level
         if target_value_type and target_value_type.upper() == MPC_OPERATION_WATER_FLOW:
             detail_value = out_flow if out_flow is not None else diversion_flow
+        elif target_value_type and target_value_type.upper() == MPC_OPERATION_OUTPUT_POWER:
+            detail_value = output_power
         return MpcPredictionResultDetail(
             biz_idem_key=build_mpc_detail_identity(
                 optimize_step,
