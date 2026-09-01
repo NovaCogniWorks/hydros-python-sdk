@@ -50,6 +50,9 @@ class ControlAlgorithmsTest(unittest.TestCase):
         self.assertIn("signals", payload)
         self.assertIn("actuators", payload)
         self.assertNotIn("controlTaskType", payload)
+        self.assertNotIn("step_index", payload["context"])
+        self.assertEqual(12, payload["context"]["main_step_index"])
+        self.assertEqual(120, payload["context"]["compute_step"])
         self.assertEqual(decoded, input_data)
         self.assertEqual(decoded.signals[0].type, SignalType.TARGET)
         self.assertEqual(decoded.actuators[0].status, "ON")
@@ -160,11 +163,11 @@ class ControlAlgorithmsTest(unittest.TestCase):
             context=ControlAlgorithmContext(
                 request_id="scene-001:12:2001:odd_dmpc",
                 context_id="scene-001",
-                step_index=12,
+                main_step_index=12,
+                compute_step=120,
                 elapsed_seconds=10.0,
                 target_object_type="PumpStation",
                 target_object_id=2001,
-                attributes={"compute_step": 120},
             ),
             signals=[
                 ControlSignal(

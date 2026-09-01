@@ -948,8 +948,8 @@ class PumpFlowDmpcTest(unittest.TestCase):
             context=ControlAlgorithmContext(
                 request_id="request-001",
                 context_id="scene-001",
-                step_index=12,
                 main_step_index=12,
+                compute_step=120,
                 target_object_type="PumpStation",
                 target_object_id=2001,
             ),
@@ -1139,7 +1139,8 @@ class PumpFlowDmpcTest(unittest.TestCase):
             context=ControlAlgorithmContext(
                 request_id="request-multi",
                 context_id="scene-multi",
-                step_index=1,
+                main_step_index=1,
+                compute_step=1,
                 target_object_type="PumpStation",
                 target_object_id=20000,
             ),
