@@ -26,6 +26,19 @@ from hydrosim import (
     HydroSimulationService,
 )
 
+RESERVOIR_EVIDENCE_HISTORY_KEYS = (
+    "current_inflow",
+    "current_outflow_power",
+    "current_outflow_discharge_ff",
+    "current_spill_ff_gain",
+    "current_spill_ff_deadband",
+    "current_spill_ff_surplus",
+    "current_spill_ff_force_pass",
+    "current_pid_output",
+    "current_target_spill",
+    "current_spill_delta",
+)
+
 __all__ = [
     "CurrentStepPowerPlanningValue",
     "HydroSimulationApi",
@@ -625,9 +638,43 @@ class HydroSimulationApi:
                         {"step": int(step), "value": self._normalize_output_value(value)}
                         for step, value in zip(steps, reservoir.history["current_outflow_discharge"])
                     ],
+                    "reservoir_evidence_time_series": self._build_reservoir_evidence_time_series(
+                        steps,
+                        reservoir,
+                    ),
                 }
             )
         return result
+
+    def _build_reservoir_evidence_time_series(
+        self,
+        steps: Any,
+        reservoir: Any,
+    ) -> List[Dict[str, Any]]:
+        history = getattr(reservoir, "history", {}) or {}
+        rows: List[Dict[str, Any]] = []
+        for index, step in enumerate(steps):
+            row: Dict[str, Any] = {"step": int(step)}
+            has_value = False
+            for key in RESERVOIR_EVIDENCE_HISTORY_KEYS:
+                values = history.get(key) or []
+                value = values[index] if index < len(values) else None
+                if value is not None:
+                    has_value = True
+                row[key] = self._normalize_evidence_value(value)
+            if has_value:
+                rows.append(row)
+        return rows
+
+    def _normalize_evidence_value(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return bool(value)
+        try:
+            return self._normalize_output_value(value)
+        except (TypeError, ValueError):
+            return value
 
     def _station_power_series_to_event_items(self, station_power_series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return [
@@ -1207,6 +1254,7 @@ class HydroSimulationApi:
             payload,
             self.service.core.result_factory.STATION_DIVERSION_FLOW_METRIC,
         )
+        reservoir_evidence_by_node = self._extract_station_reservoir_evidence_series(payload)
         station_power_plan_used = payload.get("station_power_plan_used") or []
         if station_power_plan_used:
             return [
@@ -1218,6 +1266,7 @@ class HydroSimulationApi:
                         for row in item.get("time_series", [])
                     ],
                     "diversion_flow_time_series": diversion_series_by_node.get(int(item["node_id"]), []),
+                    "reservoir_evidence_time_series": reservoir_evidence_by_node.get(int(item["node_id"]), []),
                 }
                 for item in station_power_plan_used
             ]
@@ -1242,9 +1291,32 @@ class HydroSimulationApi:
                         for row in item.get("time_series", [])
                     ],
                     "diversion_flow_time_series": diversion_series_by_node.get(node_id, []),
+                    "reservoir_evidence_time_series": reservoir_evidence_by_node.get(node_id, []),
                 }
             )
         return result
+
+    def _extract_station_reservoir_evidence_series(
+        self,
+        payload: Dict[str, Any],
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        result: Dict[int, List[Dict[str, Any]]] = {}
+        for item in payload.get("station_reservoir_evidence", []) or []:
+            node_id = item.get("node_id")
+            if node_id is None:
+                continue
+            result[int(node_id)] = [
+                self._normalize_reservoir_evidence_row(row)
+                for row in item.get("time_series", []) or []
+                if row.get("step") is not None
+            ]
+        return result
+
+    def _normalize_reservoir_evidence_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {"step": int(row["step"])}
+        for key in RESERVOIR_EVIDENCE_HISTORY_KEYS:
+            normalized[key] = self._normalize_evidence_value(row.get(key))
+        return normalized
 
     def _extract_station_metric_series(
         self,

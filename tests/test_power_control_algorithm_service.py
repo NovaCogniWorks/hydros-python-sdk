@@ -64,6 +64,12 @@ class PowerAllocationModuleTest(unittest.TestCase):
         self.assertAlmostEqual(90.0, result.allocated_output_power)
         self.assertGreater(result.estimated_water_flow, 0.0)
         self.assertEqual("current_power_ratio", result.evidence["allocation"]["mode"])
+        turbine_targets = result.evidence["allocation"]["turbine_targets"]
+        self.assertEqual(2, len(turbine_targets))
+        self.assertEqual(20301, turbine_targets[0]["object_id"])
+        self.assertAlmostEqual(40.0, turbine_targets[0]["current_output_power"])
+        self.assertAlmostEqual(60.0, turbine_targets[0]["raw_target_output_power"])
+        self.assertAlmostEqual(60.0, turbine_targets[0]["projected_target_output_power"])
 
     def test_v47_allocator_zero_target_stops_turbines(self):
         allocation = _load_power_allocation_module()

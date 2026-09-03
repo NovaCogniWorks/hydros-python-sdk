@@ -22,6 +22,18 @@ class HydroSimulationResultFactory:
     """负责仿真结果的导出、汇总与结果对象构造。"""
 
     STATION_DIVERSION_FLOW_METRIC = "diversion_flow"
+    RESERVOIR_EVIDENCE_HISTORY_KEYS = (
+        "current_inflow",
+        "current_outflow_power",
+        "current_outflow_discharge_ff",
+        "current_spill_ff_gain",
+        "current_spill_ff_deadband",
+        "current_spill_ff_surplus",
+        "current_spill_ff_force_pass",
+        "current_pid_output",
+        "current_target_spill",
+        "current_spill_delta",
+    )
 
     def __init__(self, runtime: Any | None = None) -> None:
         self.runtime = runtime or default_runtime
@@ -300,6 +312,11 @@ class HydroSimulationResultFactory:
             "formal_step_start": int(formal_steps[0]) if len(formal_steps) else 0,
             "formal_step_end": int(formal_steps[-1]) if len(formal_steps) else 0,
             "object_time_series": series_items,
+            "station_reservoir_evidence": self._station_reservoir_evidence_series(
+                formal_steps,
+                multi_reservoir,
+                sample_interval,
+            ),
             "station_power_plan_used": [
                 {
                     "node_id": node_id,
@@ -588,6 +605,68 @@ class HydroSimulationResultFactory:
         if metric == self.STATION_DIVERSION_FLOW_METRIC:
             return multi_reservoir.Capacity_Stairs[idx].history["current_outflow_discharge"]
         raise ValueError(f"不支持的 Station 指标: {metric}")
+
+    def _station_reservoir_evidence_series(
+        self,
+        steps: Sequence[int],
+        multi_reservoir: Any,
+        sample_interval: int,
+    ) -> List[Dict[str, Any]]:
+        station_names = self.runtime._station_name_by_node()
+        rows: List[Dict[str, Any]] = []
+        for node_id in self.runtime.STATION_NODE_IDS:
+            idx = self.runtime.NODE_TO_INDEX[node_id]
+            reservoir = multi_reservoir.Capacity_Stairs[idx]
+            rows.append(
+                {
+                    "node_id": int(node_id),
+                    "station": station_names[node_id],
+                    "time_series": self._make_reservoir_evidence_rows(
+                        steps,
+                        getattr(reservoir, "history", {}) or {},
+                        sample_interval,
+                    ),
+                }
+            )
+        return rows
+
+    def _make_reservoir_evidence_rows(
+        self,
+        steps: Sequence[int],
+        history: Dict[str, Any],
+        sample_interval: int,
+    ) -> List[Dict[str, Any]]:
+        if sample_interval <= 0:
+            sample_interval = 1
+        rows: List[Dict[str, Any]] = []
+        for pos, step in enumerate(steps):
+            if pos % sample_interval != 0 and pos != len(steps) - 1:
+                continue
+            row: Dict[str, Any] = {"step": int(step)}
+            has_value = False
+            for key in self.RESERVOIR_EVIDENCE_HISTORY_KEYS:
+                values = history.get(key) or []
+                value = values[pos] if pos < len(values) else None
+                if value is not None:
+                    has_value = True
+                row[key] = self._normalize_reservoir_evidence_value(value)
+            if has_value:
+                rows.append(row)
+        return rows
+
+    @staticmethod
+    def _normalize_reservoir_evidence_value(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (bool, np.bool_)):
+            return bool(value)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return value
+        if not math.isfinite(numeric):
+            return None
+        return round(numeric, 6)
 
     def _control_domain_device_series(
         self,

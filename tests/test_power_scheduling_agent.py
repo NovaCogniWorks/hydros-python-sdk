@@ -7,6 +7,8 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import yaml
+
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
     HydroEventCommand,
@@ -198,6 +200,36 @@ def test_power_outflow_planning_uses_inflow_path_without_fallback():
     agent._hydrosim_api.get_station_power_planning_series_from_inflow.assert_called_once()
 
 
+def test_power_planning_preload_falls_back_to_inflow_without_noisy_info(caplog):
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-preload-inflow-fallback")
+    agent._hydrosim_power_plan_loaded = False
+    agent._resolve_power_planning_file_for_load = Mock(return_value=("plan.json", None))
+    agent._hydrosim_api.get_station_power_planning_series = Mock(side_effect=ValueError("not station power"))
+    agent._hydrosim_api.get_station_power_planning_series_from_inflow = Mock(
+        return_value={
+            "station_power_series": [
+                {
+                    "node_id": 20100,
+                    "station": "Station-20100",
+                    "time_series": [{"step": 1, "value": 480.0}],
+                }
+            ]
+        }
+    )
+
+    caplog.set_level("INFO", logger=module.__name__)
+
+    agent._load_hydrosim_power_plan_locked()
+
+    assert agent._hydrosim_power_plan_loaded is True
+    agent._hydrosim_api.get_station_power_planning_series_from_inflow.assert_called_once_with("plan.json")
+    assert not any(
+        "Power planning file has no Station/output_power series; trying inflow-driven planning" in record.message
+        for record in caplog.records
+    )
+
+
 def test_power_outflow_follow_up_is_ack_only():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-outflow-follow-up")
@@ -305,7 +337,7 @@ def _build_session(step_count: int):
             "node_id": 20300,
             "station": "Station-20300",
             "time_series": [{"step": step, "value": 100.0 + step} for step in range(step_count)],
-        }
+        },
     ]
     device_series = [
         {
@@ -361,12 +393,13 @@ def _build_step_result(step: int):
                 "metrics_code": "gate_opening",
                 "step": step,
                 "value": 1.0 + (step * 0.1),
+                "status": "ON",
             },
         ],
     }
 
 
-def test_power_scheduling_tick_returns_hydrosim_device_metrics():
+def test_power_scheduling_tick_does_not_publish_internal_prediction_metrics():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-001")
 
@@ -393,9 +426,7 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
         )
     )
 
-    metrics_map = {(item.object_id, item.metrics_code): item.value for item in metrics_list}
-    assert metrics_map[(20304, "output_power")] == 83.0
-    assert metrics_map[(20101, "gate_opening")] == 1.3
+    assert metrics_list == []
     assert len(enqueued) == 1
     report = enqueued[0]
     assert report.mpc_prediction_results[0].plan_type == "optimal"
@@ -419,9 +450,9 @@ def test_power_scheduling_tick_returns_hydrosim_device_metrics():
     )
     assert turbine_station_detail.node_id == 20300
     assert turbine_station_detail.object_id == 20300
-    assert turbine_station_detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
-    assert turbine_station_detail.value == 43.0
-    assert turbine_station_detail.target_value == 43.0
+    assert turbine_station_detail.command_type == MPC_STATION_POWER_COMMAND_TYPE
+    assert turbine_station_detail.value == 83.0
+    assert turbine_station_detail.target_value == 83.0
     agent.dispatch_control_commands_and_await_execution.assert_called_once()
     dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
     assert len(dispatched_commands) == 1
@@ -441,6 +472,11 @@ def test_power_scheduling_optimization_builds_station_output_power_command():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-turbine-001")
     agent._hydrosim_api._session = _build_session(4)
+    agent._hydrosim_api._session.latest_device_output_series = [
+        device
+        for device in agent._hydrosim_api._session.latest_device_output_series
+        if device["object_type"] != "Gate"
+    ]
 
     commands = agent.on_optimization(2)
 
@@ -454,6 +490,217 @@ def test_power_scheduling_optimization_builds_station_output_power_command():
     assert command["main_step_index"] == 2
     assert command["group_size"] == 1
     assert command["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-turbine-001:2:TARGET_AGENT_20300:")
+
+
+def test_power_scheduling_optimization_groups_gate_station_flow_with_station_output_power_by_default():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-gate-001")
+    agent._hydrosim_api._session = _build_session(4)
+    agent._hydrosim_api._session.latest_station_power_series.append(
+        {
+            "node_id": 20100,
+            "station": "Station-20100",
+            "diversion_flow_time_series": [{"step": step, "value": 30.0 + step} for step in range(4)],
+        }
+    )
+    agent._target_agent_resolver.resolve_target_agent_for_object = Mock(
+        side_effect=lambda object_id, device_type=None: SimpleNamespace(
+            agent_code=f"TARGET_AGENT_{object_id}",
+            edge_node_code="EDGE_NODE_A",
+        )
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert len(commands) == 2
+    station_command = next(command for command in commands if command["object_type"] == "PowerStation")
+    gate_command = next(command for command in commands if command["object_type"] == "GateStation")
+    assert station_command["target_command_type"] == "output_power"
+    assert station_command["target_value"] == 102.0
+    assert station_command["object_id"] == 20300
+    assert gate_command["target_command_type"] == "water_flow"
+    assert gate_command["target_value"] == 32.0
+    assert gate_command["object_id"] == 20100
+    assert station_command["main_step_index"] == gate_command["main_step_index"] == 2
+    assert station_command["group_id"] == gate_command["group_id"]
+    assert station_command["group_size"] == gate_command["group_size"] == 2
+    assert station_command["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-gate-001:2:EDGE_NODE_A:")
+    assert "_control_group_key" not in station_command
+    assert "_control_group_key" not in gate_command
+
+
+def test_power_scheduling_logs_gate_opening_intent_evidence(caplog):
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-gate-evidence-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[
+            {
+                "node_id": 20100,
+                "station": "Station-20100",
+                "time_series": [{"step": 2, "value": 321.0}],
+                "diversion_flow_time_series": [{"step": 2, "value": 0.0}],
+            }
+        ],
+        latest_device_output_series=[
+            {
+                "object_id": 20104,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20104",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 120.0}],
+            },
+            {
+                "object_id": 20104,
+                "object_type": "Turbine",
+                "object_name": "Turbine-20104",
+                "metrics_code": DeviceValueTypeEnum.OUTPUT_POWER.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 300.0}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.GATE_OPENING.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 0.0}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 0.0}],
+            },
+        ],
+        step_runtime=SimpleNamespace(
+            merged_event={},
+            target_stage_by_node={20100: [842.0, 842.0, 842.0]},
+            multi_reservoir=SimpleNamespace(
+                Capacity_Stairs=[
+                    SimpleNamespace(
+                        history={
+                            "time": [2],
+                            "current_inflow": [100.0],
+                            "current_outflow_power": [120.0],
+                            "current_outflow_discharge_ff": [0.0],
+                            "current_spill_ff_gain": [1.0],
+                            "current_spill_ff_deadband": [20.0],
+                            "current_spill_ff_surplus": [-40.0],
+                            "current_spill_ff_force_pass": [False],
+                            "current_pid_output": [0.0],
+                            "current_target_spill": [0.0],
+                            "current_spill_delta": [0.0],
+                        }
+                    )
+                ]
+            ),
+        ),
+    )
+
+    caplog.set_level("INFO", logger=module.__name__)
+
+    commands = agent.on_optimization(2)
+
+    assert any(command["object_type"] == "GateStation" for command in commands)
+    message = next(
+        record.getMessage()
+        for record in caplog.records
+        if "Power gate control intent evidence" in record.getMessage()
+    )
+    assert "task_id=power-scene-gate-evidence-001" in message
+    assert "step=2" in message
+    assert "station_id=20100" in message
+    assert "gate_count=1" in message
+    assert "total_opening=0.000000" in message
+    assert "station_diversion_flow=0.000000" in message
+    assert "turbine_outflow=120.000000" in message
+    assert "reservoir_inflow=100.000000" in message
+    assert "reservoir_outflow_power=120.000000" in message
+    assert "reservoir_spill_ff_surplus=-40.000000" in message
+    assert "reservoir_pid_output=0.000000" in message
+    assert "reservoir_target_spill=0.000000" in message
+    assert "reason=water_level_not_triggered_or_no_spill_required" in message
+
+
+def test_power_scheduling_logs_reservoir_evidence_from_planning_series(caplog):
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-gate-evidence-series-001")
+    agent._hydrosim_api._session = SimpleNamespace(
+        latest_station_power_series=[
+            {
+                "node_id": 20100,
+                "station": "Station-20100",
+                "time_series": [{"step": 2, "value": 321.0}],
+                "diversion_flow_time_series": [{"step": 2, "value": 45.0}],
+                "reservoir_evidence_time_series": [
+                    {
+                        "step": 2,
+                        "current_inflow": 500.0,
+                        "current_outflow_power": 300.0,
+                        "current_outflow_discharge_ff": 180.0,
+                        "current_spill_ff_gain": 1.0,
+                        "current_spill_ff_deadband": 20.0,
+                        "current_spill_ff_surplus": 180.0,
+                        "current_spill_ff_force_pass": False,
+                        "current_pid_output": 15.0,
+                        "current_target_spill": 195.0,
+                        "current_spill_delta": 45.0,
+                    }
+                ],
+            }
+        ],
+        latest_device_output_series=[
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.GATE_OPENING.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 0.5}],
+            },
+            {
+                "object_id": 20101,
+                "object_type": "Gate",
+                "object_name": "Gate-20101",
+                "metrics_code": DeviceValueTypeEnum.WATER_FLOW.code,
+                "node_id": 20100,
+                "time_series": [{"step": 2, "value": 45.0}],
+            },
+        ],
+        step_runtime=SimpleNamespace(
+            merged_event={},
+            target_stage_by_node={},
+            multi_reservoir=SimpleNamespace(
+                Capacity_Stairs=[
+                    SimpleNamespace(
+                        history={
+                            "time": [0],
+                            "current_inflow": [999.0],
+                        }
+                    )
+                ]
+            ),
+        ),
+    )
+
+    caplog.set_level("INFO", logger=module.__name__)
+
+    commands = agent.on_optimization(2)
+
+    assert any(command["object_type"] == "GateStation" for command in commands)
+    message = next(
+        record.getMessage()
+        for record in caplog.records
+        if "Power gate control intent evidence" in record.getMessage()
+    )
+    assert "reservoir_inflow=500.000000" in message
+    assert "reservoir_spill_ff=180.000000" in message
+    assert "reservoir_pid_output=15.000000" in message
+    assert "reservoir_target_spill=195.000000" in message
+    assert "reservoir_spill_delta=45.000000" in message
 
 
 def test_power_scheduling_init_downloads_hydrosim_inputs_from_config_urls():
@@ -1715,6 +1962,152 @@ def test_hydrosim_execute_step_returns_cached_device_outputs():
     assert device_metrics[(20304, "water_flow")] == 42.5
     assert device_metrics[(20101, "water_flow")] == 16.2
     assert device_metrics[(20101, "gate_opening")] == 1.75
+
+
+def test_hydrosim_station_power_series_contains_reservoir_evidence():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    stations = [
+        SimpleNamespace(name="Station-20100", history={"current_power": [123.456789]}),
+        SimpleNamespace(name="Station-20300", history={"current_power": [0.0]}),
+        SimpleNamespace(name="Station-20500", history={"current_power": [0.0]}),
+        SimpleNamespace(name="Station-20700", history={"current_power": [0.0]}),
+    ]
+    reservoirs = [
+        SimpleNamespace(
+            history={
+                "current_outflow_discharge": [45.1234567],
+                "current_inflow": [500.1234567],
+                "current_outflow_power": [300.0],
+                "current_outflow_discharge_ff": [180.0],
+                "current_spill_ff_gain": [1.0],
+                "current_spill_ff_deadband": [20.0],
+                "current_spill_ff_surplus": [180.0],
+                "current_spill_ff_force_pass": [False],
+                "current_pid_output": [15.0],
+                "current_target_spill": [195.0],
+                "current_spill_delta": [45.0],
+            }
+        ),
+        SimpleNamespace(history={"current_outflow_discharge": [0.0]}),
+        SimpleNamespace(history={"current_outflow_discharge": [0.0]}),
+        SimpleNamespace(history={"current_outflow_discharge": [0.0]}),
+    ]
+
+    series = api._build_station_power_series_from_runtime(
+        [2],
+        SimpleNamespace(multi_stair=stations),
+        SimpleNamespace(Capacity_Stairs=reservoirs),
+    )
+
+    first_station = series[0]
+    assert first_station["node_id"] == 20100
+    assert first_station["time_series"] == [{"step": 2, "value": 123.456789}]
+    assert first_station["diversion_flow_time_series"] == [{"step": 2, "value": 45.123457}]
+    assert first_station["reservoir_evidence_time_series"][0]["step"] == 2
+    assert first_station["reservoir_evidence_time_series"][0]["current_inflow"] == 500.123457
+    assert first_station["reservoir_evidence_time_series"][0]["current_spill_ff_force_pass"] is False
+
+
+def test_hydrosim_configured_yaml_extraction_contains_reservoir_evidence(tmp_path):
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    yaml_path = tmp_path / "configured_outputs.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "object_time_series": [
+                    {
+                        "object_type": "Station",
+                        "object_ids": [20100],
+                        "object_name": "Station-20100",
+                        "metrics_code": "diversion_flow",
+                        "time_series": [{"step": 2, "value": 45.1234567}],
+                    }
+                ],
+                "station_power_plan_used": [
+                    {
+                        "node_id": 20100,
+                        "station": "Station-20100",
+                        "time_series": [{"step": 2, "value": 123.456789}],
+                    }
+                ],
+                "station_reservoir_evidence": [
+                    {
+                        "node_id": 20100,
+                        "station": "Station-20100",
+                        "time_series": [
+                            {
+                                "step": 2,
+                                "current_inflow": 500.1234567,
+                                "current_outflow_power": 300.0,
+                                "current_outflow_discharge_ff": 180.0,
+                                "current_spill_ff_gain": 1.0,
+                                "current_spill_ff_deadband": 20.0,
+                                "current_spill_ff_surplus": 180.0,
+                                "current_spill_ff_force_pass": False,
+                                "current_pid_output": 15.0,
+                                "current_target_spill": 195.0,
+                                "current_spill_delta": 45.0,
+                            }
+                        ],
+                    }
+                ],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+    series = api._extract_station_power_series_from_yaml(str(yaml_path))
+
+    assert series[0]["node_id"] == 20100
+    assert series[0]["time_series"] == [{"step": 2, "value": 123.456789}]
+    assert series[0]["diversion_flow_time_series"] == [{"step": 2, "value": 45.123457}]
+    evidence = series[0]["reservoir_evidence_time_series"][0]
+    assert evidence["step"] == 2
+    assert evidence["current_inflow"] == 500.123457
+    assert evidence["current_spill_ff_force_pass"] is False
+
+
+def test_hydrosim_result_factory_builds_configured_reservoir_evidence_series():
+    _load_hydrosim_api_module()
+    from hydrosim.result_factory import HydroSimulationResultFactory
+
+    runtime = SimpleNamespace(
+        __version__="test",
+        STATION_NODE_IDS=[20100],
+        NODE_TO_INDEX={20100: 0},
+        _station_name_by_node=Mock(return_value={20100: "Station-20100"}),
+    )
+    result_factory = HydroSimulationResultFactory(runtime=runtime)
+    reservoirs = [
+        SimpleNamespace(
+            history={
+                "current_inflow": [500.1234567, 501.0],
+                "current_outflow_power": [300.0, 301.0],
+                "current_outflow_discharge_ff": [180.0, 181.0],
+                "current_spill_ff_gain": [1.0, 1.0],
+                "current_spill_ff_deadband": [20.0, 20.0],
+                "current_spill_ff_surplus": [180.0, 181.0],
+                "current_spill_ff_force_pass": [False, True],
+                "current_pid_output": [15.0, 16.0],
+                "current_target_spill": [195.0, 197.0],
+                "current_spill_delta": [45.0, 46.0],
+            }
+        )
+    ]
+
+    series = result_factory._station_reservoir_evidence_series(
+        [2, 3],
+        SimpleNamespace(Capacity_Stairs=reservoirs),
+        sample_interval=1,
+    )
+
+    assert series[0]["node_id"] == 20100
+    assert series[0]["time_series"][0]["step"] == 2
+    assert series[0]["time_series"][0]["current_inflow"] == 500.123457
+    assert series[0]["time_series"][1]["current_spill_ff_force_pass"] is True
 
 
 def test_hydrosim_execute_step_rounds_outputs_to_six_decimals():

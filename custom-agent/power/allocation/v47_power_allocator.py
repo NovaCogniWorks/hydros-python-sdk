@@ -130,6 +130,7 @@ class HydroSimV47PowerAllocator:
 
         projected: Dict[int, float] = {}
         clipped = []
+        turbine_targets = []
         known_capacity = True
         total_min_output_power = 0.0
         total_max_output_power = 0.0
@@ -163,11 +164,29 @@ class HydroSimV47PowerAllocator:
                     }
                 )
             projected[turbine.object_id] = projected_value
+            turbine_targets.append(
+                {
+                    "object_id": turbine.object_id,
+                    "current_output_power": current_value,
+                    "raw_target_output_power": target_value,
+                    "projected_target_output_power": projected_value,
+                    "min_output_power": min_value,
+                    "max_output_power": max_value,
+                    "lower_bound": lower_bound,
+                    "upper_bound": upper_bound,
+                    "head": turbine.head,
+                    "efficiency": turbine.efficiency,
+                    "water_flow_per_mw": turbine.water_flow_per_mw,
+                    "design_power": turbine.design_power,
+                    "design_efficiency": turbine.design_efficiency,
+                }
+            )
 
         allocated_total = sum(projected.values())
         return projected, {
             "mode": mode,
             "target_output_power": target_power,
+            "total_current_output_power": total_current,
             "allocated_output_power": allocated_total,
             "unallocated_output_power": max(float(target_power) - allocated_total, 0.0),
             "total_min_output_power": total_min_output_power,
@@ -177,6 +196,7 @@ class HydroSimV47PowerAllocator:
                 known_capacity and target_power > total_max_output_power + 1e-9
             ),
             "max_output_power_delta": float(request.max_output_power_delta),
+            "turbine_targets": turbine_targets,
             "clipped": clipped,
         }
 

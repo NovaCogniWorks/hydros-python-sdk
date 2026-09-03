@@ -2330,6 +2330,13 @@ class HydroReservoir:
         self.current_outflow_power = 0.0
         self.current_outflow_discharge = 0.0
         self.current_outflow_discharge_ff = 0.0
+        self.current_spill_ff_gain = 0.0
+        self.current_spill_ff_deadband = 0.0
+        self.current_spill_ff_surplus = 0.0
+        self.current_spill_ff_force_pass = False
+        self.current_pid_output = 0.0
+        self.current_target_spill = 0.0
+        self.current_spill_delta = 0.0
 
         self.capacity_overflow = 0.0
         self.capacity_underflow = 0.0
@@ -2366,6 +2373,13 @@ class HydroReservoir:
             "current_outflow_power": [],
             "current_outflow_discharge": [],
             "current_outflow_discharge_ff": [],
+            "current_spill_ff_gain": [],
+            "current_spill_ff_deadband": [],
+            "current_spill_ff_surplus": [],
+            "current_spill_ff_force_pass": [],
+            "current_pid_output": [],
+            "current_target_spill": [],
+            "current_spill_delta": [],
             "capacity_overflow": [],
             "capacity_underflow": [],
         }
@@ -2387,12 +2401,20 @@ class HydroReservoir:
         return self.spill_ff_gain, self.spill_ff_deadband, False
 
     def _calc_spill_feedforward(self, inflow: float, outflow_power: float) -> float:
+        self.current_spill_ff_gain = 0.0
+        self.current_spill_ff_deadband = 0.0
+        self.current_spill_ff_surplus = 0.0
+        self.current_spill_ff_force_pass = False
         if not self.spill_ff_enable:
             return 0.0
         gain, deadband, force_pass = self._dynamic_spill_ff_params()
+        self.current_spill_ff_gain = float(gain)
+        self.current_spill_ff_deadband = float(deadband)
+        self.current_spill_ff_force_pass = bool(force_pass)
         if gain <= 0.0:
             return 0.0
         surplus = float(inflow) - float(outflow_power) - deadband
+        self.current_spill_ff_surplus = float(surplus)
         if surplus <= 0.0:
             return 0.0
         spill = gain * surplus
@@ -2402,6 +2424,7 @@ class HydroReservoir:
 
     def step(self, inflow: float, outflow_power: float, record: bool = True) -> None:
         pid_output = self.PID.update(self.current_stage, self.target_stage)
+        self.current_pid_output = float(pid_output)
         self.current_inflow = float(inflow)
         self.current_outflow_power = float(outflow_power)
         self.current_outflow_discharge_ff = self._calc_spill_feedforward(self.current_inflow, self.current_outflow_power)
@@ -2412,6 +2435,8 @@ class HydroReservoir:
             -self.spill_ramp_rate,
             self.spill_ramp_rate,
         )
+        self.current_target_spill = float(target_spill)
+        self.current_spill_delta = float(spill_delta)
         outflow_discharge = _clip(self.current_outflow_discharge + spill_delta, 0.0, self.max_spill_q)
         self.current_outflow_discharge = outflow_discharge
         self.current_outflow = self.current_outflow_power + self.current_outflow_discharge
@@ -2437,6 +2462,13 @@ class HydroReservoir:
         h["current_outflow_power"].append(self.current_outflow_power)
         h["current_outflow_discharge"].append(self.current_outflow_discharge)
         h["current_outflow_discharge_ff"].append(self.current_outflow_discharge_ff)
+        h["current_spill_ff_gain"].append(self.current_spill_ff_gain)
+        h["current_spill_ff_deadband"].append(self.current_spill_ff_deadband)
+        h["current_spill_ff_surplus"].append(self.current_spill_ff_surplus)
+        h["current_spill_ff_force_pass"].append(self.current_spill_ff_force_pass)
+        h["current_pid_output"].append(self.current_pid_output)
+        h["current_target_spill"].append(self.current_target_spill)
+        h["current_spill_delta"].append(self.current_spill_delta)
         h["capacity_overflow"].append(self.capacity_overflow)
         h["capacity_underflow"].append(self.capacity_underflow)
         self.time += 1

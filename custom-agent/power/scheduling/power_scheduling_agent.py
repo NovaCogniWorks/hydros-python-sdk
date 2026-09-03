@@ -20,6 +20,7 @@ RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "scheduling"
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
+from hydrosim import config as hydrosim_config
 from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
     ErrorCodes,
@@ -64,8 +65,11 @@ POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
 MPC_STATION_POWER_COMMAND_TYPE = DeviceValueTypeEnum.OUTPUT_POWER.code
+MPC_GATE_OPENING_COMMAND_TYPE = DeviceValueTypeEnum.GATE_OPENING.code
+MPC_GATE_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
 STATION_DIVERSION_FLOW_SERIES_KEY = "diversion_flow_time_series"
-DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS = 240.0
+RESERVOIR_EVIDENCE_SERIES_KEY = "reservoir_evidence_time_series"
+DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS = 360.0
 
 
 class HydroSimInputFileResolver:
@@ -188,6 +192,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._hydrosim_power_plan_preload_done = Event()
         self._hydrosim_power_plan_preload_thread: Optional[Thread] = None
         self._hydrosim_power_plan_preload_error: Optional[Exception] = None
+        self._hydrosim_power_plan_preload_started_at: Optional[float] = None
         self._rolling_window_start_step: Optional[int] = None
         self._rolling_window_end_step: Optional[int] = None
         self._rolling_window_dataset: List[HorizonStep] = []
@@ -301,8 +306,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 self._refresh_rolling_window_dataset(request.step, task_state)
 
             step_result = self._hydrosim_api.execute_step(step_index=request.step)
-            metrics_list = self._build_metrics_from_step_result(step_result)
-            return metrics_list
+            logger.info(
+                "Power internal scheduling runtime advanced at step=%s; "
+                "skip publishing internal prediction outputs as ordinary MqttMetrics: "
+                "stationOutputs=%s, deviceOutputs=%s",
+                request.step,
+                len(step_result.get("station_step_outputs") or []),
+                len(step_result.get("device_step_outputs") or []),
+            )
+            return []
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_optimization(self, step: int) -> Optional[List[Dict[str, Any]]]:
@@ -311,16 +323,41 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             logger.warning("Skip optimization at step=%s because HydroSim session is unavailable.", step)
             return []
 
-        power_commands = self._build_station_output_power_commands(session, step)
+        power_commands = self._build_station_output_power_commands(
+            session,
+            step,
+            assign_groups=False,
+        )
         if power_commands:
-            return power_commands
+            return self._with_gate_station_flow_control_commands(
+                session=session,
+                step=step,
+                base_commands=power_commands,
+                group_prefix="POWER_STATION_OUTPUT_POWER",
+            )
         logger.warning(
             "No station output-power control command is available at step=%s; fallback to station water-flow command.",
             step,
         )
-        return self._build_station_turbine_out_flow_commands(session, step)
+        flow_commands = self._build_station_turbine_out_flow_commands(
+            session,
+            step,
+            assign_groups=False,
+        )
+        return self._with_gate_station_flow_control_commands(
+            session=session,
+            step=step,
+            base_commands=flow_commands,
+            group_prefix="POWER_STATION_OUT_FLOW",
+        )
 
-    def _build_station_output_power_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+    def _build_station_output_power_commands(
+        self,
+        session: Any,
+        step: int,
+        *,
+        assign_groups: bool = True,
+    ) -> List[Dict[str, Any]]:
         station_output_powers: Dict[int, float] = {}
         for station in getattr(session, "latest_station_power_series", []) or []:
             metrics_code = station.get("metrics_code")
@@ -359,9 +396,16 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             step=step,
             target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
             group_prefix="POWER_STATION_OUTPUT_POWER",
+            assign_groups=assign_groups,
         )
 
-    def _build_station_turbine_out_flow_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
+    def _build_station_turbine_out_flow_commands(
+        self,
+        session: Any,
+        step: int,
+        *,
+        assign_groups: bool = True,
+    ) -> List[Dict[str, Any]]:
         station_out_flows: Dict[int, float] = {}
         for device in getattr(session, "latest_device_output_series", []) or []:
             if (
@@ -381,6 +425,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             step=step,
             target_command_type=MPC_STATION_FLOW_COMMAND_TYPE,
             group_prefix="POWER_STATION_OUT_FLOW",
+            assign_groups=assign_groups,
         )
 
     def _build_station_target_commands(
@@ -390,8 +435,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         step: int,
         target_command_type: str,
         group_prefix: str,
+        assign_groups: bool = True,
     ) -> List[Dict[str, Any]]:
-        commands_by_agent: Dict[str, List[Dict[str, Any]]] = {}
+        commands: List[Dict[str, Any]] = []
         for station_id, target_value in station_values.items():
             target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
                 object_id=station_id,
@@ -405,7 +451,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     target_command_type,
                 )
                 continue
-            commands_by_agent.setdefault(target_agent.agent_code, []).append(
+            commands.append(
                 {
                     "target_agent_code": target_agent.agent_code,
                     "target_command_type": target_command_type,
@@ -413,20 +459,527 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     "object_id": station_id,
                     "object_type": HydroObjectType.POWER_STATION.value,
                     "main_step_index": step,
+                    "_control_group_key": self._resolve_control_group_key(target_agent),
                 }
             )
 
+        if not assign_groups:
+            return commands
+        return self._assign_control_groups(commands, step=step, group_prefix=group_prefix)
+
+    def _with_gate_station_flow_control_commands(
+        self,
+        *,
+        session: Any,
+        step: int,
+        base_commands: List[Dict[str, Any]],
+        group_prefix: str,
+    ) -> List[Dict[str, Any]]:
+        if not base_commands:
+            return base_commands
+        gate_commands = self._build_gate_station_flow_control_commands(session, step)
+        if not gate_commands:
+            return self._assign_control_groups(
+                base_commands,
+                step=step,
+                group_prefix=group_prefix,
+            )
+        return self._assign_control_groups(
+            list(base_commands) + gate_commands,
+            step=step,
+            group_prefix=group_prefix,
+        )
+
+    def _build_gate_station_flow_control_commands(self, session: Any, step: int) -> List[Dict[str, Any]]:
         commands: List[Dict[str, Any]] = []
-        for target_agent_code, grouped_commands in commands_by_agent.items():
+        device_series = getattr(session, "latest_device_output_series", []) or []
+        station_series = getattr(session, "latest_station_power_series", []) or []
+        gate_intents_by_station: Dict[Optional[int], List[Dict[str, Any]]] = {}
+        gate_flow_by_station: Dict[int, float] = {}
+        missing_series_by_station: Dict[Optional[int], int] = {}
+        missing_target_agent_by_station: Dict[Optional[int], int] = {}
+        gate_opening_series_seen = False
+
+        for device in device_series:
+            if (
+                str(device.get("object_type")) != HydroObjectType.GATE.value
+                or str(device.get("metrics_code")) != MPC_GATE_OPENING_COMMAND_TYPE
+                or device.get("object_id") is None
+            ):
+                continue
+            gate_opening_series_seen = True
+            station_id = self._normalize_optional_int(device.get("node_id"))
+            row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if row is None:
+                missing_series_by_station[station_id] = missing_series_by_station.get(station_id, 0) + 1
+                continue
+            gate_id = int(device["object_id"])
+            gate_intents_by_station.setdefault(station_id, []).append(
+                {
+                    "gate_id": gate_id,
+                    "gate_name": device.get("object_name") or f"Gate-{gate_id}",
+                    "opening": float(row["value"]),
+                }
+            )
+
+        for device in device_series:
+            if (
+                str(device.get("object_type")) != HydroObjectType.GATE.value
+                or str(device.get("metrics_code")) != DeviceValueTypeEnum.WATER_FLOW.code
+                or device.get("node_id") is None
+            ):
+                continue
+            row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if row is None:
+                continue
+            station_id = int(device["node_id"])
+            gate_flow_by_station[station_id] = gate_flow_by_station.get(station_id, 0.0) + float(row["value"])
+
+        candidate_station_ids = self._collect_gate_station_flow_candidate_ids(
+            session=session,
+            step=step,
+            gate_intents_by_station=gate_intents_by_station,
+            gate_flow_by_station=gate_flow_by_station,
+        )
+        for station_id in candidate_station_ids:
+            gate_flow = gate_flow_by_station.get(station_id)
+            target_flow = self._resolve_station_diversion_flow(
+                station_series=station_series,
+                station_id=station_id,
+                step=step,
+                gate_flow=gate_flow,
+            )
+            if target_flow is None:
+                logger.info(
+                    "Skip gate station flow control because no diversion-flow intent is available: "
+                    "task_id=%s, step=%s, station_id=%s",
+                    self.context.biz_scene_instance_id,
+                    step,
+                    station_id,
+                )
+                continue
+            target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
+                object_id=station_id,
+                device_type=HydroObjectType.GATE_STATION.value,
+            )
+            if target_agent is None:
+                missing_target_agent_by_station[station_id] = missing_target_agent_by_station.get(station_id, 0) + 1
+                logger.warning(
+                    "Skip gate station flow control because target agent is unavailable: stationId=%s, step=%s",
+                    station_id,
+                    step,
+                )
+                continue
+            commands.append(
+                {
+                    "target_agent_code": target_agent.agent_code,
+                    "target_command_type": MPC_GATE_STATION_FLOW_COMMAND_TYPE,
+                    "target_value": float(target_flow),
+                    "object_id": station_id,
+                    "object_type": HydroObjectType.GATE_STATION.value,
+                    "main_step_index": step,
+                    "_control_group_key": self._resolve_control_group_key(target_agent),
+                }
+            )
+        self._log_gate_opening_control_intent_evidence(
+            session=session,
+            step=step,
+            gate_opening_series_seen=gate_opening_series_seen,
+            gate_intents_by_station=gate_intents_by_station,
+            missing_series_by_station=missing_series_by_station,
+            missing_target_agent_by_station=missing_target_agent_by_station,
+        )
+        return commands
+
+    def _collect_gate_station_flow_candidate_ids(
+        self,
+        *,
+        session: Any,
+        step: int,
+        gate_intents_by_station: Dict[Optional[int], List[Dict[str, Any]]],
+        gate_flow_by_station: Dict[int, float],
+    ) -> List[int]:
+        station_ids: List[int] = []
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            station_id = self._normalize_optional_int(station.get("node_id"))
+            if station_id is None:
+                continue
+            row = self._get_series_row_for_step(
+                station.get(STATION_DIVERSION_FLOW_SERIES_KEY, []),
+                step,
+            )
+            if row is not None and station_id not in station_ids:
+                station_ids.append(station_id)
+        for station_id in gate_flow_by_station:
+            if station_id not in station_ids:
+                station_ids.append(station_id)
+        for station_id in gate_intents_by_station:
+            if station_id is not None and station_id not in station_ids:
+                station_ids.append(station_id)
+        return station_ids
+
+    def _log_gate_opening_control_intent_evidence(
+        self,
+        *,
+        session: Any,
+        step: int,
+        gate_opening_series_seen: bool,
+        gate_intents_by_station: Dict[Optional[int], List[Dict[str, Any]]],
+        missing_series_by_station: Dict[Optional[int], int],
+        missing_target_agent_by_station: Dict[Optional[int], int],
+    ) -> None:
+        if not gate_opening_series_seen:
+            logger.info(
+                "Power gate control intent evidence: task_id=%s, step=%s, "
+                "source=power_internal_reservoir_model, edge_semantics=gate_station_flow_intent_edge_feedback_control, "
+                "reason=no_gate_opening_series_configured, gate_count=0",
+                self.context.biz_scene_instance_id,
+                step,
+            )
+            return
+
+        station_ids = set(gate_intents_by_station.keys())
+        station_ids.update(missing_series_by_station.keys())
+        station_ids.update(missing_target_agent_by_station.keys())
+        device_series = getattr(session, "latest_device_output_series", []) or []
+        station_series = getattr(session, "latest_station_power_series", []) or []
+        all_station_ids = self._collect_station_ids_for_evidence(session)
+
+        for station_id in sorted(station_ids, key=lambda value: -1 if value is None else int(value)):
+            intents = gate_intents_by_station.get(station_id, [])
+            gate_count = len(intents)
+            missing_series_count = missing_series_by_station.get(station_id, 0)
+            missing_target_agent_count = missing_target_agent_by_station.get(station_id, 0)
+            openings = [float(intent["opening"]) for intent in intents]
+            total_opening = sum(openings)
+            max_opening = max(openings) if openings else 0.0
+            station_name = self._resolve_evidence_station_name(session, station_id, intents)
+
+            gate_flow = None
+            station_diversion_flow = None
+            turbine_outflow = None
+            station_output_power = None
+            front_water_level = None
+            target_water_level = None
+            back_water_level = None
+            reservoir_evidence: Dict[str, Any] = {}
+            if station_id is not None:
+                gate_flow = self._sum_device_metric_for_station_step(
+                    device_series=device_series,
+                    station_id=station_id,
+                    object_type=HydroObjectType.GATE.value,
+                    metrics_code=DeviceValueTypeEnum.WATER_FLOW.code,
+                    step=step,
+                )
+                station_diversion_flow = self._resolve_station_diversion_flow(
+                    station_series=station_series,
+                    station_id=station_id,
+                    step=step,
+                    gate_flow=gate_flow,
+                )
+                turbine_outflow = self._sum_device_metric_for_station_step(
+                    device_series=device_series,
+                    station_id=station_id,
+                    object_type=HydroObjectType.TURBINE.value,
+                    metrics_code=DeviceValueTypeEnum.WATER_FLOW.code,
+                    step=step,
+                )
+                station_output_power = self._sum_device_metric_for_station_step(
+                    device_series=device_series,
+                    station_id=station_id,
+                    object_type=HydroObjectType.TURBINE.value,
+                    metrics_code=DeviceValueTypeEnum.OUTPUT_POWER.code,
+                    step=step,
+                )
+                front_water_level = self._resolve_station_front_water_level(
+                    station_id=station_id,
+                    step=step,
+                )
+                target_water_level = self._resolve_station_target_water_level(
+                    station_id=station_id,
+                    step=step,
+                )
+                back_water_level = self._resolve_station_back_water_level(
+                    station_ids=all_station_ids,
+                    station_id=station_id,
+                    step=step,
+                )
+                reservoir_evidence = self._resolve_station_reservoir_evidence(
+                    session=session,
+                    station_id=station_id,
+                    step=step,
+                )
+
+            reason = self._resolve_gate_opening_intent_reason(
+                gate_count=gate_count,
+                missing_series_count=missing_series_count,
+                total_opening=total_opening,
+                max_opening=max_opening,
+                station_diversion_flow=station_diversion_flow,
+                gate_flow=gate_flow,
+                turbine_outflow=turbine_outflow,
+                front_water_level=front_water_level,
+                target_water_level=target_water_level,
+            )
+            logger.info(
+                "Power gate control intent evidence: task_id=%s, step=%s, station_id=%s, station_name=%s, "
+                "source=power_internal_reservoir_model, edge_semantics=gate_station_flow_intent_edge_feedback_control, "
+                "gate_count=%s, missing_series=%s, target_agent_missing=%s, "
+                "total_opening=%.6f, max_opening=%.6f, gate_flow=%s, station_diversion_flow=%s, "
+                "turbine_outflow=%s, station_output_power=%s, front_water_level=%s, "
+                "target_water_level=%s, back_water_level=%s, reservoir_inflow=%s, "
+                "reservoir_outflow_power=%s, reservoir_spill_ff=%s, reservoir_spill_ff_gain=%s, "
+                "reservoir_spill_ff_deadband=%s, reservoir_spill_ff_surplus=%s, "
+                "reservoir_spill_ff_force_pass=%s, reservoir_pid_output=%s, "
+                "reservoir_target_spill=%s, reservoir_spill_delta=%s, "
+                "reason=%s, gates=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                station_id if station_id is not None else "null",
+                station_name,
+                gate_count,
+                missing_series_count,
+                missing_target_agent_count,
+                total_opening,
+                max_opening,
+                self._format_optional_float(gate_flow),
+                self._format_optional_float(station_diversion_flow),
+                self._format_optional_float(turbine_outflow),
+                self._format_optional_float(station_output_power),
+                self._format_optional_float(front_water_level),
+                self._format_optional_float(target_water_level),
+                self._format_optional_float(back_water_level),
+                self._format_optional_float(reservoir_evidence.get("current_inflow")),
+                self._format_optional_float(reservoir_evidence.get("current_outflow_power")),
+                self._format_optional_float(reservoir_evidence.get("current_outflow_discharge_ff")),
+                self._format_optional_float(reservoir_evidence.get("current_spill_ff_gain")),
+                self._format_optional_float(reservoir_evidence.get("current_spill_ff_deadband")),
+                self._format_optional_float(reservoir_evidence.get("current_spill_ff_surplus")),
+                reservoir_evidence.get("current_spill_ff_force_pass", "null"),
+                self._format_optional_float(reservoir_evidence.get("current_pid_output")),
+                self._format_optional_float(reservoir_evidence.get("current_target_spill")),
+                self._format_optional_float(reservoir_evidence.get("current_spill_delta")),
+                reason,
+                self._format_gate_intents(intents),
+            )
+
+    def _resolve_station_reservoir_evidence(
+        self,
+        *,
+        session: Any,
+        station_id: int,
+        step: int,
+    ) -> Dict[str, Any]:
+        series_evidence = self._resolve_station_reservoir_evidence_from_planning_series(
+            session=session,
+            station_id=station_id,
+            step=step,
+        )
+        if series_evidence is not None:
+            return series_evidence
+
+        station_idx = hydrosim_config.NODE_TO_INDEX.get(int(station_id))
+        if station_idx is None:
+            return {}
+        step_runtime = getattr(session, "step_runtime", None)
+        multi_reservoir = getattr(step_runtime, "multi_reservoir", None)
+        reservoirs = getattr(multi_reservoir, "Capacity_Stairs", None)
+        if reservoirs is None or station_idx >= len(reservoirs):
+            return {}
+        history = getattr(reservoirs[station_idx], "history", {}) or {}
+        row_index = self._resolve_reservoir_history_index(history, step)
+        if row_index is None:
+            return {}
+        keys = [
+            "current_inflow",
+            "current_outflow_power",
+            "current_outflow_discharge_ff",
+            "current_spill_ff_gain",
+            "current_spill_ff_deadband",
+            "current_spill_ff_surplus",
+            "current_spill_ff_force_pass",
+            "current_pid_output",
+            "current_target_spill",
+            "current_spill_delta",
+        ]
+        return {
+            key: self._history_value_at_index(history, key, row_index)
+            for key in keys
+        }
+
+    def _resolve_station_reservoir_evidence_from_planning_series(
+        self,
+        *,
+        session: Any,
+        station_id: int,
+        step: int,
+    ) -> Optional[Dict[str, Any]]:
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            if int(station.get("node_id", -1)) != int(station_id):
+                continue
+            row = self._get_series_row_for_step(
+                station.get(RESERVOIR_EVIDENCE_SERIES_KEY, []),
+                step,
+            )
+            if row is None:
+                return None
+            keys = [
+                "current_inflow",
+                "current_outflow_power",
+                "current_outflow_discharge_ff",
+                "current_spill_ff_gain",
+                "current_spill_ff_deadband",
+                "current_spill_ff_surplus",
+                "current_spill_ff_force_pass",
+                "current_pid_output",
+                "current_target_spill",
+                "current_spill_delta",
+            ]
+            return {key: row.get(key) for key in keys}
+        return None
+
+    @staticmethod
+    def _resolve_reservoir_history_index(history: Dict[str, Any], step: int) -> Optional[int]:
+        times = history.get("time") or []
+        try:
+            return list(times).index(int(step))
+        except ValueError:
+            pass
+        if 0 <= int(step) < len(times):
+            return int(step)
+        lengths = [len(value) for value in history.values() if hasattr(value, "__len__")]
+        if lengths and 0 <= int(step) < min(lengths):
+            return int(step)
+        return None
+
+    @staticmethod
+    def _history_value_at_index(history: Dict[str, Any], key: str, index: int) -> Any:
+        values = history.get(key) or []
+        if index < 0 or index >= len(values):
+            return None
+        return values[index]
+
+    def _resolve_gate_opening_intent_reason(
+        self,
+        *,
+        gate_count: int,
+        missing_series_count: int,
+        total_opening: float,
+        max_opening: float,
+        station_diversion_flow: Optional[float],
+        gate_flow: Optional[float],
+        turbine_outflow: Optional[float],
+        front_water_level: Optional[float],
+        target_water_level: Optional[float],
+    ) -> str:
+        epsilon = 1e-9
+        if gate_count <= 0:
+            if missing_series_count > 0:
+                return "gate_opening_series_missing_for_step"
+            return "gate_opening_series_not_available"
+        if abs(total_opening) > epsilon or abs(max_opening) > epsilon:
+            return "nonzero_gate_opening_intent"
+
+        spill_flow = station_diversion_flow if station_diversion_flow is not None else gate_flow
+        if spill_flow is None:
+            return "zero_gate_opening_without_spill_flow_evidence"
+        if abs(spill_flow) > epsilon:
+            return "zero_gate_opening_but_spill_flow_positive_check_opening_conversion"
+        if front_water_level is not None and target_water_level is not None:
+            if float(front_water_level) <= float(target_water_level) + epsilon:
+                return "water_level_not_triggered_or_no_spill_required"
+            return "spill_intent_zero_despite_front_level_above_target_check_pid_or_constraints"
+        if turbine_outflow is not None and abs(turbine_outflow) > epsilon:
+            return "spill_intent_zero_with_turbine_outflow_available"
+        return "spill_intent_zero"
+
+    def _resolve_evidence_station_name(
+        self,
+        session: Any,
+        station_id: Optional[int],
+        intents: List[Dict[str, Any]],
+    ) -> str:
+        if station_id is None:
+            return "unknown"
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            if int(station.get("node_id", -1)) == int(station_id):
+                return str(station.get("station") or station.get("object_name") or f"Station-{station_id}")
+        for device in getattr(session, "latest_device_output_series", []) or []:
+            if int(device.get("node_id", -1)) == int(station_id):
+                station_name = device.get("station") or device.get("station_name")
+                if station_name:
+                    return str(station_name)
+        if intents:
+            first_gate_name = str(intents[0].get("gate_name") or "")
+            return f"Station-{station_id}({first_gate_name})"
+        return f"Station-{station_id}"
+
+    def _collect_station_ids_for_evidence(self, session: Any) -> List[int]:
+        station_ids: List[int] = []
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            station_id = self._normalize_optional_int(station.get("node_id"))
+            if station_id is not None and station_id not in station_ids:
+                station_ids.append(station_id)
+        for device in getattr(session, "latest_device_output_series", []) or []:
+            station_id = self._normalize_optional_int(device.get("node_id"))
+            if station_id is not None and station_id not in station_ids:
+                station_ids.append(station_id)
+        return station_ids
+
+    @staticmethod
+    def _normalize_optional_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_optional_float(value: Optional[float]) -> str:
+        if value is None:
+            return "null"
+        return f"{float(value):.6f}"
+
+    @staticmethod
+    def _format_gate_intents(intents: List[Dict[str, Any]]) -> str:
+        if not intents:
+            return "[]"
+        return "[" + ",".join(
+            f"{intent.get('gate_name')}({intent.get('gate_id')})={float(intent.get('opening', 0.0)):.6f}"
+            for intent in intents
+        ) + "]"
+
+    def _assign_control_groups(
+        self,
+        commands: List[Dict[str, Any]],
+        *,
+        step: int,
+        group_prefix: str,
+    ) -> List[Dict[str, Any]]:
+        commands_by_group: Dict[str, List[Dict[str, Any]]] = {}
+        for source_command in commands:
+            command = dict(source_command)
+            group_key = str(command.pop("_control_group_key", None) or command.get("target_agent_code"))
+            commands_by_group.setdefault(group_key, []).append(command)
+
+        grouped: List[Dict[str, Any]] = []
+        for group_key, grouped_commands in commands_by_group.items():
             group_id = (
                 f"{group_prefix}:{self.context.biz_scene_instance_id}:"
-                f"{step}:{target_agent_code}:{uuid.uuid4()}"
+                f"{step}:{group_key}:{uuid.uuid4()}"
             )
             for command in grouped_commands:
                 command["group_id"] = group_id
                 command["group_size"] = len(grouped_commands)
-                commands.append(command)
-        return commands
+                grouped.append(command)
+        return grouped
+
+    def _resolve_control_group_key(self, target_agent: Any) -> str:
+        edge_node_code = getattr(target_agent, "edge_node_code", None)
+        if edge_node_code:
+            return str(edge_node_code)
+        return str(target_agent.agent_code)
 
     def _ensure_mpc_task_state(self, step: int) -> MpcTaskState:
         return self._mpc_task_state_lifecycle.ensure_task_state(step)
@@ -938,16 +1491,20 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _build_metrics_from_step_result(self, step_result: Dict[str, Any]) -> List[MqttMetrics]:
         metrics_list: List[MqttMetrics] = []
         for item in step_result.get("device_step_outputs") or []:
+            status = item.get("status")
             metrics_list.append(
                 MqttMetrics(
                     source_id=self.agent_code,
+                    biz_scene_instance_id=self.biz_scene_instance_id,
                     job_instance_id=self.biz_scene_instance_id,
                     object_id=int(item["object_id"]),
+                    object_type=str(item["object_type"]),
                     object_name=str(item["object_name"]),
                     step_index=int(item["step"]),
                     source_timestamp_ms=int(time.time() * 1000),
                     metrics_code=str(item["metrics_code"]),
                     value=float(item["value"]),
+                    status=str(status) if status is not None else None,
                 )
             )
         return metrics_list
@@ -995,6 +1552,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
         self._hydrosim_power_plan_preload_error = None
         self._hydrosim_power_plan_preload_done.clear()
+        self._hydrosim_power_plan_preload_started_at = time.monotonic()
         preload_thread = Thread(
             target=self._preload_hydrosim_power_plan,
             name=f"hydrosim-power-plan-preload-{self.agent_id}",
@@ -1032,16 +1590,49 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
         wait_seconds = self._resolve_power_plan_preload_wait_seconds()
         if preload_thread.is_alive():
+            elapsed_seconds = self._hydrosim_power_plan_preload_elapsed_seconds()
+            thread_name = getattr(preload_thread, "name", None)
+            thread_ident = getattr(preload_thread, "ident", None)
             logger.info(
-                "Waiting HydroSim power planning background preload before %s: step=%s, wait_seconds=%.3f",
+                "Waiting HydroSim power planning background preload before %s: "
+                "task_id=%s, step=%s, wait_seconds=%.3f, elapsed_seconds=%.3f, "
+                "thread_name=%s, thread_ident=%s, thread_alive=%s, done=%s",
                 command_name,
+                self.context.biz_scene_instance_id,
                 step,
                 wait_seconds,
+                elapsed_seconds,
+                thread_name,
+                thread_ident,
+                preload_thread.is_alive(),
+                self._hydrosim_power_plan_preload_done.is_set(),
             )
             if not self._hydrosim_power_plan_preload_done.wait(wait_seconds):
+                elapsed_seconds = self._hydrosim_power_plan_preload_elapsed_seconds()
+                thread_alive = preload_thread.is_alive()
+                done = self._hydrosim_power_plan_preload_done.is_set()
+                thread_name = getattr(preload_thread, "name", None)
+                thread_ident = getattr(preload_thread, "ident", None)
+                logger.error(
+                    "HydroSim power planning preload timeout before %s: "
+                    "task_id=%s, step=%s, waited_seconds=%.3f, elapsed_seconds=%.3f, "
+                    "thread_name=%s, thread_ident=%s, thread_alive=%s, done=%s",
+                    command_name,
+                    self.context.biz_scene_instance_id,
+                    step,
+                    wait_seconds,
+                    elapsed_seconds,
+                    thread_name,
+                    thread_ident,
+                    thread_alive,
+                    done,
+                )
                 raise RuntimeError(
                     "HydroSim power planning preload is still running "
-                    f"before {command_name}: step={step}, waited_seconds={wait_seconds:.3f}"
+                    f"before {command_name}: task_id={self.context.biz_scene_instance_id}, "
+                    f"step={step}, waited_seconds={wait_seconds:.3f}, "
+                    f"elapsed_seconds={elapsed_seconds:.3f}, thread_name={thread_name}, "
+                    f"thread_ident={thread_ident}, thread_alive={thread_alive}, done={done}"
                 )
 
         if self._hydrosim_power_plan_preload_error is not None:
@@ -1067,6 +1658,12 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             wait_seconds = DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS
         return max(0.0, wait_seconds)
 
+    def _hydrosim_power_plan_preload_elapsed_seconds(self) -> float:
+        started_at = self._hydrosim_power_plan_preload_started_at
+        if started_at is None:
+            return 0.0
+        return max(0.0, time.monotonic() - started_at)
+
     def _ensure_hydrosim_power_plan_loaded(self) -> None:
         if self._hydrosim_power_plan_loaded:
             return
@@ -1091,10 +1688,6 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             try:
                 result = self._hydrosim_api.get_station_power_planning_series(planning_file)
             except ValueError:
-                logger.info(
-                    "Power planning file has no Station/output_power series; trying inflow-driven planning: %s",
-                    planning_file,
-                )
                 result = self._hydrosim_api.get_station_power_planning_series_from_inflow(planning_file)
         finally:
             if cleanup_path is not None and cleanup_path.exists():

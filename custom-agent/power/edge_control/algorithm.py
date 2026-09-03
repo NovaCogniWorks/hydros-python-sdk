@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,8 @@ STATION_OBJECT_TYPE = "PowerStation"
 TURBINE_OBJECT_TYPE = "Turbine"
 WATER_FLOW_VALUE_TYPE = "water_flow"
 OUTPUT_POWER_VALUE_TYPE = "output_power"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -315,7 +318,30 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 "allocated_turbine_output_power": allocation_result.allocated_output_power,
                 "estimated_turbine_water_flow": allocation_result.estimated_water_flow,
             }
-            station_evidence.append(self._build_station_evidence(allocation_result))
+            evidence = self._build_station_evidence(allocation_result)
+            station_evidence.append(evidence)
+            allocation_evidence = evidence["allocation"]
+            logger.info(
+                "Power V47 output allocation evidence: request_id=%s, station_id=%s, "
+                "target_output_power=%.6f, allocated_output_power=%.6f, "
+                "estimated_turbine_water_flow=%.6f, mode=%s, total_current_output_power=%s, "
+                "max_output_power_delta=%s, default_efficiency=%s, feedback_used=%s, "
+                "stage_hint_count=%s, target_exceeds_known_capacity=%s, clipped_count=%s, turbines=%s",
+                input_data.context.request_id,
+                station_id,
+                target_power,
+                allocation_result.allocated_output_power,
+                allocation_result.estimated_water_flow,
+                allocation_evidence.get("mode"),
+                self._format_optional_float(allocation_evidence.get("total_current_output_power")),
+                self._format_optional_float(allocation_evidence.get("max_output_power_delta")),
+                self._format_optional_float(input_data.parameters.get("efficiency", self._config.default_efficiency)),
+                evidence["feedback_used"],
+                evidence["stage_hint_count"],
+                allocation_evidence.get("target_exceeds_known_capacity"),
+                len(allocation_evidence.get("clipped", []) or []),
+                self._format_turbine_allocation_targets(allocation_evidence),
+            )
 
         return ControlAlgorithmOutput(
             schema_version=input_data.schema_version,
@@ -400,6 +426,30 @@ class PowerStationOutputPowerAllocationAlgorithm:
             "feedback_used": allocation_result.evidence["feedback_used"],
             "stage_hint_count": allocation_result.evidence["stage_hint_count"],
         }
+
+    @staticmethod
+    def _format_optional_float(value: Any) -> str:
+        if value is None:
+            return "null"
+        return f"{float(value):.6f}"
+
+    @classmethod
+    def _format_turbine_allocation_targets(cls, allocation_evidence: Dict[str, Any]) -> str:
+        targets = allocation_evidence.get("turbine_targets", []) or []
+        if not targets:
+            return "[]"
+        return "[" + ",".join(
+            (
+                f"{item.get('object_id')}:current={cls._format_optional_float(item.get('current_output_power'))}"
+                f",raw={cls._format_optional_float(item.get('raw_target_output_power'))}"
+                f",projected={cls._format_optional_float(item.get('projected_target_output_power'))}"
+                f",min={cls._format_optional_float(item.get('min_output_power'))}"
+                f",max={cls._format_optional_float(item.get('max_output_power'))}"
+                f",lower={cls._format_optional_float(item.get('lower_bound'))}"
+                f",upper={cls._format_optional_float(item.get('upper_bound'))}"
+            )
+            for item in targets
+        ) + "]"
 
     def _stage_hints(self, input_data: ControlAlgorithmInput) -> List[Dict[str, Any]]:
         hints = []
