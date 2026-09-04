@@ -376,6 +376,32 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 if range_config and range_config.max_value is not None
                 else None
             ),
+            state=self._optional_int(
+                self._first_present(
+                    actuator.attributes,
+                    parameters,
+                    "State",
+                    "state",
+                    "current_state",
+                    "currentState",
+                )
+            ),
+            min_power=self._optional_float(
+                self._first_present(
+                    actuator.attributes,
+                    parameters,
+                    "min_power",
+                    "min_power_mw",
+                )
+            ),
+            max_power=self._optional_float(
+                self._first_present(
+                    actuator.attributes,
+                    parameters,
+                    "max_power",
+                    "max_power_mw",
+                )
+            ),
             head=self._optional_float(actuator.attributes.get("head", parameters.get("head"))),
             efficiency=self._optional_float(actuator.attributes.get("efficiency", parameters.get("efficiency"))),
             water_flow_per_mw=self._optional_float(
@@ -396,6 +422,14 @@ class PowerStationOutputPowerAllocationAlgorithm:
             eta_power_coeff=self._optional_float(
                 actuator.attributes.get("eta_power_coeff", parameters.get("eta_power_coeff"))
             ),
+            power_ramp_rate=self._optional_float(
+                self._first_present(
+                    actuator.attributes,
+                    parameters,
+                    "power_ramp_rate",
+                    "power_ramp_rate_mw",
+                )
+            ),
             attributes=dict(actuator.attributes),
         )
 
@@ -404,6 +438,21 @@ class PowerStationOutputPowerAllocationAlgorithm:
         if value is None:
             return None
         return float(value)
+
+    @staticmethod
+    def _optional_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        return int(value)
+
+    @staticmethod
+    def _first_present(primary: Dict[str, Any], secondary: Dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if primary.get(key) is not None:
+                return primary.get(key)
+            if secondary.get(key) is not None:
+                return secondary.get(key)
+        return None
 
     @staticmethod
     def _build_station_evidence(allocation_result) -> Dict[str, Any]:
@@ -443,8 +492,12 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 f"{item.get('object_id')}:current={cls._format_optional_float(item.get('current_output_power'))}"
                 f",raw={cls._format_optional_float(item.get('raw_target_output_power'))}"
                 f",projected={cls._format_optional_float(item.get('projected_target_output_power'))}"
+                f",state={item.get('state')}"
+                f",selected={item.get('selected')}"
                 f",min={cls._format_optional_float(item.get('min_output_power'))}"
                 f",max={cls._format_optional_float(item.get('max_output_power'))}"
+                f",v47_min={cls._format_optional_float(item.get('min_power'))}"
+                f",v47_max={cls._format_optional_float(item.get('max_power'))}"
                 f",lower={cls._format_optional_float(item.get('lower_bound'))}"
                 f",upper={cls._format_optional_float(item.get('upper_bound'))}"
             )

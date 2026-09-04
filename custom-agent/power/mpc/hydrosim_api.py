@@ -391,6 +391,64 @@ class HydroSimulationApi:
             "device_step_outputs": device_step_outputs,
         }
 
+    def preview_step_station_power_allocation(self, step_index: int) -> Dict[str, Any]:
+        """Preview station-level power allocation without advancing the live session."""
+
+        session = self._require_session()
+        if session.cancelled:
+            raise RuntimeError("当前会话已取消，不能预览步进分配。")
+        step_runtime = session.step_runtime
+        if step_runtime is None:
+            raise RuntimeError("当前会话尚未生成可步进的仿真上下文，请先调用获取规划出力时间序列接口。")
+
+        target_step = int(step_index)
+        total_steps = int(len(step_runtime.steps))
+        if total_steps <= 0:
+            raise RuntimeError("当前会话没有可执行的仿真步。")
+        if target_step < 0 or target_step >= total_steps:
+            raise IndexError(f"step_index={target_step} 超出仿真步范围 [0, {total_steps - 1}]。")
+
+        preview_runtime = copy.deepcopy(step_runtime)
+        preview_current_step = int(getattr(session, "current_step_index", 0) or 0)
+        if target_step < preview_current_step:
+            preview_runtime = self._build_step_runtime(
+                session,
+                copy.deepcopy(step_runtime.merged_event),
+            )
+            preview_current_step = 0
+
+        preview_session = HydroSimulationSession(
+            session_id=session.session_id,
+            inputs=session.inputs,
+            latest_power_planning_file=session.latest_power_planning_file,
+            latest_station_power_series=copy.deepcopy(session.latest_station_power_series),
+            latest_device_output_series=copy.deepcopy(session.latest_device_output_series),
+            step_runtime=preview_runtime,
+            total_steps=session.total_steps,
+            current_step_index=preview_current_step,
+            cancelled=session.cancelled,
+        )
+        planning_values_by_node = self._resolve_step_power_plan_values(
+            preview_runtime,
+            target_step,
+            [],
+        )
+        self._advance_runtime_to_target_step(
+            session=preview_session,
+            step_runtime=preview_runtime,
+            target_step=target_step,
+            planning_values_by_node=planning_values_by_node,
+        )
+
+        station_step_outputs = self._build_station_step_outputs_from_runtime(preview_runtime, target_step)
+        return {
+            "message": "站间出力分配预览成功。",
+            "current_step_index": target_step,
+            "source": "v47_inter_station_step_runtime",
+            "planning_total_power": self._normalize_output_value(sum(planning_values_by_node.values())),
+            "station_step_outputs": station_step_outputs,
+        }
+
     def _resolve_total_steps(self, station_power_series: List[Dict[str, Any]]) -> int:
         return max((len(station.get("time_series", [])) for station in station_power_series), default=0)
 

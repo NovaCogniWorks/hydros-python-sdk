@@ -60,7 +60,7 @@ from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-24-central-outflow-planning-v11"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-03-v47-inter-station-phase-9-6"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -358,6 +358,69 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         *,
         assign_groups: bool = True,
     ) -> List[Dict[str, Any]]:
+        station_output_powers = self._resolve_v47_inter_station_output_powers(session, step)
+        if not station_output_powers:
+            station_output_powers = self._resolve_legacy_station_output_powers(session, step)
+        if not station_output_powers:
+            station_output_powers = self._resolve_station_output_powers_from_turbines(session, step)
+
+        return self._build_station_target_commands(
+            station_values=station_output_powers,
+            step=step,
+            target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
+            group_prefix="POWER_STATION_OUTPUT_POWER",
+            assign_groups=assign_groups,
+        )
+
+    def _resolve_v47_inter_station_output_powers(self, session: Any, step: int) -> Dict[int, float]:
+        step_runtime = getattr(session, "step_runtime", None)
+        if step_runtime is None or not all(
+            hasattr(step_runtime, attr)
+            for attr in (
+                "steps",
+                "station_power_plan",
+                "multi_river",
+                "multi_reservoir",
+                "multi_stair",
+            )
+        ):
+            return {}
+        preview = getattr(self._hydrosim_api, "preview_step_station_power_allocation", None)
+        if preview is None:
+            return {}
+        try:
+            result = preview(step)
+        except Exception as exc:
+            logger.warning(
+                "Power V47 inter-station allocation preview failed; fallback to legacy station output series: "
+                "task_id=%s, step=%s, error=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                exc,
+            )
+            return {}
+
+        station_output_powers: Dict[int, float] = {}
+        for station in result.get("station_step_outputs", []) or []:
+            station_id = station.get("node_id", station.get("object_id"))
+            if station_id is None or station.get("power") is None:
+                continue
+            station_output_powers[int(station_id)] = float(station["power"])
+
+        if station_output_powers:
+            logger.info(
+                "Power station output intent selected: task_id=%s, step=%s, "
+                "source=v47_inter_station_step_runtime, planning_total_power=%s, "
+                "station_count=%s, station_targets=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                result.get("planning_total_power"),
+                len(station_output_powers),
+                self._format_station_values(station_output_powers),
+            )
+        return station_output_powers
+
+    def _resolve_legacy_station_output_powers(self, session: Any, step: int) -> Dict[int, float]:
         station_output_powers: Dict[int, float] = {}
         for station in getattr(session, "latest_station_power_series", []) or []:
             metrics_code = station.get("metrics_code")
@@ -377,26 +440,47 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 continue
             station_output_powers[int(station_id)] = float(row["value"])
 
-        if not station_output_powers:
-            for device in getattr(session, "latest_device_output_series", []) or []:
-                if (
-                    str(device.get("object_type")) != HydroObjectType.TURBINE.value
-                    or str(device.get("metrics_code")) != DeviceValueTypeEnum.OUTPUT_POWER.code
-                    or device.get("node_id") is None
-                ):
-                    continue
-                row = self._get_series_row_for_step(device.get("time_series", []), step)
-                if row is None:
-                    continue
-                station_id = int(device["node_id"])
-                station_output_powers[station_id] = station_output_powers.get(station_id, 0.0) + float(row["value"])
+        if station_output_powers:
+            logger.info(
+                "Power station output intent selected: task_id=%s, step=%s, "
+                "source=legacy_station_power_series, station_count=%s, station_targets=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                len(station_output_powers),
+                self._format_station_values(station_output_powers),
+            )
+        return station_output_powers
 
-        return self._build_station_target_commands(
-            station_values=station_output_powers,
-            step=step,
-            target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
-            group_prefix="POWER_STATION_OUTPUT_POWER",
-            assign_groups=assign_groups,
+    def _resolve_station_output_powers_from_turbines(self, session: Any, step: int) -> Dict[int, float]:
+        station_output_powers: Dict[int, float] = {}
+        for device in getattr(session, "latest_device_output_series", []) or []:
+            if (
+                str(device.get("object_type")) != HydroObjectType.TURBINE.value
+                or str(device.get("metrics_code")) != DeviceValueTypeEnum.OUTPUT_POWER.code
+                or device.get("node_id") is None
+            ):
+                continue
+            row = self._get_series_row_for_step(device.get("time_series", []), step)
+            if row is None:
+                continue
+            station_id = int(device["node_id"])
+            station_output_powers[station_id] = station_output_powers.get(station_id, 0.0) + float(row["value"])
+
+        if station_output_powers:
+            logger.info(
+                "Power station output intent selected: task_id=%s, step=%s, "
+                "source=turbine_output_power_sum_fallback, station_count=%s, station_targets=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                len(station_output_powers),
+                self._format_station_values(station_output_powers),
+            )
+        return station_output_powers
+
+    def _format_station_values(self, station_values: Dict[int, float]) -> str:
+        return ",".join(
+            f"{station_id}={float(value):.6f}"
+            for station_id, value in sorted(station_values.items())
         )
 
     def _build_station_turbine_out_flow_commands(

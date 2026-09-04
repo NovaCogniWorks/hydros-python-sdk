@@ -28,7 +28,7 @@ def _load_power_allocation_module():
 
 
 class PowerAllocationModuleTest(unittest.TestCase):
-    def test_v47_allocator_allocates_by_current_power_ratio(self):
+    def test_v47_allocator_uses_unit_commitment_for_station_power(self):
         allocation = _load_power_allocation_module()
         allocator = allocation.HydroSimV47PowerAllocator()
 
@@ -59,17 +59,59 @@ class PowerAllocationModuleTest(unittest.TestCase):
             item.object_id: item.target_output_power
             for item in result.turbine_allocations
         }
-        self.assertAlmostEqual(60.0, targets[20301])
-        self.assertAlmostEqual(30.0, targets[20302])
+        self.assertAlmostEqual(45.0, targets[20301])
+        self.assertAlmostEqual(45.0, targets[20302])
         self.assertAlmostEqual(90.0, result.allocated_output_power)
         self.assertGreater(result.estimated_water_flow, 0.0)
-        self.assertEqual("current_power_ratio", result.evidence["allocation"]["mode"])
+        self.assertEqual("v47_unit_commitment", result.evidence["allocation"]["mode"])
         turbine_targets = result.evidence["allocation"]["turbine_targets"]
         self.assertEqual(2, len(turbine_targets))
         self.assertEqual(20301, turbine_targets[0]["object_id"])
         self.assertAlmostEqual(40.0, turbine_targets[0]["current_output_power"])
-        self.assertAlmostEqual(60.0, turbine_targets[0]["raw_target_output_power"])
-        self.assertAlmostEqual(60.0, turbine_targets[0]["projected_target_output_power"])
+        self.assertTrue(turbine_targets[0]["selected"])
+        self.assertAlmostEqual(45.0, turbine_targets[0]["raw_target_output_power"])
+        self.assertAlmostEqual(45.0, turbine_targets[0]["projected_target_output_power"])
+
+    def test_v47_allocator_low_load_does_not_hold_every_unit_at_min_output(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        result = allocator.allocate_station(allocation.StationPowerAllocationInput(
+            station_id=20100,
+            target_output_power=100.0,
+            turbines=[
+                allocation.TurbinePowerInput(
+                    object_id=20101,
+                    current_output_power=0.0,
+                    min_output_power=200.0,
+                    max_output_power=650.0,
+                    state=1,
+                    min_power=200.0,
+                    max_power=650.0,
+                    design_power=600.0,
+                ),
+                allocation.TurbinePowerInput(
+                    object_id=20102,
+                    current_output_power=0.0,
+                    min_output_power=200.0,
+                    max_output_power=650.0,
+                    state=1,
+                    min_power=200.0,
+                    max_power=650.0,
+                    design_power=600.0,
+                ),
+            ],
+        ))
+
+        targets = {
+            item.object_id: item.target_output_power
+            for item in result.turbine_allocations
+        }
+        self.assertAlmostEqual(100.0, result.allocated_output_power)
+        self.assertEqual(1, sum(1 for value in targets.values() if value > 0.0))
+        self.assertIn(100.0, targets.values())
+        self.assertIn(0.0, targets.values())
+        self.assertEqual([20101], result.evidence["allocation"]["selected_turbine_ids"])
 
     def test_v47_allocator_zero_target_stops_turbines(self):
         allocation = _load_power_allocation_module()
@@ -125,6 +167,43 @@ class PowerAllocationModuleTest(unittest.TestCase):
             design_efficiency=0.93,
         ).query(50.0, 50.0)
         self.assertAlmostEqual(expected_flow, result.estimated_water_flow)
+
+    def test_v47_allocator_scales_flow_below_min_power(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        result = allocator.allocate_station(allocation.StationPowerAllocationInput(
+            station_id=20300,
+            target_output_power=10.0,
+            turbines=[
+                allocation.TurbinePowerInput(
+                    object_id=20301,
+                    current_output_power=0.0,
+                    min_output_power=20.0,
+                    max_output_power=120.0,
+                    state=1,
+                    min_power=20.0,
+                    max_power=120.0,
+                    head=50.0,
+                    design_head=50.0,
+                    min_head=30.0,
+                    max_head=80.0,
+                    design_power=100.0,
+                    design_efficiency=0.93,
+                )
+            ],
+        ))
+
+        q_min, _ = allocation.HydroNHQGenerator(
+            design_head=50.0,
+            min_head=30.0,
+            max_head=80.0,
+            design_power=100.0,
+            min_power=20.0,
+            max_power=120.0,
+            design_efficiency=0.93,
+        ).query(50.0, 20.0)
+        self.assertAlmostEqual(q_min * 10.0 / 20.0, result.estimated_water_flow)
 
 
 class PowerControlAlgorithmServiceTest(unittest.TestCase):
@@ -235,14 +314,82 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             item.object_id: item.target_values["output_power"]
             for item in output.actuator_targets
         }
-        self.assertAlmostEqual(60.0, targets[20301])
-        self.assertAlmostEqual(30.0, targets[20302])
+        self.assertAlmostEqual(45.0, targets[20301])
+        self.assertAlmostEqual(45.0, targets[20302])
         result_values = {
             item.value_type: item.value
             for item in output.results
         }
         self.assertAlmostEqual(90.0, result_values["output_power"])
         self.assertGreater(result_values["water_flow"], 0.0)
+
+    def test_runtime_uses_v47_state_and_min_power_without_hard_min_floor(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-low-load",
+                "target_object_type": "PowerStation",
+                "target_object_id": 20100,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20100,
+                "value_type": "output_power",
+                "value": 100.0,
+            }],
+            "actuators": [
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20101,
+                    "available": True,
+                    "values": {"output_power": 0.0},
+                    "ranges": {"output_power": {"min_value": 200.0, "max_value": 650.0}},
+                    "attributes": {
+                        "station_object_id": 20100,
+                        "state": 1,
+                        "min_power": 200.0,
+                        "max_power": 650.0,
+                        "design_power": 600.0,
+                    },
+                },
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20102,
+                    "available": True,
+                    "values": {"output_power": 0.0},
+                    "ranges": {"output_power": {"min_value": 200.0, "max_value": 650.0}},
+                    "attributes": {
+                        "station_object_id": 20100,
+                        "state": 1,
+                        "min_power": 200.0,
+                        "max_power": 650.0,
+                        "design_power": 600.0,
+                    },
+                },
+            ],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        targets = {
+            item.object_id: item.target_values["output_power"]
+            for item in output.actuator_targets
+        }
+        self.assertAlmostEqual(100.0, sum(targets.values()))
+        self.assertEqual(1, sum(1 for value in targets.values() if value > 0.0))
+        station_evidence = output.evidence["stations"][0]
+        allocation = station_evidence["allocation"]
+        self.assertEqual("v47_unit_commitment", allocation["mode"])
+        self.assertEqual([20101], allocation["selected_turbine_ids"])
+        turbine_targets = allocation["turbine_targets"]
+        self.assertTrue(any(item["min_power"] == 200.0 for item in turbine_targets))
 
     def test_runtime_reports_output_power_capacity_clipping(self):
         module = _load_power_control_module()

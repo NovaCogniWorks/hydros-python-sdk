@@ -492,6 +492,50 @@ def test_power_scheduling_optimization_builds_station_output_power_command():
     assert command["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-turbine-001:2:TARGET_AGENT_20300:")
 
 
+def test_power_scheduling_optimization_prefers_v47_inter_station_preview():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-scene-v47-inter-station")
+    agent._hydrosim_api._session = _build_session(4)
+    agent._hydrosim_api._session.step_runtime = SimpleNamespace(
+        steps=[0, 1, 2, 3],
+        station_power_plan={},
+        multi_river=object(),
+        multi_reservoir=object(),
+        multi_stair=object(),
+    )
+    agent._hydrosim_api._session.latest_device_output_series = [
+        device
+        for device in agent._hydrosim_api._session.latest_device_output_series
+        if device["object_type"] != "Gate"
+    ]
+    agent._hydrosim_api.preview_step_station_power_allocation = Mock(
+        return_value={
+            "source": "v47_inter_station_step_runtime",
+            "planning_total_power": 432.0,
+            "station_step_outputs": [
+                {
+                    "node_id": 20300,
+                    "station": "Station-20300",
+                    "step": 2,
+                    "power": 222.0,
+                }
+            ],
+        }
+    )
+
+    commands = agent.on_optimization(2)
+
+    assert len(commands) == 1
+    command = commands[0]
+    assert command["target_agent_code"] == "TARGET_AGENT_20300"
+    assert command["target_command_type"] == "output_power"
+    assert command["target_value"] == 222.0
+    assert command["object_id"] == 20300
+    assert command["object_type"] == "PowerStation"
+    assert command["main_step_index"] == 2
+    agent._hydrosim_api.preview_step_station_power_allocation.assert_called_once_with(2)
+
+
 def test_power_scheduling_optimization_groups_gate_station_flow_with_station_output_power_by_default():
     module = _load_power_scheduling_module()
     agent, _, _ = _build_agent(module, "power-scene-gate-001")
@@ -1739,6 +1783,56 @@ def test_power_scheduling_optimization_uses_turbine_output_power_when_station_se
     assert command["group_id"].startswith(
         "POWER_STATION_OUTPUT_POWER:power-scene-command-filter-001:2:TARGET_AGENT_20300:"
     )
+
+
+def test_hydrosim_preview_step_station_power_allocation_does_not_advance_live_session():
+    module = _load_hydrosim_api_module()
+    api = module.HydroSimulationApi()
+    original_runtime = SimpleNamespace(
+        steps=[0, 1, 2],
+        merged_event={"valid": True},
+        station_power_plan={
+            int(node_id): [10.0, 20.0, 30.0]
+            for node_id in module.hydrosim_config.STATION_NODE_IDS
+        },
+    )
+    api._session = module.HydroSimulationSession(
+        session_id="preview-session",
+        latest_station_power_series=[{"time_series": [{"step": 0, "value": 1.0}]}],
+        step_runtime=original_runtime,
+        total_steps=3,
+        current_step_index=1,
+    )
+    captured = {}
+
+    def fake_advance(session, step_runtime, target_step, planning_values_by_node):
+        session.current_step_index = target_step + 1
+        step_runtime.preview_only_marker = True
+        captured["step_runtime"] = step_runtime
+        captured["planning_values_by_node"] = planning_values_by_node
+
+    api._advance_runtime_to_target_step = fake_advance
+    api._build_station_step_outputs_from_runtime = Mock(
+        return_value=[
+            {
+                "node_id": 20300,
+                "station": "Station-20300",
+                "step": 2,
+                "power": 222.0,
+            }
+        ]
+    )
+
+    result = api.preview_step_station_power_allocation(2)
+
+    assert result["source"] == "v47_inter_station_step_runtime"
+    assert result["planning_total_power"] == 120.0
+    assert result["station_step_outputs"][0]["power"] == 222.0
+    assert api._session.current_step_index == 1
+    assert api._session.step_runtime is original_runtime
+    assert not hasattr(original_runtime, "preview_only_marker")
+    assert captured["step_runtime"] is not original_runtime
+    assert captured["planning_values_by_node"][20300] == 30.0
 
 
 def test_power_scheduling_optimization_falls_back_to_turbine_out_flow_when_power_is_missing():
