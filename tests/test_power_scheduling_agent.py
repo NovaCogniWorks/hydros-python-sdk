@@ -399,6 +399,150 @@ def _build_step_result(step: int):
     }
 
 
+def test_power_observation_adapter_reads_power_metrics_from_full_cache():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-observation-adapter")
+    session = _build_session(5)
+    internal_stage_hints = [
+        {
+            "station_id": 20100,
+            "station": "Station-20100",
+            "stage": 841.0,
+            "design_stage": 842.0,
+        },
+        {
+            "station_id": 20300,
+            "station": "Station-20300",
+            "stage": 610.0,
+            "design_stage": 610.0,
+        },
+        {
+            "station_id": 20500,
+            "station": "Station-20500",
+            "stage": 580.0,
+            "design_stage": 580.0,
+        },
+        {
+            "station_id": 20700,
+            "station": "Station-20700",
+            "stage": 552.0,
+            "design_stage": 552.0,
+        },
+    ]
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "PowerStation",
+            "metrics_code": "water_level",
+            "value": 612.25,
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20304,
+            "object_type": "Turbine",
+            "metrics_code": "output_power",
+            "value": 155.5,
+            "attributes": {"front_water_flow": 42.25, "back_water_level": 608.0},
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20101,
+            "object_type": "Gate",
+            "metrics_code": "gate_opening",
+            "value": 1.25,
+            "front_water_flow": 12.5,
+            "step_index": 2,
+        }
+    )
+
+    observation = agent._power_observation_adapter.build(
+        step_index=2,
+        session=session,
+        internal_stage_hints=internal_stage_hints,
+    )
+
+    assert observation.metrics_scope == "step"
+    assert observation.observed_stage_count == 1
+    assert observation.fallback_stage_count == 3
+    assert observation.station_output_power_by_station == {20300: 155.5}
+    assert observation.stage_hints[1]["station_id"] == 20300
+    assert observation.stage_hints[1]["stage"] == 612.25
+    assert observation.stage_hints[1]["stage_hints_source"] == "observation_adapter"
+    assert observation.stage_hints[1]["output_power_mw"] == 155.5
+    assert observation.stage_hints[1]["power_outflow_m3s"] == 42.25
+    assert observation.stage_hints[0]["stage_hints_source"] == "internal_reservoir_fallback"
+    assert observation.stage_hints[0]["spill_outflow_m3s"] == 12.5
+    assert "station:20100:missing_stage_observation" in observation.diagnostics
+
+
+def test_power_scheduling_tick_applies_observed_stage_hints_at_rolling_boundary():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-observation-rolling")
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        task_state=SchedulingTaskState(
+            context=context,
+            rolling_interval_steps=1,
+            start_step=3,
+            current_step=3,
+            max_steps=12,
+        ),
+    )
+    agent._hydrosim_api._session = _build_session(12)
+    agent._hydrosim_api._session.step_runtime = SimpleNamespace(
+        multi_reservoir=SimpleNamespace(
+            stage_hints=Mock(
+                return_value=[
+                    {"station_id": 20100, "station": "Station-20100", "stage": 841.0, "design_stage": 842.0},
+                    {"station_id": 20300, "station": "Station-20300", "stage": 610.0, "design_stage": 610.0},
+                    {"station_id": 20500, "station": "Station-20500", "stage": 580.0, "design_stage": 580.0},
+                    {"station_id": 20700, "station": "Station-20700", "stage": 552.0, "design_stage": 552.0},
+                ]
+            )
+        )
+    )
+    agent._hydrosim_api.apply_observed_stage_hints = Mock(return_value={})
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(3))
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "PowerStation",
+            "metrics_code": "water_level",
+            "value": 612.25,
+            "step_index": 3,
+        }
+    )
+
+    metrics_list = agent.on_tick_simulation(
+        TickCmdRequest(
+            command_id="tick-003",
+            context=context,
+            step=3,
+            broadcast=False,
+        )
+    )
+
+    assert metrics_list == []
+    agent._hydrosim_api.apply_observed_stage_hints.assert_called_once()
+    applied_step, applied_hints = agent._hydrosim_api.apply_observed_stage_hints.call_args.args
+    assert applied_step == 3
+    assert applied_hints[1]["station_id"] == 20300
+    assert applied_hints[1]["stage"] == 612.25
+    assert applied_hints[1]["stage_hints_source"] == "observation_adapter"
+    assert agent._hydrosim_api.apply_observed_stage_hints.call_args.kwargs["source"] == (
+        "mixed_observation_internal_fallback"
+    )
+
+
 def test_power_scheduling_tick_does_not_publish_internal_prediction_metrics():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-001")
@@ -2654,3 +2798,98 @@ def test_hydrosim_apply_time_series_event_update_uses_cache_for_current_step_onl
         {"step": 4, "value": 340.0},
         {"step": 5, "value": 350.0},
     ]
+
+
+def test_hydrosim_execute_step_applies_observed_stage_hint_before_dispatch():
+    hydrosim_api = _load_hydrosim_api_module()
+    api = hydrosim_api.HydroSimulationApi()
+    api.service.core.runtime._set_step_target_stages = Mock()
+    pid = SimpleNamespace(initialize=Mock())
+    reservoir = SimpleNamespace(
+        min_stage=500.0,
+        max_stage=900.0,
+        current_stage=610.0,
+        current_capacity=6100.0,
+        stage_to_capacity=lambda stage: stage * 10.0,
+        PID=pid,
+    )
+    internal_stage_hints = [
+        {"station_id": 20100, "stage": 841.0, "design_stage": 842.0},
+        {"station_id": 20300, "stage": 610.0, "design_stage": 610.0},
+        {"station_id": 20500, "stage": 580.0, "design_stage": 580.0},
+        {"station_id": 20700, "stage": 552.0, "design_stage": 552.0},
+    ]
+    observed_stage_hints = [
+        {
+            "station_id": 20100,
+            "station": "Station-20100",
+            "stage": 845.25,
+            "design_stage": 842.0,
+            "stage_hints_source": "observation_adapter",
+        },
+        {
+            "station_id": 20300,
+            "station": "Station-20300",
+            "stage": 610.0,
+            "design_stage": 610.0,
+            "stage_hints_source": "internal_reservoir_fallback",
+        },
+        {
+            "station_id": 20500,
+            "station": "Station-20500",
+            "stage": 580.0,
+            "design_stage": 580.0,
+            "stage_hints_source": "internal_reservoir_fallback",
+        },
+        {
+            "station_id": 20700,
+            "station": "Station-20700",
+            "stage": 552.0,
+            "design_stage": 552.0,
+            "stage_hints_source": "internal_reservoir_fallback",
+        },
+    ]
+    step_runtime = hydrosim_api.HydroSimulationStepRuntime(
+        merged_event={},
+        initial_states={},
+        constraints={},
+        flow_configs=[],
+        steps=[0],
+        flows_in=[100.0],
+        station_power_plan={},
+        target_stage_by_node={},
+        control_domains=[],
+        device_names={},
+        multi_river=SimpleNamespace(step_execute=Mock()),
+        multi_reservoir=SimpleNamespace(
+            Capacity_Stairs=[reservoir, SimpleNamespace(), SimpleNamespace(), SimpleNamespace()],
+            stage_hints=Mock(return_value=internal_stage_hints),
+            step=Mock(),
+            _compute_heads=Mock(),
+        ),
+        multi_stair=SimpleNamespace(
+            update_stage_hints=Mock(),
+            step_execute=Mock(),
+        ),
+        observed_stage_hints_by_step={0: observed_stage_hints},
+        observed_stage_hint_sources_by_step={0: "mixed_observation_internal_fallback"},
+    )
+
+    api._execute_runtime_step(
+        step_runtime,
+        0,
+        {20100: 100.0, 20300: 200.0, 20500: 300.0, 20700: 400.0},
+    )
+
+    assert reservoir.current_stage == 845.25
+    assert reservoir.current_capacity == 8452.5
+    pid.initialize.assert_called_once_with(845.25)
+    step_runtime.multi_reservoir.stage_hints.assert_not_called()
+    step_runtime.multi_reservoir._compute_heads.assert_called_once_with(step_runtime.multi_stair)
+    step_runtime.multi_stair.update_stage_hints.assert_called_once_with(observed_stage_hints)
+    assert step_runtime._stage_hint_usage_by_step[0] == {
+        "source": "mixed_observation_internal_fallback",
+        "hint_count": 4,
+        "observed_count": 1,
+        "fallback_count": 3,
+    }

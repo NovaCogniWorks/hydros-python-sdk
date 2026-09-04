@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import logging
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ from hydrosim import (
     HydroSimulationInputResolver,
     HydroSimulationService,
 )
+
+logger = logging.getLogger(__name__)
 
 RESERVOIR_EVIDENCE_HISTORY_KEYS = (
     "current_inflow",
@@ -121,6 +124,8 @@ class HydroSimulationStepRuntime:
     multi_river: Any
     multi_reservoir: Any
     multi_stair: Any
+    observed_stage_hints_by_step: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
+    observed_stage_hint_sources_by_step: Dict[int, str] = field(default_factory=dict)
 
 
 class HydroSimulationApi:
@@ -391,6 +396,46 @@ class HydroSimulationApi:
             "device_step_outputs": device_step_outputs,
         }
 
+    def apply_observed_stage_hints(
+        self,
+        step_index: int,
+        stage_hints: List[Dict[str, Any]],
+        *,
+        source: str = "observation_adapter",
+    ) -> Dict[str, Any]:
+        """Register observed stage hints for the next runtime step.
+
+        This is intentionally a small Phase 12 prerequisite: it lets Power
+        Scheduling correct HydroSim's step runtime with observed station stage
+        at a rolling boundary, while leaving the allocation authority unchanged.
+        """
+
+        session = self._require_session()
+        step_runtime = session.step_runtime
+        if step_runtime is None:
+            raise RuntimeError("当前会话尚未生成可步进的仿真上下文，不能应用观测 stage_hints。")
+
+        normalized_hints = [dict(hint) for hint in stage_hints or []]
+        expected_count = len(hydrosim_config.STATION_NODE_IDS)
+        if len(normalized_hints) != expected_count:
+            raise ValueError(
+                f"observed stage_hints 数量不匹配: expected={expected_count}, actual={len(normalized_hints)}"
+            )
+
+        if not hasattr(step_runtime, "observed_stage_hints_by_step"):
+            step_runtime.observed_stage_hints_by_step = {}
+        if not hasattr(step_runtime, "observed_stage_hint_sources_by_step"):
+            step_runtime.observed_stage_hint_sources_by_step = {}
+
+        step_key = int(step_index)
+        step_runtime.observed_stage_hints_by_step[step_key] = normalized_hints
+        step_runtime.observed_stage_hint_sources_by_step[step_key] = str(source)
+        return {
+            "step_index": step_key,
+            "stage_hint_count": len(normalized_hints),
+            "source": str(source),
+        }
+
     def preview_step_station_power_allocation(self, step_index: int) -> Dict[str, Any]:
         """Preview station-level power allocation without advancing the live session."""
 
@@ -441,11 +486,19 @@ class HydroSimulationApi:
         )
 
         station_step_outputs = self._build_station_step_outputs_from_runtime(preview_runtime, target_step)
+        stage_hints_usage = copy.deepcopy(
+            getattr(preview_runtime, "_stage_hint_usage_by_step", {}) or {}
+        )
+        target_stage_hints_usage = stage_hints_usage.get(target_step, {})
         return {
             "message": "站间出力分配预览成功。",
             "current_step_index": target_step,
             "source": "v47_inter_station_step_runtime",
+            "allocator_source": "imported_v47_original_hydrostair_step_execute",
+            "inter_station_dispatch_core": "HydroStair._station_dispatch",
             "planning_total_power": self._normalize_output_value(sum(planning_values_by_node.values())),
+            "stage_hints_source": target_stage_hints_usage.get("source"),
+            "stage_hints_usage": stage_hints_usage,
             "station_step_outputs": station_step_outputs,
         }
 
@@ -868,7 +921,19 @@ class HydroSimulationApi:
             step_runtime.target_stage_by_node,
             step_index,
         )
-        step_runtime.multi_stair.update_stage_hints(step_runtime.multi_reservoir.stage_hints())
+        stage_hints, stage_hints_source = self._resolve_stage_hints_for_step(
+            step_runtime,
+            step_index,
+        )
+        self._record_stage_hints_usage(
+            step_runtime,
+            step_index,
+            stage_hints,
+            stage_hints_source,
+        )
+        if stage_hints_source != "internal_reservoir":
+            self._apply_observed_reservoir_stages(step_runtime, stage_hints)
+        step_runtime.multi_stair.update_stage_hints(stage_hints)
         total_power_cmd = float(sum(planning_values_by_node.values()))
         step_runtime.multi_stair.step_execute(total_power_cmd)
         step_runtime.multi_reservoir.step(
@@ -880,6 +945,83 @@ class HydroSimulationApi:
             step_runtime.multi_reservoir,
             float(step_runtime.flows_in[step_index]),
         )
+
+    def _resolve_stage_hints_for_step(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        step_index: int,
+    ) -> tuple[List[Dict[str, Any]], str]:
+        observed_by_step = getattr(step_runtime, "observed_stage_hints_by_step", {}) or {}
+        observed_hints = observed_by_step.get(int(step_index))
+        if observed_hints:
+            sources_by_step = getattr(step_runtime, "observed_stage_hint_sources_by_step", {}) or {}
+            return copy.deepcopy(observed_hints), str(
+                sources_by_step.get(int(step_index)) or "observation_adapter"
+            )
+        return step_runtime.multi_reservoir.stage_hints(), "internal_reservoir"
+
+    def _record_stage_hints_usage(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        step_index: int,
+        stage_hints: List[Dict[str, Any]],
+        stage_hints_source: str,
+    ) -> None:
+        usage_by_step = getattr(step_runtime, "_stage_hint_usage_by_step", {}) or {}
+        usage_by_step[int(step_index)] = {
+            "source": str(stage_hints_source),
+            "hint_count": len(stage_hints or []),
+            "observed_count": sum(
+                1
+                for hint in stage_hints or []
+                if hint.get("stage_hints_source") == "observation_adapter"
+            ),
+            "fallback_count": sum(
+                1
+                for hint in stage_hints or []
+                if hint.get("stage_hints_source") != "observation_adapter"
+            ),
+        }
+        setattr(step_runtime, "_stage_hint_usage_by_step", usage_by_step)
+
+    def _apply_observed_reservoir_stages(
+        self,
+        step_runtime: HydroSimulationStepRuntime,
+        stage_hints: List[Dict[str, Any]],
+    ) -> None:
+        reservoirs = list(getattr(step_runtime.multi_reservoir, "Capacity_Stairs", []) or [])
+        applied_count = 0
+        for index, hint in enumerate(stage_hints):
+            if hint.get("stage_hints_source") != "observation_adapter":
+                continue
+            if index >= len(reservoirs):
+                continue
+            stage = hint.get("stage")
+            if stage is None:
+                continue
+            reservoir = reservoirs[index]
+            try:
+                observed_stage = float(stage)
+            except (TypeError, ValueError):
+                continue
+            min_stage = float(getattr(reservoir, "min_stage", observed_stage))
+            max_stage = float(getattr(reservoir, "max_stage", observed_stage))
+            corrected_stage = max(min_stage, min(max_stage, observed_stage))
+            reservoir.current_stage = corrected_stage
+            reservoir.current_capacity = reservoir.stage_to_capacity(corrected_stage)
+            pid = getattr(reservoir, "PID", None)
+            if pid is not None and hasattr(pid, "initialize"):
+                pid.initialize(corrected_stage)
+            applied_count += 1
+
+        if applied_count and hasattr(step_runtime.multi_reservoir, "_compute_heads"):
+            try:
+                step_runtime.multi_reservoir._compute_heads(step_runtime.multi_stair)
+            except Exception:
+                logger.warning(
+                    "Failed to recompute reservoir heads after applying observed stages.",
+                    exc_info=True,
+                )
 
     def _build_station_step_outputs_from_runtime(
         self,

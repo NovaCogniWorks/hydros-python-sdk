@@ -17,6 +17,8 @@ CURRENT_DIR = Path(__file__).resolve().parent
 HYDROSIM_DIR = CURRENT_DIR.parent / "mpc"
 DATA_DIR = CURRENT_DIR.parent / "data"
 RUNTIME_DIR = CURRENT_DIR.parent / ".runtime" / "scheduling"
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
@@ -57,6 +59,7 @@ from hydros_agent_sdk.protocol.models import (
 )
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
+from power_observation_adapter import PowerObservationAdapter, PowerObservationResult
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +190,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             or MpcPredictionResultReporter(sim_coordination_client=sim_coordination_client)
         )
         self._hydrosim_api = HydroSimulationApi()
+        self._power_observation_adapter = PowerObservationAdapter(
+            metrics_data_cache=self._metrics_data_cache,
+            station_node_ids=hydrosim_config.STATION_NODE_IDS,
+            flow_configs=hydrosim_config.FLOW_CONFIGS,
+        )
         self._hydrosim_initialized = False
         self._hydrosim_power_plan_loaded = False
         self._hydrosim_power_plan_preload_done = Event()
@@ -296,6 +304,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     request.step,
                     control_target_step,
                 )
+                self._apply_power_observation_to_runtime(
+                    step=request.step,
+                    reason="rolling_boundary",
+                )
                 commands = self.on_optimization(control_target_step)
                 if commands and not self._has_dispatched_control_target_step(control_target_step):
                     self.dispatch_control_commands_and_await_execution(commands)
@@ -350,6 +362,101 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             base_commands=flow_commands,
             group_prefix="POWER_STATION_OUT_FLOW",
         )
+
+    def _apply_power_observation_to_runtime(
+        self,
+        *,
+        step: int,
+        reason: str,
+    ) -> Optional[PowerObservationResult]:
+        session = getattr(self._hydrosim_api, "_session", None)
+        if session is None:
+            return None
+
+        observation = self._power_observation_adapter.build(
+            step_index=step,
+            session=session,
+            internal_stage_hints=self._resolve_internal_stage_hints(session),
+        )
+        applied_to_runtime = False
+        if observation.should_apply_to_runtime:
+            apply_stage_hints = getattr(self._hydrosim_api, "apply_observed_stage_hints", None)
+            if apply_stage_hints is not None:
+                apply_stage_hints(
+                    int(step),
+                    observation.stage_hints,
+                    source=self._resolve_observation_stage_hints_source(observation),
+                )
+                applied_to_runtime = True
+
+        logger.info(
+            "Power observation stage hints prepared: task_id=%s, step=%s, reason=%s, "
+            "metrics_scope=%s, metrics_count=%s, stage_hints_source=%s, "
+            "observed_stage_count=%s, fallback_stage_count=%s, station_output_power_count=%s, "
+            "applied_to_runtime=%s, diagnostics=%s, stage_hints=%s",
+            self.context.biz_scene_instance_id,
+            step,
+            reason,
+            observation.metrics_scope,
+            observation.metrics_count,
+            self._resolve_observation_stage_hints_source(observation),
+            observation.observed_stage_count,
+            observation.fallback_stage_count,
+            len(observation.station_output_power_by_station),
+            applied_to_runtime,
+            "|".join(observation.diagnostics),
+            self._format_stage_hint_summary(observation.stage_hints),
+        )
+        return observation
+
+    def _resolve_internal_stage_hints(self, session: Any) -> List[Dict[str, Any]]:
+        step_runtime = getattr(session, "step_runtime", None)
+        multi_reservoir = getattr(step_runtime, "multi_reservoir", None)
+        stage_hints = getattr(multi_reservoir, "stage_hints", None)
+        if stage_hints is None:
+            return []
+        try:
+            return [dict(item) for item in stage_hints()]
+        except Exception:
+            logger.warning("Failed to read internal reservoir stage hints.", exc_info=True)
+            return []
+
+    def _resolve_observation_stage_hints_source(self, observation: PowerObservationResult) -> str:
+        if observation.observed_stage_count <= 0:
+            return "internal_reservoir_fallback"
+        if observation.fallback_stage_count > 0:
+            return "mixed_observation_internal_fallback"
+        return "observation_adapter"
+
+    def _format_stage_hint_summary(self, stage_hints: List[Dict[str, Any]]) -> str:
+        parts: List[str] = []
+        for hint in stage_hints or []:
+            station_id = hint.get("station_id")
+            station_name = hint.get("station")
+            stage = hint.get("stage")
+            design_stage = hint.get("design_stage")
+            source = hint.get("stage_hints_source")
+            output_power = hint.get("output_power_mw")
+            inflow = hint.get("inflow_m3s")
+            if stage is None:
+                parts.append(f"{station_id or station_name}:stage=null,source={source}")
+                continue
+            design_display = self._format_optional_float(design_stage)
+            parts.append(
+                f"{station_id or station_name}:stage={float(stage):.6f},"
+                f"design={design_display},source={source},"
+                f"output_power={self._format_optional_float(output_power)},"
+                f"inflow={self._format_optional_float(inflow)}"
+            )
+        return ";".join(parts)
+
+    def _format_optional_float(self, value: Any) -> str:
+        if value is None:
+            return "null"
+        try:
+            return f"{float(value):.6f}"
+        except (TypeError, ValueError):
+            return "null"
 
     def _build_station_output_power_commands(
         self,
@@ -410,11 +517,17 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         if station_output_powers:
             logger.info(
                 "Power station output intent selected: task_id=%s, step=%s, "
-                "source=v47_inter_station_step_runtime, planning_total_power=%s, "
+                "source=v47_inter_station_step_runtime, allocator_source=%s, "
+                "inter_station_dispatch_core=%s, planning_total_power=%s, "
+                "stage_hints_source=%s, stage_hints_usage=%s, "
                 "station_count=%s, station_targets=%s",
                 self.context.biz_scene_instance_id,
                 step,
+                result.get("allocator_source") or "imported_v47_original_hydrostair_step_execute",
+                result.get("inter_station_dispatch_core") or "HydroStair._station_dispatch",
                 result.get("planning_total_power"),
+                result.get("stage_hints_source"),
+                self._format_stage_hints_usage(result.get("stage_hints_usage")),
                 len(station_output_powers),
                 self._format_station_values(station_output_powers),
             )
@@ -482,6 +595,20 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             f"{station_id}={float(value):.6f}"
             for station_id, value in sorted(station_values.items())
         )
+
+    def _format_stage_hints_usage(self, usage_by_step: Any) -> str:
+        if not isinstance(usage_by_step, dict) or not usage_by_step:
+            return "none"
+        parts: List[str] = []
+        for step_key in sorted(usage_by_step, key=lambda item: int(item)):
+            usage = usage_by_step.get(step_key) or {}
+            parts.append(
+                f"{int(step_key)}:{usage.get('source')},"
+                f"hint_count={usage.get('hint_count')},"
+                f"observed={usage.get('observed_count')},"
+                f"fallback={usage.get('fallback_count')}"
+            )
+        return ";".join(parts)
 
     def _build_station_turbine_out_flow_commands(
         self,
