@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
+from v47_adapter import ImportedV47StationAllocator
+
 from .nhq import HydroNHQGenerator
 
 
@@ -37,6 +39,9 @@ class StationPowerAllocationInput:
     max_output_power_delta: float = 1.0e9
     default_efficiency: float = 0.9
     stage_hints: Sequence[Dict[str, Any]] = field(default_factory=list)
+    context_id: Optional[str] = None
+    compute_step: Optional[int] = None
+    station_name: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -58,54 +63,37 @@ class StationPowerAllocationResult:
 
 
 class HydroSimV47PowerAllocator:
-    """Pure V47-compatible station output-power allocator.
+    """Hydros compatibility boundary for the imported HydroSim V47 algorithm.
 
-    This module is the production-facing boundary for the Edge control algorithm.
-    It intentionally excludes plotting, file IO, demos and CLI behavior from the
-    original HydroSim.V47 script.
+    The public DTOs in this file are kept stable for Edge and tests. The actual
+    station allocation path delegates to ``v47_original.HydroSim_V47`` through a
+    thin adapter so V47 unit commitment, min-power and state memory semantics are
+    provided by the original algorithm implementation.
     """
 
-    algorithm_name = "HydroSim.V47-compatible power allocation"
+    algorithm_name = "HydroSim.V47 original imported power allocation"
+
+    def __init__(self) -> None:
+        self._imported_allocator = ImportedV47StationAllocator()
 
     def allocate_station(self, request: StationPowerAllocationInput) -> StationPowerAllocationResult:
-        if not request.turbines:
-            raise ValueError(f"No turbines configured for station={request.station_id}.")
-
-        target_power = max(float(request.target_output_power), 0.0)
-        target_map, allocation_evidence = self._allocate_output_power(request, target_power)
+        imported_result = self._imported_allocator.allocate_station(request)
         allocations = [
             TurbinePowerAllocation(
-                object_id=turbine.object_id,
-                target_output_power=target_map[turbine.object_id],
-                estimated_water_flow=self._estimate_water_flow(
-                    power_mw=target_map[turbine.object_id],
-                    turbine=turbine,
-                    default_efficiency=request.default_efficiency,
-                ),
-                current_output_power=max(float(turbine.current_output_power), 0.0),
+                object_id=item.object_id,
+                target_output_power=item.target_output_power,
+                estimated_water_flow=item.estimated_water_flow,
+                current_output_power=item.current_output_power,
             )
-            for turbine in request.turbines
+            for item in imported_result.turbine_allocations
         ]
-        allocated_power = sum(item.target_output_power for item in allocations)
-        estimated_flow = sum(item.estimated_water_flow for item in allocations)
-        evidence = {
-            "algorithm": self.algorithm_name,
-            "station_id": request.station_id,
-            "target_output_power": target_power,
-            "allocated_output_power": allocated_power,
-            "estimated_turbine_water_flow": estimated_flow,
-            "available_turbine_count": len(request.turbines),
-            "feedback_used": bool(request.stage_hints),
-            "stage_hint_count": len(request.stage_hints),
-            "allocation": allocation_evidence,
-        }
         return StationPowerAllocationResult(
-            station_id=request.station_id,
-            target_output_power=target_power,
-            allocated_output_power=allocated_power,
-            estimated_water_flow=estimated_flow,
+            station_id=imported_result.station_id,
+            target_output_power=imported_result.target_output_power,
+            allocated_output_power=imported_result.allocated_output_power,
+            estimated_water_flow=imported_result.estimated_water_flow,
             turbine_allocations=allocations,
-            evidence=evidence,
+            evidence=imported_result.evidence,
         )
 
     def _allocate_output_power(

@@ -262,6 +262,12 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 )
 
             target_power = max(float(target_signal.value or 0.0), 0.0)
+            default_efficiency = float(
+                input_data.parameters.get(
+                    "default_efficiency",
+                    input_data.parameters.get("efficiency", self._config.default_efficiency),
+                )
+            )
             allocation_result = self._allocator.allocate_station(
                 StationPowerAllocationInput(
                     station_id=int(station_id),
@@ -276,8 +282,11 @@ class PowerStationOutputPowerAllocationAlgorithm:
                             ),
                         )
                     ),
-                    default_efficiency=float(input_data.parameters.get("efficiency", self._config.default_efficiency)),
+                    default_efficiency=default_efficiency,
                     stage_hints=self._stage_hints(input_data),
+                    context_id=input_data.context.context_id,
+                    compute_step=input_data.context.compute_step,
+                    station_name=str(target_signal.attributes.get("object_name") or target_signal.attributes.get("name") or ""),
                 )
             )
             allocation_by_turbine = {
@@ -326,7 +335,10 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 "target_output_power=%.6f, allocated_output_power=%.6f, "
                 "estimated_turbine_water_flow=%.6f, mode=%s, total_current_output_power=%s, "
                 "max_output_power_delta=%s, default_efficiency=%s, feedback_used=%s, "
-                "stage_hint_count=%s, target_exceeds_known_capacity=%s, clipped_count=%s, turbines=%s",
+                "stage_hint_count=%s, allocator_source=%s, core_session_id=%s, "
+                "session_created=%s, state_memory_used=%s, commitment_before=%s, "
+                "commitment_after=%s, hold_remaining=%s, target_exceeds_known_capacity=%s, "
+                "clipped_count=%s, turbines=%s",
                 input_data.context.request_id,
                 station_id,
                 target_power,
@@ -335,9 +347,16 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 allocation_evidence.get("mode"),
                 self._format_optional_float(allocation_evidence.get("total_current_output_power")),
                 self._format_optional_float(allocation_evidence.get("max_output_power_delta")),
-                self._format_optional_float(input_data.parameters.get("efficiency", self._config.default_efficiency)),
+                self._format_optional_float(default_efficiency),
                 evidence["feedback_used"],
                 evidence["stage_hint_count"],
+                allocation_evidence.get("allocator_source"),
+                allocation_evidence.get("core_session_id"),
+                allocation_evidence.get("session_created"),
+                allocation_evidence.get("state_memory_used"),
+                allocation_evidence.get("commitment_signature_before"),
+                allocation_evidence.get("commitment_signature_after"),
+                allocation_evidence.get("hold_remaining"),
                 allocation_evidence.get("target_exceeds_known_capacity"),
                 len(allocation_evidence.get("clipped", []) or []),
                 self._format_turbine_allocation_targets(allocation_evidence),
@@ -352,7 +371,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
             results=results,
             next_state={"stations": station_states},
             evidence={
-                "algorithm": "HydroSim.V47-compatible output power allocation",
+                "algorithm": "HydroSim.V47 original imported output power allocation",
                 "stations": station_evidence,
             },
         )

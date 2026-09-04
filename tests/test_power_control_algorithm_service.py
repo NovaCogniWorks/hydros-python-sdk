@@ -113,6 +113,50 @@ class PowerAllocationModuleTest(unittest.TestCase):
         self.assertIn(0.0, targets.values())
         self.assertEqual([20101], result.evidence["allocation"]["selected_turbine_ids"])
 
+    def test_v47_allocator_uses_imported_original_session_per_task_station(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+        request = allocation.StationPowerAllocationInput(
+            station_id=20100,
+            target_output_power=100.0,
+            context_id="TASK-V47-SESSION",
+            compute_step=1,
+            turbines=[
+                allocation.TurbinePowerInput(
+                    object_id=20101,
+                    current_output_power=0.0,
+                    min_output_power=200.0,
+                    max_output_power=650.0,
+                    state=1,
+                    min_power=200.0,
+                    max_power=650.0,
+                    design_power=600.0,
+                ),
+                allocation.TurbinePowerInput(
+                    object_id=20102,
+                    current_output_power=0.0,
+                    min_output_power=200.0,
+                    max_output_power=650.0,
+                    state=1,
+                    min_power=200.0,
+                    max_power=650.0,
+                    design_power=600.0,
+                ),
+            ],
+        )
+
+        first = allocator.allocate_station(request)
+        second = allocator.allocate_station(request)
+
+        first_allocation = first.evidence["allocation"]
+        second_allocation = second.evidence["allocation"]
+        self.assertEqual("imported_v47_original", first_allocation["allocator_source"])
+        self.assertTrue(first_allocation["session_created"])
+        self.assertFalse(first_allocation["state_memory_used"])
+        self.assertFalse(second_allocation["session_created"])
+        self.assertTrue(second_allocation["state_memory_used"])
+        self.assertEqual(first_allocation["core_session_id"], second_allocation["core_session_id"])
+
     def test_v47_allocator_zero_target_stops_turbines(self):
         allocation = _load_power_allocation_module()
         allocator = allocation.HydroSimV47PowerAllocator()
