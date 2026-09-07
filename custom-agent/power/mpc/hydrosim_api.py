@@ -126,6 +126,8 @@ class HydroSimulationStepRuntime:
     multi_stair: Any
     observed_stage_hints_by_step: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
     observed_stage_hint_sources_by_step: Dict[int, str] = field(default_factory=dict)
+    environment_observations_by_step: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
+    prediction_errors_by_step: Dict[int, Dict[int, float]] = field(default_factory=dict)
 
 
 class HydroSimulationApi:
@@ -402,12 +404,14 @@ class HydroSimulationApi:
         stage_hints: List[Dict[str, Any]],
         *,
         source: str = "observation_adapter",
+        environment_observations: List[Dict[str, Any]] | None = None,
+        prediction_error_by_station: Dict[int, float] | None = None,
     ) -> Dict[str, Any]:
         """Register observed stage hints for the next runtime step.
 
-        This is intentionally a small Phase 12 prerequisite: it lets Power
-        Scheduling correct HydroSim's step runtime with observed station stage
-        at a rolling boundary, while leaving the allocation authority unchanged.
+        Phase 12 stores both the stage_hints consumed by V47 and the evidence
+        used to build them, so rolling planning can distinguish closed-loop
+        observation from internal reservoir fallback.
         """
 
         session = self._require_session()
@@ -426,14 +430,27 @@ class HydroSimulationApi:
             step_runtime.observed_stage_hints_by_step = {}
         if not hasattr(step_runtime, "observed_stage_hint_sources_by_step"):
             step_runtime.observed_stage_hint_sources_by_step = {}
+        if not hasattr(step_runtime, "environment_observations_by_step"):
+            step_runtime.environment_observations_by_step = {}
+        if not hasattr(step_runtime, "prediction_errors_by_step"):
+            step_runtime.prediction_errors_by_step = {}
 
         step_key = int(step_index)
         step_runtime.observed_stage_hints_by_step[step_key] = normalized_hints
         step_runtime.observed_stage_hint_sources_by_step[step_key] = str(source)
+        step_runtime.environment_observations_by_step[step_key] = copy.deepcopy(
+            environment_observations or []
+        )
+        step_runtime.prediction_errors_by_step[step_key] = {
+            int(station_id): float(value)
+            for station_id, value in (prediction_error_by_station or {}).items()
+        }
         return {
             "step_index": step_key,
             "stage_hint_count": len(normalized_hints),
             "source": str(source),
+            "environment_observation_count": len(environment_observations or []),
+            "prediction_error_count": len(prediction_error_by_station or {}),
         }
 
     def preview_step_station_power_allocation(self, step_index: int) -> Dict[str, Any]:
@@ -499,6 +516,8 @@ class HydroSimulationApi:
             "planning_total_power": self._normalize_output_value(sum(planning_values_by_node.values())),
             "stage_hints_source": target_stage_hints_usage.get("source"),
             "stage_hints_usage": stage_hints_usage,
+            "environment_observation_count": target_stage_hints_usage.get("environment_observation_count"),
+            "prediction_error_count": target_stage_hints_usage.get("prediction_error_count"),
             "station_step_outputs": station_step_outputs,
         }
 
@@ -968,19 +987,28 @@ class HydroSimulationApi:
         stage_hints_source: str,
     ) -> None:
         usage_by_step = getattr(step_runtime, "_stage_hint_usage_by_step", {}) or {}
+        environment_observations_by_step = getattr(step_runtime, "environment_observations_by_step", {}) or {}
+        prediction_errors_by_step = getattr(step_runtime, "prediction_errors_by_step", {}) or {}
+        environment_observations = environment_observations_by_step.get(int(step_index), []) or []
+        prediction_errors = prediction_errors_by_step.get(int(step_index), {}) or {}
+        observed_count = sum(
+            1
+            for hint in stage_hints or []
+            if hint.get("stage_hints_source") == "observation_adapter"
+        )
+        fallback_count = sum(
+            1
+            for hint in stage_hints or []
+            if hint.get("stage_hints_source") != "observation_adapter"
+        )
         usage_by_step[int(step_index)] = {
             "source": str(stage_hints_source),
             "hint_count": len(stage_hints or []),
-            "observed_count": sum(
-                1
-                for hint in stage_hints or []
-                if hint.get("stage_hints_source") == "observation_adapter"
-            ),
-            "fallback_count": sum(
-                1
-                for hint in stage_hints or []
-                if hint.get("stage_hints_source") != "observation_adapter"
-            ),
+            "observed_count": observed_count,
+            "fallback_count": fallback_count,
+            "environment_observation_count": len(environment_observations),
+            "prediction_error_count": len(prediction_errors),
+            "closed_loop_ready": observed_count > 0 and fallback_count == 0,
         }
         setattr(step_runtime, "_stage_hint_usage_by_step", usage_by_step)
 

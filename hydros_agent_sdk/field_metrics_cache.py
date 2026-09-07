@@ -26,6 +26,14 @@ ATTRIBUTE_COMPAT_FIELDS = {
     "front_water_level",
     "back_water_level",
 }
+TIMESTAMP_COMPAT_FIELDS = {
+    "source_timestamp_ms",
+    "sourceTimestampMs",
+    "timestamp",
+    "sample_time",
+    "event_time",
+    "time",
+}
 
 
 class FieldMetricsCache:
@@ -66,6 +74,9 @@ class FieldMetricsCache:
             "attributes": attributes,
         }
         for field_name in ATTRIBUTE_COMPAT_FIELDS:
+            if field_name in payload:
+                metrics_data[field_name] = payload.get(field_name)
+        for field_name in TIMESTAMP_COMPAT_FIELDS:
             if field_name in payload:
                 metrics_data[field_name] = payload.get(field_name)
         self.latest_metrics[cache_key] = metrics_data

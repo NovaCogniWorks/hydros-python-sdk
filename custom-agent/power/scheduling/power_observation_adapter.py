@@ -4,6 +4,15 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+SOURCE_TIMESTAMP_FIELDS = (
+    "source_timestamp_ms",
+    "sourceTimestampMs",
+    "timestamp",
+    "sample_time",
+    "event_time",
+    "time",
+)
+
 
 @dataclass
 class PowerObservationResult:
@@ -12,6 +21,11 @@ class PowerObservationResult:
     metrics_count: int
     stage_hints: List[Dict[str, Any]] = field(default_factory=list)
     station_output_power_by_station: Dict[int, float] = field(default_factory=dict)
+    predicted_output_power_by_station: Dict[int, float] = field(default_factory=dict)
+    prediction_error_by_station: Dict[int, float] = field(default_factory=dict)
+    environment_observations: List[Dict[str, Any]] = field(default_factory=list)
+    missing_observed_stage_station_ids: List[int] = field(default_factory=list)
+    missing_critical_fields: List[str] = field(default_factory=list)
     diagnostics: List[str] = field(default_factory=list)
 
     @property
@@ -33,6 +47,14 @@ class PowerObservationResult:
     @property
     def should_apply_to_runtime(self) -> bool:
         return self.observed_stage_count > 0 and bool(self.stage_hints)
+
+    @property
+    def observation_quality(self) -> str:
+        if self.observed_stage_count <= 0:
+            return "internal_reservoir_fallback"
+        if self.fallback_stage_count > 0:
+            return "mixed_observation_internal_fallback"
+        return "closed_loop_observation"
 
 
 class PowerObservationAdapter:
@@ -60,6 +82,14 @@ class PowerObservationAdapter:
         metrics = list(metrics_by_key.values())
         device_station_map = self._build_device_station_map(session)
         station_output_power = self._aggregate_turbine_output_power(metrics, device_station_map)
+        predicted_station_output_power = self._resolve_predicted_station_output_power(
+            session,
+            step_index,
+        )
+        prediction_error = self._build_prediction_error(
+            observed_values=station_output_power,
+            predicted_values=predicted_station_output_power,
+        )
         station_power_outflow = self._aggregate_device_port_flow(
             metrics,
             device_station_map,
@@ -70,9 +100,14 @@ class PowerObservationAdapter:
             device_station_map,
             object_type="Gate",
         )
+        metric_refs_by_station = self._collect_metric_refs_by_station(metrics, device_station_map)
+        step_runtime = getattr(session, "step_runtime", None)
 
         stage_hints: List[Dict[str, Any]] = []
+        environment_observations: List[Dict[str, Any]] = []
         diagnostics: List[str] = []
+        missing_observed_stage_station_ids: List[int] = []
+        missing_critical_fields: List[str] = []
         fallback_hints = list(internal_stage_hints or [])
         previous_total_release: Optional[float] = None
         for station_index, station_id in enumerate(self._station_node_ids):
@@ -92,6 +127,8 @@ class PowerObservationAdapter:
                     power_outflow=station_power_outflow.get(station_id),
                     spill_outflow=station_spill_outflow.get(station_id),
                     output_power=station_output_power.get(station_id),
+                    predicted_output_power=predicted_station_output_power.get(station_id),
+                    prediction_error=prediction_error.get(station_id),
                     upstream_release=previous_total_release,
                     inflow=self._resolve_station_inflow(metrics, station_id, previous_total_release),
                 )
@@ -102,6 +139,8 @@ class PowerObservationAdapter:
                 hint["stage_hints_source"] = "internal_reservoir_fallback"
                 hint["fallback_reason"] = "missing_station_stage_observation"
                 diagnostics.append(f"station:{station_id}:missing_stage_observation")
+                missing_observed_stage_station_ids.append(int(station_id))
+                missing_critical_fields.append(f"{station_id}:stage")
 
             if station_power_outflow.get(station_id) is not None:
                 hint["power_outflow_m3s"] = float(station_power_outflow[station_id])
@@ -109,11 +148,31 @@ class PowerObservationAdapter:
                 hint["spill_outflow_m3s"] = float(station_spill_outflow[station_id])
             if station_output_power.get(station_id) is not None:
                 hint["output_power_mw"] = float(station_output_power[station_id])
+            if predicted_station_output_power.get(station_id) is not None:
+                hint["predicted_output_power_mw"] = float(predicted_station_output_power[station_id])
+            if prediction_error.get(station_id) is not None:
+                hint["prediction_error_mw"] = float(prediction_error[station_id])
             if previous_total_release is not None:
                 hint.setdefault("upstream_release_m3s", float(previous_total_release))
 
             total_release = (station_power_outflow.get(station_id) or 0.0) + (
                 station_spill_outflow.get(station_id) or 0.0
+            )
+            environment_observations.append(
+                self._build_environment_observation(
+                    step_index=step_index,
+                    station_id=station_id,
+                    station_name=str(flow_config.get("Name") or fallback_hint.get("station") or station_id),
+                    hint=hint,
+                    target_stage=self._resolve_target_stage(step_runtime, station_id, step_index),
+                    power_outflow=station_power_outflow.get(station_id),
+                    spill_outflow=station_spill_outflow.get(station_id),
+                    total_release=total_release,
+                    output_power=station_output_power.get(station_id),
+                    predicted_output_power=predicted_station_output_power.get(station_id),
+                    prediction_error=prediction_error.get(station_id),
+                    metric_refs=metric_refs_by_station.get(station_id, []),
+                )
             )
             previous_total_release = total_release
             stage_hints.append(hint)
@@ -124,6 +183,11 @@ class PowerObservationAdapter:
             metrics_count=len(metrics),
             stage_hints=stage_hints,
             station_output_power_by_station=station_output_power,
+            predicted_output_power_by_station=predicted_station_output_power,
+            prediction_error_by_station=prediction_error,
+            environment_observations=environment_observations,
+            missing_observed_stage_station_ids=missing_observed_stage_station_ids,
+            missing_critical_fields=missing_critical_fields,
             diagnostics=diagnostics,
         )
 
@@ -146,6 +210,50 @@ class PowerObservationAdapter:
                 continue
             mapping[int(item["device_id"])] = int(item["node_id"])
         return mapping
+
+    def _resolve_predicted_station_output_power(
+        self,
+        session: Any,
+        step_index: int,
+    ) -> Dict[int, float]:
+        result: Dict[int, float] = {}
+        for station in getattr(session, "latest_station_power_series", []) or []:
+            metrics_code = station.get("metrics_code")
+            if metrics_code is not None and str(metrics_code).lower() != "output_power":
+                continue
+            object_type = station.get("object_type")
+            if object_type is not None and str(object_type).lower() not in {"station", "powerstation"}:
+                continue
+            station_id = self._normalize_int(station.get("node_id", station.get("object_id")))
+            if station_id is None:
+                continue
+            value = self._series_value_for_step(station.get("time_series", []), step_index)
+            if value is not None:
+                result[station_id] = value
+
+        step_runtime = getattr(session, "step_runtime", None)
+        for station_id, series in (getattr(step_runtime, "station_power_plan", {}) or {}).items():
+            normalized_station_id = self._normalize_int(station_id)
+            if normalized_station_id is None or normalized_station_id in result:
+                continue
+            value = self._series_value_for_step(series, step_index)
+            if value is not None:
+                result[normalized_station_id] = value
+        return result
+
+    def _build_prediction_error(
+        self,
+        *,
+        observed_values: Mapping[int, float],
+        predicted_values: Mapping[int, float],
+    ) -> Dict[int, float]:
+        result: Dict[int, float] = {}
+        for station_id, observed_value in observed_values.items():
+            predicted_value = predicted_values.get(station_id)
+            if predicted_value is None:
+                continue
+            result[int(station_id)] = float(observed_value) - float(predicted_value)
+        return result
 
     def _aggregate_turbine_output_power(
         self,
@@ -197,6 +305,26 @@ class PowerObservationAdapter:
             result[station_id] = result.get(station_id, 0.0) + flow
         return result
 
+    def _collect_metric_refs_by_station(
+        self,
+        metrics: List[Dict[str, Any]],
+        device_station_map: Mapping[int, int],
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        result: Dict[int, List[Dict[str, Any]]] = {}
+        station_ids = set(self._station_node_ids)
+        for item in metrics:
+            object_id = self._normalize_int(item.get("object_id"))
+            if object_id is None:
+                continue
+            station_id = object_id if object_id in station_ids else device_station_map.get(object_id)
+            if station_id is None:
+                continue
+            metric_ref = self._metric_ref(item)
+            if metric_ref is None:
+                continue
+            result.setdefault(int(station_id), []).append(metric_ref)
+        return result
+
     def _resolve_station_stage(
         self,
         metrics: List[Dict[str, Any]],
@@ -243,6 +371,81 @@ class PowerObservationAdapter:
                 return value
         return None
 
+    def _resolve_target_stage(
+        self,
+        step_runtime: Any,
+        station_id: int,
+        step_index: int,
+    ) -> Optional[float]:
+        target_stage_by_node = getattr(step_runtime, "target_stage_by_node", {}) or {}
+        series = target_stage_by_node.get(int(station_id))
+        return self._series_value_for_step(series, step_index)
+
+    def _build_environment_observation(
+        self,
+        *,
+        step_index: int,
+        station_id: int,
+        station_name: str,
+        hint: Mapping[str, Any],
+        target_stage: Optional[float],
+        power_outflow: Optional[float],
+        spill_outflow: Optional[float],
+        total_release: Optional[float],
+        output_power: Optional[float],
+        predicted_output_power: Optional[float],
+        prediction_error: Optional[float],
+        metric_refs: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        observation: Dict[str, Any] = {
+            "step_index": int(step_index),
+            "station_id": int(station_id),
+            "station": station_name,
+            "source": str(hint.get("stage_hints_source") or "unknown"),
+            "stage_m": self._normalize_float(hint.get("stage")),
+            "design_stage_m": self._normalize_float(hint.get("design_stage")),
+            "target_stage_m": target_stage,
+            "delta_m": self._normalize_float(hint.get("delta")),
+            "zone": hint.get("zone"),
+            "inflow_m3s": self._normalize_float(hint.get("inflow_m3s")),
+            "power_outflow_m3s": power_outflow,
+            "spill_outflow_m3s": spill_outflow,
+            "total_release_m3s": total_release,
+            "observed_output_power_mw": output_power,
+            "predicted_output_power_mw": predicted_output_power,
+            "prediction_error_mw": prediction_error,
+            "metric_refs": metric_refs,
+            "fallback_reason": hint.get("fallback_reason"),
+        }
+        observation["missing_fields"] = [
+            name
+            for name, value in (
+                ("stage_m", observation.get("stage_m")),
+                ("observed_output_power_mw", output_power),
+            )
+            if value is None
+        ]
+        return observation
+
+    def _metric_ref(self, item: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+        object_id = self._normalize_int(item.get("object_id"))
+        if object_id is None:
+            return None
+        metric_ref: Dict[str, Any] = {
+            "object_id": object_id,
+            "object_type": item.get("object_type"),
+            "object_name": item.get("object_name"),
+            "metrics_code": item.get("metrics_code"),
+            "position_code": item.get("position_code"),
+            "step_index": self._normalize_int(item.get("step_index")),
+            "value": self._normalize_float(item.get("value")),
+        }
+        for field_name in SOURCE_TIMESTAMP_FIELDS:
+            if item.get(field_name) is not None:
+                metric_ref["source_timestamp_ms"] = item.get(field_name)
+                break
+        return metric_ref
+
     def _build_observed_stage_hint(
         self,
         *,
@@ -253,6 +456,8 @@ class PowerObservationAdapter:
         power_outflow: Optional[float],
         spill_outflow: Optional[float],
         output_power: Optional[float],
+        predicted_output_power: Optional[float],
+        prediction_error: Optional[float],
         upstream_release: Optional[float],
         inflow: Optional[float],
     ) -> Dict[str, Any]:
@@ -283,6 +488,10 @@ class PowerObservationAdapter:
             hint["upstream_spill_outflow_m3s"] = float(spill_outflow)
         if output_power is not None:
             hint["output_power_mw"] = float(output_power)
+        if predicted_output_power is not None:
+            hint["predicted_output_power_mw"] = float(predicted_output_power)
+        if prediction_error is not None:
+            hint["prediction_error_mw"] = float(prediction_error)
         if upstream_release is not None:
             hint["upstream_release_m3s"] = float(upstream_release)
         if inflow is not None:
@@ -312,6 +521,23 @@ class PowerObservationAdapter:
     @staticmethod
     def _resolve_float(*values: Any) -> Optional[float]:
         return PowerObservationAdapter._first_numeric(*values)
+
+    @staticmethod
+    def _series_value_for_step(series: Any, step_index: int) -> Optional[float]:
+        if series is None or isinstance(series, (str, bytes, Mapping)):
+            return None
+        target_step = int(step_index)
+        for row in series:
+            if isinstance(row, Mapping):
+                row_step = PowerObservationAdapter._normalize_int(row.get("step"))
+                if row_step == target_step:
+                    return PowerObservationAdapter._normalize_float(row.get("value"))
+        if 0 <= target_step < len(series):
+            row = series[target_step]
+            if isinstance(row, Mapping):
+                return PowerObservationAdapter._normalize_float(row.get("value"))
+            return PowerObservationAdapter._normalize_float(row)
+        return None
 
     @staticmethod
     def _normalize_float(value: Any) -> Optional[float]:

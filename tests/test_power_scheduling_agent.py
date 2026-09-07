@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import yaml
+import pytest
 
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
@@ -434,9 +435,11 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
             "biz_scene_instance_id": context.biz_scene_instance_id,
             "object_id": 20300,
             "object_type": "PowerStation",
+            "object_name": "Station-20300",
             "metrics_code": "water_level",
             "value": 612.25,
             "step_index": 2,
+            "source_timestamp_ms": 1234567890,
         }
     )
     agent._metrics_data_cache.update(
@@ -472,14 +475,77 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
     assert observation.observed_stage_count == 1
     assert observation.fallback_stage_count == 3
     assert observation.station_output_power_by_station == {20300: 155.5}
+    assert observation.predicted_output_power_by_station == {20300: 102.0}
+    assert observation.prediction_error_by_station == {20300: 53.5}
+    assert observation.observation_quality == "mixed_observation_internal_fallback"
     assert observation.stage_hints[1]["station_id"] == 20300
     assert observation.stage_hints[1]["stage"] == 612.25
     assert observation.stage_hints[1]["stage_hints_source"] == "observation_adapter"
     assert observation.stage_hints[1]["output_power_mw"] == 155.5
+    assert observation.stage_hints[1]["predicted_output_power_mw"] == 102.0
+    assert observation.stage_hints[1]["prediction_error_mw"] == 53.5
     assert observation.stage_hints[1]["power_outflow_m3s"] == 42.25
     assert observation.stage_hints[0]["stage_hints_source"] == "internal_reservoir_fallback"
     assert observation.stage_hints[0]["spill_outflow_m3s"] == 12.5
+    assert observation.environment_observations[1]["station_id"] == 20300
+    assert observation.environment_observations[1]["stage_m"] == 612.25
+    assert observation.environment_observations[1]["observed_output_power_mw"] == 155.5
+    assert observation.environment_observations[1]["predicted_output_power_mw"] == 102.0
+    assert observation.environment_observations[1]["prediction_error_mw"] == 53.5
+    assert observation.environment_observations[1]["metric_refs"][0]["source_timestamp_ms"] == 1234567890
+    assert observation.missing_observed_stage_station_ids == [20100, 20500, 20700]
     assert "station:20100:missing_stage_observation" in observation.diagnostics
+
+
+def test_power_observation_adapter_reads_prediction_from_step_runtime_plan():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-observation-runtime-plan")
+    session = _build_session(5)
+    session.latest_station_power_series = []
+    session.step_runtime = SimpleNamespace(
+        station_power_plan={
+            20300: (90.0, 91.0, 92.0, 93.0, 94.0),
+        },
+        control_domains=[
+            {
+                "device_id": 20304,
+                "node_id": 20300,
+            },
+        ],
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "PowerStation",
+            "metrics_code": "water_level",
+            "value": 612.25,
+            "step_index": 3,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20304,
+            "object_type": "Turbine",
+            "metrics_code": "output_power",
+            "value": 101.5,
+            "step_index": 3,
+        }
+    )
+
+    observation = agent._power_observation_adapter.build(
+        step_index=3,
+        session=session,
+        internal_stage_hints=[],
+    )
+
+    assert observation.predicted_output_power_by_station == {20300: 93.0}
+    assert observation.prediction_error_by_station == {20300: 8.5}
+    assert observation.stage_hints[1]["predicted_output_power_mw"] == 93.0
+    assert observation.stage_hints[1]["prediction_error_mw"] == 8.5
+    assert observation.environment_observations[1]["predicted_output_power_mw"] == 93.0
+    assert observation.environment_observations[1]["prediction_error_mw"] == 8.5
 
 
 def test_power_scheduling_tick_applies_observed_stage_hints_at_rolling_boundary():
@@ -541,6 +607,31 @@ def test_power_scheduling_tick_applies_observed_stage_hints_at_rolling_boundary(
     assert agent._hydrosim_api.apply_observed_stage_hints.call_args.kwargs["source"] == (
         "mixed_observation_internal_fallback"
     )
+    assert len(agent._hydrosim_api.apply_observed_stage_hints.call_args.kwargs["environment_observations"]) == 4
+    assert agent._hydrosim_api.apply_observed_stage_hints.call_args.kwargs["prediction_error_by_station"] == {}
+
+
+def test_power_observation_policy_can_require_observed_stage_after_initial():
+    module = _load_power_scheduling_module()
+    agent, _, _ = _build_agent(module, "power-observation-required")
+    session = _build_session(12)
+    session.step_runtime = SimpleNamespace(
+        multi_reservoir=SimpleNamespace(
+            stage_hints=Mock(
+                return_value=[
+                    {"station_id": 20100, "station": "Station-20100", "stage": 841.0, "design_stage": 842.0},
+                    {"station_id": 20300, "station": "Station-20300", "stage": 610.0, "design_stage": 610.0},
+                    {"station_id": 20500, "station": "Station-20500", "stage": 580.0, "design_stage": 580.0},
+                    {"station_id": 20700, "station": "Station-20700", "stage": 552.0, "design_stage": 552.0},
+                ]
+            )
+        )
+    )
+    agent._hydrosim_api._session = session
+    agent.properties["power_observation_policy"] = "require_after_initial"
+
+    with pytest.raises(RuntimeError, match="POWER_OBSERVATION_MISSING"):
+        agent._apply_power_observation_to_runtime(step=3, reason="rolling_boundary")
 
 
 def test_power_scheduling_tick_does_not_publish_internal_prediction_metrics():
@@ -928,7 +1019,12 @@ def test_power_scheduling_init_downloads_hydrosim_inputs_from_config_urls():
         assert os.path.exists(init_kwargs["initial_states_file"])
         assert os.path.exists(init_kwargs["constraints_file"])
         assert os.path.exists(init_kwargs["time_series_file"])
-        assert module.urlopen.call_count >= 3
+        assert module.urlopen.call_count >= 4
+        requested_urls = [
+            call.args[0].full_url
+            for call in module.urlopen.call_args_list
+        ]
+        assert "https://example.test/time_series_power_planning.json" in requested_urls
     finally:
         module.urlopen = original_urlopen
 
@@ -1111,6 +1207,34 @@ def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
     assert detail_counts_per_batch == ([40] * 9) + [24]
     assert details_per_object
     assert all(steps == list(range(96)) for steps in details_per_object.values())
+
+
+def test_power_scheduling_skips_terminal_coordinator_boundary_tick():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-terminal-boundary")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=10,
+        start_step=0,
+        current_step=95,
+        max_steps=96,
+    )
+    _configure_mpc_task_state(agent, roll_steps=10, task_state=task_state)
+    agent._hydrosim_api._session = _build_session(96)
+    agent._hydrosim_api._session.step_runtime = SimpleNamespace(steps=list(range(96)))
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(96))
+    agent._rolling_window_start_step = 90
+    agent._rolling_window_end_step = 95
+    agent._rolling_window_dataset = [Mock()]
+
+    metrics_list = agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-terminal-096", context=context, step=96, broadcast=False)
+    )
+
+    assert metrics_list == []
+    assert enqueued == []
+    agent._hydrosim_api.execute_step.assert_not_called()
+    agent.dispatch_control_commands_and_await_execution.assert_not_called()
 
 
 def test_power_scheduling_total_steps_uses_runtime_axis_instead_of_sampled_output_rows():
@@ -2892,4 +3016,7 @@ def test_hydrosim_execute_step_applies_observed_stage_hint_before_dispatch():
         "hint_count": 4,
         "observed_count": 1,
         "fallback_count": 3,
+        "environment_observation_count": 0,
+        "prediction_error_count": 0,
+        "closed_loop_ready": False,
     }

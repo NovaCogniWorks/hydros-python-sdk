@@ -63,7 +63,7 @@ from power_observation_adapter import PowerObservationAdapter, PowerObservationR
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-03-v47-inter-station-phase-9-6"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-07-phase-12-observation-closed-loop"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -73,6 +73,9 @@ MPC_GATE_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
 STATION_DIVERSION_FLOW_SERIES_KEY = "diversion_flow_time_series"
 RESERVOIR_EVIDENCE_SERIES_KEY = "reservoir_evidence_time_series"
 DEFAULT_POWER_PLAN_PRELOAD_WAIT_SECONDS = 360.0
+POWER_OBSERVATION_POLICY_PROPERTY = "power_observation_policy"
+POWER_OBSERVATION_MIN_OBSERVED_STATION_COUNT_PROPERTY = "power_observation_min_observed_station_count"
+DEFAULT_POWER_OBSERVATION_POLICY = "warn"
 
 
 class HydroSimInputFileResolver:
@@ -317,7 +320,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 logger.info("Refreshing rolling scheduling report at step=%s", request.step)
                 self._refresh_rolling_window_dataset(request.step, task_state)
 
-            step_result = self._hydrosim_api.execute_step(step_index=request.step)
+            step_result = self._execute_hydrosim_step_for_tick(request.step)
+            if step_result is None:
+                return []
             logger.info(
                 "Power internal scheduling runtime advanced at step=%s; "
                 "skip publishing internal prediction outputs as ordinary MqttMetrics: "
@@ -378,6 +383,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             session=session,
             internal_stage_hints=self._resolve_internal_stage_hints(session),
         )
+        observation_source = self._resolve_observation_stage_hints_source(observation)
+        self._enforce_power_observation_policy(
+            observation=observation,
+            step=step,
+            reason=reason,
+            observation_source=observation_source,
+        )
         applied_to_runtime = False
         if observation.should_apply_to_runtime:
             apply_stage_hints = getattr(self._hydrosim_api, "apply_observed_stage_hints", None)
@@ -385,26 +397,45 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 apply_stage_hints(
                     int(step),
                     observation.stage_hints,
-                    source=self._resolve_observation_stage_hints_source(observation),
+                    source=observation_source,
+                    environment_observations=observation.environment_observations,
+                    prediction_error_by_station=observation.prediction_error_by_station,
                 )
                 applied_to_runtime = True
 
+        rhythm_evidence = self._resolve_control_rhythm_evidence(session)
         logger.info(
             "Power observation stage hints prepared: task_id=%s, step=%s, reason=%s, "
             "metrics_scope=%s, metrics_count=%s, stage_hints_source=%s, "
             "observed_stage_count=%s, fallback_stage_count=%s, station_output_power_count=%s, "
-            "applied_to_runtime=%s, diagnostics=%s, stage_hints=%s",
+            "predicted_output_power_count=%s, prediction_error=%s, applied_to_runtime=%s, "
+            "observation_quality=%s, environment_observation_count=%s, "
+            "missing_observed_stage_station_ids=%s, missing_critical_fields=%s, "
+            "rolling_interval_steps=%s, v47_horizon_steps=%s, "
+            "edge_control_interval_seconds=%s, ontology_tick_seconds=%s, "
+            "diagnostics=%s, environment_observations=%s, stage_hints=%s",
             self.context.biz_scene_instance_id,
             step,
             reason,
             observation.metrics_scope,
             observation.metrics_count,
-            self._resolve_observation_stage_hints_source(observation),
+            observation_source,
             observation.observed_stage_count,
             observation.fallback_stage_count,
             len(observation.station_output_power_by_station),
+            len(observation.predicted_output_power_by_station),
+            self._format_station_values(observation.prediction_error_by_station),
             applied_to_runtime,
+            observation.observation_quality,
+            len(observation.environment_observations),
+            ",".join(str(item) for item in observation.missing_observed_stage_station_ids),
+            ",".join(observation.missing_critical_fields),
+            rhythm_evidence.get("rolling_interval_steps"),
+            rhythm_evidence.get("v47_horizon_steps"),
+            rhythm_evidence.get("edge_control_interval_seconds"),
+            rhythm_evidence.get("ontology_tick_seconds"),
             "|".join(observation.diagnostics),
+            self._format_environment_observation_summary(observation.environment_observations),
             self._format_stage_hint_summary(observation.stage_hints),
         )
         return observation
@@ -428,6 +459,65 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return "mixed_observation_internal_fallback"
         return "observation_adapter"
 
+    def _enforce_power_observation_policy(
+        self,
+        *,
+        observation: PowerObservationResult,
+        step: int,
+        reason: str,
+        observation_source: str,
+    ) -> None:
+        policy = str(
+            self.properties.get_property(
+                POWER_OBSERVATION_POLICY_PROPERTY,
+                DEFAULT_POWER_OBSERVATION_POLICY,
+            )
+            or DEFAULT_POWER_OBSERVATION_POLICY
+        ).strip().lower()
+        min_observed_count = self._resolve_optional_property_int(
+            POWER_OBSERVATION_MIN_OBSERVED_STATION_COUNT_PROPERTY
+        )
+        should_fail = False
+        fail_reason = None
+        if policy in {"off", "disabled", "none", "warn"}:
+            should_fail = False
+        elif int(step) <= 0:
+            should_fail = False
+        elif policy == "require_after_initial":
+            should_fail = observation.observed_stage_count <= 0
+            fail_reason = "no_observed_stage_after_initial"
+        elif policy in {"require_all_after_initial", "require_all"}:
+            should_fail = bool(observation.missing_observed_stage_station_ids)
+            fail_reason = "missing_observed_stage_after_initial"
+        else:
+            logger.warning(
+                "Unknown power observation policy; fallback to warn: task_id=%s, step=%s, "
+                "policy=%s, source=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                policy,
+                observation_source,
+            )
+
+        if min_observed_count is not None and int(step) > 0:
+            should_fail = should_fail or observation.observed_stage_count < min_observed_count
+            if observation.observed_stage_count < min_observed_count:
+                fail_reason = "observed_stage_count_below_minimum"
+
+        if not should_fail:
+            return
+        raise RuntimeError(
+            "POWER_OBSERVATION_MISSING: "
+            f"task_id={self.context.biz_scene_instance_id}, "
+            f"step={int(step)}, reason={reason}, policy={policy}, "
+            f"observation_source={observation_source}, "
+            f"observed_stage_count={observation.observed_stage_count}, "
+            f"fallback_stage_count={observation.fallback_stage_count}, "
+            f"missing_observed_stage_station_ids={observation.missing_observed_stage_station_ids}, "
+            f"missing_critical_fields={observation.missing_critical_fields}, "
+            f"fail_reason={fail_reason}, diagnostics={'|'.join(observation.diagnostics)}"
+        )
+
     def _format_stage_hint_summary(self, stage_hints: List[Dict[str, Any]]) -> str:
         parts: List[str] = []
         for hint in stage_hints or []:
@@ -437,6 +527,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             design_stage = hint.get("design_stage")
             source = hint.get("stage_hints_source")
             output_power = hint.get("output_power_mw")
+            predicted_output_power = hint.get("predicted_output_power_mw")
+            prediction_error = hint.get("prediction_error_mw")
             inflow = hint.get("inflow_m3s")
             if stage is None:
                 parts.append(f"{station_id or station_name}:stage=null,source={source}")
@@ -446,7 +538,25 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 f"{station_id or station_name}:stage={float(stage):.6f},"
                 f"design={design_display},source={source},"
                 f"output_power={self._format_optional_float(output_power)},"
+                f"predicted_output_power={self._format_optional_float(predicted_output_power)},"
+                f"prediction_error={self._format_optional_float(prediction_error)},"
                 f"inflow={self._format_optional_float(inflow)}"
+            )
+        return ";".join(parts)
+
+    def _format_environment_observation_summary(self, observations: List[Dict[str, Any]]) -> str:
+        parts: List[str] = []
+        for item in observations or []:
+            station_id = item.get("station_id")
+            parts.append(
+                f"{station_id}:source={item.get('source')},"
+                f"stage={self._format_optional_float(item.get('stage_m'))},"
+                f"target_stage={self._format_optional_float(item.get('target_stage_m'))},"
+                f"observed_power={self._format_optional_float(item.get('observed_output_power_mw'))},"
+                f"predicted_power={self._format_optional_float(item.get('predicted_output_power_mw'))},"
+                f"prediction_error={self._format_optional_float(item.get('prediction_error_mw'))},"
+                f"metrics={len(item.get('metric_refs') or [])},"
+                f"missing={','.join(item.get('missing_fields') or [])}"
             )
         return ";".join(parts)
 
@@ -457,6 +567,32 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return f"{float(value):.6f}"
         except (TypeError, ValueError):
             return "null"
+
+    def _resolve_control_rhythm_evidence(self, session: Any) -> Dict[str, Any]:
+        step_runtime = getattr(session, "step_runtime", None)
+        multi_stair = getattr(step_runtime, "multi_stair", None)
+        return {
+            "rolling_interval_steps": self._resolve_roll_steps(),
+            "v47_horizon_steps": self._normalize_optional_int(
+                getattr(multi_stair, "stage_mpc_horizon_steps", None)
+            ),
+            "edge_control_interval_seconds": self._resolve_optional_property_int(
+                "edge_control_interval_seconds",
+                "control_interval_seconds",
+            ),
+            "ontology_tick_seconds": self._resolve_optional_property_int(
+                "tick_seconds",
+                "output_step_seconds",
+            ),
+        }
+
+    def _resolve_optional_property_int(self, *names: str) -> Optional[int]:
+        for name in names:
+            value = self.properties.get_property(name, None)
+            normalized = self._normalize_optional_int(value)
+            if normalized is not None:
+                return normalized
+        return None
 
     def _build_station_output_power_commands(
         self,
@@ -606,7 +742,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 f"{int(step_key)}:{usage.get('source')},"
                 f"hint_count={usage.get('hint_count')},"
                 f"observed={usage.get('observed_count')},"
-                f"fallback={usage.get('fallback_count')}"
+                f"fallback={usage.get('fallback_count')},"
+                f"env_obs={usage.get('environment_observation_count')},"
+                f"prediction_errors={usage.get('prediction_error_count')},"
+                f"closed_loop_ready={usage.get('closed_loop_ready')}"
             )
         return ";".join(parts)
 
@@ -1230,6 +1369,39 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return len(runtime_steps)
         return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
 
+    def _execute_hydrosim_step_for_tick(self, step: int) -> Optional[Dict[str, Any]]:
+        """Advance the Power runtime for a coordinator tick.
+
+        Java coordinator treats total_steps as an inclusive terminal boundary in
+        the tick loop, while HydroSimulationApi uses zero-based runtime indexes.
+        When both sides agree on a 96-step task, valid runtime indexes are
+        0..95 and coordinator step=96 only means the task has reached the final
+        boundary.
+        """
+
+        total_steps = self._resolve_hydrosim_runtime_step_count()
+        tick_step = int(step)
+        if total_steps > 0 and tick_step == total_steps:
+            logger.info(
+                "Skip Power internal scheduling runtime advance at terminal coordinator boundary: "
+                "coordinatorStep=%s, hydrosimStepCount=%s, validHydroSimStepRange=0-%s",
+                tick_step,
+                total_steps,
+                total_steps - 1,
+            )
+            return None
+        return self._hydrosim_api.execute_step(step_index=tick_step)
+
+    def _resolve_hydrosim_runtime_step_count(self) -> int:
+        session = getattr(self._hydrosim_api, "_session", None)
+        if session is None:
+            return 0
+        step_runtime = getattr(session, "step_runtime", None)
+        runtime_steps = getattr(step_runtime, "steps", None)
+        if runtime_steps is None:
+            return 0
+        return int(len(runtime_steps))
+
     def _resolve_window_range(
         self,
         step: int,
@@ -1723,7 +1895,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _initialize_hydrosim_session(self) -> None:
         init_result = self._hydrosim_api.initialize(
             time_series_file=self._resolve_hydrosim_input_file(
-                url_property_names=["hydrosim_time_series_url"],
+                url_property_names=["objects_time_series_url", "hydrosim_time_series_url"],
                 path_property_names=["hydrosim_time_series_file"],
                 default_path=str(DATA_DIR / "time_series_power_planning.json"),
                 local_filename="time_series_power_planning.json",
