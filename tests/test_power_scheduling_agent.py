@@ -12,12 +12,18 @@ import pytest
 
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     HydroEventCommand,
+    MpcExecutionStatusReport,
     OutflowTimeSeriesDataUpdateRequest,
     SimTaskInitRequest,
     SimTaskTerminateRequest,
     TickCmdRequest,
     TimeSeriesDataUpdateRequest,
+)
+from hydros_agent_sdk.protocol.agent_commands import (
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
 )
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.protocol.events import (
@@ -26,9 +32,11 @@ from hydros_agent_sdk.protocol.events import (
     TimeSeriesDataChangedEvent,
 )
 from hydros_agent_sdk.protocol.models import (
+    AgentDriveMode,
     AgentStatus,
     CommandStatus,
     HydroAgent,
+    HydroAgentInstance,
     ObjectTimeSeries,
     SimulationContext,
     TimeSeriesValue,
@@ -687,7 +695,7 @@ def test_power_scheduling_tick_does_not_publish_internal_prediction_metrics():
     assert turbine_station_detail.object_id == 20300
     assert turbine_station_detail.command_type == MPC_STATION_POWER_COMMAND_TYPE
     assert turbine_station_detail.value == 83.0
-    assert turbine_station_detail.target_value == 83.0
+    assert turbine_station_detail.target_value == 103.0
     agent.dispatch_control_commands_and_await_execution.assert_called_once()
     dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
     assert len(dispatched_commands) == 1
@@ -701,6 +709,84 @@ def test_power_scheduling_tick_does_not_publish_internal_prediction_metrics():
     assert dispatched["group_size"] == 1
     assert dispatched["group_id"].startswith("POWER_STATION_OUTPUT_POWER:power-scene-001:3:TARGET_AGENT_20300:")
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=3)
+
+
+def test_power_scheduling_reports_and_dispatches_same_current_horizon_control_intents():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-canonical-horizon")
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        task_state=SchedulingTaskState(
+            context=context,
+            rolling_interval_steps=1,
+            start_step=2,
+            current_step=2,
+            max_steps=6,
+        ),
+    )
+    agent._hydrosim_api._session = _build_session(6)
+    agent._hydrosim_api._session.latest_station_power_series.append(
+        {
+            "node_id": 20100,
+            "station": "Station-20100",
+            "diversion_flow_time_series": [
+                {"step": step, "value": 30.0 + step}
+                for step in range(6)
+            ],
+        }
+    )
+    agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(2))
+    dispatched_batches = []
+
+    def dispatch_after_report(commands):
+        assert len(enqueued) == 1
+        dispatched_batches.append(commands)
+
+    agent.dispatch_control_commands_and_await_execution = Mock(
+        side_effect=dispatch_after_report
+    )
+
+    agent.on_tick_simulation(
+        TickCmdRequest(
+            command_id="tick-canonical-horizon",
+            context=context,
+            step=2,
+            broadcast=False,
+        )
+    )
+
+    assert len(dispatched_batches) == 1
+    report = enqueued[0]
+    report_targets = {
+        (detail.node_id, detail.command_type): detail.target_value
+        for detail in report.mpc_prediction_results[0].details
+        if detail.horizon_step == 1 and detail.target_value is not None
+    }
+    dispatched_targets = {
+        (command["object_id"], command["target_command_type"]): command["target_value"]
+        for command in dispatched_batches[0]
+    }
+    assert dispatched_targets == {
+        (20300, MPC_STATION_POWER_COMMAND_TYPE): 102.0,
+        (20100, DeviceValueTypeEnum.WATER_FLOW.code): 32.0,
+    }
+    assert report_targets[(20300, MPC_STATION_POWER_COMMAND_TYPE)] == 102.0
+    assert report_targets[(20100, DeviceValueTypeEnum.WATER_FLOW.code)] == 32.0
+
+    canonical_horizon = agent._rolling_window_dataset[0]
+    assert {
+        (control.object_id, control.object_type, target.value_type)
+        for control in canonical_horizon.control_object_list
+        for target in control.target_value_list
+    } == {
+        (20300, "PowerStation", MPC_STATION_POWER_COMMAND_TYPE),
+        (20100, "GateStation", DeviceValueTypeEnum.WATER_FLOW.code),
+    }
+    assert all(
+        control.object_type not in {"Turbine", "Gate"}
+        for control in canonical_horizon.control_object_list
+    )
 
 
 def test_power_scheduling_optimization_builds_station_output_power_command():
@@ -1204,7 +1290,7 @@ def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
             absolute_step = result.step + detail.horizon_step - 1
             details_per_object.setdefault(key, []).append(absolute_step)
 
-    assert detail_counts_per_batch == ([40] * 9) + [24]
+    assert detail_counts_per_batch == ([50] * 9) + [30]
     assert details_per_object
     assert all(steps == list(range(96)) for steps in details_per_object.values())
 
@@ -1639,7 +1725,11 @@ def test_power_scheduling_time_series_update_refreshes_hydrosim_plan_for_optimiz
     agent._hydrosim_api.apply_time_series_event_update.assert_called_once()
     _, kwargs = agent._hydrosim_api.apply_time_series_event_update.call_args
     assert kwargs["current_step"] == 2
-    assert commands == []
+    assert len(commands) == 1
+    assert commands[0]["object_id"] == 20300
+    assert commands[0]["object_type"] == "PowerStation"
+    assert commands[0]["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+    assert commands[0]["target_value"] == 321.0
 
 
 def test_power_scheduling_report_only_contains_control_metrics():
@@ -1728,19 +1818,22 @@ def test_power_scheduling_report_only_contains_control_metrics():
         if detail.object_type in {POWER_STATION_TURBINE, POWER_STATION_GATE} and detail.command_type != MPC_STATION_FLOW_COMMAND_TYPE
     }
     assert control_detail_keys == {
+        (20300, POWER_STATION_TURBINE, "output_power"),
         (20304, POWER_STATION_TURBINE, "output_power"),
         (20101, POWER_STATION_GATE, "gate_opening"),
     }
     turbine_station_detail = next(
         detail
         for detail in report.mpc_prediction_results[0].details
-        if detail.object_type == POWER_STATION_TURBINE and detail.command_type == MPC_STATION_FLOW_COMMAND_TYPE
+        if detail.object_type == POWER_STATION_TURBINE
+        and detail.command_type == MPC_STATION_POWER_COMMAND_TYPE
+        and detail.object_id == 20300
     )
     turbine_attributes = json.loads(turbine_station_detail.attributes)
     assert turbine_station_detail.node_id == 20300
     assert turbine_station_detail.object_id == 20300
-    assert turbine_station_detail.value == 42.0
-    assert turbine_station_detail.target_value == 42.0
+    assert turbine_station_detail.value == 82.0
+    assert turbine_station_detail.target_value == 82.0
     assert turbine_attributes["object_name"] == "Station-20300"
     assert turbine_attributes["front_water_level"] == 658.0
     assert turbine_attributes["back_water_level"] is None
@@ -2039,8 +2132,14 @@ def test_power_scheduling_optimization_uses_turbine_output_power_when_station_se
 
     commands = agent.on_optimization(2)
 
-    assert len(commands) == 1
-    command = commands[0]
+    assert len(commands) == 2
+    command = next(
+        item
+        for item in commands
+        if item["object_id"] == 20300
+        and item["object_type"] == "PowerStation"
+        and item["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+    )
     assert command["target_agent_code"] == "TARGET_AGENT_20300"
     assert command["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
     assert command["target_value"] == 82.0
@@ -2051,6 +2150,15 @@ def test_power_scheduling_optimization_uses_turbine_output_power_when_station_se
     assert command["group_id"].startswith(
         "POWER_STATION_OUTPUT_POWER:power-scene-command-filter-001:2:TARGET_AGENT_20300:"
     )
+    gate_command = next(
+        item
+        for item in commands
+        if item["object_id"] == 20100
+        and item["object_type"] == "GateStation"
+        and item["target_command_type"] == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    assert gate_command["target_value"] == 16.0
+    assert gate_command["group_size"] == 1
 
 
 def test_hydrosim_preview_step_station_power_allocation_does_not_advance_live_session():
@@ -2130,8 +2238,14 @@ def test_power_scheduling_optimization_falls_back_to_turbine_out_flow_when_power
 
     commands = agent.on_optimization(2)
 
-    assert len(commands) == 1
-    command = commands[0]
+    assert len(commands) == 2
+    command = next(
+        item
+        for item in commands
+        if item["object_id"] == 20300
+        and item["object_type"] == "PowerStation"
+        and item["target_command_type"] == MPC_STATION_FLOW_COMMAND_TYPE
+    )
     assert command["target_agent_code"] == "TARGET_AGENT_20300"
     assert command["target_command_type"] == MPC_STATION_FLOW_COMMAND_TYPE
     assert command["target_value"] == 42.0
@@ -2142,6 +2256,15 @@ def test_power_scheduling_optimization_falls_back_to_turbine_out_flow_when_power
     assert command["group_id"].startswith(
         "POWER_STATION_OUT_FLOW:power-scene-flow-fallback-001:2:TARGET_AGENT_20300:"
     )
+    gate_command = next(
+        item
+        for item in commands
+        if item["object_id"] == 20100
+        and item["object_type"] == "GateStation"
+        and item["target_command_type"] == MPC_STATION_FLOW_COMMAND_TYPE
+    )
+    assert gate_command["target_value"] == 16.0
+    assert gate_command["group_size"] == 1
 
 
 def test_power_scheduling_outflow_update_is_ack_only():
@@ -3019,4 +3142,110 @@ def test_hydrosim_execute_step_applies_observed_stage_hint_before_dispatch():
         "environment_observation_count": 0,
         "prediction_error_count": 0,
         "closed_loop_ready": False,
+    }
+
+
+def test_power_dispatch_publishes_mpc_execution_status_lifecycle():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-execution-status")
+    agent.dispatch_control_commands_and_await_execution = (
+        module.PowerCentralSchedulingAgent.dispatch_control_commands_and_await_execution.__get__(
+            agent,
+            module.PowerCentralSchedulingAgent,
+        )
+    )
+    target = HydroAgentInstance(
+        agent_id="station-agent-20300",
+        agent_code="STATION_AGENT",
+        agent_type="STATION_AGENT",
+        agent_name="Station Agent",
+        biz_scene_instance_id=context.biz_scene_instance_id,
+        cluster_id="cluster",
+        node_id="node",
+        context=context,
+        drive_mode=AgentDriveMode.PROACTIVE,
+    )
+    command = HydroStationTargetValueRequest(
+        command_id="AGTCMD_POWER_EXEC_001",
+        context=context,
+        source=agent,
+        target=target,
+        object_id=20300,
+        object_type="PowerStation",
+        target_value=726.0,
+        target_value_type=MPC_STATION_POWER_COMMAND_TYPE,
+        group_id="POWER_STATION_OUTPUT_POWER:power-scene-execution-status:10:EDGE:1",
+        group_size=1,
+        main_step_index=10,
+        need_ack_reply=True,
+    )
+    sent_commands = []
+    command_dispatched = Event()
+    dispatch_completed = Event()
+    failures = []
+
+    def send_command(dispatched_command):
+        sent_commands.append(dispatched_command)
+        command_dispatched.set()
+
+    def run_dispatch():
+        try:
+            agent.dispatch_control_commands_and_await_execution([command])
+        except Exception as error:  # pragma: no cover - asserted below
+            failures.append(error)
+        finally:
+            dispatch_completed.set()
+
+    agent._control_command_dispatcher.send_command = send_command
+    worker = Thread(target=run_dispatch)
+    worker.start()
+    assert command_dispatched.wait(0.2)
+    assert not dispatch_completed.is_set()
+
+    dispatched_command = sent_commands[0]
+    agent._handle_control_command_response(
+        HydroStationTargetValueResponse.from_request(
+            dispatched_command,
+            command_status=CommandStatus.SUCCEED,
+            success=True,
+            object_id=dispatched_command.object_id,
+            target_value_type=dispatched_command.target_value_type,
+            target_value=dispatched_command.target_value,
+        )
+    )
+    assert not dispatch_completed.is_set()
+    agent.on_station_control_execution(
+        EdgeControlExecutionReport(
+            command_id="SIMCMD_EDGE_POWER_EXEC_001",
+            context=context,
+            broadcast=True,
+            source_agent_instance=target,
+            target_agent_instance=agent,
+            exec_command_id=dispatched_command.command_id,
+            object_type=dispatched_command.object_type,
+            object_id=dispatched_command.object_id,
+            target_value_type=dispatched_command.target_value_type,
+            target_value=dispatched_command.target_value,
+            exec_status="COMPLETED",
+        )
+    )
+
+    worker.join(timeout=0.2)
+    assert not worker.is_alive()
+    assert not failures
+    assert dispatch_completed.is_set()
+
+    status_reports = [
+        item for item in enqueued if isinstance(item, MpcExecutionStatusReport)
+    ]
+    assert [item.execution_status.value for item in status_reports] == [
+        "DISPATCHED",
+        "STARTED",
+        "COMPLETED",
+    ]
+    assert {
+        item.biz_idem_key for item in status_reports
+    } == {"MPC_DETAIL:10:1:20300:20300:output_power"}
+    assert {item.execution_command_id for item in status_reports} == {
+        "AGTCMD_POWER_EXEC_001"
     }

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,16 +29,34 @@ from hydros_agent_sdk import (
     ErrorCodes,
     handle_agent_errors,
 )
-from hydros_agent_sdk.utils import HydroObjectType
+from hydros_agent_sdk.utils import HydroObjectType, generate_coordination_command_id
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
-from hydros_agent_sdk.mpc.models import DeviceResult, HorizonStep, PredictedResult, ValueItem
+from hydros_agent_sdk.mpc.control_execution_plan import MpcControlExecutionPlan
+from hydros_agent_sdk.mpc.models import (
+    DeviceResult,
+    HorizonStep,
+    MpcOptimizeResponse,
+    PredictedResult,
+    ValueItem,
+)
+from hydros_agent_sdk.mpc.control_dispatch_tracker import (
+    MpcControlDispatchRecord,
+    MpcControlDispatchTracker,
+    MpcControlExecutionError,
+)
 from hydros_agent_sdk.mpc.mpc_prediction_result_reporter import MpcPredictionResultReporter
 from hydros_agent_sdk.mpc.mpc_result_factory import MpcResultFactory
 from hydros_agent_sdk.mpc.task_state import MpcTaskState
 from hydros_agent_sdk.mpc.task_state_lifecycle import MpcTaskStateLifecycle
+from hydros_agent_sdk.protocol.agent_commands import (
+    HydroStationTargetValueRequest,
+    HydroStationTargetValueResponse,
+)
 from hydros_agent_sdk.protocol.commands import (
+    EdgeControlExecutionReport,
     HydroEventCommand,
+    MpcExecutionStatusReport,
     OutflowTimeSeriesDataUpdateRequest,
     OutflowTimeSeriesDataUpdateResponse,
     OutflowTimeSeriesResponse,
@@ -192,6 +211,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             mpc_prediction_result_reporter
             or MpcPredictionResultReporter(sim_coordination_client=sim_coordination_client)
         )
+        self._mpc_dispatch_tracker = MpcControlDispatchTracker()
         self._hydrosim_api = HydroSimulationApi()
         self._power_observation_adapter = PowerObservationAdapter(
             metrics_data_cache=self._metrics_data_cache,
@@ -311,11 +331,24 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     step=request.step,
                     reason="rolling_boundary",
                 )
-                commands = self.on_optimization(control_target_step)
+                preview_commands = self.on_optimization(control_target_step)
+                horizon_steps = self._refresh_rolling_window_dataset(
+                    control_target_step,
+                    task_state,
+                    window_start_override=control_target_step,
+                    current_control_commands=preview_commands,
+                )
+                commands = self._build_current_horizon_control_commands(
+                    horizon_steps=horizon_steps,
+                    current_step=control_target_step,
+                )
                 if commands and not self._has_dispatched_control_target_step(control_target_step):
+                    # The prediction report has already entered the same FIFO outbox.
+                    # Do not defer lifecycle reports: Edge callbacks may arrive on a
+                    # different thread and would otherwise reorder DISPATCHED/STARTED/
+                    # COMPLETED for the same business idempotency key.
                     self.dispatch_control_commands_and_await_execution(commands)
                     self._mark_control_target_step_dispatched(control_target_step)
-                self._refresh_rolling_window_dataset(control_target_step, task_state)
             elif self._should_refresh_rolling_window_report(request.step, task_state):
                 logger.info("Refreshing rolling scheduling report at step=%s", request.step)
                 self._refresh_rolling_window_dataset(request.step, task_state)
@@ -366,6 +399,161 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             step=step,
             base_commands=flow_commands,
             group_prefix="POWER_STATION_OUT_FLOW",
+        )
+
+    def dispatch_control_commands_and_await_execution(
+        self,
+        control_commands: List[Any],
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> None:
+        """Dispatch Power control intents and report MPC detail execution status."""
+        prepared_commands = self._control_command_dispatcher.prepare(control_commands)
+        records: List[MpcControlDispatchRecord] = []
+        dispatch_failures = 0
+        first_dispatch_error: Optional[Exception] = None
+
+        for command in prepared_commands:
+            if not isinstance(command, HydroStationTargetValueRequest):
+                self._control_command_dispatcher.dispatch([command])
+                continue
+
+            optimize_step, horizon_step = self._resolve_power_mpc_execution_steps(command)
+            record = self._mpc_dispatch_tracker.register(
+                command=command,
+                biz_scene_instance_id=self.context.biz_scene_instance_id,
+                optimize_step=optimize_step,
+                horizon_step=horizon_step,
+            )
+            # Queue DISPATCHED before command transport so an immediate edge ACK
+            # cannot overtake it with STARTED in the coordinator outbox. If the
+            # transport fails, FAILED is appended immediately afterwards.
+            self._publish_mpc_execution_status(
+                record,
+                execution_status="DISPATCHED",
+            )
+            try:
+                self._control_command_dispatcher.dispatch([command])
+            except Exception as error:
+                dispatch_failures += 1
+                first_dispatch_error = first_dispatch_error or error
+                failed_records = self._mpc_dispatch_tracker.mark_dispatch_failed(
+                    [record],
+                    error,
+                )
+                for failed_record in failed_records:
+                    self._publish_mpc_execution_status(
+                        failed_record,
+                        execution_status="FAILED",
+                        executed_at=datetime.now().isoformat(),
+                        error_code=failed_record.error_code,
+                        error_message=failed_record.error_message,
+                    )
+                self._mpc_dispatch_tracker.discard(command.command_id)
+                continue
+
+            records.append(record)
+
+        effective_timeout_seconds = (
+            self._control_execution_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        if effective_timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if records:
+            self._mpc_dispatch_tracker.await_all(records, effective_timeout_seconds)
+
+        if dispatch_failures:
+            raise MpcControlExecutionError(
+                "Power control dispatch failed after dispatched controls reached "
+                "terminal state: "
+                f"failure_count={dispatch_failures}, "
+                f"first_error={first_dispatch_error}"
+            )
+
+    def _resolve_power_mpc_execution_steps(
+        self,
+        command: HydroStationTargetValueRequest,
+    ) -> Tuple[int, int]:
+        optimize_step = (
+            command.main_step_index
+            if command.main_step_index is not None
+            else self._current_step
+        )
+        return int(optimize_step), 1
+
+    def _handle_control_command_response(self, response: Any) -> None:
+        if not isinstance(response, HydroStationTargetValueResponse):
+            return
+        transition = self._mpc_dispatch_tracker.handle_response(response)
+        if transition is None:
+            return
+        record, execution_status = transition
+        self._publish_mpc_execution_status(
+            record,
+            execution_status=execution_status,
+            error_code=response.error_code,
+            error_message=response.error_message,
+            executed_at=datetime.now().isoformat(),
+        )
+
+    def on_station_control_execution(self, report: EdgeControlExecutionReport) -> None:
+        transition = self._mpc_dispatch_tracker.handle_execution_report(report)
+        if transition is None:
+            return
+        record, execution_status = transition
+        self._publish_mpc_execution_status(
+            record,
+            execution_status=execution_status,
+            error_code=report.error_code,
+            error_message=report.error_message,
+            executed_at=report.finished_time or datetime.now().isoformat(),
+        )
+
+    def _publish_mpc_execution_status(
+        self,
+        dispatch: MpcControlDispatchRecord,
+        execution_status: str,
+        dispatched_at: Optional[str] = None,
+        executed_at: Optional[str] = None,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        enqueue = getattr(self.sim_coordination_client, "enqueue", None)
+        if not callable(enqueue):
+            logger.warning(
+                "Skip Power MPC execution status report because coordination outbox is unavailable: command=%s",
+                dispatch.command.command_id,
+            )
+            return
+        report = MpcExecutionStatusReport(
+            command_id=generate_coordination_command_id(),
+            context=self.context,
+            broadcast=True,
+            source_agent_instance=self,
+            optimize_step=dispatch.optimize_step,
+            horizon_step=dispatch.horizon_step,
+            biz_idem_key=dispatch.biz_idem_key,
+            node_id=dispatch.node_id,
+            object_id=dispatch.command.object_id,
+            object_type=dispatch.command.object_type,
+            target_value_type=dispatch.command.target_value_type,
+            target_value=dispatch.command.target_value,
+            execution_command_id=dispatch.command.command_id,
+            dispatch_key=dispatch.dispatch_key,
+            execution_status=execution_status,
+            dispatched_at=dispatched_at or dispatch.dispatched_at,
+            executed_at=executed_at,
+            execution_error_code=error_code,
+            execution_error_message=error_message,
+        )
+        enqueue(report)
+
+    def discard_control_execution_waiters(self) -> None:
+        super().discard_control_execution_waiters()
+        self._mpc_dispatch_tracker.discard_by_biz_scene_instance_id(
+            self.context.biz_scene_instance_id
         )
 
     def _apply_power_observation_to_runtime(
@@ -1369,6 +1557,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return len(runtime_steps)
         return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
 
+    def _resolve_total_steps(self) -> int:
+        return self._resolve_max_steps()
+
     def _execute_hydrosim_step_for_tick(self, step: int) -> Optional[Dict[str, Any]]:
         """Advance the Power runtime for a coordinator tick.
 
@@ -1426,6 +1617,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _should_refresh_rolling_window(self, step: int, task_state: MpcTaskState) -> bool:
         if not self._rolling_window_dataset:
             return True
+        if self._rolling_window_start_step is not None and int(step) < int(self._rolling_window_start_step):
+            return False
         return (
             task_state.should_start_new_rolling(step)
             and self._rolling_window_start_step != step
@@ -1471,13 +1664,18 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         step: int,
         task_state: MpcTaskState,
         window_start_override: Optional[int] = None,
-    ) -> None:
+        current_control_commands: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[HorizonStep]:
         window_start, window_end = self._resolve_window_range(
             step,
             task_state,
             window_start_override=window_start_override,
         )
-        horizon_steps = self._build_window_horizon_steps(window_start, window_end)
+        horizon_steps = self._build_window_horizon_steps(
+            window_start,
+            window_end,
+            current_control_commands=current_control_commands,
+        )
         if not horizon_steps:
             logger.warning(
                 "Skip empty MPC rolling report: triggerStep=%s, window=%s-%s, maxSteps=%s",
@@ -1489,7 +1687,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._rolling_window_start_step = window_start
         self._rolling_window_end_step = window_end
         self._rolling_window_dataset = horizon_steps
-        self._publish_rolling_window_report(step, task_state, horizon_steps)
+        original_current_step = task_state.current_step
+        task_state.current_step = window_start
+        try:
+            self._publish_rolling_window_report(step, task_state, horizon_steps)
+        finally:
+            task_state.current_step = original_current_step
+        return horizon_steps
 
     def _publish_rolling_window_report(
         self,
@@ -1507,40 +1711,41 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             plan_type="optimal",
         )
 
-    def _build_window_horizon_steps(self, window_start: int, window_end: int) -> List[HorizonStep]:
+    def _build_window_horizon_steps(
+        self,
+        window_start: int,
+        window_end: int,
+        *,
+        current_control_commands: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[HorizonStep]:
         session = getattr(self._hydrosim_api, "_session", None)
         if session is None:
             return []
 
         device_series = getattr(session, "latest_device_output_series", []) or []
         station_series = getattr(session, "latest_station_power_series", []) or []
+        current_control_object_list = self._build_control_object_list_from_commands(
+            current_control_commands or [],
+            station_series=station_series,
+        )
+        current_target_overrides = self._build_station_control_target_overrides(
+            current_control_object_list,
+        )
         horizon_steps: List[HorizonStep] = []
         for relative_step, absolute_step in enumerate(range(window_start, window_end + 1), start=1):
-            control_object_list = []
-            for device in device_series:
-                if not self._is_reportable_window_control_metric(device):
-                    continue
-                device_row = self._get_series_row_for_step(device.get("time_series", []), absolute_step)
-                if device_row is None:
-                    continue
-                control_object_list.append(
-                    MpcResultFactory.build_control_object_result(
-                        object_id=int(device["object_id"]),
-                        object_name=device.get("object_name"),
-                        object_type=self._resolve_window_report_object_type(str(device["object_type"])),
-                        target_value_list=[
-                            ValueItem(
-                                value_type=str(device["metrics_code"]),
-                                value=float(device_row["value"]),
-                            )
-                        ],
-                    )
-                )
+            # Only station-level values are executable MPC control intents. Device
+            # predictions remain in predicted_result_list and never become commands.
+            control_object_list = (
+                current_control_object_list if absolute_step == window_start else []
+            )
 
             predicted_result_list = self._build_station_predicted_results(
                 device_series=device_series,
                 station_series=station_series,
                 step=absolute_step,
+                control_target_overrides=(
+                    current_target_overrides if absolute_step == window_start else None
+                ),
             )
 
             if not control_object_list and not predicted_result_list:
@@ -1554,11 +1759,159 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             )
         return horizon_steps
 
+    def _build_control_object_list_from_commands(
+        self,
+        commands: List[Dict[str, Any]],
+        *,
+        station_series: List[Dict[str, Any]],
+    ) -> List[Any]:
+        station_names = {
+            int(station["node_id"]): str(
+                station.get("station")
+                or station.get("object_name")
+                or f"Station-{station['node_id']}"
+            )
+            for station in station_series
+            if station.get("node_id") is not None
+        }
+        control_objects = []
+        for command in commands:
+            object_id = self._normalize_optional_int(command.get("object_id"))
+            object_type = command.get("object_type")
+            target_value_type = command.get("target_command_type")
+            target_value = command.get("target_value")
+            if (
+                object_id is None
+                or object_type not in {
+                    HydroObjectType.POWER_STATION.value,
+                    HydroObjectType.GATE_STATION.value,
+                }
+                or not target_value_type
+                or target_value is None
+            ):
+                continue
+            try:
+                numeric_target = float(target_value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skip non-numeric Power control intent while building canonical horizon: "
+                    "objectId=%s, objectType=%s, targetValueType=%s, targetValue=%s",
+                    object_id,
+                    object_type,
+                    target_value_type,
+                    target_value,
+                )
+                continue
+            control_objects.append(
+                MpcResultFactory.build_control_object_result(
+                    object_id=object_id,
+                    object_name=station_names.get(object_id, f"Station-{object_id}"),
+                    object_type=str(object_type),
+                    target_value_list=[
+                        ValueItem(
+                            value_type=str(target_value_type),
+                            value=numeric_target,
+                        )
+                    ],
+                )
+            )
+        return control_objects
+
+    @staticmethod
+    def _build_station_control_target_overrides(
+        control_objects: List[Any],
+    ) -> Dict[Tuple[str, int, str], float]:
+        overrides: Dict[Tuple[str, int, str], float] = {}
+        for control_object in control_objects:
+            if control_object.object_id is None:
+                continue
+            for target_value in control_object.target_value_list or []:
+                numeric_value = target_value.numeric_value()
+                if numeric_value is None or not target_value.value_type:
+                    continue
+                overrides[
+                    (
+                        str(control_object.object_type),
+                        int(control_object.object_id),
+                        str(target_value.value_type),
+                    )
+                ] = float(numeric_value)
+        return overrides
+
+    def _build_current_horizon_control_commands(
+        self,
+        *,
+        horizon_steps: List[HorizonStep],
+        current_step: int,
+    ) -> List[Dict[str, Any]]:
+        if not horizon_steps:
+            logger.warning(
+                "Skip Power control dispatch because canonical MPC horizon is empty: step=%s",
+                current_step,
+            )
+            return []
+
+        execution_plan = MpcControlExecutionPlan.from_responses(
+            optimize_step=current_step,
+            responses=[
+                MpcOptimizeResponse(
+                    plan_type="optimal",
+                    horizon_controls=horizon_steps,
+                )
+            ],
+        )
+        commands: List[Dict[str, Any]] = []
+        for control_target in execution_plan.get_control_targets(horizon_step=1):
+            target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
+                object_id=control_target.object_id,
+                device_type=control_target.object_type,
+            )
+            if target_agent is None:
+                logger.warning(
+                    "Skip canonical Power control intent because target agent is unavailable: "
+                    "stationId=%s, objectType=%s, targetValueType=%s, step=%s",
+                    control_target.object_id,
+                    control_target.object_type,
+                    control_target.target_value_type,
+                    current_step,
+                )
+                continue
+            commands.append(
+                {
+                    "target_agent_code": target_agent.agent_code,
+                    "target_command_type": control_target.target_value_type,
+                    "target_value": control_target.target_value,
+                    "object_id": control_target.object_id,
+                    "object_type": control_target.object_type,
+                    "main_step_index": current_step,
+                    "algo_required_inputs": control_target.algo_required_inputs,
+                    "_control_group_key": self._resolve_control_group_key(target_agent),
+                }
+            )
+
+        if not commands:
+            return []
+        group_prefix = (
+            "POWER_STATION_OUTPUT_POWER"
+            if any(
+                command["object_type"] == HydroObjectType.POWER_STATION.value
+                and command["target_command_type"] == MPC_STATION_POWER_COMMAND_TYPE
+                for command in commands
+            )
+            else "POWER_STATION_OUT_FLOW"
+        )
+        return self._assign_control_groups(
+            commands,
+            step=current_step,
+            group_prefix=group_prefix,
+        )
+
     def _build_station_predicted_results(
         self,
         device_series: List[Dict[str, Any]],
         station_series: List[Dict[str, Any]],
         step: int,
+        control_target_overrides: Optional[Dict[Tuple[str, int, str], float]] = None,
     ) -> List[PredictedResult]:
         station_ids: List[int] = []
         station_names: Dict[int, str] = {}
@@ -1646,7 +1999,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 device_series, station_id, step, HydroObjectType.GATE.value
             )
             if station_out_flow is not None or station_output_power is not None or turbine_device_results:
-                target_value = self._value_item(MPC_STATION_POWER_COMMAND_TYPE, station_output_power)
+                power_target = (control_target_overrides or {}).get(
+                    (
+                        HydroObjectType.POWER_STATION.value,
+                        station_id,
+                        MPC_STATION_POWER_COMMAND_TYPE,
+                    ),
+                    station_output_power,
+                )
+                target_value = self._value_item(MPC_STATION_POWER_COMMAND_TYPE, power_target)
                 if target_value is None:
                     target_value = self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_out_flow)
                 predicted_results.append(
@@ -1668,12 +2029,20 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 )
 
             if station_diversion_flow is not None or gate_device_results:
+                diversion_target = (control_target_overrides or {}).get(
+                    (
+                        HydroObjectType.GATE_STATION.value,
+                        station_id,
+                        MPC_GATE_STATION_FLOW_COMMAND_TYPE,
+                    ),
+                    station_diversion_flow,
+                )
                 predicted_results.append(
                     MpcResultFactory.build_predicted_result(
                         object_id=station_id,
                         object_type=POWER_STATION_GATE,
                         object_name=station_name,
-                        target_value=self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, station_diversion_flow),
+                        target_value=self._value_item(MPC_STATION_FLOW_COMMAND_TYPE, diversion_target),
                         predicted_value_list=self._build_station_prediction_values(
                             front_water_level=front_water_level,
                             final_target_water_level=final_target_water_level,
@@ -2286,15 +2655,20 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         task_state: MpcTaskState,
     ) -> None:
         effective_control_step = self._resolve_effective_control_step(current_step)
-        commands = self.on_optimization(effective_control_step)
-        self._pending_boundary_control_commands = list(commands or [])
-        self._pending_boundary_control_target_step = (
-            int(effective_control_step) if self._pending_boundary_control_commands else None
-        )
-        self._refresh_rolling_window_dataset(
+        preview_commands = self.on_optimization(effective_control_step)
+        horizon_steps = self._refresh_rolling_window_dataset(
             effective_control_step,
             task_state,
             window_start_override=effective_control_step,
+            current_control_commands=preview_commands,
+        )
+        commands = self._build_current_horizon_control_commands(
+            horizon_steps=horizon_steps,
+            current_step=effective_control_step,
+        )
+        self._pending_boundary_control_commands = list(commands or [])
+        self._pending_boundary_control_target_step = (
+            int(effective_control_step) if self._pending_boundary_control_commands else None
         )
 
     def _resolve_effective_control_step(self, current_step: int) -> int:
