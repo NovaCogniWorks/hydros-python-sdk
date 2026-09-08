@@ -83,7 +83,7 @@ from power_observation_adapter import PowerObservationAdapter, PowerObservationR
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-07-phase-12-observation-closed-loop"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-roll-step-one-continuity"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -321,7 +321,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                         len(self._pending_boundary_control_commands),
                     )
 
-            control_target_step = self._resolve_next_control_target_step(request.step, task_state)
+            control_target_step = self._resolve_control_target_step(request.step, task_state)
             if control_target_step is not None:
                 logger.info(
                     "Refreshing rolling scheduling window at step=%s for controlTargetStep=%s",
@@ -1631,11 +1631,30 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _should_refresh_rolling_window_report(self, step: int, task_state: MpcTaskState) -> bool:
         return self._should_refresh_rolling_window(step, task_state)
 
-    def _resolve_next_control_target_step(self, step: int, task_state: MpcTaskState) -> Optional[int]:
+    def _resolve_control_target_step(self, step: int, task_state: MpcTaskState) -> Optional[int]:
         if not self._rolling_window_dataset:
             return int(step)
+
+        # With a one-step rolling interval every tick is already a control
+        # boundary. Prefer the current boundary, as Pump scheduling does, so
+        # the initial step-1 bootstrap cannot leave step 2 undispatched.
+        if int(task_state.rolling_interval_steps) == 1:
+            current_step = int(step)
+            if (
+                self._is_control_target_step(current_step, task_state)
+                and not self._has_dispatched_control_target_step(current_step)
+            ):
+                return current_step
+            return None
+
+        # Wider windows retain Power's existing one-tick look-ahead: prepare
+        # the next boundary before it becomes current, without replaying a
+        # boundary after recovery.
         target_step = int(step) + 1
-        if self._is_control_target_step(target_step, task_state):
+        if (
+            self._is_control_target_step(target_step, task_state)
+            and not self._has_dispatched_control_target_step(target_step)
+        ):
             return target_step
         return None
 

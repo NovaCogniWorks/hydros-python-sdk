@@ -1288,6 +1288,78 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert dispatched_commands[0]["main_step_index"] == 11
 
 
+def test_power_scheduling_roll_step_one_dispatches_every_control_step_without_gap():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-roll-step-one")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=1,
+        start_step=1,
+        current_step=1,
+        max_steps=6,
+    )
+    _configure_mpc_task_state(agent, roll_steps=1, task_state=task_state)
+    agent._hydrosim_api._session = _build_session(6)
+    agent._hydrosim_api.execute_step = Mock(
+        side_effect=lambda step_index: _build_step_result(step_index)
+    )
+
+    for step in (1, 2, 3):
+        agent.on_tick_simulation(
+            TickCmdRequest(
+                command_id=f"tick-roll-one-{step}",
+                context=context,
+                step=step,
+                broadcast=False,
+            )
+        )
+
+    assert [
+        report.mpc_prediction_results[0].step for report in enqueued
+    ] == [1, 2, 3]
+    dispatched_steps = [
+        call.args[0][0]["main_step_index"]
+        for call in agent.dispatch_control_commands_and_await_execution.call_args_list
+    ]
+    assert dispatched_steps == [1, 2, 3]
+
+
+def test_power_scheduling_roll_step_one_does_not_advance_on_repeated_tick():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-roll-step-one-retry")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=1,
+        start_step=1,
+        current_step=1,
+        max_steps=6,
+    )
+    _configure_mpc_task_state(agent, roll_steps=1, task_state=task_state)
+    agent._hydrosim_api._session = _build_session(6)
+    agent._hydrosim_api.execute_step = Mock(
+        side_effect=lambda step_index: _build_step_result(step_index)
+    )
+
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-roll-one-1", context=context, step=1)
+    )
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-roll-one-2", context=context, step=2)
+    )
+    agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-roll-one-2-retry", context=context, step=2)
+    )
+
+    assert [
+        report.mpc_prediction_results[0].step for report in enqueued
+    ] == [1, 2]
+    dispatched_steps = [
+        call.args[0][0]["main_step_index"]
+        for call in agent.dispatch_control_commands_and_await_execution.call_args_list
+    ]
+    assert dispatched_steps == [1, 2]
+
+
 def test_power_scheduling_reports_all_96_steps_in_10_rolling_batches():
     module = _load_power_scheduling_module()
     agent, context, enqueued = _build_agent(module, "power-scene-96-steps")
