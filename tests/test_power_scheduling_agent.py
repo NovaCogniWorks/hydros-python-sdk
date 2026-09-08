@@ -11,6 +11,7 @@ import yaml
 import pytest
 
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
+from hydros_agent_sdk.context_manager import ContextManager
 from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
     HydroEventCommand,
@@ -42,6 +43,10 @@ from hydros_agent_sdk.protocol.models import (
     TimeSeriesValue,
 )
 from hydros_agent_sdk.mpc.task_state import MpcTaskState as SchedulingTaskState
+from hydros_agent_sdk.scenario_config import (
+    BizScenarioConfiguration,
+    SimulationRuntimeOptions,
+)
 
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
@@ -121,6 +126,32 @@ def test_power_scheduling_agent_uses_generic_central_base():
     agent, _, _ = _build_agent(module, "power-generic-central-base")
     assert not hasattr(agent, "_mpc_rolling_runtime")
     assert not hasattr(agent, "_mpc_optimization_service")
+
+
+def test_power_roll_steps_prefers_task_runtime_options_over_agent_properties():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-roll-steps-runtime-authority")
+    agent.properties["roll_steps"] = 10
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(roll_steps=1)
+        ),
+    )
+
+    try:
+        assert agent._resolve_roll_steps() == 1
+    finally:
+        ContextManager.remove(context)
+
+
+def test_power_roll_steps_falls_back_to_legacy_agent_property():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-roll-steps-legacy-fallback")
+    agent.properties["roll_steps"] = 10
+    ContextManager.remove(context)
+
+    assert agent._resolve_roll_steps() == 10
 
 
 def test_power_outflow_planning_uses_embedded_power_series_and_returns_station_output():

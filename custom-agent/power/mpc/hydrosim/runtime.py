@@ -2657,10 +2657,22 @@ class HydroResStairs:
             "delta": delta,
             "zone": zone,
             "direction": direction,
+            "inflow_m3s": float(res.current_inflow),
+            "power_outflow_m3s": float(res.current_outflow_power),
         }
 
     def stage_hints(self) -> List[Dict]:
-        return [self.stage_state(i) for i in range(len(self.Capacity_Stairs))]
+        hints = [self.stage_state(i) for i in range(len(self.Capacity_Stairs))]
+        for i, hint in enumerate(hints):
+            if i > 0:
+                hint["upstream_release_m3s"] = float(self.Capacity_Stairs[i - 1].current_outflow)
+                hint["upstream_power_outflow_m3s"] = float(self.Capacity_Stairs[i - 1].current_outflow_power)
+                hint["upstream_spill_outflow_m3s"] = float(self.Capacity_Stairs[i - 1].current_outflow_discharge)
+            else:
+                hint["upstream_release_m3s"] = math.inf
+                hint["upstream_power_outflow_m3s"] = math.inf
+                hint["upstream_spill_outflow_m3s"] = 0.0
+        return hints
 
     def step(self, river: "RiverArray", power: HydroStair, record: bool = True) -> None:
         for i in range(len(self.configs)):

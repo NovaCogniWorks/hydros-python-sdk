@@ -76,6 +76,7 @@ from hydros_agent_sdk.protocol.models import (
     SimulationContext,
     TimeSeriesValue,
 )
+from hydros_agent_sdk.runtime.agent_context import resolve_simulation_runtime_options
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from power_observation_adapter import PowerObservationAdapter, PowerObservationResult
@@ -1542,7 +1543,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         return self._mpc_task_state_lifecycle.task_state
 
     def _resolve_roll_steps(self) -> int:
-        value = self.properties.get_property("roll_steps", None)
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        value = getattr(runtime_options, "roll_steps", None)
+        if value is None:
+            value = self.properties.get_property("roll_steps", None)
         if value is None:
             return 1
         return max(int(value), 1)
