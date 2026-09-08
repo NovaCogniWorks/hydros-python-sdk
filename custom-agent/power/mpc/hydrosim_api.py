@@ -1057,22 +1057,85 @@ class HydroSimulationApi:
         target_step: int,
     ) -> List[Dict[str, Any]]:
         outputs: List[Dict[str, Any]] = []
+        stage_hints_usage = (
+            getattr(step_runtime, "_stage_hint_usage_by_step", {}) or {}
+        ).get(int(target_step), {})
         for node_id in hydrosim_config.STATION_NODE_IDS:
             station_idx = hydrosim_config.NODE_TO_INDEX[node_id]
             station = step_runtime.multi_stair.multi_stair[station_idx]
             reservoir = step_runtime.multi_reservoir.Capacity_Stairs[station_idx]
+            head_history = list(getattr(station, "history", {}).get("head", []) or [])
+            allocation_head = head_history[-1] if head_history else getattr(station, "head", None)
+            head_inputs, head_observation_ready = self._resolve_head_observation_inputs(
+                step_runtime,
+                target_step,
+                station_idx,
+            )
             outputs.append(
                 {
                     "node_id": int(node_id),
                     "station": str(station.name),
                     "step": int(target_step),
                     "power": self._normalize_output_value(station.history["current_power"][-1]),
+                    "head": (
+                        self._normalize_output_value(allocation_head)
+                        if allocation_head is not None
+                        else None
+                    ),
+                    "head_source": (
+                        "observation_adapter"
+                        if head_observation_ready
+                        else stage_hints_usage.get("source")
+                    ),
+                    "head_observation_ready": head_observation_ready,
+                    "head_inputs": head_inputs,
                     "diversion_flow": self._normalize_output_value(
                         reservoir.history["current_outflow_discharge"][-1]
                     ),
                 }
             )
         return outputs
+
+    @staticmethod
+    def _resolve_head_observation_inputs(
+        step_runtime: HydroSimulationStepRuntime,
+        target_step: int,
+        station_index: int,
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        observed_by_step = getattr(step_runtime, "observed_stage_hints_by_step", {}) or {}
+        hints = list(observed_by_step.get(int(target_step), []) or [])
+        required_indices = [station_index]
+        if station_index + 1 < len(hydrosim_config.STATION_NODE_IDS):
+            required_indices.append(station_index + 1)
+
+        inputs: List[Dict[str, Any]] = []
+        ready = True
+        for required_index in required_indices:
+            hint = hints[required_index] if required_index < len(hints) else {}
+            source = hint.get("stage_hints_source")
+            stage = hint.get("stage")
+            inputs.append(
+                {
+                    "station_id": int(hydrosim_config.STATION_NODE_IDS[required_index]),
+                    "stage": float(stage) if stage is not None else None,
+                    "source": source,
+                }
+            )
+            if source != "observation_adapter" or stage is None:
+                ready = False
+
+        if station_index + 1 >= len(hydrosim_config.STATION_NODE_IDS):
+            tail_stage = getattr(step_runtime.multi_reservoir, "_tail_stage", None)
+            inputs.append(
+                {
+                    "station_id": None,
+                    "stage": float(tail_stage) if tail_stage is not None else None,
+                    "source": "v47_static_tail_stage",
+                }
+            )
+            if tail_stage is None:
+                ready = False
+        return inputs, ready
 
     def _build_device_step_outputs_from_runtime(
         self,

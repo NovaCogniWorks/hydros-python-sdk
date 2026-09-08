@@ -29,6 +29,7 @@ from hydros_agent_sdk import (
     ErrorCodes,
     handle_agent_errors,
 )
+from hydros_agent_sdk.control_algorithms import ControlSignal, SignalType
 from hydros_agent_sdk.utils import HydroObjectType, generate_coordination_command_id
 from hydros_agent_sdk.protocol.agent_common import DeviceValueTypeEnum
 from hydros_agent_sdk.agents.central_scheduling_agent import CentralSchedulingAgent
@@ -83,7 +84,7 @@ from power_observation_adapter import PowerObservationAdapter, PowerObservationR
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-roll-step-one-continuity"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-v47-dynamic-head-observation"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -790,7 +791,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         *,
         assign_groups: bool = True,
     ) -> List[Dict[str, Any]]:
-        station_output_powers = self._resolve_v47_inter_station_output_powers(session, step)
+        station_output_powers, head_observations = self._resolve_v47_inter_station_plan(session, step)
         if not station_output_powers:
             station_output_powers = self._resolve_legacy_station_output_powers(session, step)
         if not station_output_powers:
@@ -802,9 +803,18 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
             group_prefix="POWER_STATION_OUTPUT_POWER",
             assign_groups=assign_groups,
+            algo_required_inputs_by_station=head_observations,
         )
 
     def _resolve_v47_inter_station_output_powers(self, session: Any, step: int) -> Dict[int, float]:
+        station_output_powers, _ = self._resolve_v47_inter_station_plan(session, step)
+        return station_output_powers
+
+    def _resolve_v47_inter_station_plan(
+        self,
+        session: Any,
+        step: int,
+    ) -> Tuple[Dict[int, float], Dict[int, List[ControlSignal]]]:
         step_runtime = getattr(session, "step_runtime", None)
         if step_runtime is None or not all(
             hasattr(step_runtime, attr)
@@ -816,10 +826,10 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 "multi_stair",
             )
         ):
-            return {}
+            return {}, {}
         preview = getattr(self._hydrosim_api, "preview_step_station_power_allocation", None)
         if preview is None:
-            return {}
+            return {}, {}
         try:
             result = preview(step)
         except Exception as exc:
@@ -830,14 +840,36 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 step,
                 exc,
             )
-            return {}
+            return {}, {}
 
         station_output_powers: Dict[int, float] = {}
+        head_observations: Dict[int, List[ControlSignal]] = {}
         for station in result.get("station_step_outputs", []) or []:
             station_id = station.get("node_id", station.get("object_id"))
             if station_id is None or station.get("power") is None:
                 continue
-            station_output_powers[int(station_id)] = float(station["power"])
+            normalized_station_id = int(station_id)
+            station_output_powers[normalized_station_id] = float(station["power"])
+            head = self._positive_float_or_none(station.get("head"))
+            if head is None or not bool(station.get("head_observation_ready")):
+                continue
+            head_observations[normalized_station_id] = [
+                ControlSignal(
+                    type=SignalType.OBSERVATION,
+                    object_type=HydroObjectType.POWER_STATION.value,
+                    object_id=normalized_station_id,
+                    value_type="head",
+                    value=head,
+                    attributes={
+                        "source": "power_v47_observation_derived_head",
+                        "stage_hints_source": station.get("head_source"),
+                        "observation_step": int(step),
+                        "station_name": station.get("station"),
+                        "derivation": "HydroSystem._compute_heads",
+                        "head_inputs": list(station.get("head_inputs") or []),
+                    },
+                )
+            ]
 
         if station_output_powers:
             logger.info(
@@ -856,7 +888,21 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 len(station_output_powers),
                 self._format_station_values(station_output_powers),
             )
-        return station_output_powers
+            logger.info(
+                "Power station dynamic head observations prepared: task_id=%s, step=%s, "
+                "observation_count=%s, station_heads=%s",
+                self.context.biz_scene_instance_id,
+                step,
+                len(head_observations),
+                self._format_station_values(
+                    {
+                        station_id: float(signals[0].value)
+                        for station_id, signals in head_observations.items()
+                        if signals and signals[0].value is not None
+                    }
+                ),
+            )
+        return station_output_powers, head_observations
 
     def _resolve_legacy_station_output_powers(self, session: Any, step: int) -> Dict[int, float]:
         station_output_powers: Dict[int, float] = {}
@@ -921,6 +967,14 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             for station_id, value in sorted(station_values.items())
         )
 
+    @staticmethod
+    def _positive_float_or_none(value: Any) -> Optional[float]:
+        try:
+            normalized = float(value)
+        except (TypeError, ValueError):
+            return None
+        return normalized if normalized > 0.0 else None
+
     def _format_stage_hints_usage(self, usage_by_step: Any) -> str:
         if not isinstance(usage_by_step, dict) or not usage_by_step:
             return "none"
@@ -975,6 +1029,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         target_command_type: str,
         group_prefix: str,
         assign_groups: bool = True,
+        algo_required_inputs_by_station: Optional[Dict[int, List[ControlSignal]]] = None,
     ) -> List[Dict[str, Any]]:
         commands: List[Dict[str, Any]] = []
         for station_id, target_value in station_values.items():
@@ -998,6 +1053,9 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     "object_id": station_id,
                     "object_type": HydroObjectType.POWER_STATION.value,
                     "main_step_index": step,
+                    "algo_required_inputs": list(
+                        (algo_required_inputs_by_station or {}).get(int(station_id), [])
+                    ),
                     "_control_group_key": self._resolve_control_group_key(target_agent),
                 }
             )
@@ -1836,6 +1894,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                             value=numeric_target,
                         )
                     ],
+                    algo_required_inputs=list(command.get("algo_required_inputs") or []),
                 )
             )
         return control_objects

@@ -366,6 +366,311 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
         }
         self.assertAlmostEqual(90.0, result_values["output_power"])
         self.assertGreater(result_values["water_flow"], 0.0)
+        fallback_evidence = output.evidence["stations"][0]["allocation"]["turbine_targets"][0]
+        self.assertCountEqual(
+            ["design_head", "min_head", "max_head", "design_power", "max_power",
+             "min_power", "power_ramp_rate", "design_efficiency", "eta_head_coeff",
+             "eta_power_coeff"],
+            fallback_evidence["v47_parameter_fallback_fields"],
+        )
+        self.assertEqual(
+            "derived_from:actuator_attributes",
+            fallback_evidence["v47_parameters"]["design_head"]["source"],
+        )
+        self.assertEqual(
+            "algorithm_fallback:design_head*0.6",
+            fallback_evidence["v47_parameters"]["min_head"]["source"],
+        )
+        self.assertEqual(
+            "actuator_attributes",
+            fallback_evidence["v47_runtime_observations"]["head"]["source"],
+        )
+        self.assertEqual(
+            "runtime_observation",
+            fallback_evidence["v47_runtime_observations"]["current_output_power"]["source"],
+        )
+
+    def test_runtime_keeps_distinct_profile_parameters_through_imported_v47(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        def turbine_attributes(object_id, design_head, min_head, max_head):
+            profile_fields = {
+                "state": 1,
+                "design_head": design_head,
+                "min_head": min_head,
+                "max_head": max_head,
+                "min_power": 20.0,
+                "max_power": 182.0,
+                "design_power": 165.0,
+                "design_efficiency": 0.92,
+                "eta_head_coeff": 0.15,
+                "eta_power_coeff": 0.20,
+                "power_ramp_rate": 20.0,
+            }
+            return {
+                "station_object_id": 20300,
+                "object_name": f"turbine-{object_id}",
+                "head": design_head,
+                **profile_fields,
+                "v47_parameter_sources": {
+                    "head": "runtime_observation",
+                    **{name: "profile_turbine_config" for name in profile_fields},
+                },
+            }
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-v47-parameter-provenance",
+                "context_id": "TASK-PHASE-14-1",
+                "compute_step": 1,
+                "target_object_type": "PowerStation",
+                "target_object_id": 20300,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20300,
+                "value_type": "output_power",
+                "value": 90.0,
+            }],
+            "actuators": [
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20304,
+                    "available": True,
+                    "values": {"output_power": 40.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": turbine_attributes(20304, 30.0, 20.1, 40.0),
+                },
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20305,
+                    "available": True,
+                    "values": {"output_power": 20.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": turbine_attributes(20305, 31.5, 21.2, 41.3),
+                },
+            ],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        turbine_evidence = {
+            item["object_id"]: item
+            for item in output.evidence["stations"][0]["allocation"]["turbine_targets"]
+        }
+        expected_heads = {
+            20304: (30.0, 20.1, 40.0),
+            20305: (31.5, 21.2, 41.3),
+        }
+        for object_id, (design_head, min_head, max_head) in expected_heads.items():
+            evidence = turbine_evidence[object_id]
+            parameters = evidence["v47_parameters"]
+            self.assertEqual([], evidence["v47_parameter_fallback_fields"])
+            self.assertAlmostEqual(design_head, parameters["design_head"]["value"])
+            self.assertAlmostEqual(min_head, parameters["min_head"]["value"])
+            self.assertAlmostEqual(max_head, parameters["max_head"]["value"])
+            self.assertEqual("profile_turbine_config", parameters["design_head"]["source"])
+            self.assertEqual("profile_turbine_config", parameters["min_head"]["source"])
+            self.assertEqual("profile_turbine_config", parameters["max_head"]["source"])
+            self.assertFalse(parameters["design_head"]["fallback"])
+            self.assertFalse(parameters["min_head"]["fallback"])
+            self.assertFalse(parameters["max_head"]["fallback"])
+            observations = evidence["v47_runtime_observations"]
+            self.assertAlmostEqual(design_head, observations["head"]["value"])
+            self.assertEqual("runtime_observation", observations["head"]["source"])
+            self.assertEqual("profile_turbine_config", observations["state"]["source"])
+            self.assertEqual("runtime_observation", observations["current_output_power"]["source"])
+            self.assertEqual([], evidence["v47_runtime_observation_fallback_fields"])
+
+    def test_runtime_applies_station_head_observation_to_each_v47_turbine(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-dynamic-head",
+                "context_id": "TASK-PHASE-12-1",
+                "compute_step": 4,
+                "target_object_type": "PowerStation",
+                "target_object_id": 20300,
+            },
+            "signals": [
+                {
+                    "type": "TARGET",
+                    "object_type": "PowerStation",
+                    "object_id": 20300,
+                    "value_type": "output_power",
+                    "value": 90.0,
+                },
+                {
+                    "type": "OBSERVATION",
+                    "object_type": "PowerStation",
+                    "object_id": 20300,
+                    "value_type": "head",
+                    "value": 31.25,
+                    "attributes": {
+                        "source": "power_v47_observation_derived_head",
+                        "observation_step": 4,
+                        "stage_hints_source": "observation_adapter",
+                        "derivation": "HydroSystem._compute_heads",
+                    },
+                },
+            ],
+            "actuators": [
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20304,
+                    "available": True,
+                    "values": {"output_power": 40.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "head": 30.0,
+                        "design_head": 30.0,
+                        "min_head": 20.1,
+                        "max_head": 40.0,
+                        "design_power": 165.0,
+                        "min_power": 20.0,
+                        "max_power": 182.0,
+                        "design_efficiency": 0.92,
+                        "eta_head_coeff": 0.15,
+                        "eta_power_coeff": 0.20,
+                        "power_ramp_rate": 20.0,
+                    },
+                },
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20305,
+                    "available": True,
+                    "values": {"output_power": 20.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "head": 30.0,
+                        "design_head": 30.0,
+                        "min_head": 20.1,
+                        "max_head": 40.0,
+                        "design_power": 165.0,
+                        "min_power": 20.0,
+                        "max_power": 182.0,
+                        "design_efficiency": 0.92,
+                        "eta_head_coeff": 0.15,
+                        "eta_power_coeff": 0.20,
+                        "power_ramp_rate": 20.0,
+                    },
+                },
+            ],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        station_evidence = output.evidence["stations"][0]
+        self.assertEqual(
+            {
+                "available": True,
+                "fallback": False,
+                "value": 31.25,
+                "source": "power_v47_observation_derived_head",
+                "observation_step": 4,
+                "stage_hints_source": "observation_adapter",
+                "derivation": "HydroSystem._compute_heads",
+                "head_inputs": [],
+            },
+            station_evidence["head_observation"],
+        )
+        self.assertEqual(0, station_evidence["stage_hint_count"])
+        for turbine in station_evidence["allocation"]["turbine_targets"]:
+            head = turbine["v47_runtime_observations"]["head"]
+            self.assertAlmostEqual(31.25, head["value"])
+            self.assertEqual("power_v47_observation_derived_head", head["source"])
+            self.assertFalse(head["fallback"])
+
+    def test_runtime_uses_legacy_hydrosim_static_parameters_before_db_migration(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-v47-legacy-static-profile",
+                "context_id": "TASK-PHASE-14-1-LEGACY",
+                "compute_step": 1,
+                "target_object_type": "PowerStation",
+                "target_object_id": 20300,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20300,
+                "value_type": "output_power",
+                "value": 90.0,
+            }],
+            "actuators": [
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20304,
+                    "available": True,
+                    "values": {"output_power": 40.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "object_name": "深溪沟水轮机1",
+                        "head": 31.0,
+                        "v47_parameter_sources": {"head": "runtime_observation"},
+                    },
+                },
+                {
+                    "object_type": "Turbine",
+                    "object_id": 20305,
+                    "available": True,
+                    "values": {"output_power": 20.0},
+                    "ranges": {"output_power": {"min_value": 0.0, "max_value": 182.0}},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "object_name": "深溪沟水轮机2",
+                        "head": 31.5,
+                        "v47_parameter_sources": {"head": "runtime_observation"},
+                    },
+                },
+            ],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        turbine_evidence = output.evidence["stations"][0]["allocation"]["turbine_targets"]
+        self.assertEqual({20304, 20305}, {item["object_id"] for item in turbine_evidence})
+        for evidence in turbine_evidence:
+            parameters = evidence["v47_parameters"]
+            self.assertEqual([], evidence["v47_parameter_fallback_fields"])
+            self.assertAlmostEqual(30.0, parameters["design_head"]["value"])
+            self.assertAlmostEqual(20.1, parameters["min_head"]["value"])
+            self.assertAlmostEqual(40.0, parameters["max_head"]["value"])
+            self.assertAlmostEqual(165.0, parameters["design_power"]["value"])
+            self.assertAlmostEqual(20.0, parameters["min_power"]["value"])
+            self.assertAlmostEqual(182.0, parameters["max_power"]["value"])
+            self.assertAlmostEqual(20.0, parameters["power_ramp_rate"]["value"])
+            self.assertAlmostEqual(0.92, parameters["design_efficiency"]["value"])
+            self.assertAlmostEqual(0.15, parameters["eta_head_coeff"]["value"])
+            self.assertAlmostEqual(0.20, parameters["eta_power_coeff"]["value"])
+            for parameter in parameters.values():
+                self.assertEqual("legacy_hydrosim_config", parameter["source"])
+                self.assertFalse(parameter["fallback"])
+            observations = evidence["v47_runtime_observations"]
+            self.assertEqual("runtime_observation", observations["head"]["source"])
+            self.assertNotEqual("legacy_hydrosim_config", observations["state"]["source"])
 
     def test_runtime_uses_v47_state_and_min_power_without_hard_min_floor(self):
         module = _load_power_control_module()

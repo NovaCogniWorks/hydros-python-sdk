@@ -46,7 +46,9 @@ class ImportedV47StationAllocator:
 
         target_power = max(float(request.target_output_power), 0.0)
         session_key = self._session_key(request)
-        unit_cfgs = [self._unit_config(turbine) for turbine in request.turbines]
+        unit_resolutions = [self._resolve_unit_config(turbine) for turbine in request.turbines]
+        unit_cfgs = [config for config, _ in unit_resolutions]
+        unit_parameter_evidence = [evidence for _, evidence in unit_resolutions]
         config_signature = self._config_signature(request, unit_cfgs)
         station_created = session_key not in self._sessions or self._config_signatures.get(session_key) != config_signature
         if station_created:
@@ -87,7 +89,16 @@ class ImportedV47StationAllocator:
                     current_output_power=max(float(turbine.current_output_power), 0.0),
                 )
             )
-            turbine_targets.append(self._turbine_target_evidence(turbine, unit, index, target, flow, selected_index_set))
+            turbine_targets.append(self._turbine_target_evidence(
+                turbine,
+                unit,
+                index,
+                target,
+                flow,
+                selected_index_set,
+                unit_parameter_evidence[index],
+                self._runtime_observation_evidence(turbine, unit),
+            ))
 
         allocated_power = sum(item.target_output_power for item in allocations)
         estimated_flow = sum(item.estimated_water_flow for item in allocations)
@@ -211,31 +222,111 @@ class ImportedV47StationAllocator:
             station._commitment_hold_remaining = 0
 
     def _unit_config(self, turbine: Any) -> Dict[str, Any]:
-        design_head = self._positive_float(
-            getattr(turbine, "design_head", None),
-            getattr(turbine, "head", None),
-            50.0,
-        )
-        min_head = self._positive_float(getattr(turbine, "min_head", None), design_head * 0.6)
-        max_head = self._positive_float(getattr(turbine, "max_head", None), design_head * 1.4)
+        config, _ = self._resolve_unit_config(turbine)
+        return config
+
+    def _resolve_unit_config(self, turbine: Any) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        sources = dict(getattr(turbine, "parameter_sources", {}) or {})
+        fallback_fields: List[str] = []
+
+        design_head_input = self._positive_or_none(getattr(turbine, "design_head", None))
+        head_input = self._positive_or_none(getattr(turbine, "head", None))
+        if design_head_input is not None:
+            design_head = design_head_input
+            design_head_source = sources.get("design_head", "control_input")
+        elif head_input is not None:
+            design_head = head_input
+            design_head_source = f"derived_from:{sources.get('head', 'control_input')}"
+            fallback_fields.append("design_head")
+        else:
+            design_head = 50.0
+            design_head_source = "algorithm_fallback:50.0"
+            fallback_fields.append("design_head")
+
+        min_head_input = self._positive_or_none(getattr(turbine, "min_head", None))
+        if min_head_input is not None:
+            min_head = min_head_input
+            min_head_source = sources.get("min_head", "control_input")
+        else:
+            min_head = design_head * 0.6
+            min_head_source = "algorithm_fallback:design_head*0.6"
+            fallback_fields.append("min_head")
+
+        max_head_input = self._positive_or_none(getattr(turbine, "max_head", None))
+        if max_head_input is not None:
+            max_head = max_head_input
+            max_head_source = sources.get("max_head", "control_input")
+        else:
+            max_head = design_head * 1.4
+            max_head_source = "algorithm_fallback:design_head*1.4"
+            fallback_fields.append("max_head")
         if max_head <= min_head:
             max_head = min_head + 1e-6
+            max_head_source = "algorithm_adjustment:min_head+1e-6"
+            if "max_head" not in fallback_fields:
+                fallback_fields.append("max_head")
 
-        max_power = self._positive_float(
-            getattr(turbine, "max_power", None),
-            getattr(turbine, "max_output_power", None),
-            getattr(turbine, "design_power", None),
+        max_power, max_power_source, max_power_fallback = self._first_positive_with_source(
+            turbine,
+            sources,
+            ("max_power", "max_output_power", "design_power"),
             max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 1.0),
+            "algorithm_fallback:max(current_output_power,1.0)",
         )
-        design_power = self._positive_float(getattr(turbine, "design_power", None), max_power)
-        min_power = self._positive_float(
-            getattr(turbine, "min_power", None),
-            getattr(turbine, "min_output_power", None),
+        design_power_input = self._positive_or_none(getattr(turbine, "design_power", None))
+        if design_power_input is not None:
+            design_power = design_power_input
+            design_power_source = sources.get("design_power", "control_input")
+        else:
+            design_power = max_power
+            design_power_source = f"derived_from:{max_power_source}"
+            fallback_fields.append("design_power")
+
+        min_power, min_power_source, min_power_fallback = self._first_positive_with_source(
+            turbine,
+            sources,
+            ("min_power", "min_output_power"),
             min(max_power, max(design_power * 0.10, 1e-6)),
+            "algorithm_fallback:min(max_power,design_power*0.10)",
         )
+        if max_power_fallback:
+            fallback_fields.append("max_power")
+        if min_power_fallback:
+            fallback_fields.append("min_power")
         if max_power <= min_power:
             max_power = min_power + 1e-6
-        return {
+            max_power_source = "algorithm_adjustment:min_power+1e-6"
+            if "max_power" not in fallback_fields:
+                fallback_fields.append("max_power")
+
+        power_ramp_rate_input = self._positive_or_none(getattr(turbine, "power_ramp_rate", None))
+        power_ramp_rate = power_ramp_rate_input or max(10.0, design_power * 0.10)
+        power_ramp_rate_source = (
+            sources.get("power_ramp_rate", "control_input")
+            if power_ramp_rate_input is not None
+            else "algorithm_fallback:max(10.0,design_power*0.10)"
+        )
+        if power_ramp_rate_input is None:
+            fallback_fields.append("power_ramp_rate")
+
+        efficiency_defaults = {
+            "design_efficiency": (0.93, "algorithm_fallback:0.93"),
+            "eta_head_coeff": (0.20, "algorithm_fallback:0.20"),
+            "eta_power_coeff": (0.40, "algorithm_fallback:0.40"),
+        }
+        efficiency_values: Dict[str, float] = {}
+        efficiency_sources: Dict[str, str] = {}
+        for field_name, (default_value, default_source) in efficiency_defaults.items():
+            configured = self._positive_or_none(getattr(turbine, field_name, None))
+            if configured is not None:
+                efficiency_values[field_name] = configured
+                efficiency_sources[field_name] = sources.get(field_name, "control_input")
+            else:
+                efficiency_values[field_name] = default_value
+                efficiency_sources[field_name] = default_source
+                fallback_fields.append(field_name)
+
+        config = {
             "ID": int(turbine.object_id),
             "Name": str(getattr(turbine, "attributes", {}).get("object_name") or f"turbine-{turbine.object_id}"),
             "State": self._runtime_state(turbine, float(getattr(turbine, "current_output_power", 0.0) or 0.0)),
@@ -245,10 +336,32 @@ class ImportedV47StationAllocator:
             "design_power": design_power,
             "min_power": min_power,
             "max_power": max_power,
-            "power_ramp_rate": self._positive_float(getattr(turbine, "power_ramp_rate", None), max(10.0, design_power * 0.10)),
-            "design_efficiency": self._positive_float(getattr(turbine, "design_efficiency", None), 0.93),
-            "eta_head_coeff": self._positive_float(getattr(turbine, "eta_head_coeff", None), 0.20),
-            "eta_power_coeff": self._positive_float(getattr(turbine, "eta_power_coeff", None), 0.40),
+            "power_ramp_rate": power_ramp_rate,
+            "design_efficiency": efficiency_values["design_efficiency"],
+            "eta_head_coeff": efficiency_values["eta_head_coeff"],
+            "eta_power_coeff": efficiency_values["eta_power_coeff"],
+        }
+        parameter_sources = {
+            "design_head": design_head_source,
+            "min_head": min_head_source,
+            "max_head": max_head_source,
+            "design_power": design_power_source,
+            "min_power": min_power_source,
+            "max_power": max_power_source,
+            "power_ramp_rate": power_ramp_rate_source,
+            **efficiency_sources,
+        }
+        parameter_evidence = {
+            field_name: {
+                "value": float(config[field_name]),
+                "source": parameter_sources[field_name],
+                "fallback": field_name in fallback_fields,
+            }
+            for field_name in parameter_sources
+        }
+        return config, {
+            "parameters": parameter_evidence,
+            "fallback_fields": fallback_fields,
         }
 
     def _turbine_target_evidence(
@@ -259,6 +372,8 @@ class ImportedV47StationAllocator:
         target: float,
         flow: float,
         selected_indices: Sequence[int],
+        parameter_evidence: Dict[str, Any],
+        runtime_observation_evidence: Dict[str, Any],
     ) -> Dict[str, Any]:
         return {
             "object_id": int(turbine.object_id),
@@ -281,7 +396,76 @@ class ImportedV47StationAllocator:
             "head": unit.head,
             "efficiency": unit.efficiency,
             "design_efficiency": getattr(unit.nhq, "design_efficiency", None),
+            "v47_parameters": parameter_evidence["parameters"],
+            "v47_parameter_fallback_fields": parameter_evidence["fallback_fields"],
+            "v47_runtime_observations": runtime_observation_evidence["observations"],
+            "v47_runtime_observation_fallback_fields": runtime_observation_evidence["fallback_fields"],
         }
+
+    def _runtime_observation_evidence(self, turbine: Any, unit: Any) -> Dict[str, Any]:
+        sources = dict(getattr(turbine, "parameter_sources", {}) or {})
+        fallback_fields: List[str] = []
+
+        head_input = self._positive_or_none(getattr(turbine, "head", None))
+        if head_input is not None:
+            head_source = sources.get("head", "control_input")
+        else:
+            head_source = f"derived_from:{sources.get('design_head', 'v47_unit_config')}"
+            fallback_fields.append("head")
+
+        state_input = getattr(turbine, "state", None)
+        if state_input is not None:
+            state_source = sources.get("state", "control_input")
+        elif getattr(turbine, "attributes", {}).get("status") is not None:
+            state_source = "derived_from:actuator_status"
+            fallback_fields.append("state")
+        else:
+            state_source = "derived_from:current_output_power"
+            fallback_fields.append("state")
+
+        observations = {
+            "current_output_power": {
+                "value": max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 0.0),
+                "source": sources.get("current_output_power", "control_input"),
+                "fallback": False,
+            },
+            "head": {
+                "value": float(unit.head),
+                "source": head_source,
+                "fallback": "head" in fallback_fields,
+            },
+            "state": {
+                "value": int(unit.state),
+                "source": state_source,
+                "fallback": "state" in fallback_fields,
+            },
+        }
+        return {"observations": observations, "fallback_fields": fallback_fields}
+
+    @classmethod
+    def _first_positive_with_source(
+        cls,
+        turbine: Any,
+        sources: Dict[str, str],
+        field_names: Sequence[str],
+        fallback_value: float,
+        fallback_source: str,
+    ) -> tuple[float, str, bool]:
+        for index, field_name in enumerate(field_names):
+            value = cls._positive_or_none(getattr(turbine, field_name, None))
+            if value is not None:
+                source = sources.get(field_name, "control_input")
+                if index == 0:
+                    return value, source, False
+                return value, f"derived_from:{source}", True
+        return float(fallback_value), fallback_source, True
+
+    @staticmethod
+    def _positive_or_none(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        candidate = float(value)
+        return candidate if candidate > 0.0 else None
 
     @staticmethod
     def _runtime_state(turbine: Any, current_power: float) -> int:

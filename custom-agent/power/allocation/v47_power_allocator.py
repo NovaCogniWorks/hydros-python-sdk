@@ -28,6 +28,7 @@ class TurbinePowerInput:
     eta_head_coeff: Optional[float] = None
     eta_power_coeff: Optional[float] = None
     power_ramp_rate: Optional[float] = None
+    parameter_sources: Dict[str, str] = field(default_factory=dict)
     attributes: Dict[str, Any] = field(default_factory=dict)
 
 

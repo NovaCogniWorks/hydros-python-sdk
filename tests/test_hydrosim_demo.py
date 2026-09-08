@@ -297,6 +297,8 @@ class HydroSimDemoTest(unittest.TestCase):
         self.assertEqual(first_step["current_step_power_planning_values"][0]["value"], 88.0)
         self.assertEqual(first_step["current_step_power_planning_values"][0]["object_id"], 20100)
         self.assertIsInstance(first_step["station_step_outputs"][0]["power"], float)
+        self.assertIsInstance(first_step["station_step_outputs"][0]["head"], float)
+        self.assertIn("head_observation_ready", first_step["station_step_outputs"][0])
         self.assertIsInstance(first_step["station_step_outputs"][0]["diversion_flow"], float)
 
         second_step = api.execute_step()

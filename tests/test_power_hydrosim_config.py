@@ -26,6 +26,17 @@ class PowerHydrosimConfigTest(unittest.TestCase):
             sum(float(unit["max_power"]) for unit in units),
         )
         self.assertTrue(all(float(unit["max_power"]) == 650.0 for unit in units))
+        self.assertEqual([20104, 20105, 20106, 20107, 20108, 20109], config.UNIT_OBJECT_IDS[0])
+
+    def test_unit_object_ids_match_every_station_unit_config(self) -> None:
+        config = _load_config_module()
+
+        config.validate_hydrosim_config()
+
+        self.assertEqual(len(config.STATION_NODE_IDS), len(config.UNIT_OBJECT_IDS))
+        for unit_configs, object_ids in zip(config.UNIT_CONFIGS, config.UNIT_OBJECT_IDS):
+            self.assertEqual(len(unit_configs), len(object_ids))
+            self.assertEqual(len(object_ids), len(set(object_ids)))
 
     def test_runtime_stage_hints_include_v47_flow_context(self) -> None:
         config = _load_config_module()

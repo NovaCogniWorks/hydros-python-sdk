@@ -9,6 +9,7 @@ from allocation import (
     StationPowerAllocationInput,
     TurbinePowerInput,
 )
+from v47_adapter import LegacyHydrosimV47ProfileProvider
 from hydros_agent_sdk.control_algorithms import (
     ControlActuator,
     ControlActuatorTarget,
@@ -230,6 +231,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
         self.algorithm_type = self._config.algorithm_type
         self.algorithm_version = self._config.algorithm_version
         self._allocator = HydroSimV47PowerAllocator()
+        self._legacy_static_profile = LegacyHydrosimV47ProfileProvider()
 
     def solve(self, input_data: ControlAlgorithmInput) -> ControlAlgorithmOutput:
         if input_data.control_task_type != ControlTaskType.STATION_POWER_ALLOCATION:
@@ -253,6 +255,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
         station_evidence: List[Dict[str, Any]] = []
         for target_signal in target_signals:
             station_id = target_signal.object_id
+            head_observation = self._select_station_head_observation(input_data, station_id)
             turbines = self._select_station_actuators(input_data.actuators, station_id=station_id)
             if not turbines:
                 return PowerControlAlgorithm._failed(
@@ -272,7 +275,15 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 StationPowerAllocationInput(
                     station_id=int(station_id),
                     target_output_power=target_power,
-                    turbines=[self._to_turbine_power_input(actuator, input_data.parameters) for actuator in turbines],
+                    turbines=[
+                        self._to_turbine_power_input(
+                            actuator,
+                            input_data.parameters,
+                            station_id=int(station_id),
+                            head_observation=head_observation,
+                        )
+                        for actuator in turbines
+                    ],
                     max_output_power_delta=float(
                         input_data.parameters.get(
                             "max_output_power_delta",
@@ -328,6 +339,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 "estimated_turbine_water_flow": allocation_result.estimated_water_flow,
             }
             evidence = self._build_station_evidence(allocation_result)
+            evidence["head_observation"] = self._head_observation_evidence(head_observation)
             station_evidence.append(evidence)
             allocation_evidence = evidence["allocation"]
             logger.info(
@@ -338,7 +350,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 "stage_hint_count=%s, allocator_source=%s, core_session_id=%s, "
                 "session_created=%s, state_memory_used=%s, commitment_before=%s, "
                 "commitment_after=%s, hold_remaining=%s, target_exceeds_known_capacity=%s, "
-                "clipped_count=%s, turbines=%s",
+                "head_observation=%s, clipped_count=%s, turbines=%s",
                 input_data.context.request_id,
                 station_id,
                 target_power,
@@ -358,6 +370,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 allocation_evidence.get("commitment_signature_after"),
                 allocation_evidence.get("hold_remaining"),
                 allocation_evidence.get("target_exceeds_known_capacity"),
+                evidence["head_observation"],
                 len(allocation_evidence.get("clipped", []) or []),
                 self._format_turbine_allocation_targets(allocation_evidence),
             )
@@ -380,8 +393,31 @@ class PowerStationOutputPowerAllocationAlgorithm:
         self,
         actuator: ControlActuator,
         parameters: Dict[str, Any],
+        *,
+        station_id: int,
+        head_observation: ControlSignal | None = None,
     ) -> TurbinePowerInput:
         range_config = actuator.ranges.get(OUTPUT_POWER_VALUE_TYPE)
+        attributes = self._legacy_static_profile.merge_turbine_attributes(
+            station_id,
+            int(actuator.object_id),
+            actuator.attributes,
+            parameters,
+        )
+        if head_observation is not None and head_observation.value is not None:
+            attributes["head"] = float(head_observation.value)
+            source_hints = attributes.get("v47_parameter_sources")
+            source_hints = dict(source_hints) if isinstance(source_hints, dict) else {}
+            source_hints["head"] = str(
+                head_observation.attributes.get("source")
+                or "power_station_head_observation"
+            )
+            attributes["v47_parameter_sources"] = source_hints
+        parameter_sources = self._resolve_turbine_parameter_sources(
+            attributes,
+            parameters,
+            range_config,
+        )
         return TurbinePowerInput(
             object_id=int(actuator.object_id),
             current_output_power=float(actuator.values.get(OUTPUT_POWER_VALUE_TYPE, 0.0)),
@@ -397,7 +433,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
             ),
             state=self._optional_int(
                 self._first_present(
-                    actuator.attributes,
+                    attributes,
                     parameters,
                     "State",
                     "state",
@@ -407,7 +443,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
             ),
             min_power=self._optional_float(
                 self._first_present(
-                    actuator.attributes,
+                    attributes,
                     parameters,
                     "min_power",
                     "min_power_mw",
@@ -415,42 +451,85 @@ class PowerStationOutputPowerAllocationAlgorithm:
             ),
             max_power=self._optional_float(
                 self._first_present(
-                    actuator.attributes,
+                    attributes,
                     parameters,
                     "max_power",
                     "max_power_mw",
                 )
             ),
-            head=self._optional_float(actuator.attributes.get("head", parameters.get("head"))),
-            efficiency=self._optional_float(actuator.attributes.get("efficiency", parameters.get("efficiency"))),
+            head=self._optional_float(attributes.get("head", parameters.get("head"))),
+            efficiency=self._optional_float(attributes.get("efficiency", parameters.get("efficiency"))),
             water_flow_per_mw=self._optional_float(
-                actuator.attributes.get("water_flow_per_mw", parameters.get("water_flow_per_mw"))
+                attributes.get("water_flow_per_mw", parameters.get("water_flow_per_mw"))
             ),
-            design_head=self._optional_float(actuator.attributes.get("design_head", parameters.get("design_head"))),
-            min_head=self._optional_float(actuator.attributes.get("min_head", parameters.get("min_head"))),
-            max_head=self._optional_float(actuator.attributes.get("max_head", parameters.get("max_head"))),
+            design_head=self._optional_float(attributes.get("design_head", parameters.get("design_head"))),
+            min_head=self._optional_float(attributes.get("min_head", parameters.get("min_head"))),
+            max_head=self._optional_float(attributes.get("max_head", parameters.get("max_head"))),
             design_power=self._optional_float(
-                actuator.attributes.get("design_power", parameters.get("design_power"))
+                attributes.get("design_power", parameters.get("design_power"))
             ),
             design_efficiency=self._optional_float(
-                actuator.attributes.get("design_efficiency", parameters.get("design_efficiency"))
+                attributes.get("design_efficiency", parameters.get("design_efficiency"))
             ),
             eta_head_coeff=self._optional_float(
-                actuator.attributes.get("eta_head_coeff", parameters.get("eta_head_coeff"))
+                attributes.get("eta_head_coeff", parameters.get("eta_head_coeff"))
             ),
             eta_power_coeff=self._optional_float(
-                actuator.attributes.get("eta_power_coeff", parameters.get("eta_power_coeff"))
+                attributes.get("eta_power_coeff", parameters.get("eta_power_coeff"))
             ),
             power_ramp_rate=self._optional_float(
                 self._first_present(
-                    actuator.attributes,
+                    attributes,
                     parameters,
                     "power_ramp_rate",
                     "power_ramp_rate_mw",
                 )
             ),
-            attributes=dict(actuator.attributes),
+            parameter_sources=parameter_sources,
+            attributes=attributes,
         )
+
+    @classmethod
+    def _resolve_turbine_parameter_sources(
+        cls,
+        attributes: Dict[str, Any],
+        parameters: Dict[str, Any],
+        range_config: Any,
+    ) -> Dict[str, str]:
+        source_hints = attributes.get("v47_parameter_sources")
+        source_hints = source_hints if isinstance(source_hints, dict) else {}
+        aliases = {
+            "state": ("State", "state", "current_state", "currentState"),
+            "head": ("head",),
+            "design_head": ("design_head",),
+            "min_head": ("min_head",),
+            "max_head": ("max_head",),
+            "min_power": ("min_power", "min_power_mw"),
+            "max_power": ("max_power", "max_power_mw"),
+            "design_power": ("design_power",),
+            "design_efficiency": ("design_efficiency",),
+            "eta_head_coeff": ("eta_head_coeff",),
+            "eta_power_coeff": ("eta_power_coeff",),
+            "power_ramp_rate": ("power_ramp_rate", "power_ramp_rate_mw"),
+        }
+        resolved: Dict[str, str] = {"current_output_power": "runtime_observation"}
+        if range_config is not None and range_config.min_value is not None:
+            resolved["min_output_power"] = "actuator_range"
+        if range_config is not None and range_config.max_value is not None:
+            resolved["max_output_power"] = "actuator_range"
+        for canonical_name, keys in aliases.items():
+            for key in keys:
+                if attributes.get(key) is not None:
+                    resolved[canonical_name] = str(
+                        source_hints.get(key)
+                        or source_hints.get(canonical_name)
+                        or "actuator_attributes"
+                    )
+                    break
+                if parameters.get(key) is not None:
+                    resolved[canonical_name] = "algorithm_parameters"
+                    break
+        return resolved
 
     @staticmethod
     def _optional_float(value: Any) -> float | None:
@@ -519,9 +598,26 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 f",v47_max={cls._format_optional_float(item.get('max_power'))}"
                 f",lower={cls._format_optional_float(item.get('lower_bound'))}"
                 f",upper={cls._format_optional_float(item.get('upper_bound'))}"
+                f",v47_params={cls._format_v47_parameters(item.get('v47_parameters'))}"
+                f",v47_fallbacks={item.get('v47_parameter_fallback_fields') or []}"
+                f",v47_observations={cls._format_v47_parameters(item.get('v47_runtime_observations'))}"
+                f",v47_observation_fallbacks={item.get('v47_runtime_observation_fallback_fields') or []}"
             )
             for item in targets
         ) + "]"
+
+    @classmethod
+    def _format_v47_parameters(cls, parameters: Any) -> str:
+        if not isinstance(parameters, dict) or not parameters:
+            return "{}"
+        parts = []
+        for name, detail in parameters.items():
+            if not isinstance(detail, dict):
+                continue
+            parts.append(
+                f"{name}={cls._format_optional_float(detail.get('value'))}@{detail.get('source')}"
+            )
+        return "{" + ",".join(parts) + "}"
 
     def _stage_hints(self, input_data: ControlAlgorithmInput) -> List[Dict[str, Any]]:
         hints = []
@@ -529,7 +625,11 @@ class PowerStationOutputPowerAllocationAlgorithm:
         if isinstance(configured_hints, list):
             hints.extend(item for item in configured_hints if isinstance(item, dict))
         for signal in input_data.signals:
-            if signal.type != SignalType.OBSERVATION or signal.value is None:
+            if (
+                signal.type != SignalType.OBSERVATION
+                or signal.value is None
+                or signal.value_type not in {"stage", "water_level"}
+            ):
                 continue
             hints.append(
                 {
@@ -541,6 +641,42 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 }
             )
         return hints
+
+    @staticmethod
+    def _select_station_head_observation(
+        input_data: ControlAlgorithmInput,
+        station_id: int,
+    ) -> ControlSignal | None:
+        for signal in input_data.signals:
+            if (
+                signal.type == SignalType.OBSERVATION
+                and signal.object_type == STATION_OBJECT_TYPE
+                and int(signal.object_id) == int(station_id)
+                and signal.value_type == "head"
+                and signal.value is not None
+                and float(signal.value) > 0.0
+            ):
+                return signal
+        return None
+
+    @staticmethod
+    def _head_observation_evidence(signal: ControlSignal | None) -> Dict[str, Any]:
+        if signal is None or signal.value is None:
+            return {
+                "available": False,
+                "fallback": True,
+                "source": "turbine_static_head_fallback",
+            }
+        return {
+            "available": True,
+            "fallback": False,
+            "value": float(signal.value),
+            "source": signal.attributes.get("source") or "power_station_head_observation",
+            "observation_step": signal.attributes.get("observation_step"),
+            "stage_hints_source": signal.attributes.get("stage_hints_source"),
+            "derivation": signal.attributes.get("derivation"),
+            "head_inputs": list(signal.attributes.get("head_inputs") or []),
+        }
 
     def _select_station_power_targets(self, input_data: ControlAlgorithmInput) -> List[ControlSignal]:
         return [

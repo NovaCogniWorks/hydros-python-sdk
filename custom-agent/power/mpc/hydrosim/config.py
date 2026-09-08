@@ -140,6 +140,13 @@ UNIT_CONFIGS = [
     ],
 ]
 
+UNIT_OBJECT_IDS = [
+    [20104, 20105, 20106, 20107, 20108, 20109],
+    [20304, 20305, 20306, 20307],
+    [20506, 20507, 20508, 20509],
+    [20706, 20707, 20708, 20709, 20710, 20711],
+]
+
 STATION_NODE_IDS = [20100, 20300, 20500, 20700]
 STATION_CANAL_IDS = [20000, 20200, 20400, 20600]
 NODE_TO_INDEX = {node_id: idx for idx, node_id in enumerate(STATION_NODE_IDS)}
@@ -148,10 +155,13 @@ CANAL_TO_NODE = dict(zip(STATION_CANAL_IDS, STATION_NODE_IDS))
 
 def validate_hydrosim_config() -> None:
     n = len(FLOW_CONFIGS)
-    if not (n == len(FLOW_STATION_CFGS) == len(POWER_CONFIGS) == len(UNIT_CONFIGS)):
+    if not (n == len(FLOW_STATION_CFGS) == len(POWER_CONFIGS) == len(UNIT_CONFIGS) == len(UNIT_OBJECT_IDS)):
         raise ValueError("FLOW/FLOW_STATION/POWER/UNIT 配置长度不一致。")
     if len(CAPA_LOC) != n + 1:
         raise ValueError("CAPA_LOC 长度应等于电站数 + 1。")
+    for station_index, (unit_configs, object_ids) in enumerate(zip(UNIT_CONFIGS, UNIT_OBJECT_IDS)):
+        if len(unit_configs) != len(object_ids):
+            raise ValueError(f"电站索引 {station_index} 的 UNIT 配置与对象 ID 数量不一致。")
 
 
 def build_station_name_map() -> Dict[int, str]:

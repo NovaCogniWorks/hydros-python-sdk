@@ -870,6 +870,9 @@ def test_power_scheduling_optimization_prefers_v47_inter_station_preview():
                     "station": "Station-20300",
                     "step": 2,
                     "power": 222.0,
+                    "head": 31.25,
+                    "head_source": "observation_adapter",
+                    "head_observation_ready": True,
                 }
             ],
         }
@@ -885,6 +888,26 @@ def test_power_scheduling_optimization_prefers_v47_inter_station_preview():
     assert command["object_id"] == 20300
     assert command["object_type"] == "PowerStation"
     assert command["main_step_index"] == 2
+    assert len(command["algo_required_inputs"]) == 1
+    head_signal = command["algo_required_inputs"][0]
+    assert head_signal.type.value == "OBSERVATION"
+    assert head_signal.object_type == "PowerStation"
+    assert head_signal.object_id == 20300
+    assert head_signal.value_type == "head"
+    assert head_signal.value == 31.25
+    assert head_signal.attributes["observation_step"] == 2
+    assert head_signal.attributes["derivation"] == "HydroSystem._compute_heads"
+
+    horizon = agent._build_window_horizon_steps(
+        2,
+        2,
+        current_control_commands=commands,
+    )
+    dispatched = agent._build_current_horizon_control_commands(
+        horizon_steps=horizon,
+        current_step=2,
+    )
+    assert dispatched[0]["algo_required_inputs"] == [head_signal]
     agent._hydrosim_api.preview_step_station_power_allocation.assert_called_once_with(2)
 
 
@@ -2312,6 +2335,47 @@ def test_hydrosim_preview_step_station_power_allocation_does_not_advance_live_se
     assert not hasattr(original_runtime, "preview_only_marker")
     assert captured["step_runtime"] is not original_runtime
     assert captured["planning_values_by_node"][20300] == 30.0
+
+
+def test_hydrosim_head_observation_requires_each_stage_used_by_the_head_formula():
+    module = _load_hydrosim_api_module()
+    runtime = SimpleNamespace(
+        observed_stage_hints_by_step={
+            4: [
+                {"stage": 842.0, "stage_hints_source": "observation_adapter"},
+                {"stage": 612.0, "stage_hints_source": "observation_adapter"},
+                {"stage": 580.0, "stage_hints_source": "internal_reservoir_fallback"},
+                {"stage": 552.0, "stage_hints_source": "observation_adapter"},
+            ]
+        },
+        multi_reservoir=SimpleNamespace(_tail_stage=540.0),
+    )
+
+    first_inputs, first_ready = module.HydroSimulationApi._resolve_head_observation_inputs(
+        runtime,
+        4,
+        0,
+    )
+    second_inputs, second_ready = module.HydroSimulationApi._resolve_head_observation_inputs(
+        runtime,
+        4,
+        1,
+    )
+    last_inputs, last_ready = module.HydroSimulationApi._resolve_head_observation_inputs(
+        runtime,
+        4,
+        3,
+    )
+
+    assert first_ready is True
+    assert [item["station_id"] for item in first_inputs] == [20100, 20300]
+    assert second_ready is False
+    assert last_ready is True
+    assert last_inputs[-1] == {
+        "station_id": None,
+        "stage": 540.0,
+        "source": "v47_static_tail_stage",
+    }
 
 
 def test_power_scheduling_optimization_falls_back_to_turbine_out_flow_when_power_is_missing():
