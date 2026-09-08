@@ -449,12 +449,15 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
             "station": "Station-20100",
             "stage": 841.0,
             "design_stage": 842.0,
+            "inflow_m3s": 70.0,
         },
         {
             "station_id": 20300,
             "station": "Station-20300",
             "stage": 610.0,
             "design_stage": 610.0,
+            "inflow_m3s": 82.0,
+            "upstream_release_m3s": 999.0,
         },
         {
             "station_id": 20500,
@@ -469,6 +472,16 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
             "design_stage": 552.0,
         },
     ]
+    session.latest_device_output_series.append(
+        {
+            "object_id": 20104,
+            "object_type": "Turbine",
+            "object_name": "Turbine-20104",
+            "metrics_code": "water_flow",
+            "node_id": 20100,
+            "time_series": [],
+        }
+    )
     agent._metrics_data_cache.update(
         {
             "biz_scene_instance_id": context.biz_scene_instance_id,
@@ -476,9 +489,43 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
             "object_type": "PowerStation",
             "object_name": "Station-20300",
             "metrics_code": "water_level",
+            "value": 999.0,
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "GateStation",
+            "object_name": "Station-20300",
+            "metrics_code": "water_level",
+            "position_code": "down_stream",
+            "value": 608.0,
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "GateStation",
+            "object_name": "Station-20300",
+            "metrics_code": "water_level",
+            "position_code": "up_stream",
             "value": 612.25,
             "step_index": 2,
             "source_timestamp_ms": 1234567890,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20300,
+            "object_type": "GateStation",
+            "metrics_code": "water_flow",
+            "value": 999.0,
+            "step_index": 2,
         }
     )
     agent._metrics_data_cache.update(
@@ -495,10 +542,42 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
     agent._metrics_data_cache.update(
         {
             "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20304,
+            "object_type": "Turbine",
+            "metrics_code": "water_flow",
+            "value": 42.25,
+            "attributes": {"front_water_flow": 42.25},
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20104,
+            "object_type": "Turbine",
+            "metrics_code": "water_flow",
+            "value": 40.0,
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
             "object_id": 20101,
             "object_type": "Gate",
             "metrics_code": "gate_opening",
             "value": 1.25,
+            "front_water_flow": 12.5,
+            "step_index": 2,
+        }
+    )
+    agent._metrics_data_cache.update(
+        {
+            "biz_scene_instance_id": context.biz_scene_instance_id,
+            "object_id": 20101,
+            "object_type": "Gate",
+            "metrics_code": "water_flow",
+            "value": 12.5,
             "front_water_flow": 12.5,
             "step_index": 2,
         }
@@ -524,6 +603,15 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
     assert observation.stage_hints[1]["predicted_output_power_mw"] == 102.0
     assert observation.stage_hints[1]["prediction_error_mw"] == 53.5
     assert observation.stage_hints[1]["power_outflow_m3s"] == 42.25
+    assert observation.stage_hints[1]["inflow_m3s"] == 82.0
+    assert observation.stage_hints[1]["inflow_source"] == "v47_river_array_internal_state"
+    assert observation.stage_hints[1]["upstream_release_m3s"] == 52.5
+    assert observation.stage_hints[1]["upstream_release_source"] == "ontology_actual_device_outflows"
+    assert observation.stage_hints[1]["stage_metric_ref"]["object_type"] == "GateStation"
+    assert observation.stage_hints[1]["stage_metric_ref"]["position_code"] == "up_stream"
+    assert observation.stage_hints[1]["stage_metric_ref"]["source_object_id"] == 20300
+    assert observation.stage_hints[1]["inflow_source_step"] == 2
+    assert observation.stage_hints[1]["upstream_release_source_step"] == 2
     assert observation.stage_hints[0]["stage_hints_source"] == "internal_reservoir_fallback"
     assert observation.stage_hints[0]["spill_outflow_m3s"] == 12.5
     assert observation.environment_observations[1]["station_id"] == 20300
@@ -531,9 +619,63 @@ def test_power_observation_adapter_reads_power_metrics_from_full_cache():
     assert observation.environment_observations[1]["observed_output_power_mw"] == 155.5
     assert observation.environment_observations[1]["predicted_output_power_mw"] == 102.0
     assert observation.environment_observations[1]["prediction_error_mw"] == 53.5
-    assert observation.environment_observations[1]["metric_refs"][0]["source_timestamp_ms"] == 1234567890
+    assert observation.environment_observations[1]["inflow_m3s"] == 82.0
+    assert observation.environment_observations[1]["inflow_source"] == "v47_river_array_internal_state"
+    assert observation.environment_observations[1]["upstream_release_m3s"] == 52.5
+    assert observation.environment_observations[1]["upstream_release_source"] == (
+        "ontology_actual_device_outflows"
+    )
+    assert any(
+        ref.get("source_timestamp_ms") == 1234567890
+        for ref in observation.environment_observations[1]["metric_refs"]
+    )
     assert observation.missing_observed_stage_station_ids == [20100, 20500, 20700]
     assert "station:20100:missing_stage_observation" in observation.diagnostics
+
+
+def test_power_observation_adapter_deduplicates_device_flow_independent_of_metric_order():
+    module = _load_power_scheduling_module()
+    adapter = module.PowerObservationAdapter(
+        metrics_data_cache=None,
+        station_node_ids=[20100],
+        flow_configs=[],
+    )
+    device_station_map = {20104: 20100, 20105: 20100}
+    metrics = [
+        {
+            "object_id": 20104,
+            "object_type": "Turbine",
+            "metrics_code": "output_power",
+            "value": 155.5,
+            "attributes": {"front_water_flow": 999.0},
+        },
+        {
+            "object_id": 20104,
+            "object_type": "Turbine",
+            "metrics_code": "water_flow",
+            "value": 42.25,
+            "attributes": {"front_water_flow": 42.25},
+        },
+        {
+            "object_id": 20105,
+            "object_type": "Turbine",
+            "metrics_code": "water_level",
+            "value": 840.0,
+            "front_water_flow": 10.0,
+        },
+    ]
+
+    expected = {20100: 52.25}
+    assert adapter._aggregate_device_port_flow(
+        metrics,
+        device_station_map,
+        object_type="Turbine",
+    ) == expected
+    assert adapter._aggregate_device_port_flow(
+        list(reversed(metrics)),
+        device_station_map,
+        object_type="Turbine",
+    ) == expected
 
 
 def test_power_observation_adapter_reads_prediction_from_step_runtime_plan():
@@ -556,8 +698,9 @@ def test_power_observation_adapter_reads_prediction_from_step_runtime_plan():
         {
             "biz_scene_instance_id": context.biz_scene_instance_id,
             "object_id": 20300,
-            "object_type": "PowerStation",
+            "object_type": "GateStation",
             "metrics_code": "water_level",
+            "position_code": "up_stream",
             "value": 612.25,
             "step_index": 3,
         }
@@ -620,8 +763,9 @@ def test_power_scheduling_tick_applies_observed_stage_hints_at_rolling_boundary(
         {
             "biz_scene_instance_id": context.biz_scene_instance_id,
             "object_id": 20300,
-            "object_type": "PowerStation",
+            "object_type": "GateStation",
             "metrics_code": "water_level",
+            "position_code": "up_stream",
             "value": 612.25,
             "step_index": 3,
         }

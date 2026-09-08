@@ -13,6 +13,16 @@ SOURCE_TIMESTAMP_FIELDS = (
     "time",
 )
 
+GATE_STATION_OBJECT_TYPE = "gatestation"
+WATER_LEVEL_METRICS_CODE = "water_level"
+UPSTREAM_POSITION_CODE = "up_stream"
+
+
+@dataclass(frozen=True)
+class StationStageObservation:
+    value: float
+    metric_ref: Dict[str, Any]
+
 
 @dataclass
 class PowerObservationResult:
@@ -109,28 +119,32 @@ class PowerObservationAdapter:
         missing_observed_stage_station_ids: List[int] = []
         missing_critical_fields: List[str] = []
         fallback_hints = list(internal_stage_hints or [])
+        previous_power_outflow: Optional[float] = None
+        previous_spill_outflow: Optional[float] = None
         previous_total_release: Optional[float] = None
         for station_index, station_id in enumerate(self._station_node_ids):
             flow_config = self._flow_configs[station_index] if station_index < len(self._flow_configs) else {}
             fallback_hint = fallback_hints[station_index] if station_index < len(fallback_hints) else {}
-            stage = self._resolve_station_stage(metrics, station_id)
+            stage_observation = self._resolve_station_stage(metrics, station_id)
             design_stage = self._resolve_float(
                 fallback_hint.get("design_stage"),
                 flow_config.get("design_stage"),
             )
-            if stage is not None:
+            if stage_observation is not None:
                 hint = self._build_observed_stage_hint(
                     station_id=station_id,
                     station_name=str(flow_config.get("Name") or fallback_hint.get("station") or station_id),
-                    stage=stage,
+                    stage_observation=stage_observation,
                     design_stage=design_stage,
                     power_outflow=station_power_outflow.get(station_id),
                     spill_outflow=station_spill_outflow.get(station_id),
                     output_power=station_output_power.get(station_id),
                     predicted_output_power=predicted_station_output_power.get(station_id),
                     prediction_error=prediction_error.get(station_id),
+                    internal_hint=fallback_hint,
                     upstream_release=previous_total_release,
-                    inflow=self._resolve_station_inflow(metrics, station_id, previous_total_release),
+                    upstream_power_outflow=previous_power_outflow,
+                    upstream_spill_outflow=previous_spill_outflow,
                 )
             else:
                 hint = dict(fallback_hint)
@@ -138,6 +152,10 @@ class PowerObservationAdapter:
                 hint.setdefault("station_id", station_id)
                 hint["stage_hints_source"] = "internal_reservoir_fallback"
                 hint["fallback_reason"] = "missing_station_stage_observation"
+                if hint.get("inflow_m3s") is not None:
+                    hint["inflow_source"] = "v47_river_array_internal_state"
+                if hint.get("upstream_release_m3s") is not None:
+                    hint["upstream_release_source"] = "v47_river_array_internal_state"
                 diagnostics.append(f"station:{station_id}:missing_stage_observation")
                 missing_observed_stage_station_ids.append(int(station_id))
                 missing_critical_fields.append(f"{station_id}:stage")
@@ -153,10 +171,22 @@ class PowerObservationAdapter:
             if prediction_error.get(station_id) is not None:
                 hint["prediction_error_mw"] = float(prediction_error[station_id])
             if previous_total_release is not None:
-                hint.setdefault("upstream_release_m3s", float(previous_total_release))
+                hint["upstream_release_m3s"] = float(previous_total_release)
+                hint["upstream_release_source"] = "ontology_actual_device_outflows"
+            if previous_power_outflow is not None:
+                hint["upstream_power_outflow_m3s"] = float(previous_power_outflow)
+            if previous_spill_outflow is not None:
+                hint["upstream_spill_outflow_m3s"] = float(previous_spill_outflow)
+            if hint.get("inflow_source") is not None:
+                hint["inflow_source_step"] = int(step_index)
+            if hint.get("upstream_release_source") is not None:
+                hint["upstream_release_source_step"] = int(step_index)
 
-            total_release = (station_power_outflow.get(station_id) or 0.0) + (
-                station_spill_outflow.get(station_id) or 0.0
+            current_power_outflow = station_power_outflow.get(station_id)
+            current_spill_outflow = station_spill_outflow.get(station_id)
+            total_release = self._sum_complete_release(
+                current_power_outflow,
+                current_spill_outflow,
             )
             environment_observations.append(
                 self._build_environment_observation(
@@ -174,6 +204,8 @@ class PowerObservationAdapter:
                     metric_refs=metric_refs_by_station.get(station_id, []),
                 )
             )
+            previous_power_outflow = current_power_outflow
+            previous_spill_outflow = current_spill_outflow
             previous_total_release = total_release
             stage_hints.append(hint)
 
@@ -283,6 +315,7 @@ class PowerObservationAdapter:
         *,
         object_type: str,
     ) -> Dict[int, float]:
+        device_flows: Dict[int, tuple[int, float]] = {}
         result: Dict[int, float] = {}
         for item in metrics:
             if str(item.get("object_type") or "").lower() != object_type.lower():
@@ -293,15 +326,26 @@ class PowerObservationAdapter:
             station_id = device_station_map.get(object_id)
             if station_id is None:
                 continue
-            flow = self._first_numeric(
-                item.get("front_water_flow"),
-                item.get("back_water_flow"),
-                self._attribute_value(item, "front_water_flow"),
-                self._attribute_value(item, "back_water_flow"),
-                item.get("value") if str(item.get("metrics_code") or "").lower() == "water_flow" else None,
-            )
+            is_water_flow_metric = str(item.get("metrics_code") or "").lower() == "water_flow"
+            metric_flow = self._normalize_float(item.get("value")) if is_water_flow_metric else None
+            flow = metric_flow
+            priority = 2
+            if flow is None:
+                flow = self._first_numeric(
+                    item.get("front_water_flow"),
+                    item.get("back_water_flow"),
+                    self._attribute_value(item, "front_water_flow"),
+                    self._attribute_value(item, "back_water_flow"),
+                )
+                priority = 1
             if flow is None:
                 continue
+            current = device_flows.get(object_id)
+            if current is None or priority > current[0]:
+                device_flows[object_id] = (priority, flow)
+
+        for object_id, (_, flow) in device_flows.items():
+            station_id = device_station_map[object_id]
             result[station_id] = result.get(station_id, 0.0) + flow
         return result
 
@@ -329,47 +373,31 @@ class PowerObservationAdapter:
         self,
         metrics: List[Dict[str, Any]],
         station_id: int,
-    ) -> Optional[float]:
+    ) -> Optional[StationStageObservation]:
         for item in metrics:
             object_id = self._normalize_int(item.get("object_id"))
             if object_id != int(station_id):
                 continue
-            stage = self._first_numeric(
-                item.get("front_water_level"),
-                self._attribute_value(item, "front_water_level"),
-                item.get("value") if str(item.get("metrics_code") or "").lower() == "water_level" else None,
-            )
-            if stage is not None:
-                return stage
+            if str(item.get("object_type") or "").replace("_", "").lower() != GATE_STATION_OBJECT_TYPE:
+                continue
+            if str(item.get("metrics_code") or "").lower() != WATER_LEVEL_METRICS_CODE:
+                continue
+            if str(item.get("position_code") or "").lower() != UPSTREAM_POSITION_CODE:
+                continue
+            stage = self._normalize_float(item.get("value"))
+            metric_ref = self._metric_ref(item)
+            if stage is not None and metric_ref is not None:
+                return StationStageObservation(value=stage, metric_ref=metric_ref)
         return None
 
-    def _resolve_station_inflow(
-        self,
-        metrics: List[Dict[str, Any]],
-        station_id: int,
-        upstream_release: Optional[float],
+    @staticmethod
+    def _sum_complete_release(
+        power_outflow: Optional[float],
+        spill_outflow: Optional[float],
     ) -> Optional[float]:
-        direct_flow = self._resolve_station_metric_value(metrics, station_id, "water_flow")
-        if direct_flow is not None:
-            return direct_flow
-        return upstream_release
-
-    def _resolve_station_metric_value(
-        self,
-        metrics: List[Dict[str, Any]],
-        station_id: int,
-        metrics_code: str,
-    ) -> Optional[float]:
-        for item in metrics:
-            object_id = self._normalize_int(item.get("object_id"))
-            if object_id != int(station_id):
-                continue
-            if str(item.get("metrics_code") or "").lower() != metrics_code.lower():
-                continue
-            value = self._normalize_float(item.get("value"))
-            if value is not None:
-                return value
-        return None
+        if power_outflow is None or spill_outflow is None:
+            return None
+        return float(power_outflow) + float(spill_outflow)
 
     def _resolve_target_stage(
         self,
@@ -402,12 +430,20 @@ class PowerObservationAdapter:
             "station_id": int(station_id),
             "station": station_name,
             "source": str(hint.get("stage_hints_source") or "unknown"),
+            "stage_metric_ref": hint.get("stage_metric_ref"),
             "stage_m": self._normalize_float(hint.get("stage")),
             "design_stage_m": self._normalize_float(hint.get("design_stage")),
             "target_stage_m": target_stage,
             "delta_m": self._normalize_float(hint.get("delta")),
             "zone": hint.get("zone"),
             "inflow_m3s": self._normalize_float(hint.get("inflow_m3s")),
+            "inflow_source": hint.get("inflow_source"),
+            "inflow_source_step": self._normalize_int(hint.get("inflow_source_step")),
+            "upstream_release_m3s": self._normalize_float(hint.get("upstream_release_m3s")),
+            "upstream_release_source": hint.get("upstream_release_source"),
+            "upstream_release_source_step": self._normalize_int(
+                hint.get("upstream_release_source_step")
+            ),
             "power_outflow_m3s": power_outflow,
             "spill_outflow_m3s": spill_outflow,
             "total_release_m3s": total_release,
@@ -433,6 +469,7 @@ class PowerObservationAdapter:
             return None
         metric_ref: Dict[str, Any] = {
             "object_id": object_id,
+            "source_object_id": object_id,
             "object_type": item.get("object_type"),
             "object_name": item.get("object_name"),
             "metrics_code": item.get("metrics_code"),
@@ -451,16 +488,19 @@ class PowerObservationAdapter:
         *,
         station_id: int,
         station_name: str,
-        stage: float,
+        stage_observation: StationStageObservation,
         design_stage: Optional[float],
         power_outflow: Optional[float],
         spill_outflow: Optional[float],
         output_power: Optional[float],
         predicted_output_power: Optional[float],
         prediction_error: Optional[float],
+        internal_hint: Mapping[str, Any],
         upstream_release: Optional[float],
-        inflow: Optional[float],
+        upstream_power_outflow: Optional[float],
+        upstream_spill_outflow: Optional[float],
     ) -> Dict[str, Any]:
+        stage = float(stage_observation.value)
         if design_stage is None:
             design_stage = stage
         delta = float(stage) - float(design_stage)
@@ -480,12 +520,25 @@ class PowerObservationAdapter:
             "zone": zone,
             "direction": self._clip(delta / max(1.0 if zone == "red" else 0.2, 1e-6), -2.0, 2.0),
             "stage_hints_source": "observation_adapter",
+            "stage_metric_ref": dict(stage_observation.metric_ref),
         }
+        for field_name in (
+            "upstream_release_m3s",
+            "upstream_power_outflow_m3s",
+            "upstream_spill_outflow_m3s",
+        ):
+            if internal_hint.get(field_name) is not None:
+                hint[field_name] = internal_hint[field_name]
+        if hint.get("upstream_release_m3s") is not None:
+            hint["upstream_release_source"] = "v47_river_array_internal_state"
+        inflow = self._normalize_float(internal_hint.get("inflow_m3s"))
+        if inflow is not None:
+            hint["inflow_m3s"] = inflow
+            hint["inflow_source"] = "v47_river_array_internal_state"
         if power_outflow is not None:
             hint["power_outflow_m3s"] = float(power_outflow)
         if spill_outflow is not None:
             hint["spill_outflow_m3s"] = float(spill_outflow)
-            hint["upstream_spill_outflow_m3s"] = float(spill_outflow)
         if output_power is not None:
             hint["output_power_mw"] = float(output_power)
         if predicted_output_power is not None:
@@ -494,8 +547,11 @@ class PowerObservationAdapter:
             hint["prediction_error_mw"] = float(prediction_error)
         if upstream_release is not None:
             hint["upstream_release_m3s"] = float(upstream_release)
-        if inflow is not None:
-            hint["inflow_m3s"] = float(inflow)
+            hint["upstream_release_source"] = "ontology_actual_device_outflows"
+        if upstream_power_outflow is not None:
+            hint["upstream_power_outflow_m3s"] = float(upstream_power_outflow)
+        if upstream_spill_outflow is not None:
+            hint["upstream_spill_outflow_m3s"] = float(upstream_spill_outflow)
         return hint
 
     @staticmethod

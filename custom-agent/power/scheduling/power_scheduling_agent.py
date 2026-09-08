@@ -720,6 +720,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             predicted_output_power = hint.get("predicted_output_power_mw")
             prediction_error = hint.get("prediction_error_mw")
             inflow = hint.get("inflow_m3s")
+            stage_ref = hint.get("stage_metric_ref") or {}
+            stage_ref_display = (
+                f"{stage_ref.get('object_type')}/{stage_ref.get('position_code')}/"
+                f"{stage_ref.get('object_id')}@{stage_ref.get('step_index')}"
+                if stage_ref
+                else "null"
+            )
             if stage is None:
                 parts.append(f"{station_id or station_name}:stage=null,source={source}")
                 continue
@@ -730,7 +737,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 f"output_power={self._format_optional_float(output_power)},"
                 f"predicted_output_power={self._format_optional_float(predicted_output_power)},"
                 f"prediction_error={self._format_optional_float(prediction_error)},"
-                f"inflow={self._format_optional_float(inflow)}"
+                f"stage_ref={stage_ref_display},"
+                f"inflow={self._format_optional_float(inflow)},"
+                f"inflow_source={hint.get('inflow_source')},"
+                f"inflow_step={hint.get('inflow_source_step')},"
+                f"upstream_release={self._format_optional_float(hint.get('upstream_release_m3s'))},"
+                f"upstream_release_source={hint.get('upstream_release_source')},"
+                f"upstream_release_step={hint.get('upstream_release_source_step')}"
             )
         return ";".join(parts)
 
@@ -745,6 +758,12 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 f"observed_power={self._format_optional_float(item.get('observed_output_power_mw'))},"
                 f"predicted_power={self._format_optional_float(item.get('predicted_output_power_mw'))},"
                 f"prediction_error={self._format_optional_float(item.get('prediction_error_mw'))},"
+                f"inflow={self._format_optional_float(item.get('inflow_m3s'))},"
+                f"inflow_source={item.get('inflow_source')},"
+                f"inflow_step={item.get('inflow_source_step')},"
+                f"upstream_release={self._format_optional_float(item.get('upstream_release_m3s'))},"
+                f"upstream_release_source={item.get('upstream_release_source')},"
+                f"upstream_release_step={item.get('upstream_release_source_step')},"
                 f"metrics={len(item.get('metric_refs') or [])},"
                 f"missing={','.join(item.get('missing_fields') or [])}"
             )
