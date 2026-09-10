@@ -145,6 +145,28 @@ class BaseAgentConfigurationTest(unittest.TestCase):
             "https://example.test/constrains_targets.yaml",
         )
 
+    def test_opt_in_agent_keeps_resolved_db_params_out_of_yaml_properties(self):
+        agent = self.build_agent()
+        object.__setattr__(agent, "keep_resolved_agent_params_separate", True)
+        request = self.build_request(agent)
+        request.agent_config_params = {
+            agent.agent_code: {
+                "allocation": {"inter_station": {"parameters": {"stage_mpc_horizon_steps": 12}}}
+            }
+        }
+
+        with patch(
+            "hydros_agent_sdk.agent_config.AgentConfigLoader.from_url",
+            return_value=self.build_config(agent.agent_code),
+        ):
+            agent.load_agent_configuration(request)
+
+        self.assertEqual(
+            agent.resolved_agent_params["allocation"]["inter_station"]["parameters"]["stage_mpc_horizon_steps"],
+            12,
+        )
+        self.assertIsNone(agent.properties.get_property("allocation"))
+
     def test_load_agent_configuration_rejects_unrelated_agent_code(self):
         agent = self.build_agent()
         request = self.build_request(agent)

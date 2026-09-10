@@ -87,6 +87,7 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         sim_coordination_client: 'SimCoordinationClient'
         state_manager: 'AgentStateManager'
         properties: AgentProperties
+        resolved_agent_params: dict
 
     def __init__(
         self,
@@ -150,6 +151,9 @@ class BaseHydroAgent(HydroAgentInstance, ABC):
         object.__setattr__(self, 'sim_coordination_client', sim_coordination_client)
         object.__setattr__(self, 'state_manager', sim_coordination_client.state_manager)
         object.__setattr__(self, 'properties', AgentProperties())
+        # DB runtime profiles are not ordinary YAML properties. Agents that opt
+        # into the split contract consume this map explicitly after YAML loading.
+        object.__setattr__(self, 'resolved_agent_params', {})
 
         # 注意：日志上下文（task_id、biz_component）会由 SimCoordinationClient
         # 在处理指令时自动设置，因此回调中的全部日志都会包含正确的上下文信息。

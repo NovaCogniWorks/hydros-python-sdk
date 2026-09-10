@@ -23,7 +23,11 @@ if str(CURRENT_DIR) not in sys.path:
 if str(HYDROSIM_DIR) not in sys.path:
     sys.path.insert(0, str(HYDROSIM_DIR))
 
-from hydrosim import config as hydrosim_config
+from hydrosim import (
+    HydroSimulationService,
+    build_central_power_runtime_core,
+    config as hydrosim_config,
+)
 from hydrosim_api import HydroSimulationApi
 from hydros_agent_sdk import (
     ErrorCodes,
@@ -203,6 +207,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             hydros_node_id=hydros_node_id,
             **kwargs,
         )
+        object.__setattr__(self, "keep_resolved_agent_params_separate", True)
         object.__setattr__(self, "_configured_mpc_config_url", configured_mpc_config_url)
         object.__setattr__(
             self,
@@ -261,6 +266,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
         try:
             self.load_agent_configuration(request)
+            self._configure_hydrosim_runtime_from_resolved_profile()
             self._initialize_optimization_model()
             self._initialize_hydrosim_session()
             # Power planning conversion may take several minutes. The task-init
@@ -293,6 +299,34 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
     def _initialize_optimization_model(self) -> None:
         self._optimization_model = {"status": "ready"}
+
+    def _configure_hydrosim_runtime_from_resolved_profile(self) -> None:
+        profile = getattr(self, "resolved_agent_params", None) or {}
+        if not profile:
+            logger.info(
+                "Power central runtime profile is absent; using bundled V47/HydroReservoir defaults: task_id=%s",
+                self.context.biz_scene_instance_id,
+            )
+            return
+
+        core, evidence = build_central_power_runtime_core(profile)
+        self._hydrosim_api = HydroSimulationApi(
+            service=HydroSimulationService(core=core),
+        )
+        self._power_observation_adapter = PowerObservationAdapter(
+            metrics_data_cache=self._metrics_data_cache,
+            station_node_ids=hydrosim_config.STATION_NODE_IDS,
+            flow_configs=core.flow_configs,
+        )
+        logger.info(
+            "Power central runtime profile applied: task_id=%s, source=%s, interStationKeys=%s, "
+            "stationConstraintCount=%s, reservoirReleaseCount=%s",
+            self.context.biz_scene_instance_id,
+            evidence["source"],
+            evidence["inter_station_parameter_keys"],
+            evidence["station_constraint_count"],
+            evidence["reservoir_release_count"],
+        )
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
     def on_tick_simulation(self, request: TickCmdRequest) -> Optional[List[MqttMetrics]]:

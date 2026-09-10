@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from urllib.parse import urlparse
 
 from hydros_agent_sdk.agent_config import AgentConfigLoader
@@ -64,6 +65,14 @@ class AgentConfigurationService:
         if not isinstance(properties, dict):
             raise ValueError("agent_config_params values must be objects")
         if properties:
+            if getattr(agent, "keep_resolved_agent_params_separate", False):
+                object.__setattr__(agent, "resolved_agent_params", deepcopy(properties))
+                logger.info(
+                    "Resolved %s inline initialization parameters separately for agent '%s'",
+                    len(properties),
+                    agent.agent_code,
+                )
+                return
             agent.properties.update(properties)
             logger.info(
                 "Applied %s inline initialization properties for agent '%s'",
