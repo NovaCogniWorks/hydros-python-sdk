@@ -253,6 +253,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
         results: List[ControlSignal] = []
         station_states: Dict[str, Any] = {}
         station_evidence: List[Dict[str, Any]] = []
+        intra_station_parameters, parameter_source = self._intra_station_parameters(input_data.parameters)
         for target_signal in target_signals:
             station_id = target_signal.object_id
             head_observation = self._select_station_head_observation(input_data, station_id)
@@ -266,9 +267,9 @@ class PowerStationOutputPowerAllocationAlgorithm:
 
             target_power = max(float(target_signal.value or 0.0), 0.0)
             default_efficiency = float(
-                input_data.parameters.get(
+                intra_station_parameters.get(
                     "default_efficiency",
-                    input_data.parameters.get("efficiency", self._config.default_efficiency),
+                    intra_station_parameters.get("efficiency", self._config.default_efficiency),
                 )
             )
             allocation_result = self._allocator.allocate_station(
@@ -285,9 +286,9 @@ class PowerStationOutputPowerAllocationAlgorithm:
                         for actuator in turbines
                     ],
                     max_output_power_delta=float(
-                        input_data.parameters.get(
+                        intra_station_parameters.get(
                             "max_output_power_delta",
-                            input_data.parameters.get(
+                            intra_station_parameters.get(
                                 "max_adjustment_delta",
                                 self._config.default_output_power_delta,
                             ),
@@ -340,6 +341,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
             }
             evidence = self._build_station_evidence(allocation_result)
             evidence["head_observation"] = self._head_observation_evidence(head_observation)
+            evidence["intra_station_parameter_source"] = parameter_source
             station_evidence.append(evidence)
             allocation_evidence = evidence["allocation"]
             logger.info(
@@ -389,6 +391,15 @@ class PowerStationOutputPowerAllocationAlgorithm:
             },
         )
 
+    @staticmethod
+    def _intra_station_parameters(parameters: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
+        allocation = parameters.get("allocation") if isinstance(parameters, dict) else None
+        intra_station = allocation.get("intra_station") if isinstance(allocation, dict) else None
+        nested = intra_station.get("parameters") if isinstance(intra_station, dict) else None
+        if isinstance(nested, dict):
+            return nested, "allocation.intra_station.parameters"
+        return parameters, "legacy_flat_parameters"
+
     def _to_turbine_power_input(
         self,
         actuator: ControlActuator,
@@ -413,6 +424,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 or "power_station_head_observation"
             )
             attributes["v47_parameter_sources"] = source_hints
+        runtime_state = self._runtime_turbine_state(actuator, attributes, parameters)
         parameter_sources = self._resolve_turbine_parameter_sources(
             attributes,
             parameters,
@@ -431,16 +443,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 if range_config and range_config.max_value is not None
                 else None
             ),
-            state=self._optional_int(
-                self._first_present(
-                    attributes,
-                    parameters,
-                    "State",
-                    "state",
-                    "current_state",
-                    "currentState",
-                )
-            ),
+            state=runtime_state,
             min_power=self._optional_float(
                 self._first_present(
                     attributes,
@@ -530,6 +533,43 @@ class PowerStationOutputPowerAllocationAlgorithm:
                     resolved[canonical_name] = "algorithm_parameters"
                     break
         return resolved
+
+    @classmethod
+    def _runtime_turbine_state(
+        cls,
+        actuator: ControlActuator,
+        attributes: Dict[str, Any],
+        parameters: Dict[str, Any],
+    ) -> int | None:
+        status = str(actuator.status or "").strip().upper()
+        if status == "ON":
+            cls._mark_runtime_state_source(attributes, "runtime_actuator_status")
+            return 1
+        if status == "OFF":
+            cls._mark_runtime_state_source(attributes, "runtime_actuator_status")
+            return 0
+        current_power = float(actuator.values.get(OUTPUT_POWER_VALUE_TYPE, 0.0) or 0.0)
+        if current_power > 1.0e-6:
+            cls._mark_runtime_state_source(attributes, "runtime_output_power_inference")
+            return 1
+        configured = cls._first_present(
+            attributes,
+            parameters,
+            "initial_state",
+            "initialState",
+            "State",
+            "state",
+        )
+        if configured is not None:
+            cls._mark_runtime_state_source(attributes, "profile_initial_state")
+        return cls._optional_int(configured)
+
+    @staticmethod
+    def _mark_runtime_state_source(attributes: Dict[str, Any], source: str) -> None:
+        source_hints = attributes.get("v47_parameter_sources")
+        source_hints = dict(source_hints) if isinstance(source_hints, dict) else {}
+        source_hints["state"] = source
+        attributes["v47_parameter_sources"] = source_hints
 
     @staticmethod
     def _optional_float(value: Any) -> float | None:

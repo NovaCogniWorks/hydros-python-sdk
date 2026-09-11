@@ -390,6 +390,116 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             fallback_evidence["v47_runtime_observations"]["current_output_power"]["source"],
         )
 
+    def test_runtime_reads_nested_intra_station_parameters(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-nested-parameters",
+                "context_id": "TASK-PHASE-14-5",
+                "compute_step": 1,
+                "target_object_type": "PowerStation",
+                "target_object_id": 20300,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20300,
+                "value_type": "output_power",
+                "value": 90.0,
+            }],
+            "actuators": [{
+                "object_type": "Turbine",
+                "object_id": 20301,
+                "available": True,
+                "status": "ON",
+                "values": {"output_power": 40.0},
+                "ranges": {"output_power": {"min_value": 0.0, "max_value": 100.0}},
+                "attributes": {"station_object_id": 20300, "head": 100.0},
+            }, {
+                "object_type": "Turbine",
+                "object_id": 20302,
+                "available": True,
+                "status": "ON",
+                "values": {"output_power": 20.0},
+                "ranges": {"output_power": {"min_value": 0.0, "max_value": 100.0}},
+                "attributes": {"station_object_id": 20300, "head": 100.0},
+            }],
+            "parameters": {
+                "allocation": {
+                    "intra_station": {
+                        "parameters": {
+                            "max_output_power_delta": 1200.0,
+                            "default_efficiency": 0.91,
+                        }
+                    }
+                }
+            },
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        evidence = output.evidence["stations"][0]
+        self.assertEqual(
+            "allocation.intra_station.parameters",
+            evidence["intra_station_parameter_source"],
+        )
+        self.assertAlmostEqual(
+            1200.0,
+            evidence["allocation"]["max_output_power_delta"],
+        )
+
+    def test_runtime_actuator_status_overrides_static_profile_state(self):
+        module = _load_power_control_module()
+        models = _load_power_control_models()
+        runtime = module.build_runtime()
+
+        output = runtime.solve(models.ControlAlgorithmInput.model_validate({
+            "schema_version": "1.0",
+            "algorithm_type": "power_station_output_power_allocation",
+            "algorithm_version": "1.0.0",
+            "control_task_type": "STATION_POWER_ALLOCATION",
+            "context": {
+                "request_id": "request-power-runtime-state-priority",
+                "context_id": "TASK-PHASE-14-5-STATE",
+                "compute_step": 1,
+                "target_object_type": "PowerStation",
+                "target_object_id": 20300,
+            },
+            "signals": [{
+                "type": "TARGET",
+                "object_type": "PowerStation",
+                "object_id": 20300,
+                "value_type": "output_power",
+                "value": 0.0,
+            }],
+            "actuators": [{
+                "object_type": "Turbine",
+                "object_id": 20301,
+                "available": True,
+                "status": "OFF",
+                "values": {"output_power": 0.0},
+                "ranges": {"output_power": {"min_value": 0.0, "max_value": 100.0}},
+                "attributes": {
+                    "station_object_id": 20300,
+                    "head": 100.0,
+                    "state": 1,
+                },
+            }],
+        }))
+
+        self.assertEqual("CONTINUE", output.status.value)
+        state = output.evidence["stations"][0]["allocation"]["turbine_targets"][0][
+            "v47_runtime_observations"
+        ]["state"]
+        self.assertEqual(0, state["value"])
+        self.assertEqual("runtime_actuator_status", state["source"])
+
     def test_runtime_keeps_distinct_profile_parameters_through_imported_v47(self):
         module = _load_power_control_module()
         models = _load_power_control_models()
@@ -484,7 +594,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             observations = evidence["v47_runtime_observations"]
             self.assertAlmostEqual(design_head, observations["head"]["value"])
             self.assertEqual("runtime_observation", observations["head"]["source"])
-            self.assertEqual("profile_turbine_config", observations["state"]["source"])
+            self.assertEqual("runtime_output_power_inference", observations["state"]["source"])
             self.assertEqual("runtime_observation", observations["current_output_power"]["source"])
             self.assertEqual([], evidence["v47_runtime_observation_fallback_fields"])
 
