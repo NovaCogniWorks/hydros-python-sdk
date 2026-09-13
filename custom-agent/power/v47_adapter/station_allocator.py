@@ -46,7 +46,14 @@ class ImportedV47StationAllocator:
 
         target_power = max(float(request.target_output_power), 0.0)
         session_key = self._session_key(request)
-        unit_resolutions = [self._resolve_unit_config(turbine) for turbine in request.turbines]
+        unit_resolutions = [
+            self._resolve_unit_config(
+                turbine,
+                station_max_output_power_delta=getattr(request, "max_output_power_delta", None),
+                default_efficiency=getattr(request, "default_efficiency", None),
+            )
+            for turbine in request.turbines
+        ]
         unit_cfgs = [config for config, _ in unit_resolutions]
         unit_parameter_evidence = [evidence for _, evidence in unit_resolutions]
         config_signature = self._config_signature(request, unit_cfgs)
@@ -74,12 +81,20 @@ class ImportedV47StationAllocator:
         target_by_index = {index: 0.0 for index in range(len(request.turbines))}
         for index, power in zip(selected_indices, selected_powers):
             target_by_index[int(index)] = float(power)
+        raw_targets = [max(float(target_by_index.get(index, 0.0)), 0.0) for index in range(len(request.turbines))]
+        projected_targets, target_bounds = self._project_targets(
+            request.turbines,
+            unit_cfgs,
+            raw_targets,
+            unit_parameter_evidence,
+        )
 
         allocations: List[ImportedV47TurbineAllocation] = []
         turbine_targets: List[Dict[str, Any]] = []
         for index, turbine in enumerate(request.turbines):
             unit = station.multi_station[index]
-            target = max(float(target_by_index.get(index, 0.0)), 0.0)
+            raw_target = raw_targets[index]
+            target = projected_targets[index]
             flow = float(station._unit_flow_for_power(unit, target))
             allocations.append(
                 ImportedV47TurbineAllocation(
@@ -93,11 +108,13 @@ class ImportedV47StationAllocator:
                 turbine,
                 unit,
                 index,
+                raw_target,
                 target,
                 flow,
                 selected_index_set,
                 unit_parameter_evidence[index],
                 self._runtime_observation_evidence(turbine, unit),
+                target_bounds[index],
             ))
 
         allocated_power = sum(item.target_output_power for item in allocations)
@@ -112,8 +129,6 @@ class ImportedV47StationAllocator:
             "allocated_output_power": allocated_power,
             "estimated_turbine_water_flow": estimated_flow,
             "available_turbine_count": len(request.turbines),
-            "feedback_used": bool(getattr(request, "stage_hints", None)),
-            "stage_hint_count": len(getattr(request, "stage_hints", []) or []),
             "allocation": {
                 "mode": mode,
                 "allocator_source": "imported_v47_original",
@@ -128,6 +143,8 @@ class ImportedV47StationAllocator:
                 "total_current_output_power": sum(max(float(t.current_output_power), 0.0) for t in request.turbines),
                 "allocated_output_power": allocated_power,
                 "unallocated_output_power": max(target_power - allocated_power, 0.0),
+                "overallocated_output_power": max(allocated_power - target_power, 0.0),
+                "allocation_gap": target_power - allocated_power,
                 "total_min_output_power": sum(float(cfg["min_power"]) for cfg in unit_cfgs),
                 "total_min_start_power": sum(float(cfg["design_power"]) * 0.10 for cfg in unit_cfgs),
                 "total_max_output_power": sum(float(cfg["max_power"]) for cfg in unit_cfgs),
@@ -166,7 +183,7 @@ class ImportedV47StationAllocator:
                     if index not in selected_index_set
                 ],
                 "turbine_targets": turbine_targets,
-                "clipped": self._clipped_evidence(target_power, allocated_power, unit_cfgs),
+                "clipped": self._clipped_evidence(target_power, turbine_targets, unit_cfgs),
                 "v47_original_result": result,
             },
         }
@@ -225,7 +242,13 @@ class ImportedV47StationAllocator:
         config, _ = self._resolve_unit_config(turbine)
         return config
 
-    def _resolve_unit_config(self, turbine: Any) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    def _resolve_unit_config(
+        self,
+        turbine: Any,
+        *,
+        station_max_output_power_delta: Any = None,
+        default_efficiency: Any = None,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
         sources = dict(getattr(turbine, "parameter_sources", {}) or {})
         fallback_fields: List[str] = []
 
@@ -266,51 +289,96 @@ class ImportedV47StationAllocator:
             if "max_head" not in fallback_fields:
                 fallback_fields.append("max_head")
 
-        max_power, max_power_source, max_power_fallback = self._first_positive_with_source(
-            turbine,
-            sources,
-            ("max_power", "max_output_power", "design_power"),
-            max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 1.0),
-            "algorithm_fallback:max(current_output_power,1.0)",
-        )
         design_power_input = self._positive_or_none(getattr(turbine, "design_power", None))
+        runtime_max_power = self._positive_or_none(getattr(turbine, "max_output_power", None))
+        physical_max_power = self._positive_or_none(getattr(turbine, "max_power", None))
+        physical_max_fallback = False
+        if physical_max_power is not None:
+            physical_max_source = sources.get("max_power", "control_input")
+        elif design_power_input is not None:
+            physical_max_power = design_power_input
+            physical_max_source = f"derived_from:{sources.get('design_power', 'control_input')}"
+            physical_max_fallback = True
+        elif runtime_max_power is not None:
+            physical_max_power = runtime_max_power
+            physical_max_source = f"derived_from:{sources.get('max_output_power', 'runtime_range')}"
+            physical_max_fallback = True
+        else:
+            physical_max_power = max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 1.0)
+            physical_max_source = "algorithm_fallback:max(current_output_power,1.0)"
+            physical_max_fallback = True
+
         if design_power_input is not None:
             design_power = design_power_input
             design_power_source = sources.get("design_power", "control_input")
         else:
-            design_power = max_power
-            design_power_source = f"derived_from:{max_power_source}"
+            design_power = physical_max_power
+            design_power_source = f"derived_from:{physical_max_source}"
             fallback_fields.append("design_power")
 
-        min_power, min_power_source, min_power_fallback = self._first_positive_with_source(
-            turbine,
-            sources,
-            ("min_power", "min_output_power"),
-            min(max_power, max(design_power * 0.10, 1e-6)),
-            "algorithm_fallback:min(max_power,design_power*0.10)",
+        physical_min_power = self._positive_or_none(getattr(turbine, "min_power", None))
+        physical_min_fallback = False
+        if physical_min_power is not None:
+            physical_min_source = sources.get("min_power", "control_input")
+        else:
+            physical_min_power = min(physical_max_power, max(design_power * 0.10, 1e-6))
+            physical_min_source = "algorithm_fallback:min(physical_max_power,design_power*0.10)"
+            physical_min_fallback = True
+
+        runtime_min_power = self._non_negative_or_none(getattr(turbine, "min_output_power", None))
+        effective_min_power = max(physical_min_power, runtime_min_power or 0.0)
+        effective_max_power = min(
+            value for value in (physical_max_power, runtime_max_power) if value is not None
         )
-        if max_power_fallback:
+        effective_min_source = (
+            sources.get("min_output_power", "runtime_range")
+            if runtime_min_power is not None and runtime_min_power > physical_min_power
+            else physical_min_source
+        )
+        effective_max_source = (
+            sources.get("max_output_power", "runtime_range")
+            if runtime_max_power is not None and runtime_max_power < physical_max_power
+            else physical_max_source
+        )
+        if effective_min_power > effective_max_power + 1e-9:
+            raise ValueError(
+                "Empty turbine output-power constraint intersection: "
+                f"object_id={turbine.object_id}, physical=[{physical_min_power},{physical_max_power}], "
+                f"runtime=[{runtime_min_power},{runtime_max_power}]."
+            )
+
+        if physical_max_fallback:
             fallback_fields.append("max_power")
-        if min_power_fallback:
+        if physical_min_fallback:
             fallback_fields.append("min_power")
-        if max_power <= min_power:
-            max_power = min_power + 1e-6
-            max_power_source = "algorithm_adjustment:min_power+1e-6"
-            if "max_power" not in fallback_fields:
-                fallback_fields.append("max_power")
 
         power_ramp_rate_input = self._positive_or_none(getattr(turbine, "power_ramp_rate", None))
-        power_ramp_rate = power_ramp_rate_input or max(10.0, design_power * 0.10)
-        power_ramp_rate_source = (
+        physical_ramp_rate = power_ramp_rate_input or max(10.0, design_power * 0.10)
+        physical_ramp_source = (
             sources.get("power_ramp_rate", "control_input")
             if power_ramp_rate_input is not None
             else "algorithm_fallback:max(10.0,design_power*0.10)"
         )
         if power_ramp_rate_input is None:
             fallback_fields.append("power_ramp_rate")
+        profile_ramp_rate = self._positive_or_none(station_max_output_power_delta)
+        power_ramp_rate = min(
+            value for value in (physical_ramp_rate, profile_ramp_rate) if value is not None
+        )
+        power_ramp_rate_source = (
+            physical_ramp_source
+            if profile_ramp_rate is None or physical_ramp_rate <= profile_ramp_rate
+            else "station_profile:max_output_power_delta"
+        )
 
+        default_design_efficiency = self._positive_or_none(default_efficiency) or 0.93
+        default_design_efficiency_source = (
+            "station_profile:default_efficiency"
+            if self._positive_or_none(default_efficiency) is not None
+            else "algorithm_fallback:0.93"
+        )
         efficiency_defaults = {
-            "design_efficiency": (0.93, "algorithm_fallback:0.93"),
+            "design_efficiency": (default_design_efficiency, default_design_efficiency_source),
             "eta_head_coeff": (0.20, "algorithm_fallback:0.20"),
             "eta_power_coeff": (0.40, "algorithm_fallback:0.40"),
         }
@@ -334,8 +402,8 @@ class ImportedV47StationAllocator:
             "min_head": min_head,
             "max_head": max_head,
             "design_power": design_power,
-            "min_power": min_power,
-            "max_power": max_power,
+            "min_power": effective_min_power,
+            "max_power": effective_max_power,
             "power_ramp_rate": power_ramp_rate,
             "design_efficiency": efficiency_values["design_efficiency"],
             "eta_head_coeff": efficiency_values["eta_head_coeff"],
@@ -346,8 +414,8 @@ class ImportedV47StationAllocator:
             "min_head": min_head_source,
             "max_head": max_head_source,
             "design_power": design_power_source,
-            "min_power": min_power_source,
-            "max_power": max_power_source,
+            "min_power": effective_min_source,
+            "max_power": effective_max_source,
             "power_ramp_rate": power_ramp_rate_source,
             **efficiency_sources,
         }
@@ -362,6 +430,29 @@ class ImportedV47StationAllocator:
         return config, {
             "parameters": parameter_evidence,
             "fallback_fields": fallback_fields,
+            "constraints": {
+                "physical": {
+                    "min": float(physical_min_power),
+                    "max": float(physical_max_power),
+                    "min_source": physical_min_source,
+                    "max_source": physical_max_source,
+                    "ramp": float(physical_ramp_rate),
+                    "ramp_source": physical_ramp_source,
+                },
+                "runtime": {
+                    "min": float(runtime_min_power or 0.0),
+                    "max": float(runtime_max_power) if runtime_max_power is not None else None,
+                    "min_source": sources.get("min_output_power", "runtime_range"),
+                    "max_source": sources.get("max_output_power", "runtime_range"),
+                },
+                "effective": {
+                    "min": float(effective_min_power),
+                    "max": float(effective_max_power),
+                },
+                "profile_ramp": float(profile_ramp_rate) if profile_ramp_rate is not None else None,
+                "effective_ramp": float(power_ramp_rate),
+                "effective_ramp_source": power_ramp_rate_source,
+            },
         }
 
     def _turbine_target_evidence(
@@ -369,18 +460,21 @@ class ImportedV47StationAllocator:
         turbine: Any,
         unit: Any,
         index: int,
+        raw_target: float,
         target: float,
         flow: float,
         selected_indices: Sequence[int],
         parameter_evidence: Dict[str, Any],
         runtime_observation_evidence: Dict[str, Any],
+        target_bound: Dict[str, float],
     ) -> Dict[str, Any]:
         return {
             "object_id": int(turbine.object_id),
             "current_output_power": max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 0.0),
             "state": getattr(turbine, "state", None),
             "selected": index in selected_indices,
-            "raw_target_output_power": target,
+            "commanded_on": target > 1e-9,
+            "raw_target_output_power": raw_target,
             "projected_target_output_power": target,
             "target_output_power": target,
             "estimated_water_flow": flow,
@@ -391,13 +485,14 @@ class ImportedV47StationAllocator:
             "min_start_power": unit.min_start_power,
             "design_power": unit.design_power,
             "power_ramp_rate": unit.power_ramp_rate,
-            "lower_bound": 0.0,
-            "upper_bound": unit.max_power,
+            "lower_bound": target_bound["lower"],
+            "upper_bound": target_bound["upper"],
             "head": unit.head,
             "efficiency": unit.efficiency,
             "design_efficiency": getattr(unit.nhq, "design_efficiency", None),
             "v47_parameters": parameter_evidence["parameters"],
             "v47_parameter_fallback_fields": parameter_evidence["fallback_fields"],
+            "constraints": parameter_evidence["constraints"],
             "v47_runtime_observations": runtime_observation_evidence["observations"],
             "v47_runtime_observation_fallback_fields": runtime_observation_evidence["fallback_fields"],
         }
@@ -442,30 +537,74 @@ class ImportedV47StationAllocator:
         }
         return {"observations": observations, "fallback_fields": fallback_fields}
 
-    @classmethod
-    def _first_positive_with_source(
-        cls,
-        turbine: Any,
-        sources: Dict[str, str],
-        field_names: Sequence[str],
-        fallback_value: float,
-        fallback_source: str,
-    ) -> tuple[float, str, bool]:
-        for index, field_name in enumerate(field_names):
-            value = cls._positive_or_none(getattr(turbine, field_name, None))
-            if value is not None:
-                source = sources.get(field_name, "control_input")
-                if index == 0:
-                    return value, source, False
-                return value, f"derived_from:{source}", True
-        return float(fallback_value), fallback_source, True
-
     @staticmethod
     def _positive_or_none(value: Any) -> Optional[float]:
         if value is None:
             return None
         candidate = float(value)
         return candidate if candidate > 0.0 else None
+
+    @staticmethod
+    def _non_negative_or_none(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        candidate = float(value)
+        return candidate if candidate >= 0.0 else None
+
+    @classmethod
+    def _project_targets(
+        cls,
+        turbines: Sequence[Any],
+        unit_cfgs: Sequence[Dict[str, Any]],
+        raw_targets: Sequence[float],
+        unit_parameter_evidence: Sequence[Dict[str, Any]],
+    ) -> tuple[List[float], List[Dict[str, float]]]:
+        projected: List[float] = []
+        bounds: List[Dict[str, float]] = []
+        for turbine, cfg, raw_target, parameter_evidence in zip(
+            turbines,
+            unit_cfgs,
+            raw_targets,
+            unit_parameter_evidence,
+        ):
+            current = max(float(getattr(turbine, "current_output_power", 0.0) or 0.0), 0.0)
+            effective_min = float(cfg["min_power"])
+            effective_max = float(cfg["max_power"])
+            effective_ramp = float(cfg["power_ramp_rate"])
+            runtime_min = float(parameter_evidence["constraints"]["runtime"]["min"])
+            ramp_lower = max(0.0, current - effective_ramp)
+            ramp_upper = current + effective_ramp
+
+            lower = ramp_lower
+            upper = min(effective_max, ramp_upper)
+            if lower > upper + 1e-9:
+                raise ValueError(
+                    "No feasible turbine output-power target: "
+                    f"object_id={turbine.object_id}, current={current}, "
+                    f"effective=[{effective_min},{effective_max}], effective_ramp={effective_ramp}."
+                )
+            target = max(lower, min(upper, float(raw_target)))
+            if runtime_min > 0.0 and 1e-9 < target < runtime_min:
+                online_lower = max(runtime_min, lower)
+                online_feasible = online_lower <= upper + 1e-9
+                off_feasible = lower <= 1e-9
+                if not online_feasible and not off_feasible:
+                    raise ValueError(
+                        "No feasible turbine runtime-range target: "
+                        f"object_id={turbine.object_id}, current={current}, "
+                        f"runtime_min={runtime_min}, upper={upper}, effective_ramp={effective_ramp}."
+                    )
+                if not online_feasible:
+                    target = 0.0
+                elif not off_feasible:
+                    target = online_lower
+                else:
+                    online_target = max(online_lower, min(upper, float(raw_target)))
+                    target = 0.0 if raw_target <= online_lower / 2.0 else online_target
+
+            projected.append(float(target))
+            bounds.append({"lower": float(lower), "upper": float(upper)})
+        return projected, bounds
 
     @staticmethod
     def _runtime_state(turbine: Any, current_power: float) -> int:
@@ -556,17 +695,41 @@ class ImportedV47StationAllocator:
         )
 
     @staticmethod
-    def _clipped_evidence(target_power: float, allocated_power: float, unit_cfgs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _clipped_evidence(
+        target_power: float,
+        turbine_targets: Sequence[Dict[str, Any]],
+        unit_cfgs: Sequence[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        clipped = []
+        for target in turbine_targets:
+            raw = float(target["raw_target_output_power"])
+            projected = float(target["projected_target_output_power"])
+            if abs(raw - projected) <= 1e-9:
+                continue
+            lower = float(target["lower_bound"])
+            upper = float(target["upper_bound"])
+            if raw > upper + 1e-9:
+                reason = "above_upper_bound"
+            elif raw < lower - 1e-9:
+                reason = "below_lower_bound"
+            else:
+                reason = "projected_to_feasible_target"
+            clipped.append({
+                "object_id": int(target["object_id"]),
+                "reason": reason,
+                "raw_value": raw,
+                "projected_value": projected,
+                "min_value": lower,
+                "max_value": upper,
+            })
         total_max = sum(float(cfg["max_power"]) for cfg in unit_cfgs)
-        if target_power <= total_max + 1e-9 and abs(target_power - allocated_power) <= 1e-6:
-            return []
-        if target_power > total_max + 1e-9:
-            return [
+        if target_power > total_max + 1e-9 and not clipped:
+            clipped.extend(
                 {
                     "object_id": int(cfg["ID"]),
                     "reason": "above_upper_bound",
                     "max_value": float(cfg["max_power"]),
                 }
                 for cfg in unit_cfgs
-            ]
-        return []
+            )
+        return clipped

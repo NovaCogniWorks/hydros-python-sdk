@@ -2312,6 +2312,22 @@ class HydroReservoir:
         self.min_stage = float(cfg["min_stage"])
         self.design_stage = float(cfg["design_stage"])
         self.max_stage = float(cfg["max_stage"])
+        self.operating_min_stage = _clip(
+            float(cfg.get("operating_min_stage", self.min_stage)),
+            self.min_stage,
+            self.max_stage,
+        )
+        self.operating_max_stage = _clip(
+            float(cfg.get("operating_max_stage", self.max_stage)),
+            self.min_stage,
+            self.max_stage,
+        )
+        if self.operating_min_stage > self.operating_max_stage:
+            raise ValueError(
+                "Invalid reservoir operating stage limits: "
+                f"reservoir_id={self.id}, operating_min_stage={self.operating_min_stage}, "
+                f"operating_max_stage={self.operating_max_stage}."
+            )
 
         self.min_capacity = float(cfg["min_capacity"])
         self.design_capacity = float(cfg["design_capacity"])
@@ -2320,8 +2336,12 @@ class HydroReservoir:
         self.stages = np.array([self.min_stage, self.design_stage, self.max_stage], dtype=float)
         self.capacities = np.array([self.min_capacity, self.design_capacity, self.max_capacity], dtype=float)
 
-        self.target_stage = self.design_stage
-        self.target_capacity = self.design_capacity
+        self.target_stage = _clip(
+            self.design_stage,
+            self.operating_min_stage,
+            self.operating_max_stage,
+        )
+        self.target_capacity = self.stage_to_capacity(self.target_stage)
         self.current_stage = self.design_stage
         self.current_capacity = self.design_capacity
 
@@ -2637,9 +2657,21 @@ class HydroResStairs:
         green = float(band["green"])
         yellow = float(band["yellow"])
         current_stage = float(res.current_stage if stage is None else stage)
-        delta = current_stage - float(res.design_stage)
+        target_stage = _clip(
+            float(res.target_stage),
+            float(res.operating_min_stage),
+            float(res.operating_max_stage),
+        )
+        delta = current_stage - target_stage
         abs_delta = abs(delta)
-        if abs_delta <= green:
+        outside_operating_range = (
+            current_stage < float(res.operating_min_stage)
+            or current_stage > float(res.operating_max_stage)
+        )
+        if outside_operating_range:
+            zone = "red"
+            denom = yellow
+        elif abs_delta <= green:
             zone = "green"
             denom = green
         elif abs_delta <= yellow:
@@ -2649,11 +2681,14 @@ class HydroResStairs:
             zone = "red"
             denom = yellow
 
-        direction = 0.0 if abs_delta <= green else _clip(delta / max(denom, 1e-6), -2.0, 2.0)
+        direction = 0.0 if zone == "green" else _clip(delta / max(denom, 1e-6), -2.0, 2.0)
         return {
             "station": res.name,
             "stage": current_stage,
             "design_stage": float(res.design_stage),
+            "target_stage": target_stage,
+            "operating_min_stage": float(res.operating_min_stage),
+            "operating_max_stage": float(res.operating_max_stage),
             "delta": delta,
             "zone": zone,
             "direction": direction,
@@ -2931,16 +2966,33 @@ def _apply_yaml_basic_parameters(
     target_stage_by_node: Dict[int, float] = {}
     for node_id, idx in NODE_TO_INDEX.items():
         cfg = configs[idx]
+        cfg["operating_min_stage"] = float(cfg.get("operating_min_stage", cfg["min_stage"]))
+        cfg["operating_max_stage"] = float(cfg.get("operating_max_stage", cfg["max_stage"]))
         if node_id in limits:
             limit = limits[node_id]
-            cfg["min_stage"] = float(limit.get("min_water_level", cfg["min_stage"]))
-            cfg["max_stage"] = float(limit.get("max_water_level", cfg["max_stage"]))
-            cfg["design_stage"] = _clip(
-                cfg["design_stage"],
-                cfg["min_stage"],
-                cfg["max_stage"],
+            cfg["operating_min_stage"] = float(
+                limit.get("min_water_level", cfg["operating_min_stage"])
+            )
+            cfg["operating_max_stage"] = float(
+                limit.get("max_water_level", cfg["operating_max_stage"])
             )
             cfg["max_spill_q"] = float(limit.get("max_flow", cfg.get("max_spill_q", 20000.0)))
+        cfg["operating_min_stage"] = _clip(
+            cfg["operating_min_stage"],
+            cfg["min_stage"],
+            cfg["max_stage"],
+        )
+        cfg["operating_max_stage"] = _clip(
+            cfg["operating_max_stage"],
+            cfg["min_stage"],
+            cfg["max_stage"],
+        )
+        if cfg["operating_min_stage"] > cfg["operating_max_stage"]:
+            raise ValueError(
+                "Invalid reservoir operating stage limits: "
+                f"node_id={node_id}, operating_min_stage={cfg['operating_min_stage']}, "
+                f"operating_max_stage={cfg['operating_max_stage']}."
+            )
 
         initial_stage = None
         if (node_id, "water_level") in initial:
@@ -2955,8 +3007,8 @@ def _apply_yaml_basic_parameters(
 
         target_stage_by_node[node_id] = _clip(
             first_water_level.get(node_id, cfg["design_stage"]),
-            cfg["min_stage"],
-            cfg["max_stage"],
+            cfg["operating_min_stage"],
+            cfg["operating_max_stage"],
         )
 
     return configs, target_stage_by_node
@@ -3080,7 +3132,7 @@ def _set_step_target_stages(
     for node_id, idx in NODE_TO_INDEX.items():
         res = reservoirs.Capacity_Stairs[idx]
         target = float(target_stage_by_node[node_id][step_idx])
-        res.target_stage = _clip(target, res.min_stage, res.max_stage)
+        res.target_stage = _clip(target, res.operating_min_stage, res.operating_max_stage)
         res.target_capacity = res.stage_to_capacity(res.target_stage)
 
 

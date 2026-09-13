@@ -295,7 +295,6 @@ class PowerStationOutputPowerAllocationAlgorithm:
                         )
                     ),
                     default_efficiency=default_efficiency,
-                    stage_hints=self._stage_hints(input_data),
                     context_id=input_data.context.context_id,
                     compute_step=input_data.context.compute_step,
                     station_name=str(target_signal.attributes.get("object_name") or target_signal.attributes.get("name") or ""),
@@ -341,6 +340,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
             }
             evidence = self._build_station_evidence(allocation_result)
             evidence["head_observation"] = self._head_observation_evidence(head_observation)
+            evidence["head_observation_used"] = head_observation is not None
             evidence["intra_station_parameter_source"] = parameter_source
             station_evidence.append(evidence)
             allocation_evidence = evidence["allocation"]
@@ -348,8 +348,8 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 "Power V47 output allocation evidence: request_id=%s, station_id=%s, "
                 "target_output_power=%.6f, allocated_output_power=%.6f, "
                 "estimated_turbine_water_flow=%.6f, mode=%s, total_current_output_power=%s, "
-                "max_output_power_delta=%s, default_efficiency=%s, feedback_used=%s, "
-                "stage_hint_count=%s, allocator_source=%s, core_session_id=%s, "
+                "max_output_power_delta=%s, default_efficiency=%s, head_observation_used=%s, "
+                "allocator_source=%s, core_session_id=%s, "
                 "session_created=%s, state_memory_used=%s, commitment_before=%s, "
                 "commitment_after=%s, hold_remaining=%s, target_exceeds_known_capacity=%s, "
                 "head_observation=%s, clipped_count=%s, turbines=%s",
@@ -362,8 +362,7 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 self._format_optional_float(allocation_evidence.get("total_current_output_power")),
                 self._format_optional_float(allocation_evidence.get("max_output_power_delta")),
                 self._format_optional_float(default_efficiency),
-                evidence["feedback_used"],
-                evidence["stage_hint_count"],
+                evidence["head_observation_used"],
                 allocation_evidence.get("allocator_source"),
                 allocation_evidence.get("core_session_id"),
                 allocation_evidence.get("session_created"),
@@ -610,8 +609,6 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 for allocation in allocation_result.turbine_allocations
             ],
             "allocation": allocation_result.evidence["allocation"],
-            "feedback_used": allocation_result.evidence["feedback_used"],
-            "stage_hint_count": allocation_result.evidence["stage_hint_count"],
         }
 
     @staticmethod
@@ -658,29 +655,6 @@ class PowerStationOutputPowerAllocationAlgorithm:
                 f"{name}={cls._format_optional_float(detail.get('value'))}@{detail.get('source')}"
             )
         return "{" + ",".join(parts) + "}"
-
-    def _stage_hints(self, input_data: ControlAlgorithmInput) -> List[Dict[str, Any]]:
-        hints = []
-        configured_hints = input_data.parameters.get("stage_hints", [])
-        if isinstance(configured_hints, list):
-            hints.extend(item for item in configured_hints if isinstance(item, dict))
-        for signal in input_data.signals:
-            if (
-                signal.type != SignalType.OBSERVATION
-                or signal.value is None
-                or signal.value_type not in {"stage", "water_level"}
-            ):
-                continue
-            hints.append(
-                {
-                    "object_type": signal.object_type,
-                    "object_id": signal.object_id,
-                    "metrics_code": signal.value_type,
-                    "value": float(signal.value),
-                    "attributes": dict(signal.attributes or {}),
-                }
-            )
-        return hints
 
     @staticmethod
     def _select_station_head_observation(

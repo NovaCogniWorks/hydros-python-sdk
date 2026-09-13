@@ -15,10 +15,75 @@ if POWER_MPC_DIR not in sys.path:
 
 from hydrosim_api import HydroSimulationApi
 from hydrosim.input_resolver import HydroSimulationInputResolver
-from hydrosim.runtime import _upstream_inflow_series
+from hydrosim.config import FLOW_CONFIGS
+from hydrosim.runtime import (
+    HydroReservoir,
+    HydroResStairs,
+    _apply_yaml_basic_parameters,
+    _upstream_inflow_series,
+)
 
 
 class TestPowerHydroSimInflowPlanning(unittest.TestCase):
+    def test_operating_stage_limits_do_not_rewrite_physical_capacity_curve(self):
+        narrow_constraints = {
+            "control_targets": [{
+                "node_id": 20100,
+                "min_water_level": 830.0,
+                "max_water_level": 845.0,
+            }]
+        }
+        wide_constraints = {
+            "control_targets": [{
+                "node_id": 20100,
+                "min_water_level": 800.0,
+                "max_water_level": 852.0,
+            }]
+        }
+
+        narrow_configs, narrow_targets = _apply_yaml_basic_parameters(
+            FLOW_CONFIGS,
+            narrow_constraints,
+            {},
+            {},
+        )
+        wide_configs, _ = _apply_yaml_basic_parameters(
+            FLOW_CONFIGS,
+            wide_constraints,
+            {},
+            {},
+        )
+        narrow = HydroReservoir(1, "narrow", narrow_configs[0])
+        wide = HydroReservoir(1, "wide", wide_configs[0])
+
+        self.assertAlmostEqual(narrow.stage_to_capacity(840.0), wide.stage_to_capacity(840.0))
+        self.assertEqual(FLOW_CONFIGS[0]["min_stage"], narrow.min_stage)
+        self.assertEqual(FLOW_CONFIGS[0]["max_stage"], narrow.max_stage)
+        self.assertEqual(830.0, narrow.operating_min_stage)
+        self.assertEqual(845.0, narrow.operating_max_stage)
+        self.assertGreaterEqual(narrow_targets[20100], narrow.operating_min_stage)
+        self.assertLessEqual(narrow_targets[20100], narrow.operating_max_stage)
+
+    def test_internal_stage_hint_uses_operating_target_and_boundaries(self):
+        reservoir = HydroReservoir(1, "reservoir", {
+            **FLOW_CONFIGS[0],
+            "operating_min_stage": 830.0,
+            "operating_max_stage": 845.0,
+        })
+        reservoir.current_stage = 829.0
+        reservoir.target_stage = 840.0
+        stairs = HydroResStairs.__new__(HydroResStairs)
+        stairs.Capacity_Stairs = [reservoir]
+        stairs.stage_zone_bands = [{"green": 1.0, "yellow": 3.0}]
+
+        hint = stairs.stage_state(0)
+
+        self.assertEqual(840.0, hint["target_stage"])
+        self.assertEqual(830.0, hint["operating_min_stage"])
+        self.assertEqual(845.0, hint["operating_max_stage"])
+        self.assertEqual(-11.0, hint["delta"])
+        self.assertEqual("red", hint["zone"])
+
     def test_weather_forecast_unified_canal_overrides_station_inflow(self):
         base_event = {
             "object_time_series": [

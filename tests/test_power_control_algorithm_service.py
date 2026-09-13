@@ -43,6 +43,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                     max_output_power=100.0,
                     head=100.0,
                     efficiency=0.9,
+                    power_ramp_rate=1000.0,
                 ),
                 allocation.TurbinePowerInput(
                     object_id=20302,
@@ -51,6 +52,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                     max_output_power=100.0,
                     head=100.0,
                     efficiency=0.9,
+                    power_ramp_rate=1000.0,
                 ),
             ],
         ))
@@ -83,22 +85,24 @@ class PowerAllocationModuleTest(unittest.TestCase):
                 allocation.TurbinePowerInput(
                     object_id=20101,
                     current_output_power=0.0,
-                    min_output_power=200.0,
+                    min_output_power=0.0,
                     max_output_power=650.0,
                     state=1,
                     min_power=200.0,
                     max_power=650.0,
                     design_power=600.0,
+                    power_ramp_rate=1000.0,
                 ),
                 allocation.TurbinePowerInput(
                     object_id=20102,
                     current_output_power=0.0,
-                    min_output_power=200.0,
+                    min_output_power=0.0,
                     max_output_power=650.0,
                     state=1,
                     min_power=200.0,
                     max_power=650.0,
                     design_power=600.0,
+                    power_ramp_rate=1000.0,
                 ),
             ],
         ))
@@ -170,6 +174,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                     current_output_power=40.0,
                     min_output_power=0.0,
                     max_output_power=100.0,
+                    power_ramp_rate=1000.0,
                 )
             ],
         ))
@@ -197,6 +202,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                     max_head=80.0,
                     design_power=100.0,
                     design_efficiency=0.93,
+                    power_ramp_rate=1000.0,
                 )
             ],
         ))
@@ -223,7 +229,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                 allocation.TurbinePowerInput(
                     object_id=20301,
                     current_output_power=0.0,
-                    min_output_power=20.0,
+                    min_output_power=0.0,
                     max_output_power=120.0,
                     state=1,
                     min_power=20.0,
@@ -234,6 +240,7 @@ class PowerAllocationModuleTest(unittest.TestCase):
                     max_head=80.0,
                     design_power=100.0,
                     design_efficiency=0.93,
+                    power_ramp_rate=1000.0,
                 )
             ],
         ))
@@ -248,6 +255,29 @@ class PowerAllocationModuleTest(unittest.TestCase):
             design_efficiency=0.93,
         ).query(50.0, 20.0)
         self.assertAlmostEqual(q_min * 10.0 / 20.0, result.estimated_water_flow)
+
+    def test_v47_allocator_consumes_station_default_efficiency_when_unit_value_is_missing(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        result = allocator.allocate_station(allocation.StationPowerAllocationInput(
+            station_id=20300,
+            target_output_power=50.0,
+            default_efficiency=0.88,
+            turbines=[allocation.TurbinePowerInput(
+                object_id=20301,
+                current_output_power=0.0,
+                min_output_power=0.0,
+                max_output_power=120.0,
+                design_power=100.0,
+                power_ramp_rate=1000.0,
+            )],
+        ))
+
+        parameter = result.evidence["allocation"]["turbine_targets"][0]["v47_parameters"]["design_efficiency"]
+        self.assertAlmostEqual(0.88, parameter["value"])
+        self.assertEqual("station_profile:default_efficiency", parameter["source"])
+        self.assertTrue(parameter["fallback"])
 
 
 class PowerControlAlgorithmServiceTest(unittest.TestCase):
@@ -339,7 +369,12 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
                     "available": True,
                     "values": {"output_power": 40.0},
                     "ranges": {"output_power": {"min_value": 0.0, "max_value": 100.0}},
-                    "attributes": {"station_object_id": 20300, "head": 100.0, "efficiency": 0.9},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "head": 100.0,
+                        "efficiency": 0.9,
+                        "power_ramp_rate": 1000.0,
+                    },
                 },
                 {
                     "object_type": "Turbine",
@@ -347,7 +382,12 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
                     "available": True,
                     "values": {"output_power": 20.0},
                     "ranges": {"output_power": {"min_value": 0.0, "max_value": 100.0}},
-                    "attributes": {"station_object_id": 20300, "head": 100.0, "efficiency": 0.9},
+                    "attributes": {
+                        "station_object_id": 20300,
+                        "head": 100.0,
+                        "efficiency": 0.9,
+                        "power_ramp_rate": 1000.0,
+                    },
                 },
             ],
         }))
@@ -369,7 +409,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
         fallback_evidence = output.evidence["stations"][0]["allocation"]["turbine_targets"][0]
         self.assertCountEqual(
             ["design_head", "min_head", "max_head", "design_power", "max_power",
-             "min_power", "power_ramp_rate", "design_efficiency", "eta_head_coeff",
+             "min_power", "design_efficiency", "eta_head_coeff",
              "eta_power_coeff"],
             fallback_evidence["v47_parameter_fallback_fields"],
         )
@@ -698,7 +738,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             },
             station_evidence["head_observation"],
         )
-        self.assertEqual(0, station_evidence["stage_hint_count"])
+        self.assertNotIn("stage_hint_count", station_evidence)
         for turbine in station_evidence["allocation"]["turbine_targets"]:
             head = turbine["v47_runtime_observations"]["head"]
             self.assertAlmostEqual(31.25, head["value"])
@@ -782,7 +822,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             self.assertEqual("runtime_observation", observations["head"]["source"])
             self.assertNotEqual("legacy_hydrosim_config", observations["state"]["source"])
 
-    def test_runtime_uses_v47_state_and_min_power_without_hard_min_floor(self):
+    def test_runtime_respects_positive_actuator_minimum_as_off_or_online_range(self):
         module = _load_power_control_module()
         models = _load_power_control_models()
         runtime = module.build_runtime()
@@ -841,8 +881,8 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             item.object_id: item.target_values["output_power"]
             for item in output.actuator_targets
         }
-        self.assertAlmostEqual(100.0, sum(targets.values()))
-        self.assertEqual(1, sum(1 for value in targets.values() if value > 0.0))
+        self.assertAlmostEqual(0.0, sum(targets.values()))
+        self.assertEqual(0, sum(1 for value in targets.values() if value > 0.0))
         station_evidence = output.evidence["stations"][0]
         allocation = station_evidence["allocation"]
         self.assertEqual("v47_unit_commitment", allocation["mode"])
@@ -879,7 +919,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
                     "available": True,
                     "values": {"output_power": 0.0},
                     "ranges": {"output_power": {"min_value": 0.0, "max_value": 50.0}},
-                    "attributes": {"station_object_id": 20300},
+                    "attributes": {"station_object_id": 20300, "power_ramp_rate": 1000.0},
                 },
                 {
                     "object_type": "Turbine",
@@ -887,7 +927,7 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
                     "available": True,
                     "values": {"output_power": 0.0},
                     "ranges": {"output_power": {"min_value": 0.0, "max_value": 70.0}},
-                    "attributes": {"station_object_id": 20300},
+                    "attributes": {"station_object_id": 20300, "power_ramp_rate": 1000.0},
                 },
             ],
         }))
@@ -909,7 +949,91 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
             all(item["reason"] == "above_upper_bound" for item in allocation["clipped"])
         )
 
-    def test_runtime_marks_feedback_used_from_observation_signals(self):
+    def test_v47_allocator_intersects_physical_and_runtime_power_ranges(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        result = allocator.allocate_station(allocation.StationPowerAllocationInput(
+            station_id=20300,
+            target_output_power=80.0,
+            max_output_power_delta=1000.0,
+            turbines=[allocation.TurbinePowerInput(
+                object_id=20301,
+                current_output_power=0.0,
+                min_output_power=0.0,
+                max_output_power=50.0,
+                min_power=10.0,
+                max_power=100.0,
+                design_power=100.0,
+                power_ramp_rate=1000.0,
+            )],
+        ))
+
+        self.assertAlmostEqual(50.0, result.allocated_output_power)
+        self.assertAlmostEqual(30.0, result.evidence["allocation"]["unallocated_output_power"])
+        target = result.evidence["allocation"]["turbine_targets"][0]
+        self.assertEqual(10.0, target["constraints"]["physical"]["min"])
+        self.assertEqual(100.0, target["constraints"]["physical"]["max"])
+        self.assertEqual(0.0, target["constraints"]["runtime"]["min"])
+        self.assertEqual(50.0, target["constraints"]["runtime"]["max"])
+        self.assertEqual(
+            {"min": 10.0, "max": 50.0},
+            target["constraints"]["effective"],
+        )
+
+    def test_v47_allocator_rejects_empty_physical_runtime_power_range(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Empty turbine output-power constraint intersection",
+        ):
+            allocator.allocate_station(allocation.StationPowerAllocationInput(
+                station_id=20300,
+                target_output_power=80.0,
+                turbines=[allocation.TurbinePowerInput(
+                    object_id=20301,
+                    current_output_power=0.0,
+                    min_output_power=0.0,
+                    max_output_power=50.0,
+                    min_power=60.0,
+                    max_power=100.0,
+                    design_power=100.0,
+                    power_ramp_rate=1000.0,
+                )],
+            ))
+
+    def test_v47_allocator_returns_reachable_target_when_profile_delta_is_tighter(self):
+        allocation = _load_power_allocation_module()
+        allocator = allocation.HydroSimV47PowerAllocator()
+
+        result = allocator.allocate_station(allocation.StationPowerAllocationInput(
+            station_id=20300,
+            target_output_power=80.0,
+            max_output_power_delta=1.0,
+            turbines=[allocation.TurbinePowerInput(
+                object_id=20301,
+                current_output_power=20.0,
+                min_output_power=0.0,
+                max_output_power=100.0,
+                min_power=10.0,
+                max_power=100.0,
+                design_power=100.0,
+                power_ramp_rate=25.0,
+            )],
+        ))
+
+        self.assertAlmostEqual(21.0, result.allocated_output_power)
+        self.assertAlmostEqual(59.0, result.evidence["allocation"]["unallocated_output_power"])
+        target = result.evidence["allocation"]["turbine_targets"][0]
+        self.assertAlmostEqual(80.0, target["raw_target_output_power"])
+        self.assertAlmostEqual(21.0, target["projected_target_output_power"])
+        self.assertAlmostEqual(1.0, target["constraints"]["effective_ramp"])
+        self.assertAlmostEqual(19.0, target["lower_bound"])
+        self.assertAlmostEqual(21.0, target["upper_bound"])
+
+    def test_runtime_reports_head_observation_instead_of_unused_stage_hints(self):
         module = _load_power_control_module()
         models = _load_power_control_models()
         runtime = module.build_runtime()
@@ -936,9 +1060,12 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
                     "type": "OBSERVATION",
                     "object_type": "PowerStation",
                     "object_id": 20300,
-                    "value_type": "water_level",
-                    "value": 612.3,
-                    "attributes": {"position_code": "up_stream"},
+                    "value_type": "head",
+                    "value": 31.25,
+                    "attributes": {
+                        "source": "ontology_observation_derived_head",
+                        "observation_step": 7,
+                    },
                 },
             ],
             "actuators": [{
@@ -952,8 +1079,14 @@ class PowerControlAlgorithmServiceTest(unittest.TestCase):
         }))
 
         station_evidence = output.evidence["stations"][0]
-        self.assertTrue(station_evidence["feedback_used"])
-        self.assertEqual(1, station_evidence["stage_hint_count"])
+        self.assertNotIn("feedback_used", station_evidence)
+        self.assertNotIn("stage_hint_count", station_evidence)
+        self.assertTrue(station_evidence["head_observation_used"])
+        self.assertEqual(
+            "ontology_observation_derived_head",
+            station_evidence["head_observation"]["source"],
+        )
+        self.assertAlmostEqual(31.25, station_evidence["head_observation"]["value"])
 
     def test_http_service_allocates_station_output_power_to_turbines(self):
         module = _load_power_control_module()
