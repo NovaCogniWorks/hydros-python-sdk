@@ -456,6 +456,15 @@ class HydroSimulationApi:
     def preview_step_station_power_allocation(self, step_index: int) -> Dict[str, Any]:
         """Preview station-level power allocation without advancing the live session."""
 
+        return self.preview_control_horizon(step_index, step_index)[0]
+
+    def preview_control_horizon(
+        self,
+        start_step_index: int,
+        end_step_index: int,
+    ) -> List[Dict[str, Any]]:
+        """Preview a contiguous V47 control horizon on one isolated planning copy."""
+
         session = self._require_session()
         if session.cancelled:
             raise RuntimeError("当前会话已取消，不能预览步进分配。")
@@ -463,16 +472,19 @@ class HydroSimulationApi:
         if step_runtime is None:
             raise RuntimeError("当前会话尚未生成可步进的仿真上下文，请先调用获取规划出力时间序列接口。")
 
-        target_step = int(step_index)
+        start_step = int(start_step_index)
+        end_step = int(end_step_index)
         total_steps = int(len(step_runtime.steps))
         if total_steps <= 0:
             raise RuntimeError("当前会话没有可执行的仿真步。")
-        if target_step < 0 or target_step >= total_steps:
-            raise IndexError(f"step_index={target_step} 超出仿真步范围 [0, {total_steps - 1}]。")
+        if start_step < 0 or end_step < start_step or end_step >= total_steps:
+            raise IndexError(
+                f"step range={start_step}-{end_step} 超出仿真步范围 [0, {total_steps - 1}]。"
+            )
 
         preview_runtime = copy.deepcopy(step_runtime)
         preview_current_step = int(getattr(session, "current_step_index", 0) or 0)
-        if target_step < preview_current_step:
+        if start_step < preview_current_step:
             preview_runtime = self._build_step_runtime(
                 session,
                 copy.deepcopy(step_runtime.merged_event),
@@ -490,36 +502,55 @@ class HydroSimulationApi:
             current_step_index=preview_current_step,
             cancelled=session.cancelled,
         )
-        planning_values_by_node = self._resolve_step_power_plan_values(
-            preview_runtime,
-            target_step,
-            [],
-        )
-        self._advance_runtime_to_target_step(
-            session=preview_session,
-            step_runtime=preview_runtime,
-            target_step=target_step,
-            planning_values_by_node=planning_values_by_node,
-        )
+        results: List[Dict[str, Any]] = []
+        for target_step in range(start_step, end_step + 1):
+            planning_values_by_node = self._resolve_step_power_plan_values(
+                preview_runtime,
+                target_step,
+                [],
+            )
+            self._advance_runtime_to_target_step(
+                session=preview_session,
+                step_runtime=preview_runtime,
+                target_step=target_step,
+                planning_values_by_node=planning_values_by_node,
+            )
 
-        station_step_outputs = self._build_station_step_outputs_from_runtime(preview_runtime, target_step)
-        stage_hints_usage = copy.deepcopy(
-            getattr(preview_runtime, "_stage_hint_usage_by_step", {}) or {}
-        )
-        target_stage_hints_usage = stage_hints_usage.get(target_step, {})
-        return {
-            "message": "站间出力分配预览成功。",
-            "current_step_index": target_step,
-            "source": "v47_inter_station_step_runtime",
-            "allocator_source": "imported_v47_original_hydrostair_step_execute",
-            "inter_station_dispatch_core": "HydroStair._station_dispatch",
-            "planning_total_power": self._normalize_output_value(sum(planning_values_by_node.values())),
-            "stage_hints_source": target_stage_hints_usage.get("source"),
-            "stage_hints_usage": stage_hints_usage,
-            "environment_observation_count": target_stage_hints_usage.get("environment_observation_count"),
-            "prediction_error_count": target_stage_hints_usage.get("prediction_error_count"),
-            "station_step_outputs": station_step_outputs,
-        }
+            station_step_outputs = self._build_station_step_outputs_from_runtime(
+                preview_runtime,
+                target_step,
+            )
+            device_step_outputs = self._build_device_step_outputs_from_runtime(
+                preview_runtime,
+                target_step,
+            )
+            stage_hints_usage = copy.deepcopy(
+                getattr(preview_runtime, "_stage_hint_usage_by_step", {}) or {}
+            )
+            target_stage_hints_usage = stage_hints_usage.get(target_step, {})
+            results.append(
+                {
+                    "message": "站间出力分配预览成功。",
+                    "current_step_index": target_step,
+                    "source": "v47_inter_station_step_runtime",
+                    "allocator_source": "imported_v47_original_hydrostair_step_execute",
+                    "inter_station_dispatch_core": "HydroStair._station_dispatch",
+                    "planning_total_power": self._normalize_output_value(
+                        sum(planning_values_by_node.values())
+                    ),
+                    "stage_hints_source": target_stage_hints_usage.get("source"),
+                    "stage_hints_usage": stage_hints_usage,
+                    "environment_observation_count": target_stage_hints_usage.get(
+                        "environment_observation_count"
+                    ),
+                    "prediction_error_count": target_stage_hints_usage.get(
+                        "prediction_error_count"
+                    ),
+                    "station_step_outputs": station_step_outputs,
+                    "device_step_outputs": device_step_outputs,
+                }
+            )
+        return results
 
     def _resolve_total_steps(self, station_power_series: List[Dict[str, Any]]) -> int:
         return max((len(station.get("time_series", [])) for station in station_power_series), default=0)
@@ -1066,6 +1097,13 @@ class HydroSimulationApi:
             reservoir = step_runtime.multi_reservoir.Capacity_Stairs[station_idx]
             head_history = list(getattr(station, "history", {}).get("head", []) or [])
             allocation_head = head_history[-1] if head_history else getattr(station, "head", None)
+            reservoir_history = getattr(reservoir, "history", {}) or {}
+            reservoir_evidence = {
+                key: values[-1]
+                for key in RESERVOIR_EVIDENCE_HISTORY_KEYS
+                for values in [list(reservoir_history.get(key, []) or [])]
+                if values
+            }
             head_inputs, head_observation_ready = self._resolve_head_observation_inputs(
                 step_runtime,
                 target_step,
@@ -1092,6 +1130,7 @@ class HydroSimulationApi:
                     "diversion_flow": self._normalize_output_value(
                         reservoir.history["current_outflow_discharge"][-1]
                     ),
+                    "reservoir_evidence": reservoir_evidence,
                 }
             )
         return outputs
@@ -1145,7 +1184,7 @@ class HydroSimulationApi:
         result_factory = self.service.core.result_factory
         outputs: List[Dict[str, Any]] = []
         seen: set[tuple[int, str]] = set()
-        for row in step_runtime.control_domains:
+        for row in getattr(step_runtime, "control_domains", []) or []:
             if row.get("device_id") is None:
                 continue
             device_id = int(row["device_id"])

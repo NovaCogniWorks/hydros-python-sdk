@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -89,7 +90,7 @@ from power_planning_config import PowerPlanningConfig
 
 logger = logging.getLogger(__name__)
 
-POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-v47-dynamic-head-observation"
+POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-13-flat-profile-and-init-fail-fast"
 POWER_STATION_TURBINE = "POWER_STATION_TURBINE"
 POWER_STATION_GATE = "POWER_STATION_GATE"
 MPC_STATION_FLOW_COMMAND_TYPE = DeviceValueTypeEnum.WATER_FLOW.code
@@ -237,8 +238,11 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._rolling_window_dataset: List[HorizonStep] = []
         self._pending_boundary_control_commands: List[Dict[str, Any]] = []
         self._pending_boundary_control_target_step: Optional[int] = None
+        self._pending_boundary_control_optimize_step: Optional[int] = None
+        self._pending_boundary_control_horizon_step: Optional[int] = None
         self._dispatched_control_target_steps: set[int] = set()
         self._power_planning_config: Optional[PowerPlanningConfig] = None
+        self._reservoir_step_seconds: Optional[int] = None
         self._runtime_lock = RLock()
         self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
@@ -321,7 +325,12 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             )
             return
 
-        core, evidence = build_central_power_runtime_core(profile)
+        reservoir_step_seconds = self._resolve_output_step_seconds()
+        core, evidence = build_central_power_runtime_core(
+            profile,
+            reservoir_step_seconds=reservoir_step_seconds,
+        )
+        self._reservoir_step_seconds = reservoir_step_seconds
         self._hydrosim_api = HydroSimulationApi(
             service=HydroSimulationService(core=core),
         )
@@ -332,12 +341,18 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         )
         logger.info(
             "Power central runtime profile applied: task_id=%s, source=%s, interStationKeys=%s, "
-            "stationConstraintCount=%s, reservoirReleaseCount=%s",
+            "stationConstraintCount=%s, reservoirReleaseCount=%s, "
+            "reservoirStepSeconds=%s, reservoirStepSource=%s, ignoredLegacyTimeStepsCount=%s, "
+            "ignoredLegacyTimeSteps=%s",
             self.context.biz_scene_instance_id,
             evidence["source"],
             evidence["inter_station_parameter_keys"],
             evidence["station_constraint_count"],
             evidence["reservoir_release_count"],
+            evidence["reservoir_step_seconds"],
+            evidence["reservoir_step_source"],
+            evidence["ignored_legacy_time_steps_count"],
+            evidence["ignored_legacy_time_steps"],
         )
 
     @handle_agent_errors(ErrorCodes.SIMULATION_EXECUTION_FAILURE)
@@ -356,6 +371,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 pending_target_step = self._pending_boundary_control_target_step
                 self._pending_boundary_control_commands = []
                 self._pending_boundary_control_target_step = None
+                self._pending_boundary_control_optimize_step = None
+                self._pending_boundary_control_horizon_step = None
                 logger.info(
                     "Skip Power planning and control at terminal coordinator boundary: "
                     "task_id=%s, coordinatorStep=%s, ontologyMaxSteps=%s, "
@@ -372,11 +389,21 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 target_step = self._pending_boundary_control_target_step
                 if self._can_dispatch_control_for_target_step(request.step, target_step):
                     pending_commands = self._pending_boundary_control_commands
+                    pending_optimize_step = self._pending_boundary_control_optimize_step
+                    pending_horizon_step = self._pending_boundary_control_horizon_step
                     self._pending_boundary_control_commands = []
                     self._pending_boundary_control_target_step = None
+                    self._pending_boundary_control_optimize_step = None
+                    self._pending_boundary_control_horizon_step = None
                     if target_step is None or not self._has_dispatched_control_target_step(target_step):
-                        self.dispatch_control_commands_and_await_execution(pending_commands)
+                        self.dispatch_control_commands_and_await_execution(
+                            pending_commands,
+                            optimize_step=pending_optimize_step,
+                            horizon_step=pending_horizon_step,
+                        )
                         self._mark_control_target_step_dispatched(target_step)
+                        if pending_horizon_step is not None:
+                            task_state.dispatched_horizon_steps.add(int(pending_horizon_step))
                 else:
                     logger.info(
                         "Deferring pending boundary control commands until target step: currentStep=%s, targetStep=%s, commandCount=%s",
@@ -396,27 +423,31 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                     step=request.step,
                     reason="rolling_boundary",
                 )
-                preview_commands = self.on_optimization(control_target_step)
+                window_start, window_end = self._resolve_window_range(
+                    control_target_step,
+                    task_state,
+                    window_start_override=control_target_step,
+                )
+                control_commands_by_step = self._build_horizon_control_commands_by_step(
+                    window_start,
+                    window_end,
+                )
                 horizon_steps = self._refresh_rolling_window_dataset(
                     control_target_step,
                     task_state,
                     window_start_override=control_target_step,
-                    current_control_commands=preview_commands,
+                    control_commands_by_step=control_commands_by_step,
                 )
-                commands = self._build_current_horizon_control_commands(
+                self._activate_power_control_plan(
+                    task_state,
+                    optimize_step=control_target_step,
                     horizon_steps=horizon_steps,
-                    current_step=control_target_step,
                 )
-                if commands and not self._has_dispatched_control_target_step(control_target_step):
-                    # The prediction report has already entered the same FIFO outbox.
-                    # Do not defer lifecycle reports: Edge callbacks may arrive on a
-                    # different thread and would otherwise reorder DISPATCHED/STARTED/
-                    # COMPLETED for the same business idempotency key.
-                    self.dispatch_control_commands_and_await_execution(commands)
-                    self._mark_control_target_step_dispatched(control_target_step)
             elif self._should_refresh_rolling_window_report(request.step, task_state):
                 logger.info("Refreshing rolling scheduling report at step=%s", request.step)
                 self._refresh_rolling_window_dataset(request.step, task_state)
+
+            self._dispatch_active_power_control_slice(task_state, request.step)
 
             step_result = self._execute_hydrosim_step_for_tick(request.step)
             if step_result is None:
@@ -471,6 +502,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         control_commands: List[Any],
         *,
         timeout_seconds: Optional[float] = None,
+        optimize_step: Optional[int] = None,
+        horizon_step: Optional[int] = None,
     ) -> None:
         """Dispatch Power control intents and report MPC detail execution status."""
         prepared_commands = self._control_command_dispatcher.prepare(control_commands)
@@ -483,12 +516,16 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 self._control_command_dispatcher.dispatch([command])
                 continue
 
-            optimize_step, horizon_step = self._resolve_power_mpc_execution_steps(command)
+            resolved_optimize_step, resolved_horizon_step = self._resolve_power_mpc_execution_steps(
+                command,
+                optimize_step=optimize_step,
+                horizon_step=horizon_step,
+            )
             record = self._mpc_dispatch_tracker.register(
                 command=command,
                 biz_scene_instance_id=self.context.biz_scene_instance_id,
-                optimize_step=optimize_step,
-                horizon_step=horizon_step,
+                optimize_step=resolved_optimize_step,
+                horizon_step=resolved_horizon_step,
             )
             # Queue DISPATCHED before command transport so an immediate edge ACK
             # cannot overtake it with STARTED in the coordinator outbox. If the
@@ -540,13 +577,18 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
     def _resolve_power_mpc_execution_steps(
         self,
         command: HydroStationTargetValueRequest,
+        *,
+        optimize_step: Optional[int] = None,
+        horizon_step: Optional[int] = None,
     ) -> Tuple[int, int]:
-        optimize_step = (
-            command.main_step_index
+        resolved_optimize_step = (
+            optimize_step
+            if optimize_step is not None
+            else command.main_step_index
             if command.main_step_index is not None
             else self._current_step
         )
-        return int(optimize_step), 1
+        return int(resolved_optimize_step), int(horizon_step or 1)
 
     def _handle_control_command_response(self, response: Any) -> None:
         if not isinstance(response, HydroStationTargetValueResponse):
@@ -924,6 +966,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             )
             return {}, {}
 
+        return self._project_v47_inter_station_preview(result, step)
+
+    def _project_v47_inter_station_preview(
+        self,
+        result: Dict[str, Any],
+        step: int,
+        *,
+        log_selection: bool = True,
+    ) -> Tuple[Dict[int, float], Dict[int, List[ControlSignal]]]:
         station_output_powers: Dict[int, float] = {}
         head_observations: Dict[int, List[ControlSignal]] = {}
         for station in result.get("station_step_outputs", []) or []:
@@ -953,7 +1004,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
                 )
             ]
 
-        if station_output_powers:
+        if station_output_powers and log_selection:
             logger.info(
                 "Power station output intent selected: task_id=%s, step=%s, "
                 "source=v47_inter_station_step_runtime, allocator_source=%s, "
@@ -1701,6 +1752,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             raise ValueError("Ontology simulation_runtime_options.max_steps is required")
         return int(max_steps)
 
+    def _resolve_output_step_seconds(self) -> int:
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        output_step_seconds = getattr(runtime_options, "output_step_seconds", None)
+        if output_step_seconds is None or int(output_step_seconds) <= 0:
+            raise ValueError(
+                "Ontology simulation_runtime_options.output_step_seconds is required"
+            )
+        return int(output_step_seconds)
+
     def _resolve_total_steps(self) -> int:
         return self._resolve_max_steps()
 
@@ -1780,25 +1840,13 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         if not self._rolling_window_dataset:
             return int(step)
 
-        # With a one-step rolling interval every tick is already a control
-        # boundary. Prefer the current boundary, as Pump scheduling does, so
-        # the initial step-1 bootstrap cannot leave step 2 undispatched.
-        if int(task_state.rolling_interval_steps) == 1:
-            current_step = int(step)
-            if (
-                self._is_control_target_step(current_step, task_state)
-                and not self._has_dispatched_control_target_step(current_step)
-            ):
-                return current_step
+        target_step = int(step)
+        active_plan_start = task_state.latest_control_plan_start_step
+        if active_plan_start is not None and target_step <= int(active_plan_start):
             return None
-
-        # Wider windows retain Power's existing one-tick look-ahead: prepare
-        # the next boundary before it becomes current, without replaying a
-        # boundary after recovery.
-        target_step = int(step) + 1
         if (
             self._is_control_target_step(target_step, task_state)
-            and not self._has_dispatched_control_target_step(target_step)
+            and task_state.latest_control_plan_start_step != target_step
         ):
             return target_step
         return None
@@ -1827,12 +1875,198 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         if target_step is not None:
             self._dispatched_control_target_steps.add(int(target_step))
 
+    def _build_horizon_control_commands_by_step(
+        self,
+        window_start: int,
+        window_end: int,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        session = getattr(self._hydrosim_api, "_session", None)
+        step_runtime = getattr(session, "step_runtime", None)
+        can_preview_v47_horizon = step_runtime is not None and all(
+            hasattr(step_runtime, attribute)
+            for attribute in (
+                "steps",
+                "station_power_plan",
+                "multi_river",
+                "multi_reservoir",
+                "multi_stair",
+            )
+        )
+        if not can_preview_v47_horizon:
+            return {
+                step: list(self.on_optimization(step) or [])
+                for step in range(int(window_start), int(window_end) + 1)
+            }
+
+        preview_results = self._hydrosim_api.preview_control_horizon(
+            int(window_start),
+            int(window_end),
+        )
+        commands_by_step: Dict[int, List[Dict[str, Any]]] = {}
+        for preview_result in preview_results:
+            step = int(preview_result["current_step_index"])
+            commands_by_step[step] = self._build_control_commands_from_v47_preview(
+                session=session,
+                step=step,
+                preview_result=preview_result,
+            )
+        return commands_by_step
+
+    def _build_control_commands_from_v47_preview(
+        self,
+        *,
+        session: Any,
+        step: int,
+        preview_result: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        station_output_powers, head_observations = self._project_v47_inter_station_preview(
+            preview_result,
+            step,
+            log_selection=False,
+        )
+        base_commands = self._build_station_target_commands(
+            station_values=station_output_powers,
+            step=step,
+            target_command_type=MPC_STATION_POWER_COMMAND_TYPE,
+            group_prefix="POWER_STATION_OUTPUT_POWER",
+            assign_groups=False,
+            algo_required_inputs_by_station=head_observations,
+        )
+        if not base_commands:
+            return []
+
+        planning_session = self._build_v47_preview_session(session, preview_result, step)
+        return self._with_gate_station_flow_control_commands(
+            session=planning_session,
+            step=step,
+            base_commands=base_commands,
+            group_prefix="POWER_STATION_OUTPUT_POWER",
+        )
+
+    @staticmethod
+    def _build_v47_preview_session(
+        live_session: Any,
+        preview_result: Dict[str, Any],
+        step: int,
+    ) -> Any:
+        station_series = []
+        for station in preview_result.get("station_step_outputs", []) or []:
+            station_series.append(
+                {
+                    "node_id": station.get("node_id"),
+                    "station": station.get("station"),
+                    "time_series": [{"step": step, "value": station.get("power")}],
+                    STATION_DIVERSION_FLOW_SERIES_KEY: [
+                        {"step": step, "value": station.get("diversion_flow")}
+                    ],
+                    RESERVOIR_EVIDENCE_SERIES_KEY: [
+                        {"step": step, **dict(station.get("reservoir_evidence") or {})}
+                    ],
+                }
+            )
+
+        device_series = []
+        for device in preview_result.get("device_step_outputs", []) or []:
+            device_series.append(
+                {
+                    "object_id": device.get("object_id"),
+                    "object_type": device.get("object_type"),
+                    "object_name": device.get("object_name"),
+                    "metrics_code": device.get("metrics_code"),
+                    "node_id": device.get("node_id"),
+                    "time_series": [{"step": step, "value": device.get("value")}],
+                }
+            )
+        return SimpleNamespace(
+            latest_station_power_series=station_series,
+            latest_device_output_series=device_series,
+            step_runtime=getattr(live_session, "step_runtime", None),
+        )
+
+    def _activate_power_control_plan(
+        self,
+        task_state: MpcTaskState,
+        *,
+        optimize_step: int,
+        horizon_steps: List[HorizonStep],
+    ) -> None:
+        task_state.latest_control_plan = MpcControlExecutionPlan.from_responses(
+            optimize_step=int(optimize_step),
+            responses=[
+                MpcOptimizeResponse(
+                    plan_type="optimal",
+                    horizon_controls=horizon_steps,
+                )
+            ],
+        )
+        task_state.latest_control_plan_start_step = int(optimize_step)
+        task_state.dispatched_horizon_steps.clear()
+        task_state.dispatched_control_keys.clear()
+        logger.info(
+            "Power active control plan replaced: task_id=%s, optimizeStep=%s, "
+            "horizonCount=%s, executableHorizonCount=%s, rollingStep=%s, "
+            "outputStepSeconds=%s, reservoirStepSeconds=%s, reservoirStepSource=%s",
+            self.context.biz_scene_instance_id,
+            optimize_step,
+            len(horizon_steps),
+            len(task_state.latest_control_plan.control_targets_by_horizon),
+            task_state.rolling_interval_steps,
+            self._resolve_output_step_seconds(),
+            self._reservoir_step_seconds,
+            "simulation_runtime_options.output_step_seconds",
+        )
+
+    def _dispatch_active_power_control_slice(
+        self,
+        task_state: MpcTaskState,
+        current_step: int,
+    ) -> None:
+        execution_plan = task_state.latest_control_plan
+        optimize_step = task_state.latest_control_plan_start_step
+        if execution_plan is None or optimize_step is None:
+            return
+        horizon_step = int(current_step) - int(optimize_step) + 1
+        if horizon_step <= 0 or horizon_step > int(task_state.rolling_interval_steps):
+            return
+        if horizon_step in task_state.dispatched_horizon_steps:
+            return
+        if not execution_plan.get_control_targets(horizon_step):
+            logger.info(
+                "Skip Power active control slice without executable targets: "
+                "task_id=%s, optimizeStep=%s, horizonStep=%s, mainStepIndex=%s",
+                self.context.biz_scene_instance_id,
+                optimize_step,
+                horizon_step,
+                current_step,
+            )
+            return
+
+        commands = self._build_current_horizon_control_commands(
+            horizon_steps=self._rolling_window_dataset,
+            current_step=int(current_step),
+            optimize_step=int(optimize_step),
+            horizon_step=horizon_step,
+        )
+        if not commands:
+            raise MpcControlExecutionError(
+                "Power active control slice has no dispatchable commands: "
+                f"optimize_step={optimize_step}, horizon_step={horizon_step}"
+            )
+        self.dispatch_control_commands_and_await_execution(
+            commands,
+            optimize_step=int(optimize_step),
+            horizon_step=horizon_step,
+        )
+        task_state.dispatched_horizon_steps.add(horizon_step)
+        self._mark_control_target_step_dispatched(int(current_step))
+
     def _refresh_rolling_window_dataset(
         self,
         step: int,
         task_state: MpcTaskState,
         window_start_override: Optional[int] = None,
         current_control_commands: Optional[List[Dict[str, Any]]] = None,
+        control_commands_by_step: Optional[Dict[int, List[Dict[str, Any]]]] = None,
     ) -> List[HorizonStep]:
         window_start, window_end = self._resolve_window_range(
             step,
@@ -1843,6 +2077,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             window_start,
             window_end,
             current_control_commands=current_control_commands,
+            control_commands_by_step=control_commands_by_step,
         )
         if not horizon_steps:
             logger.warning(
@@ -1885,6 +2120,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         window_end: int,
         *,
         current_control_commands: Optional[List[Dict[str, Any]]] = None,
+        control_commands_by_step: Optional[Dict[int, List[Dict[str, Any]]]] = None,
     ) -> List[HorizonStep]:
         session = getattr(self._hydrosim_api, "_session", None)
         if session is None:
@@ -1892,28 +2128,24 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
         device_series = getattr(session, "latest_device_output_series", []) or []
         station_series = getattr(session, "latest_station_power_series", []) or []
-        current_control_object_list = self._build_control_object_list_from_commands(
-            current_control_commands or [],
-            station_series=station_series,
-        )
-        current_target_overrides = self._build_station_control_target_overrides(
-            current_control_object_list,
-        )
+        commands_by_step = dict(control_commands_by_step or {})
+        if current_control_commands is not None:
+            commands_by_step.setdefault(int(window_start), current_control_commands)
         horizon_steps: List[HorizonStep] = []
         for relative_step, absolute_step in enumerate(range(window_start, window_end + 1), start=1):
-            # Only station-level values are executable MPC control intents. Device
-            # predictions remain in predicted_result_list and never become commands.
-            control_object_list = (
-                current_control_object_list if absolute_step == window_start else []
+            control_object_list = self._build_control_object_list_from_commands(
+                commands_by_step.get(int(absolute_step), []),
+                station_series=station_series,
+            )
+            target_overrides = self._build_station_control_target_overrides(
+                control_object_list,
             )
 
             predicted_result_list = self._build_station_predicted_results(
                 device_series=device_series,
                 station_series=station_series,
                 step=absolute_step,
-                control_target_overrides=(
-                    current_target_overrides if absolute_step == window_start else None
-                ),
+                control_target_overrides=target_overrides or None,
             )
 
             if not control_object_list and not predicted_result_list:
@@ -2012,6 +2244,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         *,
         horizon_steps: List[HorizonStep],
         current_step: int,
+        optimize_step: Optional[int] = None,
+        horizon_step: int = 1,
     ) -> List[Dict[str, Any]]:
         if not horizon_steps:
             logger.warning(
@@ -2021,7 +2255,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             return []
 
         execution_plan = MpcControlExecutionPlan.from_responses(
-            optimize_step=current_step,
+            optimize_step=(current_step if optimize_step is None else optimize_step),
             responses=[
                 MpcOptimizeResponse(
                     plan_type="optimal",
@@ -2030,7 +2264,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             ],
         )
         commands: List[Dict[str, Any]] = []
-        for control_target in execution_plan.get_control_targets(horizon_step=1):
+        for control_target in execution_plan.get_control_targets(horizon_step=horizon_step):
             target_agent = self._target_agent_resolver.resolve_target_agent_for_object(
                 object_id=control_target.object_id,
                 device_type=control_target.object_type,
@@ -2824,20 +3058,41 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         task_state: MpcTaskState,
     ) -> None:
         effective_control_step = self._resolve_effective_control_step(current_step)
-        preview_commands = self.on_optimization(effective_control_step)
+        window_start, window_end = self._resolve_window_range(
+            effective_control_step,
+            task_state,
+            window_start_override=effective_control_step,
+        )
+        control_commands_by_step = self._build_horizon_control_commands_by_step(
+            window_start,
+            window_end,
+        )
         horizon_steps = self._refresh_rolling_window_dataset(
             effective_control_step,
             task_state,
             window_start_override=effective_control_step,
-            current_control_commands=preview_commands,
+            control_commands_by_step=control_commands_by_step,
+        )
+        self._activate_power_control_plan(
+            task_state,
+            optimize_step=effective_control_step,
+            horizon_steps=horizon_steps,
         )
         commands = self._build_current_horizon_control_commands(
             horizon_steps=horizon_steps,
             current_step=effective_control_step,
+            optimize_step=effective_control_step,
+            horizon_step=1,
         )
         self._pending_boundary_control_commands = list(commands or [])
         self._pending_boundary_control_target_step = (
             int(effective_control_step) if self._pending_boundary_control_commands else None
+        )
+        self._pending_boundary_control_optimize_step = (
+            int(effective_control_step) if self._pending_boundary_control_commands else None
+        )
+        self._pending_boundary_control_horizon_step = (
+            1 if self._pending_boundary_control_commands else None
         )
 
     def _resolve_effective_control_step(self, current_step: int) -> int:
@@ -2896,6 +3151,8 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._rolling_window_dataset = []
             self._pending_boundary_control_commands = []
             self._pending_boundary_control_target_step = None
+            self._pending_boundary_control_optimize_step = None
+            self._pending_boundary_control_horizon_step = None
             self._dispatched_control_target_steps.clear()
             self.discard_control_execution_waiters()
             self._mpc_task_state_lifecycle.clear()

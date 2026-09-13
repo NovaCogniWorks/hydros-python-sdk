@@ -59,7 +59,6 @@ _STATION_CONSTRAINT_KEYS = _INTER_STATION_PARAMETER_KEYS | frozenset(
 
 _RESERVOIR_PARAMETER_KEYS = frozenset(
     {
-        "time_steps",
         "min_stage",
         "design_stage",
         "max_stage",
@@ -98,6 +97,8 @@ _TOP_LEVEL_KEYS = frozenset({"planning", "allocation", "reservoir_release"})
 
 def build_central_power_runtime_core(
     profile: Mapping[str, Any],
+    *,
+    reservoir_step_seconds: int,
 ) -> tuple[HydroSimulationCore, dict[str, Any]]:
     """Build a V47 runtime core from one resolved central Power profile.
 
@@ -110,6 +111,8 @@ def build_central_power_runtime_core(
     _reject_unsupported_keys(profile, _TOP_LEVEL_KEYS, "central Power profile")
     if not profile:
         raise ValueError("central Power profile must not be empty")
+    if int(reservoir_step_seconds) <= 0:
+        raise ValueError("reservoir_step_seconds must be positive")
 
     flow_configs = deepcopy(hydrosim_config.FLOW_CONFIGS)
     flow_station_cfgs = deepcopy(hydrosim_config.FLOW_STATION_CFGS)
@@ -117,16 +120,18 @@ def build_central_power_runtime_core(
     unit_configs = deepcopy(hydrosim_config.UNIT_CONFIGS)
 
     allocation = _mapping(profile.get("allocation"), "allocation")
-    _reject_unsupported_keys(allocation, frozenset({"inter_station"}), "allocation")
-    inter_station = _mapping(allocation.get("inter_station"), "allocation.inter_station")
     _reject_unsupported_keys(
-        inter_station,
-        frozenset({"parameters", "station_constraints"}),
-        "allocation.inter_station",
+        allocation,
+        _INTER_STATION_PARAMETER_KEYS | frozenset({"station_constraints"}),
+        "allocation",
     )
-    inter_parameters = _mapping(inter_station.get("parameters"), "allocation.inter_station.parameters")
+    inter_parameters = {
+        key: value
+        for key, value in allocation.items()
+        if key != "station_constraints"
+    }
     _apply_parameters_to_all_stations(power_configs, inter_parameters)
-    _apply_station_constraints(power_configs, inter_station.get("station_constraints"))
+    _apply_station_constraints(power_configs, allocation.get("station_constraints"))
 
     reservoir_release = _mapping(profile.get("reservoir_release"), "reservoir_release")
     _reject_unsupported_keys(
@@ -134,7 +139,12 @@ def build_central_power_runtime_core(
         frozenset({"stations"}),
         "reservoir_release",
     )
-    _apply_reservoir_release(flow_configs, reservoir_release.get("stations"))
+    ignored_legacy_time_steps = _apply_reservoir_release(
+        flow_configs,
+        reservoir_release.get("stations"),
+    )
+    for flow_config in flow_configs:
+        flow_config["time_steps"] = int(reservoir_step_seconds)
 
     return (
         HydroSimulationCore(
@@ -147,8 +157,12 @@ def build_central_power_runtime_core(
         {
             "source": "resolved_agent_params",
             "inter_station_parameter_keys": sorted(inter_parameters),
-            "station_constraint_count": len(inter_station.get("station_constraints") or []),
+            "station_constraint_count": len(allocation.get("station_constraints") or []),
             "reservoir_release_count": len(reservoir_release.get("stations") or []),
+            "reservoir_step_seconds": int(reservoir_step_seconds),
+            "reservoir_step_source": "simulation_runtime_options.output_step_seconds",
+            "ignored_legacy_time_steps_count": len(ignored_legacy_time_steps),
+            "ignored_legacy_time_steps": ignored_legacy_time_steps,
         },
     )
 
@@ -195,12 +209,16 @@ def _apply_station_constraints(
         power_configs[station_index].update(values)
 
 
-def _apply_reservoir_release(flow_configs: list[dict[str, Any]], stations: Any) -> None:
+def _apply_reservoir_release(
+    flow_configs: list[dict[str, Any]],
+    stations: Any,
+) -> list[dict[str, Any]]:
     if stations is None:
-        return
+        return []
     if not isinstance(stations, list):
         raise ValueError("reservoir_release.stations must be a list")
 
+    ignored_legacy_time_steps: list[dict[str, Any]] = []
     for item in stations:
         if not isinstance(item, Mapping):
             raise ValueError("reservoir_release.stations entries must be objects")
@@ -213,9 +231,19 @@ def _apply_reservoir_release(flow_configs: list[dict[str, Any]], stations: Any) 
         parameters = _mapping(item.get("parameters"), "reservoir release parameters")
         values = {key: value for key, value in item.items() if key not in {"station_object_id", "parameters"}}
         values.update(parameters)
+        if "time_steps" in values:
+            ignored_legacy_time_steps.append(
+                {
+                    "station_object_id": int(station_object_id),
+                    "configured_time_steps": values["time_steps"],
+                    "effective": False,
+                }
+            )
+            values.pop("time_steps")
         normalized = {_RESERVOIR_ALIASES.get(key, key): value for key, value in values.items()}
         _reject_unsupported_keys(normalized, _RESERVOIR_PARAMETER_KEYS, "reservoir_release.stations")
         flow_configs[station_index].update(normalized)
+    return ignored_legacy_time_steps
 
 
 def _reject_unsupported_keys(values: Mapping[str, Any], allowed: frozenset[str], path: str) -> None:

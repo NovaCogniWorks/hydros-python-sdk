@@ -21,7 +21,7 @@ from hydros_agent_sdk.protocol.commands import (
     EdgeControlExecutionReport,
     AgentInstanceStatusReport,
 )
-from hydros_agent_sdk.protocol.models import AgentInstanceStatus, HydroAgent
+from hydros_agent_sdk.protocol.models import AgentInstanceStatus, CommandStatus, HydroAgent
 from hydros_agent_sdk.runtime.agent_instance_status_support import AgentInstanceStatusSupport
 from hydros_agent_sdk.runtime.agent_logging_context import AgentLoggingContextSetter
 from hydros_agent_sdk.observability import observe_span
@@ -333,6 +333,20 @@ class MultiAgentCallback(SimCoordinationCallback):
                     ):
                         response = agent.on_init(request)
                 created_agent_code = getattr(agent, "agent_code", routed_agent_code)
+
+                if response and response.command_status == CommandStatus.FAILED:
+                    failed_agents.append(response.source_agent_instance)
+                    init_error_messages.append(
+                        f"{routed_agent_code}: "
+                        f"{response.error_message or response.error_code or 'agent initialization failed'}"
+                    )
+                    logger.error(
+                        "  ✗ Agent initialization returned FAILED: %s, errorCode=%s, errorMessage=%s",
+                        routed_agent_code,
+                        response.error_code,
+                        response.error_message,
+                    )
+                    continue
 
                 # 收集已创建的智能体实例
                 if response and hasattr(response, 'source_agent_instance'):

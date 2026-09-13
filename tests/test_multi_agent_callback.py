@@ -99,6 +99,21 @@ class EventOnlyFakeAgent(FakeAgent):
         return False
 
 
+class FailedInitFakeAgent(FakeAgent):
+    def on_init(self, request):
+        return SimTaskInitResponse(
+            command_id=request.command_id,
+            context=request.context,
+            command_status=CommandStatus.FAILED,
+            error_code="AGENT_INIT_FAILURE",
+            error_message="invalid runtime profile",
+            source_agent_instance=self.instance,
+            created_agent_instances=[],
+            managed_top_objects={},
+            broadcast=False,
+        )
+
+
 class ContextAwareFakeAgent(FakeAgent):
     def __init__(self, instance):
         super().__init__(instance)
@@ -213,6 +228,23 @@ def test_multi_agent_init_returns_response_without_direct_enqueue():
     assert "TEST_AGENT" in client.state_manager.get_agents_by_code(
         context.biz_scene_instance_id
     )
+
+
+def test_multi_agent_init_does_not_activate_agent_that_returns_failed_response():
+    context = make_context()
+    instance = make_instance(context)
+    callback = MultiAgentCallback()
+    callback.register_agent_factory("TEST_AGENT", FakeFactory(FailedInitFakeAgent(instance)))
+    client = FakeClient()
+    callback.set_client(client)
+
+    response = callback.on_sim_task_init(make_init_request(context))
+
+    assert isinstance(response, SimTaskInitResponse)
+    assert response.command_status == CommandStatus.FAILED
+    assert response.created_agent_instances == []
+    assert client.state_manager.get_agents_by_code(context.biz_scene_instance_id) == {}
+    assert "invalid runtime profile" in response.error_message
 
 
 def test_multi_agent_router_returns_init_response_with_pending_status_report():

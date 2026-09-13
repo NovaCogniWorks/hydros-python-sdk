@@ -126,7 +126,7 @@ docker build \
     "${REPO_ROOT}"
 
 if ! docker run --rm --entrypoint /bin/bash "${IMAGE_NAME}:${VERSION}" -c \
-    'test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-v47-dynamic-head-observation"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
+    'test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-13-flat-profile-and-init-fail-fast"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
     echo "Built image is missing required sources, bundled HydroSim inputs, or the expected power scheduling runtime revision; deployment aborted." >&2
     exit 1
 fi

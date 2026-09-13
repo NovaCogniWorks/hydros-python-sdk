@@ -950,9 +950,9 @@ def test_power_scheduling_reports_and_dispatches_same_current_horizon_control_in
     agent._hydrosim_api.execute_step = Mock(return_value=_build_step_result(2))
     dispatched_batches = []
 
-    def dispatch_after_report(commands):
+    def dispatch_after_report(commands, **execution_steps):
         assert len(enqueued) == 1
-        dispatched_batches.append(commands)
+        dispatched_batches.append((commands, execution_steps))
 
     agent.dispatch_control_commands_and_await_execution = Mock(
         side_effect=dispatch_after_report
@@ -976,7 +976,7 @@ def test_power_scheduling_reports_and_dispatches_same_current_horizon_control_in
     }
     dispatched_targets = {
         (command["object_id"], command["target_command_type"]): command["target_value"]
-        for command in dispatched_batches[0]
+        for command in dispatched_batches[0][0]
     }
     assert dispatched_targets == {
         (20300, MPC_STATION_POWER_COMMAND_TYPE): 102.0,
@@ -984,6 +984,7 @@ def test_power_scheduling_reports_and_dispatches_same_current_horizon_control_in
     }
     assert report_targets[(20300, MPC_STATION_POWER_COMMAND_TYPE)] == 102.0
     assert report_targets[(20100, DeviceValueTypeEnum.WATER_FLOW.code)] == 32.0
+    assert dispatched_batches[0][1] == {"optimize_step": 2, "horizon_step": 1}
 
     canonical_horizon = agent._rolling_window_dataset[0]
     assert {
@@ -1400,7 +1401,7 @@ def test_power_scheduling_uses_bundled_data_default_planning_file():
     assert ".runtime" not in Path(init_kwargs["time_series_file"]).parts
 
 
-def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
+def test_power_scheduling_step_21_recovery_rebuilds_active_plan_from_session_series():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-scene-step-21-recovery")
     task_state = SchedulingTaskState(
@@ -1422,7 +1423,6 @@ def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
     agent._rolling_window_end_step = 20
     agent._rolling_window_dataset = [Mock()]
     agent.on_optimization = Mock(return_value=[])
-    agent._refresh_rolling_window_dataset = Mock()
 
     agent.on_tick_simulation(
         TickCmdRequest(command_id="tick-step-21-recovery", context=context, step=21)
@@ -1434,8 +1434,11 @@ def test_power_scheduling_step_21_recovery_does_not_read_planner_runtime():
     )
     assert os.path.abspath(init_kwargs["time_series_file"]) == expected_path
     assert ".runtime" not in Path(init_kwargs["time_series_file"]).parts
-    agent.on_optimization.assert_not_called()
-    agent._refresh_rolling_window_dataset.assert_called_once_with(21, task_state)
+    assert agent.on_optimization.call_count == 20
+    assert agent.on_optimization.call_args_list[0].args == (21,)
+    assert agent.on_optimization.call_args_list[-1].args == (40,)
+    assert agent._rolling_window_start_step == 21
+    assert agent._rolling_window_end_step == 40
     agent._hydrosim_api.execute_step.assert_called_once_with(step_index=21)
 
 
@@ -1479,6 +1482,9 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert agent._rolling_window_end_step == 10
 
     agent.on_tick_simulation(TickCmdRequest(command_id="tick-010", context=context, step=10, broadcast=False))
+    assert len(enqueued) == 1
+
+    agent.on_tick_simulation(TickCmdRequest(command_id="tick-011", context=context, step=11, broadcast=False))
     assert len(enqueued) == 2
     second_report = enqueued[1]
     assert len(second_report.mpc_prediction_results) == 1
@@ -1486,9 +1492,13 @@ def test_power_scheduling_refreshes_window_only_at_roll_step_boundaries():
     assert {detail.horizon_step for detail in second_report.mpc_prediction_results[0].details} == set(range(1, 11))
     assert agent._rolling_window_start_step == 11
     assert agent._rolling_window_end_step == 20
-    assert agent.dispatch_control_commands_and_await_execution.call_count == 2
+    assert agent.dispatch_control_commands_and_await_execution.call_count == 4
     dispatched_commands = agent.dispatch_control_commands_and_await_execution.call_args.args[0]
     assert dispatched_commands[0]["main_step_index"] == 11
+    assert agent.dispatch_control_commands_and_await_execution.call_args.kwargs == {
+        "optimize_step": 11,
+        "horizon_step": 1,
+    }
 
 
 def test_power_scheduling_roll_step_one_dispatches_every_control_step_without_gap():
@@ -1525,6 +1535,79 @@ def test_power_scheduling_roll_step_one_dispatches_every_control_step_without_ga
         for call in agent.dispatch_control_commands_and_await_execution.call_args_list
     ]
     assert dispatched_steps == [1, 2, 3]
+
+
+def test_power_scheduling_roll_step_three_consumes_active_horizons_sequentially():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-scene-roll-step-three")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=3,
+        prediction_horizon=5,
+        start_step=1,
+        current_step=1,
+        max_steps=8,
+    )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=3,
+        prediction_horizon=5,
+        task_state=task_state,
+    )
+    agent._hydrosim_api._session = _build_session(8)
+    agent._hydrosim_api.execute_step = Mock(
+        side_effect=lambda step_index: _build_step_result(step_index)
+    )
+
+    for step in (1, 2, 3):
+        agent.on_tick_simulation(
+            TickCmdRequest(
+                command_id=f"tick-roll-three-{step}",
+                context=context,
+                step=step,
+                broadcast=False,
+            )
+        )
+
+    assert len(enqueued) == 1
+    assert {
+        detail.horizon_step
+        for detail in enqueued[0].mpc_prediction_results[0].details
+        if detail.target_value is not None
+    } == {1, 2, 3, 4, 5}
+    assert [
+        call.args[0][0]["main_step_index"]
+        for call in agent.dispatch_control_commands_and_await_execution.call_args_list
+    ] == [1, 2, 3]
+    assert [
+        call.kwargs
+        for call in agent.dispatch_control_commands_and_await_execution.call_args_list
+    ] == [
+        {"optimize_step": 1, "horizon_step": 1},
+        {"optimize_step": 1, "horizon_step": 2},
+        {"optimize_step": 1, "horizon_step": 3},
+    ]
+    assert task_state.dispatched_horizon_steps == {1, 2, 3}
+
+    agent.on_tick_simulation(
+        TickCmdRequest(
+            command_id="tick-roll-three-4",
+            context=context,
+            step=4,
+            broadcast=False,
+        )
+    )
+
+    assert len(enqueued) == 2
+    assert agent.dispatch_control_commands_and_await_execution.call_args.args[0][0][
+        "main_step_index"
+    ] == 4
+    assert agent.dispatch_control_commands_and_await_execution.call_args.kwargs == {
+        "optimize_step": 4,
+        "horizon_step": 1,
+    }
+    assert task_state.latest_control_plan_start_step == 4
+    assert task_state.dispatched_horizon_steps == {1}
 
 
 def test_power_scheduling_roll_step_one_does_not_advance_on_repeated_tick():
@@ -1840,7 +1923,9 @@ def test_power_scheduling_event_ack_does_not_wait_for_edge_control_execution():
     )
 
     agent.dispatch_control_commands_and_await_execution.assert_called_once_with(
-        pending_commands
+        pending_commands,
+        optimize_step=2,
+        horizon_step=1,
     )
     assert agent._pending_boundary_control_commands == []
     assert agent._pending_boundary_control_target_step is None
@@ -2590,6 +2675,49 @@ def test_hydrosim_preview_step_station_power_allocation_does_not_advance_live_se
     assert not hasattr(original_runtime, "preview_only_marker")
     assert captured["step_runtime"] is not original_runtime
     assert captured["planning_values_by_node"][20300] == 30.0
+
+
+def test_hydrosim_preview_control_horizon_advances_one_isolated_copy_sequentially():
+    module = _load_hydrosim_api_module()
+    api = module.HydroSimulationApi()
+    original_runtime = SimpleNamespace(
+        steps=[0, 1, 2, 3, 4],
+        merged_event={"valid": True},
+        station_power_plan={
+            int(node_id): [10.0, 20.0, 30.0, 40.0, 50.0]
+            for node_id in module.hydrosim_config.STATION_NODE_IDS
+        },
+    )
+    api._session = module.HydroSimulationSession(
+        session_id="preview-horizon-session",
+        latest_station_power_series=[],
+        step_runtime=original_runtime,
+        total_steps=5,
+        current_step_index=1,
+    )
+    advanced_steps = []
+    preview_runtime_ids = []
+
+    def fake_advance(session, step_runtime, target_step, planning_values_by_node):
+        advanced_steps.append(target_step)
+        preview_runtime_ids.append(id(step_runtime))
+        session.current_step_index = target_step + 1
+        step_runtime.preview_only_marker = target_step
+
+    api._advance_runtime_to_target_step = fake_advance
+    api._build_station_step_outputs_from_runtime = Mock(side_effect=lambda _, step: [
+        {"node_id": 20300, "station": "Station-20300", "step": step, "power": step * 10.0}
+    ])
+
+    results = api.preview_control_horizon(1, 3)
+
+    assert [item["current_step_index"] for item in results] == [1, 2, 3]
+    assert advanced_steps == [1, 2, 3]
+    assert len(set(preview_runtime_ids)) == 1
+    assert preview_runtime_ids[0] != id(original_runtime)
+    assert api._session.current_step_index == 1
+    assert api._session.step_runtime is original_runtime
+    assert not hasattr(original_runtime, "preview_only_marker")
 
 
 def test_hydrosim_head_observation_requires_each_stage_used_by_the_head_formula():
