@@ -105,6 +105,8 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 POWER_DIR="${REPO_ROOT}/custom-agent/power"
+DEPLOY_STARTED_AT="$(date '+%Y-%m-%d %H:%M:%S %z')"
+DEPLOY_STARTED_SECONDS="$(date +%s)"
 
 echo "Building ${IMAGE_NAME}:${VERSION} with base image ${BASE_IMAGE}"
 echo "Deploy environment: ${DEPLOY_ENV}"
@@ -113,6 +115,7 @@ echo "Hydros cluster: ${HYDROS_CLUSTER_ID}"
 echo "MQTT broker: ${MQTT_BROKER_URL}:${MQTT_BROKER_PORT}"
 echo "Container start args: ${HYDROS_AGENT_START_ARGS}"
 echo "Control API port mapping: ${PORT}:${HYDROS_CONTROL_ALGORITHM_PORT}"
+echo "Deployment started at: ${DEPLOY_STARTED_AT}"
 if [ -n "${DEBUG_PORT}" ]; then
     echo "Debug port: ${DEBUG_PORT}"
 fi
@@ -123,7 +126,7 @@ docker build \
     "${REPO_ROOT}"
 
 if ! docker run --rm --entrypoint /bin/bash "${IMAGE_NAME}:${VERSION}" -c \
-    'test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-08-24-central-outflow-planning-v11"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
+    'test -s /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && grep -q '\''POWER_SCHEDULING_RUNTIME_REVISION = "2026-09-08-v47-dynamic-head-observation"'\'' /opt/hydros/custom-agent/power/scheduling/power_scheduling_agent.py && test -s /opt/hydros/custom-agent/power/data/time_series_power_planning.json && test -s /opt/hydros/custom-agent/power/data/mpc_config.yaml && test -s /opt/hydros/custom-agent/power/data/initial_states.yaml && test -s /opt/hydros/custom-agent/power/data/constrains_targets.yaml'; then
     echo "Built image is missing required sources, bundled HydroSim inputs, or the expected power scheduling runtime revision; deployment aborted." >&2
     exit 1
 fi
@@ -171,4 +174,7 @@ if [ "$(docker inspect --format '{{.State.Running}}' "${CONTAINER_NAME}")" != "t
     exit 1
 fi
 
-echo "Deployed container ${CONTAINER_NAME} (${CONTAINER_ID}) to ${DEPLOY_ENV}."
+DEPLOY_FINISHED_AT="$(date '+%Y-%m-%d %H:%M:%S %z')"
+DEPLOY_FINISHED_SECONDS="$(date +%s)"
+DEPLOY_DURATION_SECONDS="$((DEPLOY_FINISHED_SECONDS - DEPLOY_STARTED_SECONDS))"
+echo "Deployed container ${CONTAINER_NAME} (${CONTAINER_ID}) to ${DEPLOY_ENV} at ${DEPLOY_FINISHED_AT}; elapsed ${DEPLOY_DURATION_SECONDS}s."
