@@ -85,6 +85,7 @@ from hydros_agent_sdk.runtime.agent_context import resolve_simulation_runtime_op
 from hydros_agent_sdk.runtime.response_factory import ResponseFactory
 from hydros_agent_sdk.utils.mqtt_metrics import MqttMetrics
 from power_observation_adapter import PowerObservationAdapter, PowerObservationResult
+from power_planning_config import PowerPlanningConfig
 
 logger = logging.getLogger(__name__)
 
@@ -237,12 +238,14 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         self._pending_boundary_control_commands: List[Dict[str, Any]] = []
         self._pending_boundary_control_target_step: Optional[int] = None
         self._dispatched_control_target_steps: set[int] = set()
+        self._power_planning_config: Optional[PowerPlanningConfig] = None
         self._runtime_lock = RLock()
         self._mpc_task_state_lifecycle = MpcTaskStateLifecycle(
             context=context,
             get_current_step=lambda: self._current_step,
             get_rolling_interval_steps=self._resolve_roll_steps,
             get_max_steps=self._resolve_max_steps,
+            get_prediction_horizon=self._resolve_prediction_horizon,
             get_algorithm_config_url=lambda: self._configured_mpc_config_url,
             get_control_config_url=(
                 lambda: self._configured_target_and_constrain_config_url
@@ -266,6 +269,15 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
 
         try:
             self.load_agent_configuration(request)
+            self._power_planning_config = None
+            planning = self._resolve_power_planning_config()
+            logger.info(
+                "Power outer planning runtime applied: task_id=%s, rollingStep=%s, "
+                "predictionHorizon=%s",
+                self.context.biz_scene_instance_id,
+                planning.rolling_step,
+                planning.prediction_horizon,
+            )
             self._configure_hydrosim_runtime_from_resolved_profile()
             self._initialize_optimization_model()
             self._initialize_hydrosim_session()
@@ -338,6 +350,23 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
             self._ensure_hydrosim_initialized()
             self._ensure_hydrosim_power_plan_loaded()
             task_state = self._ensure_mpc_task_state(request.step)
+
+            if self._is_terminal_coordinator_tick(request.step, task_state):
+                pending_count = len(self._pending_boundary_control_commands)
+                pending_target_step = self._pending_boundary_control_target_step
+                self._pending_boundary_control_commands = []
+                self._pending_boundary_control_target_step = None
+                logger.info(
+                    "Skip Power planning and control at terminal coordinator boundary: "
+                    "task_id=%s, coordinatorStep=%s, ontologyMaxSteps=%s, "
+                    "discardedPendingCommandCount=%s, discardedPendingTargetStep=%s",
+                    self.context.biz_scene_instance_id,
+                    request.step,
+                    task_state.max_steps,
+                    pending_count,
+                    pending_target_step,
+                )
+                return []
 
             if self._pending_boundary_control_commands:
                 target_step = self._pending_boundary_control_target_step
@@ -1654,26 +1683,30 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         return self._mpc_task_state_lifecycle.task_state
 
     def _resolve_roll_steps(self) -> int:
-        runtime_options = resolve_simulation_runtime_options(self.context)
-        value = getattr(runtime_options, "roll_steps", None)
-        if value is None:
-            value = self.properties.get_property("roll_steps", None)
-        if value is None:
-            return 1
-        return max(int(value), 1)
+        return self._resolve_power_planning_config().rolling_step
+
+    def _resolve_prediction_horizon(self) -> int:
+        return self._resolve_power_planning_config().prediction_horizon
+
+    def _resolve_power_planning_config(self) -> PowerPlanningConfig:
+        if self._power_planning_config is None:
+            profile = getattr(self, "resolved_agent_params", None) or {}
+            self._power_planning_config = PowerPlanningConfig.from_profile(profile)
+        return self._power_planning_config
 
     def _resolve_max_steps(self) -> int:
-        session = getattr(self._hydrosim_api, "_session", None)
-        if session is None:
-            return 0
-        step_runtime = getattr(session, "step_runtime", None)
-        runtime_steps = getattr(step_runtime, "steps", None)
-        if runtime_steps is not None:
-            return len(runtime_steps)
-        return max([len(item.get("time_series", [])) for item in getattr(session, "latest_station_power_series", [])] or [0])
+        runtime_options = resolve_simulation_runtime_options(self.context)
+        max_steps = getattr(runtime_options, "max_steps", None)
+        if max_steps is None or int(max_steps) <= 0:
+            raise ValueError("Ontology simulation_runtime_options.max_steps is required")
+        return int(max_steps)
 
     def _resolve_total_steps(self) -> int:
         return self._resolve_max_steps()
+
+    @staticmethod
+    def _is_terminal_coordinator_tick(step: int, task_state: MpcTaskState) -> bool:
+        return bool(task_state.max_steps and int(step) >= int(task_state.max_steps))
 
     def _execute_hydrosim_step_for_tick(self, step: int) -> Optional[Dict[str, Any]]:
         """Advance the Power runtime for a coordinator tick.
@@ -1715,6 +1748,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         window_start_override: Optional[int] = None,
     ) -> Tuple[int, int]:
         roll_steps = max(int(task_state.rolling_interval_steps), 1)
+        prediction_horizon = max(int(task_state.prediction_horizon or roll_steps), 1)
         start_step = int(task_state.start_step)
         max_steps = int(task_state.max_steps)
         if window_start_override is not None:
@@ -1724,7 +1758,7 @@ class PowerCentralSchedulingAgent(CentralSchedulingAgent):
         else:
             window_index = (step - start_step) // roll_steps
             window_start = start_step + (window_index * roll_steps)
-        window_end = window_start + roll_steps - 1
+        window_end = window_start + prediction_horizon - 1
         if max_steps > 0:
             window_end = min(window_end, max_steps - 1)
         return window_start, window_end

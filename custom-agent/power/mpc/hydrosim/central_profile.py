@@ -101,8 +101,8 @@ def build_central_power_runtime_core(
 ) -> tuple[HydroSimulationCore, dict[str, Any]]:
     """Build a V47 runtime core from one resolved central Power profile.
 
-    The profile is deliberately narrow: only central inter-station allocation and
-    the historical HydroReservoir release model are accepted. Task timing and
+    The profile also carries outer ``planning`` parameters, but those are consumed
+    by Power scheduling and deliberately do not enter the V47/HydroReservoir core.
     Edge station/gate profiles remain outside this projection.
     """
     if not isinstance(profile, Mapping):

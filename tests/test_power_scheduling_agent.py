@@ -88,6 +88,20 @@ def _build_agent(module, scene_id: str):
         hydros_cluster_id="cluster",
         hydros_node_id="node",
     )
+    object.__setattr__(
+        agent,
+        "resolved_agent_params",
+        {"planning": {"rolling_step": 10, "prediction_horizon": 10}},
+    )
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(
+                max_steps=96,
+                output_step_seconds=3600,
+            )
+        ),
+    )
     agent._hydrosim_initialized = True
     agent._hydrosim_power_plan_loaded = True
     agent.dispatch_control_commands_and_await_execution = Mock()
@@ -103,11 +117,26 @@ def _configure_mpc_task_state(
     agent,
     *,
     roll_steps: int,
+    prediction_horizon: int | None = None,
     task_state=None,
     algorithm_config_url: str = "mpc.yaml",
     control_config_url: str = "control.yaml",
 ):
     agent.properties["roll_steps"] = roll_steps
+    prediction_horizon = prediction_horizon or roll_steps
+    object.__setattr__(
+        agent,
+        "resolved_agent_params",
+        {
+            "planning": {
+                "rolling_step": roll_steps,
+                "prediction_horizon": prediction_horizon,
+            }
+        },
+    )
+    object.__setattr__(agent, "_power_planning_config", None)
+    if task_state is not None:
+        task_state.prediction_horizon = prediction_horizon
     object.__setattr__(agent, "_configured_mpc_config_url", algorithm_config_url)
     object.__setattr__(
         agent,
@@ -128,10 +157,13 @@ def test_power_scheduling_agent_uses_generic_central_base():
     assert not hasattr(agent, "_mpc_optimization_service")
 
 
-def test_power_roll_steps_prefers_task_runtime_options_over_agent_properties():
+def test_power_roll_steps_comes_from_resolved_central_planning_profile():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-roll-steps-runtime-authority")
     agent.properties["roll_steps"] = 10
+    object.__setattr__(agent, "resolved_agent_params", {
+        "planning": {"rolling_step": 2, "prediction_horizon": 12}
+    })
     ContextManager.create(
         context=context,
         scenario_config=BizScenarioConfiguration(
@@ -140,18 +172,22 @@ def test_power_roll_steps_prefers_task_runtime_options_over_agent_properties():
     )
 
     try:
-        assert agent._resolve_roll_steps() == 1
+        assert agent._resolve_roll_steps() == 2
+        assert agent._resolve_prediction_horizon() == 12
     finally:
         ContextManager.remove(context)
 
 
-def test_power_roll_steps_falls_back_to_legacy_agent_property():
+def test_power_planning_rejects_missing_resolved_profile_instead_of_using_legacy_property():
     module = _load_power_scheduling_module()
     agent, context, _ = _build_agent(module, "power-roll-steps-legacy-fallback")
     agent.properties["roll_steps"] = 10
+    object.__setattr__(agent, "resolved_agent_params", {})
+    object.__setattr__(agent, "_power_planning_config", None)
     ContextManager.remove(context)
 
-    assert agent._resolve_roll_steps() == 10
+    with pytest.raises(ValueError, match="requires planning"):
+        agent._resolve_roll_steps()
 
 
 def test_power_outflow_planning_uses_embedded_power_series_and_returns_station_output():
@@ -1593,9 +1629,9 @@ def test_power_scheduling_skips_terminal_coordinator_boundary_tick():
     agent.dispatch_control_commands_and_await_execution.assert_not_called()
 
 
-def test_power_scheduling_total_steps_uses_runtime_axis_instead_of_sampled_output_rows():
+def test_power_scheduling_total_steps_uses_ontology_runtime_instead_of_internal_plan_axis():
     module = _load_power_scheduling_module()
-    agent, _, _ = _build_agent(module, "power-scene-runtime-axis")
+    agent, context, _ = _build_agent(module, "power-scene-runtime-axis")
     agent._hydrosim_api._session = SimpleNamespace(
         step_runtime=SimpleNamespace(steps=list(range(96))),
         latest_station_power_series=[
@@ -1607,8 +1643,83 @@ def test_power_scheduling_total_steps_uses_runtime_axis_instead_of_sampled_outpu
             }
         ],
     )
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(max_steps=12)
+        ),
+    )
+    try:
+        assert agent._resolve_total_steps() == 12
+        assert agent._resolve_hydrosim_runtime_step_count() == 96
+    finally:
+        ContextManager.remove(context)
 
-    assert agent._resolve_total_steps() == 96
+
+def test_power_scheduling_prediction_horizon_is_independent_from_rolling_step():
+    module = _load_power_scheduling_module()
+    agent, context, _ = _build_agent(module, "power-independent-planning-window")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=2,
+        prediction_horizon=5,
+        start_step=1,
+        current_step=1,
+        max_steps=12,
+    )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=2,
+        prediction_horizon=5,
+        task_state=task_state,
+    )
+
+    assert agent._resolve_window_range(1, task_state) == (1, 5)
+    assert agent._resolve_window_range(3, task_state) == (3, 7)
+
+
+def test_power_scheduling_terminal_tick_discards_pending_control_against_longer_internal_plan():
+    module = _load_power_scheduling_module()
+    agent, context, enqueued = _build_agent(module, "power-terminal-task-clock-authority")
+    task_state = SchedulingTaskState(
+        context=context,
+        rolling_interval_steps=1,
+        prediction_horizon=12,
+        start_step=1,
+        current_step=11,
+        max_steps=12,
+    )
+    _configure_mpc_task_state(
+        agent,
+        roll_steps=1,
+        prediction_horizon=12,
+        task_state=task_state,
+    )
+    ContextManager.create(
+        context=context,
+        scenario_config=BizScenarioConfiguration(
+            simulation_runtime_options=SimulationRuntimeOptions(
+                max_steps=12,
+                output_step_seconds=3600,
+            )
+        ),
+    )
+    agent._hydrosim_api._session = _build_session(96)
+    agent._hydrosim_api._session.step_runtime = SimpleNamespace(steps=list(range(96)))
+    agent._hydrosim_api.execute_step = Mock()
+    agent._pending_boundary_control_commands = [{"main_step_index": 12}]
+    agent._pending_boundary_control_target_step = 12
+
+    metrics_list = agent.on_tick_simulation(
+        TickCmdRequest(command_id="tick-terminal-012", context=context, step=12, broadcast=False)
+    )
+
+    assert metrics_list == []
+    assert enqueued == []
+    assert agent._pending_boundary_control_commands == []
+    assert agent._pending_boundary_control_target_step is None
+    agent._hydrosim_api.execute_step.assert_not_called()
+    agent.dispatch_control_commands_and_await_execution.assert_not_called()
 
 
 def test_hydrosim_event_update_keeps_initialized_96_step_axis():
