@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydros-control-algorithms
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydros-control-algorithms
+  template:
+    metadata:
+      labels:
+        app: hydros-control-algorithms
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: hydros-control-algorithms
+          image: ${APP_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/opt/hydros/custom-agent/power/control_algorithm_service.py"]
+          env:
+            - name: APP_ENV
+              value: "${APP_ENV}"
+          ports:
+            - name: http
+              containerPort: 8015
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
