@@ -1185,7 +1185,7 @@ class PumpCentralSchedulingAgent(CentralSchedulingAgent):
                     )
                     continue
                 command: Dict[str, Any] = {
-                    "target_agent_code": "GATE_STATION_AGENT",
+                    "target_agent_code": "STATION_AGENT",
                     "target_command_type": DeviceValueTypeEnum.WATER_FLOW.code,
                     "target_value": str(round(water_flow, 2)),
                     "object_id": int(control_object.object_id),
