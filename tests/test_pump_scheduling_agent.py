@@ -2,7 +2,7 @@ import unittest
 import sys
 import os
 import types
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.abspath('custom-agent/pump/scheduling'))
 from pump_scheduling_agent import PumpCentralSchedulingAgent
 
@@ -64,6 +64,11 @@ class TestPumpSchedulingAgent(unittest.TestCase):
             sys.modules["plot_tracker"] = self._original_plot_tracker_module
 
     def test_rolling_optimization(self):
+        context = types.SimpleNamespace(simulation_runtime_options=types.SimpleNamespace(
+            max_steps=self.agent.system_config.horizon_hours, output_step_seconds=3600))
+        runtime = patch('hydros_agent_sdk.context_manager.ContextManager.get_context', return_value=context)
+        runtime.start()
+        self.addCleanup(runtime.stop)
         print("\n--- Starting Rolling Optimization Test ---")
         steps = 3
         # 覆盖初始泵站状态

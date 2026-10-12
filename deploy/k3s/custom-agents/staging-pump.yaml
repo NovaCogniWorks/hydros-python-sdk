@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydros-pump-agent
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+      - env:
+        - name: HYDROS_METRICS_TOPIC
+          value: /hydros/data/edges/{hydros_cluster_id}
+        image: registry.zot-oci.hydros.yuma.intra/yuma/images/hydros/dev/hydros-pump-agent@sha256:a67070512cf121d0bbcf6f06a5f75767eb85abebd4be1a02e86cb33a317bdb2f
+        imagePullPolicy: IfNotPresent
+        name: hydros-pump-agent
+        ports:
+        - containerPort: 8015
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          periodSeconds: 5
+          successThreshold: 1
+          tcpSocket:
+            port: http
+          timeoutSeconds: 1
+        resources:
+          limits:
+            memory: 2Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /opt/hydros/custom-agent/pump/env.properties
+          name: environment
+          readOnly: true
+          subPath: env.properties
+      enableServiceLinks: false
+      volumes:
+      - name: environment
+        secret:
+          defaultMode: 420
+          secretName: hydros-pump-agent
+    metadata:
+      labels:
+        app: hydros-pump-agent
+metadata:
+  name: hydros-pump-agent
+  namespace: hydros
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hydros-pump-agent
+  namespace: hydros
+spec:
+  selector:
+    app: hydros-pump-agent
+  ports:
+  - name: http
+    port: 8015
+    targetPort: http

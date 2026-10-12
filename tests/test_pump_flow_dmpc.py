@@ -689,13 +689,16 @@ class PumpFlowDmpcTest(unittest.TestCase):
 
     def test_solver_local_runtime_config_contains_deployed_station_id(self):
         solver = PumpFlowDmpcSolver()
-        config_path = os.path.abspath("custom-agent/pump/data/mpc_config.yaml")
 
         with tempfile.TemporaryDirectory() as temporary_directory, patch.object(
             solver,
             "_resolve_flow_depart_cache_dir",
             return_value=Path(temporary_directory),
         ):
+            config_path = str(Path(temporary_directory) / "runtime.yaml")
+            Path(config_path).write_text(json.dumps({"scheduling": {
+                "horizon_hours": 24, "dt_hours": 1, "target_avg_flow_last_station": 30},
+                "flow_depart": {"step_q": 1.0, "step_h": 0.1}, "runtime": {}}))
             solver._ensure_loaded(
                 PumpFlowDmpcArguments(
                     station_id=20000,
@@ -774,7 +777,8 @@ class PumpFlowDmpcTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             cache_path = Path(temporary_directory) / "flow_depart_cache.pkl"
             with cache_path.open("wb") as cache_file:
-                pickle.dump({cache_key: expected}, cache_file)
+                pickle.dump({"_meta": {"step_q": 1.0, "step_h": 0.1, "rho": 1000.0, "g": 9.81},
+                             "_tables": {cache_key: expected}}, cache_file)
             service = FlowDepartService(
                 system_config=SimpleNamespace(source_config_path="unused.yaml"),
                 cache_dir=temporary_directory,
@@ -802,7 +806,8 @@ class PumpFlowDmpcTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             cache_path = Path(temporary_directory) / "flow_depart_cache.pkl"
             with cache_path.open("wb") as cache_file:
-                pickle.dump(cache, cache_file)
+                pickle.dump({"_meta": {"step_q": 1.0, "step_h": 0.1, "rho": 1000.0, "g": 9.81},
+                             "_tables": cache}, cache_file)
             service = FlowDepartService(
                 system_config=SimpleNamespace(source_config_path="unused.yaml"),
                 cache_dir=temporary_directory,
@@ -948,7 +953,6 @@ class PumpFlowDmpcTest(unittest.TestCase):
             context=ControlAlgorithmContext(
                 request_id="request-001",
                 context_id="scene-001",
-                step_index=12,
                 main_step_index=12,
                 target_object_type="PumpStation",
                 target_object_id=2001,
@@ -1139,7 +1143,7 @@ class PumpFlowDmpcTest(unittest.TestCase):
             context=ControlAlgorithmContext(
                 request_id="request-multi",
                 context_id="scene-multi",
-                step_index=1,
+                main_step_index=1,
                 target_object_type="PumpStation",
                 target_object_id=20000,
             ),

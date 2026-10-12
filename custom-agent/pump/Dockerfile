@@ -46,7 +46,8 @@ COPY custom-agent/pump /opt/hydros/custom-agent/pump
 
 WORKDIR /opt/hydros/custom-agent/pump
 
-RUN mkdir -p /opt/hydros/custom-agent/pump/logs
+RUN mkdir -p /opt/hydros/custom-agent/pump/logs \
+    && touch /opt/hydros/custom-agent/pump/env.properties
 
 EXPOSE 8015
 

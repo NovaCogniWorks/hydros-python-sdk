@@ -58,6 +58,9 @@ RUN sed -i 's/\r$//' /opt/hydros/custom-agent/power/start_agents.sh \
     && chmod +x /opt/hydros/custom-agent/power/start_agents.sh \
     && mkdir -p /opt/hydros/custom-agent/power/logs
 
+# Runtime environment overrides populate this file; never copy local credentials.
+RUN touch /opt/hydros/custom-agent/power/env.properties
+
 EXPOSE 8015
 
 CMD ["bash", "./start_agents.sh"]

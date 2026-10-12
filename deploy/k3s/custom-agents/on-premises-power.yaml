@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydros-power-agent
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+      - env:
+        - name: MQTT_BROKER_URL
+          value: tcp://hydros-mqtt-broker-internal.hydros.svc.cluster.local
+        - name: MQTT_BROKER_PORT
+          value: '1883'
+        - name: HYDROS_CLUSTER_ID
+          value: hydros-cluster-on-premises
+        - name: MQTT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: mqtt-user
+              name: hydros-agent-central-runtime
+              optional: true
+        - name: MQTT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: mqtt-token
+              name: hydros-agent-central-runtime
+              optional: true
+        - name: HYDROS_NODE_ID
+          value: default_central
+        - name: REQUESTS_CA_BUNDLE
+          value: /etc/hydros/pki/ca.crt
+        - name: SSL_CERT_FILE
+          value: /etc/hydros/pki/ca.crt
+        - name: HYDROS_METRICS_TOPIC
+          value: /hydros/data/edges/{hydros_cluster_id}
+        image: registry.zot-oci.hydros.yuma.intra/yuma/images/hydros/dev/hydros-power-agent@sha256:f5a6acc3f6d856456af3d08a1579f39dd058943ef8f03b8cafc83a3120681e5f
+        imagePullPolicy: IfNotPresent
+        name: hydros-power-agent
+        ports:
+        - containerPort: 8015
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          periodSeconds: 5
+          successThreshold: 1
+          tcpSocket:
+            port: http
+          timeoutSeconds: 1
+        resources:
+          limits:
+            memory: 2Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /etc/hydros/pki
+          name: trust
+          readOnly: true
+      enableServiceLinks: false
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: hydros-onprem-trust
+        name: trust
+    metadata:
+      labels:
+        app: hydros-power-agent
+metadata:
+  name: hydros-power-agent
+  namespace: hydros

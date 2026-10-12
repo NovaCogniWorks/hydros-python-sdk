@@ -120,6 +120,15 @@ def build_central_power_runtime_core(
     unit_configs = deepcopy(hydrosim_config.UNIT_CONFIGS)
 
     allocation = _mapping(profile.get("allocation"), "allocation")
+    # Data publishes inter_station; older standalone profiles use flat allocation.
+    if "inter_station" in allocation:
+        _reject_unsupported_keys(allocation, frozenset({"inter_station"}), "allocation")
+        inter_station = _mapping(allocation["inter_station"], "allocation.inter_station")
+        _reject_unsupported_keys(inter_station, frozenset({"parameters", "station_constraints"}), "allocation.inter_station")
+        allocation = dict(_mapping(inter_station.get("parameters"), "allocation.inter_station.parameters"))
+        _reject_unsupported_keys(allocation, _INTER_STATION_PARAMETER_KEYS, "allocation.inter_station.parameters")
+        if "station_constraints" in inter_station:
+            allocation["station_constraints"] = inter_station["station_constraints"]
     _reject_unsupported_keys(
         allocation,
         _INTER_STATION_PARAMETER_KEYS | frozenset({"station_constraints"}),

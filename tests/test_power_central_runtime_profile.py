@@ -13,6 +13,23 @@ def _load_profile_builder():
 
 
 class PowerCentralRuntimeProfileTest(unittest.TestCase):
+    def test_accepts_data_published_inter_station_without_losing_constraints(self):
+        build = _load_profile_builder()
+        allocation = {"stage_mpc_horizon_steps": 12, "station_constraints": [
+            {"station_object_id": 20300, "max_power": 740.0}]}
+        flat, _ = build({"allocation": allocation}, reservoir_step_seconds=3600)
+        nested, _ = build({"allocation": {"inter_station": {
+            "parameters": {"stage_mpc_horizon_steps": 12},
+            "station_constraints": allocation["station_constraints"]}}}, reservoir_step_seconds=3600)
+        self.assertEqual(flat.power_configs, nested.power_configs)
+        for invalid in [
+            {"inter_station": {}, "stage_mpc_horizon_steps": 12},
+            {"inter_station": {"parameters": {"unknown_parameter": 1}}},
+            {"inter_station": {"intra_station": {}}},
+        ]:
+            with self.assertRaises(ValueError):
+                build({"allocation": invalid}, reservoir_step_seconds=3600)
+
     def test_projects_only_central_v47_and_reservoir_parameters(self):
         build = _load_profile_builder()
 
