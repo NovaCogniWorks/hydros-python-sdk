@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hydros-k3s-app-live-deploy-skill app-live-deploy template version: 0.1.20
+# hydros-k3s-app-live-deploy-skill app-live-deploy template version: 0.1.21+hydros.20261013
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

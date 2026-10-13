@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import fnmatch
 import hashlib
 import json
 import os
@@ -14,21 +13,31 @@ from pathlib import Path
 from cluster_runtime import load_cluster_runtime, apply_cluster_policy
 
 LIVE_DEPLOY_TEMPLATE_NAME = "hydros-k3s-app-live-deploy-skill/app-live-deploy"
-LIVE_DEPLOY_TEMPLATE_VERSION = "0.1.20"
+LIVE_DEPLOY_TEMPLATE_VERSION = "0.1.21+hydros.20261013"
 LIVE_DEPLOY_TEMPLATE_SOURCE = "hydros-k3s-app-live-deploy-skill/assets/app-live-deploy/live_deploy.py"
 
 # App-specific block. Modify only this block when copying or upgrading the template.
 APP_NAME = "hydros-control-algorithms"
-APP_PLACEMENT = "agentSandbox"  # shared or agentSandbox
-APP_SPECIFIC_ENV_DEFAULTS: dict[str, str] = {}
+APP_SPECIFIC_ENV_DEFAULTS: dict[str, str] = {
+    "CONTAINER_ENGINE": "podman",
+}
 APP_CLUSTER_METADATA_ENV: dict[str, str] = {}
 BUILD_SCRIPT_ARGS = ["--tag", "{image_tag}"]
 ROLLOUT_DEPLOYMENT_ENV: str | None = "DEPLOYMENT_NAME"
+
+
+APP_IP_ENDPOINT = ''
+APP_IP_REQUIRED_HOST = ''
+
+BUILD_BASE_IMAGE_ENV = 'PYTHON_BASE_IMAGE'
+BASE_IMAGE_DEFAULT = 'registry.zot-oci.hydros.yuma.intra/yuma/images/public/dockerhub/library/python:3.11-slim-trixie'
+PODMAN_PULL_POLICY_DEFAULT = "missing"
+APP_LEGACY_SSO_REDIS_ALIAS = True
 # End app-specific block.
 
 METADATA_NAMESPACE = "hydros-system"
 METADATA_CONFIGMAP = "hydros-cluster-deployment-metadata"
-VALID_DEPLOYMENT_PROFILES = {"standard", "agent-sandbox"}
+VALID_DEPLOYMENT_PROFILES = {"standard"}
 RUNTIME_CONFIG_PROTECTED_KEYS = {
     "APP_NAME",
     "APP_PORT",
@@ -143,16 +152,52 @@ def podman_insecure_registry_help(registry: str) -> str:
     )
 
 
+def image_registry_host(image_ref: str) -> str:
+    first_segment = image_ref.split("/", 1)[0]
+    if "." in first_segment or ":" in first_segment or first_segment == "localhost":
+        return first_segment
+    return ""
+
+
+def podman_local_image_exists(image_ref: str) -> bool:
+    result = subprocess.run(
+        ["podman", "image", "exists", image_ref],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def build_container_engine(env: dict[str, str]) -> str:
+    engine = env.get("CONTAINER_ENGINE") or APP_SPECIFIC_ENV_DEFAULTS.get("CONTAINER_ENGINE", "podman")
+    if engine not in {"podman", "docker"}:
+        fail("CONTAINER_ENGINE must be docker or podman")
+    return engine
+
+
 def preflight_build_registry(env: dict[str, str]) -> None:
-    registry = env.get("IMAGE_REGISTRY", "").split("/", 1)[0]
+    if build_container_engine(env) != "podman":
+        return
+    base_image_key = globals().get("BUILD_BASE_IMAGE_ENV", "BASE_IMAGE")
+    base_image = env.get(base_image_key) or env.get("PYTHON_BASE_IMAGE") or globals().get("BASE_IMAGE_DEFAULT", "")
+    pull_policy = env.get("PODMAN_PULL_POLICY", globals().get("PODMAN_PULL_POLICY_DEFAULT", "missing")).lower()
+    registry = image_registry_host(base_image)
     if not registry.endswith(".yuma.intra"):
         return
     if not command_exists("podman"):
         return
+    if pull_policy in {"missing", "never"} and podman_local_image_exists(base_image):
+        return
+    if pull_policy == "never":
+        fail(
+            f"PODMAN_PULL_POLICY=never requires the base image to exist locally: {base_image}. "
+            "Pull/tag it locally first or override BASE_IMAGE / PODMAN_PULL_POLICY."
+        )
     if podman_insecure_registry_configured(registry):
         return
     fail(
-        f"podman build/push to {registry} requires an insecure registry entry. "
+        f"podman build using base image {base_image} requires an insecure registry entry for {registry}. "
         + podman_insecure_registry_help(registry)
     )
 
@@ -188,11 +233,13 @@ def apply_runtime_env_aliases(env: dict[str, str]) -> None:
     if redis_host:
         env["SPRING_DATA_REDIS_HOST"] = redis_host
         env["SPRING_REDIS_HOST"] = redis_host
-        env["HYDROS_SSO_CLIENT_REDIS_HOST"] = redis_host
+        if APP_LEGACY_SSO_REDIS_ALIAS:
+            env["HYDROS_SSO_CLIENT_REDIS_HOST"] = redis_host
     if redis_port:
         env["SPRING_DATA_REDIS_PORT"] = redis_port
         env["SPRING_REDIS_PORT"] = redis_port
-        env["HYDROS_SSO_CLIENT_REDIS_PORT"] = redis_port
+        if APP_LEGACY_SSO_REDIS_ALIAS:
+            env["HYDROS_SSO_CLIENT_REDIS_PORT"] = redis_port
     if redis_username:
         env["SPRING_DATA_REDIS_USERNAME"] = redis_username
         env["SPRING_REDIS_USERNAME"] = redis_username
@@ -338,6 +385,8 @@ def load_cluster_metadata(args: argparse.Namespace) -> dict[str, str]:
     reject_deprecated_cluster_target(args.cluster_target)
 
     if args.cluster_metadata_file:
+        if not getattr(args, "render_only", False):
+            fail("--cluster-metadata-file is only allowed with --render-only")
         path = Path(args.cluster_metadata_file)
         if not path.exists():
             fail(f"missing cluster metadata file: {path}")
@@ -361,10 +410,6 @@ def load_cluster_metadata(args: argparse.Namespace) -> dict[str, str]:
     return load_metadata_from_text(text, f"{METADATA_NAMESPACE}/{METADATA_CONFIGMAP}")
 
 
-def active_agent_sandbox_namespaces(metadata: dict[str, str]) -> list[str]:
-    raw = metadata.get("activeAgentSandboxNamespaces", "")
-    return [item.strip() for item in re.split(r"[\n,]+", raw) if item.strip()]
-
 
 def require_metadata(metadata: dict[str, str], key: str) -> str:
     value = metadata.get(key, "").strip()
@@ -386,13 +431,14 @@ def on_premises_entrypoint_env(metadata: dict[str, str]) -> dict[str, str]:
         "HYDROS_PUBLIC_HOSTNAME": host, "HYDROS_RUNTIME_SCHEME": scheme,
         "HYDROS_COOKIE_DOMAIN": "", "HTTP_GATEWAY_TLS_SECRET_NAME": require_metadata(metadata, "httpGatewayTlsSecretName"),
         "HYDROS_LOOP_TESTING_HOST": "", "HYDROS_ADMIN_HOST": "", "HYDROS_DOCS_HOST": "",
+        "HYDROS_PLAYGROUND_HOST": "", "HYDROS_PLAYGROUND_ORIGIN": "",
     }
     ports = {}
-    keys = ["portal", "site", "api", "playground", "mcp"]
-    for optional in ("loopTesting", "admin", "docs"):
+    keys = ["portal", "site", "api", "mcp"]
+    for optional in ("playground", "loopTesting", "admin", "docs"):
         if metadata.get(optional + "Host"):
             keys.append(optional)
-    required = {"hydros-ui-loop-testing": "loopTesting", "hydros-aio-admin": "admin", "hydros-ui-docs": "docs"}.get(APP_NAME)
+    required = APP_IP_REQUIRED_HOST
     if required and required not in keys:
         fail(f"cluster metadata missing required field: {required}Host")
     for key in keys:
@@ -411,15 +457,14 @@ def on_premises_entrypoint_env(metadata: dict[str, str]) -> dict[str, str]:
         values[f"HYDROS_{key.replace('loopTesting', 'loop_testing').upper()}_ORIGIN"] = "https://" + authority
     if len(set(ports.values())) != len(ports):
         fail("on-premises public application NodePorts must be distinct")
-    endpoint = {"hydros-ui-portal": "portal", "hydros-accounts": "site", "hydros-data": "api",
-                "hydros-ui-playground": "playground", "hydros-engine-mcp-server": "mcp", "hydros-ui-loop-testing": "loop-testing", "hydros-aio-admin": "admin", "hydros-ui-docs": "docs"}.get(APP_NAME)
+    endpoint = APP_IP_ENDPOINT
     values["HYDROS_IP_ENTRYPOINT"] = "hydros-" + endpoint if endpoint else ""
     return values
 
 
 def render_onprem_trust(content: str, env: dict[str, str]) -> str:
     configmap = env.get("HYDROS_ONPREM_TRUST_CONFIGMAP", "")
-    if env.get("HYDROS_IP_ONLY") != "true" or not configmap or manifest_kind(content) != "Deployment":
+    if not configmap or manifest_kind(content) != "Deployment":
         return content
     if not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", configmap):
         fail("invalid on-premises trust ConfigMap name")
@@ -466,7 +511,7 @@ def render_ip_only_route(content: str, env: dict[str, str]) -> str:
 
 
 def standard_public_entrypoint_env(metadata: dict[str, str]) -> dict[str, str]:
-    if metadata.get("appEnv") == "on-premises" and metadata.get("dnsMode") == "ip-only":
+    if metadata.get("dnsMode") == "ip-only":
         return on_premises_entrypoint_env(metadata)
     runtime_scheme = require_metadata(metadata, "runtimeScheme")
     if runtime_scheme not in {"http", "https"}:
@@ -478,9 +523,9 @@ def standard_public_entrypoint_env(metadata: dict[str, str]) -> dict[str, str]:
     portal_host = require_metadata(metadata, "portalHost")
     site_host = require_metadata(metadata, "siteHost")
     api_host = require_metadata(metadata, "apiHost")
-    playground_host = require_metadata(metadata, "playgroundHost")
+    playground_host = metadata.get("playgroundHost", "")
     mcp_host = require_metadata(metadata, "mcpHost")
-    cookie_domain = require_metadata(metadata, "cookieDomain")
+    cookie_domain = metadata.get("cookieDomain", "")
     return {
         "HYDROS_HOSTNAME_SCOPE": require_metadata(metadata, "hostnameScope"),
         "HYDROS_PUBLIC_HOSTNAME": hostname,
@@ -497,7 +542,7 @@ def standard_public_entrypoint_env(metadata: dict[str, str]) -> dict[str, str]:
         "HYDROS_PORTAL_ORIGIN": f"{runtime_scheme}://{portal_host}",
         "HYDROS_SITE_ORIGIN": f"{runtime_scheme}://{site_host}",
         "HYDROS_API_ORIGIN": f"{runtime_scheme}://{api_host}",
-        "HYDROS_PLAYGROUND_ORIGIN": f"{runtime_scheme}://{playground_host}",
+        "HYDROS_PLAYGROUND_ORIGIN": f"{runtime_scheme}://{playground_host}" if playground_host else "",
         "HYDROS_MCP_ORIGIN": f"{runtime_scheme}://{mcp_host}",
         "HTTP_GATEWAY_TLS_SECRET_NAME": require_metadata(
             metadata, "httpGatewayTlsSecretName"
@@ -512,7 +557,15 @@ def apply_cluster_metadata_env(
         return
     env.update(standard_public_entrypoint_env(metadata))
     for key, value in APP_CLUSTER_METADATA_ENV.items():
-        env[key] = expand_vars(value, env)
+        resolved = expand_vars(value, env)
+        if key == "SSO_CORS_ORIGINS":
+            # Explicit trusted origins supplement the cluster entrypoints.
+            # Replacing them here drops public aliases from the runtime config.
+            origins = f"{env.get(key, '')},{resolved}".split(",")
+            resolved = ",".join(dict.fromkeys(
+                origin.strip() for origin in origins if origin.strip()
+            ))
+        env[key] = resolved
 
 
 def resolve_deployment(
@@ -523,6 +576,9 @@ def resolve_deployment(
         fail(f"cluster metadata target {metadata_cluster_target!r} does not match {cluster_target!r}")
 
     app_env = require_metadata(metadata, "appEnv")
+    target_kind = require_metadata(metadata, "targetKind")
+    if target_kind != "managed-k3s-cluster":
+        fail(f"unsupported targetKind: {target_kind}")
     deployment_profile = require_metadata(metadata, "deploymentProfile")
     namespace_mode = require_metadata(metadata, "namespaceMode")
     if deployment_profile not in VALID_DEPLOYMENT_PROFILES:
@@ -530,45 +586,11 @@ def resolve_deployment(
     if namespace_mode != deployment_profile:
         fail("cluster metadata deploymentProfile and namespaceMode must match")
 
-    if deployment_profile == "standard":
-        default_namespace = require_metadata(metadata, "defaultNamespace")
-        target_namespace = namespace or default_namespace
-        if target_namespace != "hydros":
-            fail("standard live deploy namespace must be hydros")
-        return app_env, deployment_profile, target_namespace
-
-    shared_namespace = require_metadata(metadata, "sharedNamespace")
-    if APP_PLACEMENT == "shared":
-        target_namespace = namespace or shared_namespace
-        if target_namespace != shared_namespace:
-            fail(f"shared app namespace must be {shared_namespace}")
-        return app_env, deployment_profile, target_namespace
-
-    if APP_PLACEMENT != "agentSandbox":
-        fail(f"unsupported APP_PLACEMENT for agent-sandbox profile: {APP_PLACEMENT}")
-
-    if namespace is None:
-        active = active_agent_sandbox_namespaces(metadata)
-        examples = "\n".join(f"  --namespace {item}" for item in active[:5])
-        if examples:
-            fail(
-                f"{APP_NAME} placement is agentSandbox on cluster {cluster_target}.\n"
-                f"Live deploy must specify one active sandbox namespace:\n{examples}"
-            )
-        fail(
-            f"{APP_NAME} placement is agentSandbox on cluster {cluster_target}. "
-            "Live deploy must specify --namespace for an active sandbox namespace."
-        )
-
-    pattern = require_metadata(metadata, "agentSandboxNamespacePattern")
-    if not fnmatch.fnmatchcase(namespace, pattern):
-        fail(f"namespace {namespace!r} does not match agent sandbox pattern {pattern!r}")
-    active = active_agent_sandbox_namespaces(metadata)
-    if namespace not in active:
-        fail(f"namespace {namespace!r} is not in activeAgentSandboxNamespaces")
-    if namespace == shared_namespace:
-        fail("agentSandbox app namespace must not be the shared namespace")
-    return app_env, deployment_profile, namespace
+    default_namespace = require_metadata(metadata, "defaultNamespace")
+    target_namespace = namespace or default_namespace
+    if target_namespace != "hydros":
+        fail("standard live deploy namespace must be hydros")
+    return app_env, deployment_profile, target_namespace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -676,13 +698,14 @@ def prepare_deployment_context(args: argparse.Namespace) -> tuple[Path, Path, Pa
             "IMAGE_REPOSITORY": image_repository,
             "KUBE_CONTEXT": kube_context,
             "KUBE_NAMESPACE": target_namespace,
-            "AGENT_SANDBOX_NAMESPACE": target_namespace,
-            "AGENT_SANDBOX_SHARED_NAMESPACE": metadata.get("sharedNamespace", ""),
             "STANDARD_HTTP_GATEWAY_NAME": env.get("STANDARD_HTTP_GATEWAY_NAME", f"hydros-{app_env}-http-gateway"),
         }
     )
     for key, value in APP_SPECIFIC_ENV_DEFAULTS.items():
         env.setdefault(key, expand_vars(value, env))
+    configure = globals().get("configure_app_env")
+    if configure:
+        configure(env)
     env["HYDROS_CONFIG_CHECKSUM"] = stable_env_checksum(env)
 
     return repo_root, k3s_dir, build_script, env, app_name, app_image, manifest_dir, deployment_profile
@@ -699,11 +722,28 @@ def print_smoke_check(name: str, ok: bool, detail: str) -> None:
     print(f"smoke.{name}={status} {detail}")
 
 
-def run_smoke(args: argparse.Namespace, env: dict[str, str], app_name: str) -> int:
+def rollout_deployments(env: dict[str, str], app_name: str) -> list[str]:
+    raw = env.get("ROLLOUT_DEPLOYMENTS", "").strip()
+    if raw:
+        candidates = [item.strip() for item in raw.split(",") if item.strip()]
+    else:
+        deployment_key = ROLLOUT_DEPLOYMENT_ENV or "DEPLOYMENT_NAME"
+        candidates = [env.get(deployment_key, app_name)]
+    seen: set[str] = set()
+    deployments: list[str] = []
+    for name in candidates:
+        if name and name not in seen:
+            deployments.append(name)
+            seen.add(name)
+    return deployments or [app_name]
+
+def run_smoke(
+    args: argparse.Namespace, env: dict[str, str], app_name: str, manifest_dir: Path | None = None
+) -> int:
     require_command("kubectl", "live deploy smoke checks")
 
     namespace = env["KUBE_NAMESPACE"]
-    deployment_name = env.get(ROLLOUT_DEPLOYMENT_ENV, app_name) if ROLLOUT_DEPLOYMENT_ENV else app_name
+    deployment_names = rollout_deployments(env, app_name)
     service_name = env.get("SERVICE_NAME", app_name)
     route_name = env.get("HTTP_ROUTE_NAME", f"{app_name}-route")
     kubectl = ["kubectl", "--context", env["KUBE_CONTEXT"], "-n", namespace]
@@ -715,66 +755,78 @@ def run_smoke(args: argparse.Namespace, env: dict[str, str], app_name: str) -> i
     print(f"appEnv={env['APP_ENV']}")
     print(f"deploymentProfile={env['DEPLOYMENT_PROFILE']}")
     print(f"namespace={namespace}")
+    print(f"deployments={','.join(deployment_names)}")
 
     failed = False
-    code, output = run_optional_capture(
-        kubectl + ["rollout", "status", f"deployment/{deployment_name}", "--timeout=30s"]
-    )
-    print_smoke_check("rollout", code == 0, output)
-    failed = failed or code != 0
+    for deployment_name in deployment_names:
+        code, output = run_optional_capture(
+            kubectl + ["rollout", "status", f"deployment/{deployment_name}", "--timeout=30s"]
+        )
+        print_smoke_check(f"rollout.{deployment_name}", code == 0, output)
+        failed = failed or code != 0
 
-    code, output = run_optional_capture(
-        kubectl
-        + [
-            "get",
-            f"deployment/{deployment_name}",
-            "-o",
-            "jsonpath={.spec.template.spec.containers[0].image}",
-        ]
-    )
-    print_smoke_check("image", code == 0 and bool(output), output or "(missing)")
-    failed = failed or code != 0 or not output
+        code, output = run_optional_capture(
+            kubectl
+            + [
+                "get",
+                f"deployment/{deployment_name}",
+                "-o",
+                "jsonpath={.spec.template.spec.containers[0].image}",
+            ]
+        )
+        print_smoke_check(f"image.{deployment_name}", code == 0 and bool(output), output or "(missing)")
+        failed = failed or code != 0 or not output
 
-    code, output = run_optional_capture(
-        kubectl
-        + [
-            "get",
-            "pods",
-            "-l",
-            f"app={deployment_name}",
-            "--field-selector",
-            "status.phase=Running",
-            "-o",
-            "jsonpath={range .items[*]}{.metadata.name}{\" ready=\"}{range .status.containerStatuses[*]}{.ready}{\" \"}{end}{\"phase=\"}{.status.phase}{\"\\n\"}{end}",
-        ]
-    )
-    pods_ready = code == 0 and bool(output) and "false" not in output and "phase=Running" in output
-    print_smoke_check("pods", pods_ready, output or "(no pods)")
-    failed = failed or not pods_ready
+        code, output = run_optional_capture(
+            kubectl
+            + [
+                "get",
+                "pods",
+                "-l",
+                f"app={deployment_name}",
+                "--field-selector",
+                "status.phase=Running",
+                "-o",
+                "jsonpath={range .items[*]}{.metadata.name}{\" ready=\"}{range .status.containerStatuses[*]}{.ready}{\" \"}{end}{\"phase=\"}{.status.phase}{\"\\n\"}{end}",
+            ]
+        )
+        pods_ready = code == 0 and bool(output) and "false" not in output and "phase=Running" in output
+        print_smoke_check(f"pods.{deployment_name}", pods_ready, output or "(no pods)")
+        failed = failed or not pods_ready
 
     code, output = run_optional_capture(kubectl + ["get", f"service/{service_name}", "-o", "name"])
     print_smoke_check("service", code == 0, output or f"service/{service_name} not found")
+    failed = failed or code != 0
 
     if env.get("HYDROS_IP_ONLY") == "true" and env.get("HYDROS_IP_ENTRYPOINT"):
         resource = f"ingressroute.traefik.io/{app_name}-ip-only"
         code, output = run_optional_capture(kubectl + ["get", resource, "-o", "name"])
         print_smoke_check("ipRoute", code == 0, output or f"{resource} not found")
         failed = failed or code != 0
-    elif env.get("HTTP_HOST") or env.get("HTTP_ROUTE_HOSTNAME"):
+    elif manifest_dir and any(
+        manifest_kind(path.read_text(encoding="utf-8")) == "Ingress"
+        for path in manifest_dir.glob("*.yaml")
+    ):
         code, output = run_optional_capture(kubectl + ["get", f"ingress/{route_name}", "-o", "name"])
         print_smoke_check("ingress", code == 0, output or f"ingress/{route_name} not found")
 
-    health_scheme = "https" if env.get("HYDROS_IP_ONLY") == "true" else "http"
+        failed = failed or code != 0
+
+    health_scheme = env.get("HYDROS_RUNTIME_SCHEME", "http")
     health_path = env.get("HEALTH_PATH", "").strip()
     health_host = env.get("HEALTH_HOST", env.get("HTTP_HOST", "")).strip()
-    if health_path and health_host and command_exists("curl"):
+    if health_path and health_host:
+        require_command("curl", "configured health check")
         code, output = run_optional_capture(["curl", "-fsS", f"{health_scheme}://{health_host}{health_path}"])
         print_smoke_check("health", code == 0, output[:200] if output else f"{health_scheme}://{health_host}{health_path}")
+
+        failed = failed or code != 0
 
     cors_path = env.get("CORS_PREFLIGHT_PATH", "").strip()
     cors_origin = env.get("CORS_PREFLIGHT_ORIGIN", "").strip()
     cors_host = env.get("CORS_PREFLIGHT_HOST", env.get("HTTP_HOST", "")).strip()
-    if cors_path and cors_origin and cors_host and command_exists("curl"):
+    if cors_path and cors_origin and cors_host:
+        require_command("curl", "configured CORS check")
         code, output = run_optional_capture(
             [
                 "curl",
@@ -794,14 +846,18 @@ def run_smoke(args: argparse.Namespace, env: dict[str, str], app_name: str) -> i
         )
         print_smoke_check("corsPreflight", code == 0, output or f"{cors_origin} -> {cors_host}{cors_path}")
 
+        failed = failed or code != 0
+
     if failed:
         return 1
     return 0
 
 
 def manifest_kind(content: str) -> str:
+    if content.lstrip().startswith("{"):
+        return json.loads(content).get("kind", "")
     for raw_line in content.splitlines():
-        if raw_line.startswith((" ", "\\t")):
+        if raw_line.startswith((" ", "\t")):
             continue
         key, separator, value = raw_line.partition(":")
         if separator and key.strip() == "kind":
@@ -809,15 +865,24 @@ def manifest_kind(content: str) -> str:
     return ""
 
 
-def namespaced_apply_args(render_dir: Path) -> list[str]:
+def namespaced_apply_args(
+    render_dir: Path,
+    *,
+    include_kinds: set[str] | None = None,
+    exclude_kinds: set[str] | None = None,
+) -> list[str]:
     apply_args: list[str] = []
     for manifest in sorted(render_dir.glob("*.yaml")):
         kind = manifest_kind(manifest.read_text(encoding="utf-8"))
         if kind == "Namespace":
             print(f"skip.cluster-scoped-manifest={manifest.name} kind={kind}")
             continue
+        if include_kinds is not None and kind not in include_kinds:
+            continue
+        if exclude_kinds is not None and kind in exclude_kinds:
+            continue
         apply_args.extend(["-f", str(manifest)])
-    if not apply_args:
+    if not apply_args and include_kinds is None and exclude_kinds is None:
         fail(f"no namespace-scoped manifests found in {render_dir}")
     return apply_args
 
@@ -828,12 +893,16 @@ def main(argv: list[str]) -> int:
     repo_root, k3s_dir, build_script, env, app_name, app_image, manifest_dir, deployment_profile = prepare_deployment_context(args)
 
     if args.command == "smoke":
-        return run_smoke(args, env, app_name)
+        return run_smoke(args, env, app_name, manifest_dir)
+
+    validate_app = globals().get("validate_app_manifests")
+    if validate_app:
+        validate_app(manifest_dir, env)
 
     should_build = not args.skip_build and not args.image and not args.render_only and not args.dry_run
     if should_build:
+        require_command(build_container_engine(env), "image build")
         preflight_build_registry(env)
-        require_command("docker", "image build")
         if not build_script.exists():
             fail(f"missing build script: {build_script}")
         build_env = dict(env)
@@ -843,15 +912,25 @@ def main(argv: list[str]) -> int:
         run([str(build_script), *build_args(env["APP_VERSION"], env["APP_ENV"])], env=build_env)
 
     render_dir = Path(tempfile.mkdtemp(prefix=f"{app_name}-{env['APP_ENV']}-manifests-"))
+    render_dir.chmod(0o700)
+    trust_renderer = globals().get("render_app_trust", render_onprem_trust)
+    route_renderer = globals().get("render_app_ip_only_route", render_ip_only_route)
     for source in sorted(manifest_dir.glob("*.yaml")):
         if env.get("HYDROS_IP_ONLY") == "true" and manifest_kind(source.read_text(encoding="utf-8")) == "Ingress":
             continue
         target = render_dir / source.name
+        target.touch(mode=0o600)
         target.write_text(render_text(source.read_text(encoding="utf-8"), env), encoding="utf-8")
-        target.write_text(render_onprem_trust(target.read_text(encoding="utf-8"), env), encoding="utf-8")
-        ip_route = render_ip_only_route(target.read_text(encoding="utf-8"), env)
+        target.write_text(trust_renderer(target.read_text(encoding="utf-8"), env), encoding="utf-8")
+        ip_route = route_renderer(target.read_text(encoding="utf-8"), env)
         if ip_route:
-            (render_dir / "90-ip-only-route.yaml").write_text(ip_route, encoding="utf-8")
+            route_file = render_dir / "90-ip-only-route.yaml"
+            route_file.touch(mode=0o600)
+            route_file.write_text(ip_route, encoding="utf-8")
+
+    render_app = globals().get("render_app_manifests")
+    if render_app:
+        render_app(render_dir, env)
 
     print(f"cluster={env['HYDROS_CLUSTER_ID']}")
     print(f"kubeContext={env['KUBE_CONTEXT']}")
@@ -859,13 +938,19 @@ def main(argv: list[str]) -> int:
     print(f"namespace={env['KUBE_NAMESPACE']}")
     print(f"image={app_image}")
     apply_cluster_policy(render_dir, args.cluster_policy)
+    for rendered_file in render_dir.iterdir():
+        if rendered_file.is_file():
+            rendered_file.chmod(0o600)
     print(f"manifests={manifest_dir}")
     render_output_dir = getattr(args, "render_output_dir", None)
     if render_output_dir:
         output_dir = Path(render_output_dir)
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
-        shutil.copytree(render_dir, output_dir)
+        if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
+            fail("--render-output-dir must be a new or empty directory")
+        output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        output_dir.chmod(0o700)
+        shutil.copytree(render_dir, output_dir, dirs_exist_ok=True)
+        shutil.rmtree(render_dir)
         render_dir = output_dir
 
     print(f"rendered={render_dir}")
@@ -881,21 +966,45 @@ def main(argv: list[str]) -> int:
         run(kubectl + ["apply", "--dry-run=server", *apply_args])
         return 0
 
-    run(kubectl + ["apply", *apply_args])
-    rollout_timeout = env.get("ROLLOUT_TIMEOUT", "300s")
-    deployment_name = env.get(ROLLOUT_DEPLOYMENT_ENV, app_name) if ROLLOUT_DEPLOYMENT_ENV else app_name
-    run(
-        kubectl
-        + [
-            "-n",
-            env["KUBE_NAMESPACE"],
-            "rollout",
-            "status",
-            f"deployment/{deployment_name}",
-            f"--timeout={rollout_timeout}",
-        ]
+    migration_apply_args = namespaced_apply_args(render_dir, include_kinds={"Job"})
+    base_apply_args = namespaced_apply_args(
+        render_dir,
+        exclude_kinds={"Deployment", "Job"},
     )
-    return run_smoke(args, env, app_name)
+    if base_apply_args:
+        run(kubectl + ["apply", *base_apply_args])
+
+    if migration_apply_args:
+        run(kubectl + ["apply", *migration_apply_args])
+        run(
+            kubectl
+            + [
+                "-n",
+                env["KUBE_NAMESPACE"],
+                "wait",
+                "--for=condition=complete",
+                *migration_apply_args,
+                f"--timeout={env.get('MIGRATION_TIMEOUT', '300s')}",
+            ]
+        )
+
+    deployment_apply_args = namespaced_apply_args(render_dir, include_kinds={"Deployment"})
+    if deployment_apply_args:
+        run(kubectl + ["apply", *deployment_apply_args])
+    rollout_timeout = env.get("ROLLOUT_TIMEOUT", "300s")
+    for deployment_name in rollout_deployments(env, app_name):
+        run(
+            kubectl
+            + [
+                "-n",
+                env["KUBE_NAMESPACE"],
+                "rollout",
+                "status",
+                f"deployment/{deployment_name}",
+                f"--timeout={rollout_timeout}",
+            ]
+        )
+    return run_smoke(args, env, app_name, render_dir)
 
 
 if __name__ == "__main__":
