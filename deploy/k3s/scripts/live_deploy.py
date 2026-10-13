@@ -848,6 +848,11 @@ def run_smoke(
 
         failed = failed or code != 0
 
+    app_smoke = globals().get("run_app_smoke_checks")
+    if app_smoke:
+        for deployment_name in deployment_names:
+            failed = not app_smoke(kubectl, deployment_name, env) or failed
+
     if failed:
         return 1
     return 0
