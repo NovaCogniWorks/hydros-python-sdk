@@ -1,5 +1,7 @@
 # Phase 0 Java → Python AI contract review
 
+> 当前校验（2026-10-15）：评审门禁报告 `Snapshot-SHA256` 与最新源码派生快照不匹配。下方已有 PASS / REVIEW 仅对应记录的旧快照；须重新逐面评审后更新记录，不能只替换 hash。
+
 Snapshot-SHA256: `204e06005e47afb19a32c45e25ae9ee21285563e58672cba401e1dcee3170d3b`
 
 The reviewer inspected the source-derived snapshot emitted by

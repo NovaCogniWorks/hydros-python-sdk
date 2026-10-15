@@ -1,5 +1,7 @@
 # Java → Python Contract Sync
 
+> 当前校验（2026-10-15）：评审门禁报告 `Snapshot-SHA256` 与最新源码派生快照不匹配。下方已有 PASS / REVIEW 仅对应记录的旧快照；须重新逐面评审后更新记录，不能只替换 hash。
+
 ## Canonical source
 
 `hydros-agent-parent/hydros-agent-protocol` DTO source is the source of truth
