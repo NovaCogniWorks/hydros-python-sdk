@@ -892,6 +892,19 @@ def namespaced_apply_args(
     return apply_args
 
 
+def prepare_build_environment(env: dict[str, str]) -> dict[str, str]:
+    build_env = dict(env)
+    # The engine runs on the developer host. Explicit local selection must survive
+    # cluster runtime configuration without changing the application's runtime env.
+    if os.environ.get("CONTAINER_ENGINE"):
+        build_env["CONTAINER_ENGINE"] = os.environ["CONTAINER_ENGINE"]
+    build_env["CONTAINER_ENGINE"] = build_container_engine(build_env)
+    if build_env.get("HYDROS_LIVE_DEPLOY_PRESERVE_BUILD_JAVA_TOOL_OPTIONS", "").lower() not in {"1", "true", "yes"}:
+        build_env.pop("JAVA_TOOL_OPTIONS", None)
+    build_env["IMAGE_REPOSITORY"] = f"{env['IMAGE_REGISTRY']}/{env['IMAGE_REPOSITORY']}"
+    return build_env
+
+
 def main(argv: list[str]) -> int:
     reject_legacy_positional_cluster_target(argv)
     args = build_parser().parse_args(argv)
@@ -906,14 +919,14 @@ def main(argv: list[str]) -> int:
 
     should_build = not args.skip_build and not args.image and not args.render_only and not args.dry_run
     if should_build:
-        require_command(build_container_engine(env), "image build")
-        preflight_build_registry(env)
+        build_env = prepare_build_environment(env)
+        engine = build_env["CONTAINER_ENGINE"]
+        require_command(engine, "image build")
+        if engine == "podman":
+            preflight_build_registry(build_env)
         if not build_script.exists():
             fail(f"missing build script: {build_script}")
-        build_env = dict(env)
-        if build_env.get("HYDROS_LIVE_DEPLOY_PRESERVE_BUILD_JAVA_TOOL_OPTIONS", "").lower() not in {"1", "true", "yes"}:
-            build_env.pop("JAVA_TOOL_OPTIONS", None)
-        build_env["IMAGE_REPOSITORY"] = f"{env['IMAGE_REGISTRY']}/{env['IMAGE_REPOSITORY']}"
+        print(f"containerEngine={engine}")
         run([str(build_script), *build_args(env["APP_VERSION"], env["APP_ENV"])], env=build_env)
 
     render_dir = Path(tempfile.mkdtemp(prefix=f"{app_name}-{env['APP_ENV']}-manifests-"))
