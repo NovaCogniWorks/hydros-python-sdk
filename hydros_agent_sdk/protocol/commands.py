@@ -321,10 +321,6 @@ CommandUnion = Union[
     # 后续按需在这里补充其他指令
 ]
 
-def get_command_type(obj: Any) -> Optional[str]:
-    if isinstance(obj, dict):
-        return obj.get("command_type")
-    return getattr(obj, "command_type", None)
 
 class SimCommandEnvelope(HydroBaseModel):
     """

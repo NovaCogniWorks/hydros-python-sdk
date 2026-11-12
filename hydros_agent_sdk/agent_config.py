@@ -57,13 +57,6 @@ class MqttBroker(HydroBaseModel):
     server_uri: str
 
 
-class OutputConfig(HydroBaseModel):
-    """智能体结果输出配置。"""
-    output_mode: str
-    mqtt_broker: MqttBroker
-    mqtt_topic: str
-
-
 class AgentProperties(HydroBaseModel):
     """包含业务逻辑配置的智能体属性。"""
     model_config = ConfigDict(extra='allow')

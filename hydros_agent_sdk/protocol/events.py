@@ -67,8 +67,3 @@ HydroEventUnion = Union[
     # 是否增加通用 HydroEvent 作为兜底？
     HydroEvent
 ]
-
-def get_event_type(obj: Any) -> str:
-    if isinstance(obj, dict):
-        return obj.get("hydro_event_type")
-    return getattr(obj, "hydro_event_type", None)
